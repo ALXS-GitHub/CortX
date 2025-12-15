@@ -36,6 +36,8 @@ interface AppState {
   currentView: View;
   terminalPanelOpen: boolean;
   activeTerminalServiceId: string | null;
+  hiddenTerminalIds: Set<string>;
+  closedTerminalIds: Set<string>;
 
   // Actions - Projects
   loadProjects: () => Promise<void>;
@@ -59,6 +61,12 @@ interface AppState {
   updateServiceStatus: (serviceId: string, status: ServiceStatus, pid?: number) => void;
   appendServiceLog: (serviceId: string, log: LogEntry) => void;
   clearServiceLogs: (serviceId: string) => void;
+  closeAllTerminals: () => void;
+
+  // Actions - Terminal visibility
+  hideTerminal: (serviceId: string) => void;
+  showTerminal: (serviceId: string) => void;
+  closeTerminal: (serviceId: string) => void;
 
   // Actions - Settings
   loadSettings: () => Promise<void>;
@@ -81,6 +89,8 @@ export const useAppStore = create<AppState>((set, _get) => ({
   currentView: 'dashboard',
   terminalPanelOpen: false,
   activeTerminalServiceId: null,
+  hiddenTerminalIds: new Set(),
+  closedTerminalIds: new Set(),
 
   // Project actions
   loadProjects: async () => {
@@ -161,7 +171,19 @@ export const useAppStore = create<AppState>((set, _get) => ({
     try {
       await api.startIntegratedService(serviceId);
       // Status will be updated via events
-      set({ terminalPanelOpen: true, activeTerminalServiceId: serviceId });
+      // Also unhide terminal if it was hidden and remove from closed
+      set((state) => {
+        const hidden = new Set(state.hiddenTerminalIds);
+        hidden.delete(serviceId);
+        const closed = new Set(state.closedTerminalIds);
+        closed.delete(serviceId);
+        return {
+          terminalPanelOpen: true,
+          activeTerminalServiceId: serviceId,
+          hiddenTerminalIds: hidden,
+          closedTerminalIds: closed,
+        };
+      });
     } catch (error) {
       console.error('Failed to start service:', error);
       throw error;
@@ -216,6 +238,86 @@ export const useAppStore = create<AppState>((set, _get) => ({
         runtimes.set(serviceId, { ...existing, logs: [] });
       }
       return { serviceRuntimes: runtimes };
+    });
+  },
+
+  closeAllTerminals: () => {
+    set((state) => {
+      // Hide all terminals that have logs or are running
+      const hidden = new Set<string>();
+      for (const [serviceId, runtime] of state.serviceRuntimes) {
+        if (runtime.logs.length > 0 || runtime.status !== 'stopped') {
+          hidden.add(serviceId);
+        }
+      }
+      return { hiddenTerminalIds: hidden, activeTerminalServiceId: null };
+    });
+  },
+
+  // Terminal visibility actions
+  hideTerminal: (serviceId) => {
+    set((state) => {
+      const hidden = new Set(state.hiddenTerminalIds);
+      hidden.add(serviceId);
+      // If hiding the active terminal, switch to another visible one or null
+      let newActiveId = state.activeTerminalServiceId;
+      if (state.activeTerminalServiceId === serviceId) {
+        // Find first visible terminal
+        for (const [id, runtime] of state.serviceRuntimes) {
+          if (!hidden.has(id) && (runtime.logs.length > 0 || runtime.status !== 'stopped')) {
+            newActiveId = id;
+            break;
+          }
+        }
+        if (newActiveId === serviceId) {
+          newActiveId = null;
+        }
+      }
+      return { hiddenTerminalIds: hidden, activeTerminalServiceId: newActiveId };
+    });
+  },
+
+  showTerminal: (serviceId) => {
+    set((state) => {
+      const hidden = new Set(state.hiddenTerminalIds);
+      hidden.delete(serviceId);
+      return {
+        hiddenTerminalIds: hidden,
+        activeTerminalServiceId: serviceId,
+        terminalPanelOpen: true,
+      };
+    });
+  },
+
+  closeTerminal: (serviceId) => {
+    set((state) => {
+      // Add to closed, remove from hidden, clear logs and runtime
+      const closed = new Set(state.closedTerminalIds);
+      closed.add(serviceId);
+      const hidden = new Set(state.hiddenTerminalIds);
+      hidden.delete(serviceId);
+      const runtimes = new Map(state.serviceRuntimes);
+      runtimes.delete(serviceId);
+
+      // Update active terminal if needed
+      let newActiveId = state.activeTerminalServiceId;
+      if (state.activeTerminalServiceId === serviceId) {
+        newActiveId = null;
+        // Find another visible terminal
+        for (const [id, runtime] of runtimes) {
+          if (!hidden.has(id) && !closed.has(id) && (runtime.logs.length > 0 || runtime.status !== 'stopped')) {
+            newActiveId = id;
+            break;
+          }
+        }
+      }
+
+      return {
+        closedTerminalIds: closed,
+        hiddenTerminalIds: hidden,
+        serviceRuntimes: runtimes,
+        activeTerminalServiceId: newActiveId,
+      };
     });
   },
 
