@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { TitleBar } from '@/components/layout/TitleBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { TerminalPanel } from '@/components/layout/TerminalPanel';
+import { UpdateChecker } from '@/components/UpdateChecker';
 import { Dashboard } from '@/views/Dashboard';
 import { ProjectView } from '@/views/ProjectView';
 import { Settings } from '@/views/Settings';
@@ -153,6 +154,7 @@ function App() {
         </div>
       </div>
       <Toaster position="bottom-right" />
+      <UpdateChecker />
     </TooltipProvider>
   );
 }

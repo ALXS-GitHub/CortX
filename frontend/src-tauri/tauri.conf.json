@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,5 +38,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZBQ0VGOEUxNERCRjVDRkQKUldUOVhMOU40ZmpPK3ZWV1M4VlBjSkRsOHlYbXc1T3JhOEN2UHFYMXZWOG1aZ3k2UERVTmh3b0gK",
+      "endpoints": [
+        "https://github.com/ALXS-GitHub/CortX/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

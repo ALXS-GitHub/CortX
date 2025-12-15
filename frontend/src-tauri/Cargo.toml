@@ -25,6 +25,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
 uuid = { version = "1.11", features = ["v4", "serde"] }
 directories = "5.0"
 chrono = { version = "0.4", features = ["serde"] }

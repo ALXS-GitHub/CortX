@@ -11,7 +11,8 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "Bash(npx tauri:*)",
-      "WebFetch(domain:v2.tauri.app)"
+      "WebFetch(domain:v2.tauri.app)",
+      "WebFetch(domain:thatgurjot.com)"
     ]
   }
 }
