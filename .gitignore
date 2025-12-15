@@ -148,6 +148,12 @@ vite.config.ts.timestamp-*
 **/src-tauri/target/
 **/src-tauri/gen/
 
+# Tauri signing keys (NEVER commit these!)
+.tauri/
+*.key
+*.key.pub
+tauri-signing-key*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

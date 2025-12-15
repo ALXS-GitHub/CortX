@@ -24,6 +24,8 @@
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text",
     "process:allow-exit",
-    "process:allow-restart"
+    "process:allow-restart",
+    "process:allow-relaunch",
+    "updater:default"
   ]
 }
