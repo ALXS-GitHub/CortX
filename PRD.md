@@ -238,10 +238,16 @@ Local App Launcher provides:
 | F4.3.4 | Stop/restart service from UI | Must Have |
 | F4.3.5 | Clear terminal output | Must Have |
 | F4.3.6 | Multiple terminal tabs/panels | Must Have |
-| F4.3.7 | Search within terminal output | Should Have |
-| F4.3.8 | Copy output to clipboard | Should Have |
-| F4.3.9 | Auto-scroll with option to pause | Should Have |
-| F4.3.10 | Terminal input (send commands to running process) | Could Have |
+| F4.3.7 | Hide terminal without stopping service (X button) | Must Have |
+| F4.3.8 | Show hidden terminals dropdown | Must Have |
+| F4.3.9 | Running services section in sidebar | Must Have |
+| F4.3.10 | Auto-scroll with pause on user scroll | Must Have |
+| F4.3.11 | Scroll-to-bottom button when scrolled up | Must Have |
+| F4.3.12 | Clickable URLs in terminal output | Must Have |
+| F4.3.13 | Close all terminals button (hides all, keeps running) | Must Have |
+| F4.3.14 | Search within terminal output | Should Have |
+| F4.3.15 | Copy output to clipboard | Should Have |
+| F4.3.16 | Terminal input (send commands to running process) | Could Have |
 
 ---
 

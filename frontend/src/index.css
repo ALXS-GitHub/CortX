@@ -141,3 +141,14 @@ body {
     @apply font-sans;
   }
 }
+
+/* Terminal clickable links */
+.terminal-link {
+  color: #569cd6;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.terminal-link:hover {
+  color: #7cb3f0;
+}
