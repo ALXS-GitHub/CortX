@@ -3,15 +3,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/stores/appStore';
 import type { Project } from '@/types';
-import { Play, FolderOpen, MoreVertical, Circle } from 'lucide-react';
+import { Play, FolderOpen, MoreVertical, Circle, Code } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { openInExplorer } from '@/lib/tauri';
+import { openInExplorer, openInVscode } from '@/lib/tauri';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface ProjectCardProps {
   project: Project;
@@ -39,6 +40,15 @@ export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
   const handleOpenFolder = (e: React.MouseEvent) => {
     e.stopPropagation();
     openInExplorer(project.rootPath).catch(console.error);
+  };
+
+  const handleOpenInVscode = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    openInVscode(project.rootPath).catch((error) => {
+      toast.error('Failed to open VSCode', {
+        description: String(error),
+      });
+    });
   };
 
   const runningCount = project.services.filter((s) => {
@@ -72,6 +82,10 @@ export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleOpenInVscode}>
+                <Code className="size-4 mr-2" />
+                Open in VSCode
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={handleOpenFolder}>
                 <FolderOpen className="size-4 mr-2" />
                 Open Folder

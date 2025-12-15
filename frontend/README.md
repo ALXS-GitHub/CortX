@@ -1,6 +1,6 @@
-# Local App Launcher - Frontend
+# Cortx - Frontend
 
-This is the frontend for Local App Launcher, built with:
+This is the frontend for Cortx, built with:
 
 - **React 19** with TypeScript
 - **Vite** (using rolldown-vite for better performance)

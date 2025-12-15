@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
+import { TitleBar } from '@/components/layout/TitleBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { TerminalPanel } from '@/components/layout/TerminalPanel';
 import { Dashboard } from '@/views/Dashboard';
@@ -11,14 +12,31 @@ import { useAppStore } from '@/stores/appStore';
 import { onServiceLog, onServiceStatus, onServiceExit, getRunningServices } from '@/lib/tauri';
 import type { LogEntry } from '@/types';
 
+// Minimized terminal bar height
+const MINIMIZED_TERMINAL_HEIGHT = 32;
+
+// Component to handle dynamic padding based on terminal state
+function MainContent({ children }: { children: React.ReactNode }) {
+  const { terminalPanelOpen, terminalHeight } = useAppStore();
+
+  // Calculate bottom padding based on terminal state
+  const bottomPadding = terminalPanelOpen ? terminalHeight : MINIMIZED_TERMINAL_HEIGHT;
+
+  return (
+    <div
+      className="flex-1 overflow-auto"
+      style={{ paddingBottom: bottomPadding + 16 }} // +16 for some extra space
+    >
+      {children}
+    </div>
+  );
+}
+
 function App() {
-  const {
-    currentView,
-    loadProjects,
-    loadSettings,
-    updateServiceStatus,
-    appendServiceLog,
-  } = useAppStore();
+  const { currentView, loadProjects, loadSettings } = useAppStore();
+
+  // Keep track of whether listeners are set up
+  const listenersSetUp = useRef(false);
 
   // Load initial data
   useEffect(() => {
@@ -27,20 +45,28 @@ function App() {
 
     // Check for running services on startup
     getRunningServices().then((serviceIds) => {
+      const { updateServiceStatus } = useAppStore.getState();
       serviceIds.forEach((serviceId) => {
         updateServiceStatus(serviceId, 'running');
       });
     });
-  }, [loadProjects, loadSettings, updateServiceStatus]);
+  }, [loadProjects, loadSettings]);
 
-  // Set up event listeners
+  // Set up event listeners - only once
   useEffect(() => {
+    // Prevent duplicate listener setup
+    if (listenersSetUp.current) return;
+    listenersSetUp.current = true;
+
     let unlistenLog: (() => void) | undefined;
     let unlistenStatus: (() => void) | undefined;
     let unlistenExit: (() => void) | undefined;
+    let isCancelled = false;
 
     const setupListeners = async () => {
       unlistenLog = await onServiceLog((payload) => {
+        if (isCancelled) return;
+        const { appendServiceLog } = useAppStore.getState();
         const logEntry: LogEntry = {
           timestamp: new Date().toISOString(),
           stream: payload.stream,
@@ -50,10 +76,13 @@ function App() {
       });
 
       unlistenStatus = await onServiceStatus((payload) => {
+        if (isCancelled) return;
+        const { updateServiceStatus } = useAppStore.getState();
         updateServiceStatus(payload.serviceId, payload.status, payload.pid);
       });
 
       unlistenExit = await onServiceExit((payload) => {
+        if (isCancelled) return;
         console.log(`Service ${payload.serviceId} exited with code ${payload.exitCode}`);
       });
     };
@@ -61,11 +90,13 @@ function App() {
     setupListeners();
 
     return () => {
+      isCancelled = true;
       unlistenLog?.();
       unlistenStatus?.();
       unlistenExit?.();
+      listenersSetUp.current = false;
     };
-  }, [appendServiceLog, updateServiceStatus]);
+  }, []);
 
   // Get settings from store
   const settings = useAppStore((state) => state.settings);
@@ -101,23 +132,26 @@ function App() {
 
   return (
     <TooltipProvider>
-      <SidebarProvider>
-        <AppSidebar />
-        <SidebarInset>
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-            <SidebarTrigger className="-ml-1" />
-            <div className="text-sm font-medium text-muted-foreground">
-              {currentView === 'dashboard' && 'Dashboard'}
-              {currentView === 'project' && 'Project'}
-              {currentView === 'settings' && 'Settings'}
-            </div>
-          </header>
-          <div className="flex-1 overflow-auto pb-20">
-            {renderView()}
-          </div>
-        </SidebarInset>
-        <TerminalPanel />
-      </SidebarProvider>
+      <div className="flex flex-col h-screen overflow-hidden">
+        <TitleBar />
+        <div className="flex-1 flex overflow-hidden">
+          <SidebarProvider>
+            <AppSidebar />
+            <SidebarInset>
+              <header className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
+                <SidebarTrigger className="-ml-1" />
+                <div className="text-sm font-medium text-muted-foreground">
+                  {currentView === 'dashboard' && 'Dashboard'}
+                  {currentView === 'project' && 'Project'}
+                  {currentView === 'settings' && 'Settings'}
+                </div>
+              </header>
+              <MainContent>{renderView()}</MainContent>
+            </SidebarInset>
+            <TerminalPanel />
+          </SidebarProvider>
+        </div>
+      </div>
       <Toaster position="bottom-right" />
     </TooltipProvider>
   );

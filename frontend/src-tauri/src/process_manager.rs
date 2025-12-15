@@ -3,9 +3,13 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use tauri::{AppHandle, Emitter};
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 pub struct ProcessInfo {
     pub child: Child,
@@ -15,13 +19,20 @@ pub struct ProcessInfo {
 
 pub struct ProcessManager {
     processes: Arc<Mutex<HashMap<String, ProcessInfo>>>,
+    shutdown_flag: Arc<AtomicBool>,
 }
 
 impl ProcessManager {
     pub fn new() -> Self {
         Self {
             processes: Arc::new(Mutex::new(HashMap::new())),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Get a clone of the shutdown flag for monitoring threads
+    pub fn get_shutdown_flag(&self) -> Arc<AtomicBool> {
+        self.shutdown_flag.clone()
     }
 
     pub fn start_service(
@@ -69,10 +80,7 @@ impl ProcessManager {
 
         // On Windows, prevent console window from appearing
         #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
         // Spawn the process
         let mut child = cmd.spawn().map_err(|e| format!("Failed to start process: {}", e))?;
@@ -153,10 +161,16 @@ impl ProcessManager {
 
         // Spawn thread to wait for process exit
         let processes = self.processes.clone();
+        let shutdown_flag = self.shutdown_flag.clone();
         let service_id_exit = service_id.clone();
         thread::spawn(move || {
             // Wait for the process to exit
             loop {
+                // Check shutdown flag first
+                if shutdown_flag.load(Ordering::SeqCst) {
+                    break;
+                }
+
                 thread::sleep(std::time::Duration::from_millis(100));
 
                 let mut should_remove = false;
@@ -178,7 +192,7 @@ impl ProcessManager {
                             }
                         }
                     } else {
-                        // Process was removed (stopped manually)
+                        // Process was removed (stopped manually or during shutdown)
                         break;
                     }
                 }
@@ -189,22 +203,25 @@ impl ProcessManager {
                         processes_guard.remove(&service_id_exit);
                     }
 
-                    let _ = app_handle.emit(
-                        "service-status",
-                        ServiceStatusPayload {
-                            service_id: service_id_exit.clone(),
-                            status: ServiceStatus::Stopped,
-                            pid: None,
-                        },
-                    );
+                    // Don't emit events during shutdown
+                    if !shutdown_flag.load(Ordering::SeqCst) {
+                        let _ = app_handle.emit(
+                            "service-status",
+                            ServiceStatusPayload {
+                                service_id: service_id_exit.clone(),
+                                status: ServiceStatus::Stopped,
+                                pid: None,
+                            },
+                        );
 
-                    let _ = app_handle.emit(
-                        "service-exit",
-                        ServiceExitPayload {
-                            service_id: service_id_exit.clone(),
-                            exit_code,
-                        },
-                    );
+                        let _ = app_handle.emit(
+                            "service-exit",
+                            ServiceExitPayload {
+                                service_id: service_id_exit.clone(),
+                                exit_code,
+                            },
+                        );
+                    }
 
                     break;
                 }
@@ -251,27 +268,61 @@ impl ProcessManager {
     }
 
     pub fn stop_all(&self) {
+        // Set shutdown flag to stop monitoring threads
+        self.shutdown_flag.store(true, Ordering::SeqCst);
+
+        // Give monitoring threads a moment to see the flag
+        thread::sleep(std::time::Duration::from_millis(50));
+
+        // Collect all processes to kill
+        let processes_to_kill: Vec<(String, u32)> = {
+            let processes = self.processes.lock();
+            processes.iter().map(|(id, info)| (id.clone(), info.pid)).collect()
+        };
+
+        // Kill all processes
+        for (service_id, pid) in &processes_to_kill {
+            log::info!("Stopping service {} (PID: {})", service_id, pid);
+            if let Err(e) = kill_process_tree_robust(*pid) {
+                log::error!("Failed to kill process tree for PID {}: {}", pid, e);
+            }
+        }
+
+        // Now drain and cleanup child handles
         let mut processes = self.processes.lock();
         for (_, mut info) in processes.drain() {
-            // Kill the entire process tree (including child processes)
-            let _ = kill_process_tree(info.pid);
-            // Also try to kill and wait on the child handle for cleanup
+            // Try to kill via child handle as backup
             let _ = info.child.kill();
+            // Wait with timeout
             let _ = info.child.wait();
         }
+
+        // Final verification - try to kill any remaining processes
+        for (_, pid) in &processes_to_kill {
+            let _ = kill_process_tree_robust(*pid);
+        }
+
+        log::info!("All services stopped");
+    }
+
+    /// Check if any processes are still running
+    pub fn has_running_processes(&self) -> bool {
+        let processes = self.processes.lock();
+        !processes.is_empty()
     }
 }
 
 impl Drop for ProcessManager {
     fn drop(&mut self) {
-        self.stop_all();
+        if !self.shutdown_flag.load(Ordering::SeqCst) {
+            self.stop_all();
+        }
     }
 }
 
-/// Kill a process and all its child processes on Windows
+/// Kill a process and all its child processes on Windows (basic version)
 #[cfg(target_os = "windows")]
 fn kill_process_tree(pid: u32) -> Result<(), std::io::Error> {
-    use std::os::windows::process::CommandExt;
     Command::new("taskkill")
         .args(["/F", "/T", "/PID", &pid.to_string()])
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
@@ -279,23 +330,111 @@ fn kill_process_tree(pid: u32) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-/// Kill a process and all its child processes on Unix
+/// Kill a process tree robustly on Windows with retries and verification
+#[cfg(target_os = "windows")]
+fn kill_process_tree_robust(pid: u32) -> Result<(), String> {
+    // First attempt with taskkill
+    let output = Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .output()
+        .map_err(|e| format!("Failed to execute taskkill: {}", e))?;
+
+    // Give Windows time to actually terminate the processes
+    thread::sleep(std::time::Duration::from_millis(100));
+
+    // Check if process still exists using tasklist
+    let check = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {}", pid), "/NH"])
+        .creation_flags(0x08000000)
+        .output();
+
+    if let Ok(check_output) = check {
+        let output_str = String::from_utf8_lossy(&check_output.stdout);
+        if output_str.contains(&pid.to_string()) {
+            // Process still exists, try again
+            log::warn!("Process {} still running after first kill attempt, retrying...", pid);
+            thread::sleep(std::time::Duration::from_millis(200));
+
+            let _ = Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(0x08000000)
+                .output();
+
+            thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    // Also try to kill by process name pattern (node.exe) as a fallback
+    // This helps catch any orphaned node processes that might have been spawned
+    let _ = Command::new("wmic")
+        .args(["process", "where", &format!("ParentProcessId={}", pid), "delete"])
+        .creation_flags(0x08000000)
+        .output();
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Don't treat "not found" as an error - the process might have already exited
+        if !stderr.contains("not found") && !stderr.contains("No tasks") {
+            return Err(format!("taskkill failed: {}", stderr));
+        }
+    }
+
+    Ok(())
+}
+
+/// Kill a process and all its child processes on Unix (basic version)
 #[cfg(not(target_os = "windows"))]
 fn kill_process_tree(pid: u32) -> Result<(), std::io::Error> {
-    // On Unix, we use negative PID to kill the process group
-    // First try SIGTERM, then SIGKILL
-    use std::process::Command;
-
     // Try to kill the process group
     let _ = Command::new("kill")
         .args(["-TERM", &format!("-{}", pid)])
         .output();
 
     // Give it a moment, then force kill
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    thread::sleep(std::time::Duration::from_millis(100));
 
     let _ = Command::new("kill")
         .args(["-KILL", &format!("-{}", pid)])
+        .output();
+
+    Ok(())
+}
+
+/// Kill a process tree robustly on Unix with retries
+#[cfg(not(target_os = "windows"))]
+fn kill_process_tree_robust(pid: u32) -> Result<(), String> {
+    // First try SIGTERM to the process group
+    let _ = Command::new("kill")
+        .args(["-TERM", &format!("-{}", pid)])
+        .output();
+
+    thread::sleep(std::time::Duration::from_millis(100));
+
+    // Check if still running
+    let check = Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .output();
+
+    if check.map(|o| o.status.success()).unwrap_or(false) {
+        // Still running, force kill
+        log::warn!("Process {} still running after SIGTERM, sending SIGKILL...", pid);
+
+        let _ = Command::new("kill")
+            .args(["-KILL", &format!("-{}", pid)])
+            .output();
+
+        // Also try killing the process directly
+        let _ = Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .output();
+
+        thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    // Use pkill as a fallback to kill any children that might have escaped
+    let _ = Command::new("pkill")
+        .args(["-KILL", "-P", &pid.to_string()])
         .output();
 
     Ok(())

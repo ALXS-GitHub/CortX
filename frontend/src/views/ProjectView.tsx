@@ -22,8 +22,9 @@ import {
   FolderOpen,
   Pencil,
   Trash2,
+  Code,
 } from 'lucide-react';
-import { openInExplorer } from '@/lib/tauri';
+import { openInExplorer, openInVscode } from '@/lib/tauri';
 import type { Service, CreateServiceInput, UpdateServiceInput, UpdateProjectInput } from '@/types';
 import { toast } from 'sonner';
 
@@ -74,6 +75,14 @@ export function ProjectView() {
 
   const handleOpenFolder = () => {
     openInExplorer(project.rootPath).catch(console.error);
+  };
+
+  const handleOpenInVscode = () => {
+    openInVscode(project.rootPath).catch((error) => {
+      toast.error('Failed to open VSCode', {
+        description: String(error),
+      });
+    });
   };
 
   const handleAddService = async (data: CreateServiceInput | UpdateServiceInput) => {
@@ -155,6 +164,10 @@ export function ProjectView() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleOpenInVscode}>
+            <Code className="size-4 mr-2" />
+            Open in VSCode
+          </Button>
           <Button variant="outline" size="sm" onClick={handleOpenFolder}>
             <FolderOpen className="size-4 mr-2" />
             Open Folder

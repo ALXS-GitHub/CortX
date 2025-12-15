@@ -14,10 +14,13 @@ import {
   SidebarMenuSubButton,
 } from '@/components/ui/sidebar';
 import { useAppStore } from '@/stores/appStore';
-import { LayoutDashboard, Settings, Rocket, FolderOpen, Terminal, Circle, Play, X, Square } from 'lucide-react';
+import { LayoutDashboard, Settings, FolderOpen, Terminal, Circle, Play, X, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { View, ServiceStatus } from '@/types';
 import { Button } from '@/components/ui/button';
+
+// Minimized terminal bar height
+const MINIMIZED_TERMINAL_HEIGHT = 32;
 
 export function AppSidebar() {
   const {
@@ -32,7 +35,12 @@ export function AppSidebar() {
     startService,
     stopService,
     closeTerminal,
+    terminalPanelOpen,
+    terminalHeight,
   } = useAppStore();
+
+  // Calculate bottom padding based on terminal state
+  const bottomPadding = terminalPanelOpen ? terminalHeight : MINIMIZED_TERMINAL_HEIGHT;
 
   const handleNavigate = (view: View) => {
     setCurrentView(view);
@@ -100,12 +108,12 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" className="gap-3" tooltip="Local App Launcher">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Rocket className="size-4" />
+            <SidebarMenuButton size="lg" className="gap-3" tooltip="Cortx">
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg overflow-hidden">
+                <img src="/cortx-logo.png" alt="Cortx" className="size-8 object-contain" />
               </div>
               <div className="flex flex-col gap-0.5 leading-none">
-                <span className="font-semibold">App Launcher</span>
+                <span className="font-semibold">Cortx</span>
                 <span className="text-xs text-muted-foreground">v0.1.0</span>
               </div>
             </SidebarMenuButton>
@@ -113,7 +121,7 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent style={{ paddingBottom: bottomPadding + 16 }}>
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -186,14 +194,73 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {projectsWithServices.map(({ projectId, projectName, services }) => (
+                {projectsWithServices.map(({ projectId, projectName, services }) => {
+                  const runningServices = services.filter(s => s.status === 'running');
+                  const stoppedServices = services.filter(s => s.status !== 'running');
+                  const hasRunning = runningServices.length > 0;
+                  const hasStopped = stoppedServices.length > 0;
+
+                  const handleStartAll = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    stoppedServices.forEach(s => startService(s.serviceId));
+                  };
+
+                  const handleStopAll = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    runningServices.forEach(s => stopService(s.serviceId));
+                  };
+
+                  const handleCloseAll = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    services.forEach(s => closeTerminal(s.serviceId));
+                  };
+
+                  const allStopped = !hasRunning;
+
+                  return (
                   <SidebarMenuItem key={projectId}>
-                    <SidebarMenuButton className="font-medium" tooltip={projectName}>
+                    <SidebarMenuButton className="font-medium group/project" tooltip={projectName}>
                       <FolderOpen className="size-4" />
-                      <span>{projectName}</span>
-                      <span className="ml-auto text-xs text-muted-foreground">
+                      <span className="flex-1">{projectName}</span>
+                      <span className="text-xs text-muted-foreground group-hover/project:hidden">
                         {services.length}
                       </span>
+                      {/* Project action buttons - visible on hover */}
+                      <div className="hidden group-hover/project:flex items-center gap-0.5">
+                        {hasStopped && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-5 p-0 hover:bg-green-500/20 hover:text-green-500"
+                            onClick={handleStartAll}
+                            title="Start all services"
+                          >
+                            <Play className="size-3" />
+                          </Button>
+                        )}
+                        {hasRunning && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                            onClick={handleStopAll}
+                            title="Stop all services"
+                          >
+                            <Square className="size-3" />
+                          </Button>
+                        )}
+                        {allStopped && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                            onClick={handleCloseAll}
+                            title="Close all terminals"
+                          >
+                            <X className="size-3" />
+                          </Button>
+                        )}
+                      </div>
                     </SidebarMenuButton>
                     <SidebarMenuSub>
                       {services.map(({ serviceId, serviceName, status, isHidden }) => (
@@ -266,7 +333,8 @@ export function AppSidebar() {
                       ))}
                     </SidebarMenuSub>
                   </SidebarMenuItem>
-                ))}
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

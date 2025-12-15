@@ -27,7 +27,7 @@ pub struct Storage {
 
 impl Storage {
     pub fn new() -> Result<Self, StorageError> {
-        let project_dirs = ProjectDirs::from("com", "local-app-launcher", "LocalAppLauncher")
+        let project_dirs = ProjectDirs::from("com", "cortx", "Cortx")
             .ok_or(StorageError::NoAppDir)?;
 
         let app_dir = project_dirs.data_dir().to_path_buf();

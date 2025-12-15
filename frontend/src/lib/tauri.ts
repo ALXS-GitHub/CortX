@@ -95,6 +95,10 @@ export async function openInExplorer(path: string): Promise<void> {
   return invoke('open_in_explorer', { path });
 }
 
+export async function openInVscode(path: string): Promise<void> {
+  return invoke('open_in_vscode', { path });
+}
+
 export async function validatePath(path: string): Promise<boolean> {
   return invoke('validate_path', { path });
 }

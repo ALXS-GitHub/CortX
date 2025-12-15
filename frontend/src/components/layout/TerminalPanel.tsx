@@ -19,6 +19,7 @@ import {
   Eye,
   ArrowDown,
   XCircle,
+  GripHorizontal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import AnsiToHtml from 'ansi-to-html';
@@ -94,8 +95,9 @@ function processTerminalContent(rawContent: string): string {
 
     html = html.replace(regex, (matchedText) => {
       // matchedText contains the URL text possibly with HTML tags interspersed
-      // We wrap the whole thing in an anchor, preserving internal formatting
-      return `<a href="${url}" class="terminal-link" data-url="${url}">${matchedText}</a>`;
+      // We use a span instead of anchor to prevent default navigation behavior
+      // The click handler will open the URL externally via Tauri shell
+      return `<span class="terminal-link" data-url="${url}">${matchedText}</span>`;
     });
   }
 
@@ -106,6 +108,8 @@ export function TerminalPanel() {
   const {
     terminalPanelOpen,
     toggleTerminalPanel,
+    terminalHeight,
+    setTerminalHeight,
     activeTerminalServiceId,
     setActiveTerminalServiceId,
     serviceRuntimes,
@@ -120,8 +124,43 @@ export function TerminalPanel() {
   } = useAppStore();
 
   // Scroll state
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
+
+  // Resize state
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartY = useRef(0);
+  const resizeStartHeight = useRef(0);
+
+  // Handle resize drag
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    resizeStartY.current = e.clientY;
+    resizeStartHeight.current = terminalHeight;
+  }, [terminalHeight]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaY = resizeStartY.current - e.clientY;
+      const newHeight = resizeStartHeight.current + deltaY;
+      setTerminalHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, setTerminalHeight]);
 
   // Get service info helper
   const getServiceInfo = useCallback(
@@ -187,10 +226,14 @@ export function TerminalPanel() {
     setUserScrolledUp(!isAtBottom);
   }, []);
 
-  // Scroll to bottom function
+  // Scroll to bottom function - finds the active tab's viewport dynamically
   const scrollToBottom = useCallback(() => {
-    if (scrollRef.current) {
-      const viewport = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+    if (!containerRef.current) return;
+
+    // Find the active tab panel within our container
+    const activePanel = containerRef.current.querySelector('[role="tabpanel"][data-state="active"]');
+    if (activePanel) {
+      const viewport = activePanel.querySelector('[data-radix-scroll-area-viewport]');
       if (viewport) {
         viewport.scrollTop = viewport.scrollHeight;
       }
@@ -198,12 +241,27 @@ export function TerminalPanel() {
     setUserScrolledUp(false);
   }, []);
 
+  // Scroll to bottom when switching terminals - with delay to ensure DOM is updated
+  useEffect(() => {
+    // Use double requestAnimationFrame to ensure the tab switch is complete
+    // and the new content is rendered before scrolling
+    const frame1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollToBottom();
+      });
+    });
+    return () => cancelAnimationFrame(frame1);
+  }, [activeTerminalServiceId, scrollToBottom]);
+
   // Auto-scroll when new logs arrive (only if not scrolled up)
   useEffect(() => {
     if (!userScrolledUp) {
-      scrollToBottom();
+      // Small delay to ensure new content is rendered
+      requestAnimationFrame(() => {
+        scrollToBottom();
+      });
     }
-  }, [activeTerminalServiceId, serviceRuntimes, userScrolledUp, scrollToBottom]);
+  }, [serviceRuntimes, userScrolledUp, scrollToBottom]);
 
   // Handle link clicks in terminal output
   const handleTerminalClick = useCallback(async (e: React.MouseEvent) => {
@@ -242,9 +300,25 @@ export function TerminalPanel() {
     : null;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 h-64 bg-card border-t flex flex-col">
+    <div
+      ref={containerRef}
+      className={cn(
+        "fixed bottom-0 left-0 right-0 z-50 bg-card border-t flex flex-col",
+        isResizing && "select-none"
+      )}
+      style={{ height: terminalHeight }}
+    >
+      {/* Resize handle */}
+      <div
+        className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize hover:bg-primary/50 transition-colors flex items-center justify-center group"
+        onMouseDown={handleResizeStart}
+      >
+        <div className="absolute -top-1 left-0 right-0 h-3" /> {/* Larger hit area */}
+        <GripHorizontal className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+      </div>
+
       {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/50">
+      <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/50 mt-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Terminal</span>
           <span className="text-xs text-muted-foreground">
@@ -338,7 +412,7 @@ export function TerminalPanel() {
           onValueChange={setActiveTerminalServiceId}
           className="flex-1 flex flex-col min-h-0"
         >
-          <TabsList className="w-full justify-start rounded-none border-b bg-transparent h-auto p-0 overflow-x-auto">
+          <TabsList className="w-full justify-start rounded-none border-b bg-transparent h-auto p-0 overflow-x-auto overflow-y-hidden">
             {visibleServices.map(({ serviceId, runtime, serviceName, projectName }) => (
               <TabsTrigger
                 key={serviceId}
@@ -352,6 +426,11 @@ export function TerminalPanel() {
                     <span className="text-muted-foreground ml-1">({projectName})</span>
                   )}
                 </span>
+                {runtime.detectedPort && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-mono">
+                    :{runtime.detectedPort}
+                  </span>
+                )}
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -377,7 +456,6 @@ export function TerminalPanel() {
             >
               <ScrollArea
                 className="h-full"
-                ref={scrollRef}
                 onScrollCapture={handleScroll}
               >
                 <div
