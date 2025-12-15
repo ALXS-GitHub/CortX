@@ -9,6 +9,7 @@ Don't forget to update PRD when adding features
 - [ ] split terminal view to have multiple terminals visible at the same time (only horizontal split for now is fine)
 - [ ] sidebar should be resizable (when opened, and remember size for next time)
 - [ ] Check that on quit app all terminals are properly killed...
+- [ ] Set app version from tag version when building
 
 ## Done
 
