@@ -18,11 +18,11 @@
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  --secondary: oklch(0.93 0 0);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --muted: oklch(0.93 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: oklch(0.92 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.58 0.22 27);
   --border: oklch(0.922 0 0);
@@ -38,7 +38,7 @@
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent: oklch(0.92 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
@@ -52,6 +52,19 @@ body {
 
 #root {
   min-height: 100vh;
+}
+
+/* Custom window styling */
+html {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Title bar no-drag for interactive elements */
+[data-tauri-drag-region] button,
+[data-tauri-drag-region] a,
+[data-tauri-drag-region] input {
+  -webkit-app-region: no-drag;
 }
 
 .dark {
@@ -140,6 +153,67 @@ body {
   html {
     @apply font-sans;
   }
+}
+
+/* Custom Scrollbar - Minimal, overlay style */
+:root {
+  --scrollbar-thumb: oklch(0.7 0 0 / 30%);
+  --scrollbar-thumb-hover: oklch(0.5 0 0 / 50%);
+}
+
+.dark {
+  --scrollbar-thumb: oklch(0.5 0 0 / 30%);
+  --scrollbar-thumb-hover: oklch(0.7 0 0 / 50%);
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* Webkit scrollbar (Chrome, Safari, Edge, Tauri) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Hide scrollbar arrows */
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Overlay scrollbar - doesn't take layout space */
+.overlay-scroll {
+  overflow: overlay;
+}
+
+/* Apply overlay scroll to main scrollable areas */
+html {
+  overflow: overlay;
+}
+
+body, #root {
+  overflow: hidden;
 }
 
 /* Terminal clickable links */

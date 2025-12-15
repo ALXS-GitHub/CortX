@@ -586,3 +586,33 @@ pub fn open_in_explorer(path: String) -> Result<(), String> {
 pub fn validate_path(path: String) -> bool {
     Path::new(&path).exists()
 }
+
+#[tauri::command]
+pub fn open_in_vscode(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, try 'code' command (requires VSCode in PATH)
+        std::process::Command::new("cmd")
+            .args(["/C", "code", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open VSCode: {}. Make sure VSCode is installed and 'code' command is in PATH.", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("code")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open VSCode: {}. Make sure VSCode is installed and 'code' command is in PATH.", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("code")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open VSCode: {}. Make sure VSCode is installed and 'code' command is in PATH.", e))?;
+    }
+
+    Ok(())
+}

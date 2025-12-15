@@ -17,6 +17,52 @@ interface ServiceRuntime {
   status: ServiceStatus;
   pid?: number;
   logs: LogEntry[];
+  detectedPort?: number;
+}
+
+// Strip ANSI escape codes and orphaned bracket sequences
+function stripAnsiCodes(str: string): string {
+  // Remove proper ANSI escape codes (ESC [ ... m)
+  let result = str.replace(/\x1b\[[0-9;]*m/g, '');
+  // Also remove orphaned bracket sequences (e.g., [1m, [22m, [39m)
+  result = result.replace(/\[([0-9;]*)m/g, '');
+  return result;
+}
+
+// Port detection patterns
+const PORT_PATTERNS = [
+  // URLs with ports - most specific first
+  /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::\]):(\d{2,5})/i,
+  /https?:\/\/[^/:]+:(\d{2,5})/i,
+  // Direct host:port patterns
+  /(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})/i,
+  // Common log messages
+  /listening\s+(?:on\s+)?(?:port\s+)?:?(\d{2,5})/i,
+  /server\s+(?:is\s+)?(?:running|started|listening)\s+(?:on\s+)?(?:port\s+)?:?(\d{2,5})/i,
+  /started\s+(?:on\s+)?(?:port\s+)?:?(\d{2,5})/i,
+  /running\s+(?:on\s+)?(?:port\s+)?:?(\d{2,5})/i,
+  /available\s+(?:on|at)\s+(?:port\s+)?:?(\d{2,5})/i,
+  /bound\s+to\s+(?:port\s+)?:?(\d{2,5})/i,
+  // Generic port mentions
+  /port[:\s]+(\d{2,5})/i,
+  /:(\d{4,5})(?:\/|\s|$)/,  // :PORT followed by / or space or end
+];
+
+function detectPort(content: string): number | null {
+  // Strip ANSI codes first to handle colored output
+  const cleanContent = stripAnsiCodes(content);
+
+  for (const pattern of PORT_PATTERNS) {
+    const match = cleanContent.match(pattern);
+    if (match && match[1]) {
+      const port = parseInt(match[1], 10);
+      // Valid port range (excluding very common non-port numbers)
+      if (port >= 1024 && port <= 65535) {
+        return port;
+      }
+    }
+  }
+  return null;
 }
 
 interface AppState {
@@ -35,6 +81,7 @@ interface AppState {
   // UI state
   currentView: View;
   terminalPanelOpen: boolean;
+  terminalHeight: number;
   activeTerminalServiceId: string | null;
   hiddenTerminalIds: Set<string>;
   closedTerminalIds: Set<string>;
@@ -76,6 +123,7 @@ interface AppState {
   setCurrentView: (view: View) => void;
   toggleTerminalPanel: () => void;
   setActiveTerminalServiceId: (serviceId: string | null) => void;
+  setTerminalHeight: (height: number) => void;
 }
 
 export const useAppStore = create<AppState>((set, _get) => ({
@@ -88,6 +136,7 @@ export const useAppStore = create<AppState>((set, _get) => ({
   serviceRuntimes: new Map(),
   currentView: 'dashboard',
   terminalPanelOpen: false,
+  terminalHeight: 256,
   activeTerminalServiceId: null,
   hiddenTerminalIds: new Set(),
   closedTerminalIds: new Set(),
@@ -214,7 +263,9 @@ export const useAppStore = create<AppState>((set, _get) => ({
     set((state) => {
       const runtimes = new Map(state.serviceRuntimes);
       const existing = runtimes.get(serviceId) || { status: 'stopped', logs: [] };
-      runtimes.set(serviceId, { ...existing, status, pid });
+      // Clear detected port when service stops
+      const detectedPort = status === 'stopped' ? undefined : existing.detectedPort;
+      runtimes.set(serviceId, { ...existing, status, pid, detectedPort });
       return { serviceRuntimes: runtimes };
     });
   },
@@ -225,7 +276,17 @@ export const useAppStore = create<AppState>((set, _get) => ({
       const existing = runtimes.get(serviceId) || { status: 'stopped', logs: [] };
       // Keep last 1000 logs
       const logs = [...existing.logs, log].slice(-1000);
-      runtimes.set(serviceId, { ...existing, logs });
+
+      // Try to detect port from log content (only if not already detected)
+      let detectedPort = existing.detectedPort;
+      if (!detectedPort) {
+        const port = detectPort(log.content);
+        if (port) {
+          detectedPort = port;
+        }
+      }
+
+      runtimes.set(serviceId, { ...existing, logs, detectedPort });
       return { serviceRuntimes: runtimes };
     });
   },
@@ -352,5 +413,11 @@ export const useAppStore = create<AppState>((set, _get) => ({
 
   setActiveTerminalServiceId: (serviceId) => {
     set({ activeTerminalServiceId: serviceId });
+  },
+
+  setTerminalHeight: (height) => {
+    // Clamp height between 100px and 600px
+    const clampedHeight = Math.min(Math.max(height, 100), 600);
+    set({ terminalHeight: clampedHeight });
   },
 }));

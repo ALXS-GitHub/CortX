@@ -1,15 +1,15 @@
 [package]
-name = "app"
+name = "cortx"
 version = "0.1.0"
-description = "Local App Launcher - A dashboard for managing local dev applications"
-authors = ["you"]
+description = "Cortx - A dashboard for managing local dev applications"
+authors = ["ALXS-GitHub"]
 license = ""
 repository = ""
 edition = "2021"
 rust-version = "1.77.2"
 
 [lib]
-name = "app_lib"
+name = "cortx_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
