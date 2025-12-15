@@ -68,38 +68,67 @@ impl Project {
     }
 }
 
+/// Predefined terminal presets with known configurations
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalPreset {
+    /// Windows Terminal (wt.exe)
+    WindowsTerminal,
+    /// PowerShell
+    PowerShell,
+    /// Command Prompt (cmd.exe)
+    Cmd,
+    /// Warp Terminal
+    Warp,
+    /// macOS Terminal.app
+    MacTerminal,
+    /// iTerm2
+    ITerm2,
+    /// Custom terminal with user-specified path and arguments
+    Custom,
+}
+
+impl Default for TerminalPreset {
+    fn default() -> Self {
+        #[cfg(target_os = "windows")]
+        {
+            Self::WindowsTerminal
+        }
+        #[cfg(target_os = "macos")]
+        {
+            Self::MacTerminal
+        }
+        #[cfg(target_os = "linux")]
+        {
+            Self::Custom
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct TerminalConfig {
-    pub executable_path: String,
-    pub arguments: Vec<String>,
+    /// The selected terminal preset
+    pub preset: TerminalPreset,
+    /// Custom executable path (only used when preset is Custom)
+    #[serde(default)]
+    pub custom_path: String,
+    /// Custom arguments (only used when preset is Custom)
+    /// Supports placeholders: {dir}, {command}, {full_command}
+    #[serde(default)]
+    pub custom_args: Vec<String>,
 }
 
 impl Default for TerminalConfig {
     fn default() -> Self {
-        #[cfg(target_os = "windows")]
-        {
-            Self {
-                executable_path: "powershell.exe".to_string(),
-                arguments: vec!["-NoExit".to_string(), "-Command".to_string()],
-            }
-        }
-        #[cfg(target_os = "macos")]
-        {
-            Self {
-                executable_path: "/bin/zsh".to_string(),
-                arguments: vec!["-c".to_string()],
-            }
-        }
-        #[cfg(target_os = "linux")]
-        {
-            Self {
-                executable_path: "/bin/bash".to_string(),
-                arguments: vec!["-c".to_string()],
-            }
+        Self {
+            preset: TerminalPreset::default(),
+            custom_path: String::new(),
+            custom_args: Vec::new(),
         }
     }
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

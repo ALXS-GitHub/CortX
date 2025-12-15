@@ -21,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Plus, Search, LayoutGrid, List } from 'lucide-react';
+import { Plus, Search, LayoutGrid } from 'lucide-react';
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@/types';
 
 type SortOption = 'recent' | 'name' | 'created';

@@ -79,11 +79,11 @@ pub fn update_project(
 }
 
 #[tauri::command]
-pub fn delete_project(state: State<AppState>, id: String) -> Result<(), String> {
+pub fn delete_project(app_handle: AppHandle, state: State<AppState>, id: String) -> Result<(), String> {
     // Stop any running services for this project
     if let Some(project) = state.storage.get_project(&id) {
         for service in &project.services {
-            let _ = state.process_manager.stop_service(&service.id);
+            let _ = state.process_manager.stop_service(&app_handle, &service.id);
         }
     }
 
@@ -157,9 +157,9 @@ pub fn update_service(
 }
 
 #[tauri::command]
-pub fn delete_service(state: State<AppState>, service_id: String) -> Result<(), String> {
+pub fn delete_service(app_handle: AppHandle, state: State<AppState>, service_id: String) -> Result<(), String> {
     // Stop if running
-    let _ = state.process_manager.stop_service(&service_id);
+    let _ = state.process_manager.stop_service(&app_handle, &service_id);
 
     state
         .storage
@@ -216,10 +216,12 @@ pub fn get_launch_command(state: State<AppState>, service_id: String) -> Result<
 
 #[tauri::command]
 pub async fn launch_external_terminal(
-    app_handle: AppHandle,
+    _app_handle: AppHandle,
     state: State<'_, AppState>,
     service_id: String,
 ) -> Result<(), String> {
+    use crate::models::TerminalPreset;
+
     let (project, service) = state
         .storage
         .get_service(&service_id)
@@ -234,23 +236,262 @@ pub async fn launch_external_terminal(
         path.to_string_lossy().to_string()
     };
 
-    let full_command = format!("cd \"{}\" && {}", working_dir, service.command);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
 
-    // Build the command based on terminal configuration
-    let mut args = settings.terminal.arguments.clone();
-    args.push(full_command);
+        match settings.terminal.preset {
+            TerminalPreset::WindowsTerminal => {
+                // Windows Terminal - use -d for directory and pass the command
+                std::process::Command::new("wt.exe")
+                    .args(["-d", &working_dir, "cmd", "/k", &service.command])
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch Windows Terminal: {}", e))?;
+            }
+            TerminalPreset::PowerShell => {
+                // PowerShell - needs CREATE_NEW_CONSOLE to show window
+                let ps_command = format!(
+                    "Set-Location '{}'; {}",
+                    working_dir.replace("'", "''"),
+                    service.command
+                );
+                std::process::Command::new("powershell.exe")
+                    .args(["-NoExit", "-Command", &ps_command])
+                    .creation_flags(CREATE_NEW_CONSOLE)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch PowerShell: {}", e))?;
+            }
+            TerminalPreset::Cmd => {
+                // cmd.exe - needs CREATE_NEW_CONSOLE to show window
+                let cmd_str = format!("cd /d \"{}\" && {}", working_dir, service.command);
+                std::process::Command::new("cmd.exe")
+                    .args(["/k", &cmd_str])
+                    .creation_flags(CREATE_NEW_CONSOLE)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch Command Prompt: {}", e))?;
+            }
+            TerminalPreset::Warp => {
+                // Warp uses URI scheme for opening with a specific path
+                // warp://action/new_window?path=<path>
+                let uri = format!("warp://action/new_window?path={}", urlencoding(&working_dir));
+                std::process::Command::new("cmd")
+                    .args(["/c", "start", "", &uri])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW for cmd wrapper
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch Warp: {}", e))?;
+            }
+            TerminalPreset::Custom => {
+                // Custom terminal with user-specified path and arguments
+                if settings.terminal.custom_path.is_empty() {
+                    return Err("Custom terminal path is not configured".to_string());
+                }
 
-    // Use tauri-plugin-shell to open the terminal
-    use tauri_plugin_shell::ShellExt;
+                let full_command = format!("cd /d \"{}\" && {}", working_dir, service.command);
+                let mut cmd = std::process::Command::new(&settings.terminal.custom_path);
 
-    app_handle
-        .shell()
-        .command(&settings.terminal.executable_path)
-        .args(args)
-        .spawn()
-        .map_err(|e| format!("Failed to launch terminal: {}", e))?;
+                if settings.terminal.custom_args.is_empty() {
+                    cmd.current_dir(&working_dir);
+                } else {
+                    for arg in &settings.terminal.custom_args {
+                        let replaced = arg
+                            .replace("{command}", &service.command)
+                            .replace("{dir}", &working_dir)
+                            .replace("{full_command}", &full_command);
+                        cmd.arg(replaced);
+                    }
+                }
+
+                cmd.creation_flags(CREATE_NEW_CONSOLE)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch custom terminal: {}", e))?;
+            }
+            // macOS presets on Windows - fallback to Windows Terminal
+            TerminalPreset::MacTerminal | TerminalPreset::ITerm2 => {
+                std::process::Command::new("wt.exe")
+                    .args(["-d", &working_dir, "cmd", "/k", &service.command])
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch Windows Terminal: {}", e))?;
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        match settings.terminal.preset {
+            TerminalPreset::MacTerminal => {
+                let script = format!(
+                    r#"tell application "Terminal"
+                        activate
+                        do script "cd '{}' && {}"
+                    end tell"#,
+                    working_dir.replace("'", "'\\''"),
+                    service.command.replace("\"", "\\\"")
+                );
+                std::process::Command::new("osascript")
+                    .args(["-e", &script])
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch Terminal: {}", e))?;
+            }
+            TerminalPreset::ITerm2 => {
+                let script = format!(
+                    r#"tell application "iTerm"
+                        activate
+                        create window with default profile
+                        tell current session of current window
+                            write text "cd '{}' && {}"
+                        end tell
+                    end tell"#,
+                    working_dir.replace("'", "'\\''"),
+                    service.command.replace("\"", "\\\"")
+                );
+                std::process::Command::new("osascript")
+                    .args(["-e", &script])
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch iTerm2: {}", e))?;
+            }
+            TerminalPreset::Warp => {
+                let script = format!(
+                    r#"tell application "Warp"
+                        activate
+                    end tell
+                    delay 0.5
+                    tell application "System Events"
+                        keystroke "cd '{}' && {}"
+                        key code 36
+                    end tell"#,
+                    working_dir.replace("'", "'\\''"),
+                    service.command.replace("\"", "\\\"")
+                );
+                std::process::Command::new("osascript")
+                    .args(["-e", &script])
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch Warp: {}", e))?;
+            }
+            TerminalPreset::Custom => {
+                if settings.terminal.custom_path.is_empty() {
+                    return Err("Custom terminal path is not configured".to_string());
+                }
+                std::process::Command::new("open")
+                    .args(["-a", &settings.terminal.custom_path])
+                    .current_dir(&working_dir)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch custom terminal: {}", e))?;
+            }
+            // Windows presets on macOS - fallback to Terminal.app
+            TerminalPreset::WindowsTerminal | TerminalPreset::PowerShell | TerminalPreset::Cmd => {
+                let script = format!(
+                    r#"tell application "Terminal"
+                        activate
+                        do script "cd '{}' && {}"
+                    end tell"#,
+                    working_dir.replace("'", "'\\''"),
+                    service.command.replace("\"", "\\\"")
+                );
+                std::process::Command::new("osascript")
+                    .args(["-e", &script])
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch Terminal: {}", e))?;
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let full_command = format!("cd \"{}\" && {}; exec $SHELL", working_dir, service.command);
+
+        match settings.terminal.preset {
+            TerminalPreset::Custom => {
+                if settings.terminal.custom_path.is_empty() {
+                    // Try common terminal emulators
+                    let terminals = [
+                        ("gnome-terminal", vec!["--", "bash", "-c", &full_command]),
+                        ("konsole", vec!["-e", "bash", "-c", &full_command]),
+                        ("xfce4-terminal", vec!["-e", &format!("bash -c '{}'", full_command)]),
+                        ("alacritty", vec!["-e", "bash", "-c", &full_command]),
+                        ("kitty", vec!["bash", "-c", &full_command]),
+                        ("xterm", vec!["-e", "bash", "-c", &full_command]),
+                    ];
+
+                    let mut launched = false;
+                    for (terminal, args) in terminals {
+                        if std::process::Command::new(terminal)
+                            .args(&args)
+                            .spawn()
+                            .is_ok()
+                        {
+                            launched = true;
+                            break;
+                        }
+                    }
+
+                    if !launched {
+                        return Err("No supported terminal emulator found".to_string());
+                    }
+                } else {
+                    let mut cmd = std::process::Command::new(&settings.terminal.custom_path);
+
+                    if settings.terminal.custom_args.is_empty() {
+                        cmd.args(["-e", "bash", "-c", &full_command]);
+                    } else {
+                        for arg in &settings.terminal.custom_args {
+                            let replaced = arg
+                                .replace("{command}", &service.command)
+                                .replace("{dir}", &working_dir)
+                                .replace("{full_command}", &full_command);
+                            cmd.arg(replaced);
+                        }
+                    }
+
+                    cmd.spawn()
+                        .map_err(|e| format!("Failed to launch custom terminal: {}", e))?;
+                }
+            }
+            // All presets fallback to auto-detection on Linux
+            _ => {
+                let terminals = [
+                    ("gnome-terminal", vec!["--", "bash", "-c", &full_command]),
+                    ("konsole", vec!["-e", "bash", "-c", &full_command]),
+                    ("xfce4-terminal", vec!["-e", &format!("bash -c '{}'", full_command)]),
+                    ("alacritty", vec!["-e", "bash", "-c", &full_command]),
+                    ("kitty", vec!["bash", "-c", &full_command]),
+                    ("xterm", vec!["-e", "bash", "-c", &full_command]),
+                ];
+
+                let mut launched = false;
+                for (terminal, args) in terminals {
+                    if std::process::Command::new(terminal)
+                        .args(&args)
+                        .spawn()
+                        .is_ok()
+                    {
+                        launched = true;
+                        break;
+                    }
+                }
+
+                if !launched {
+                    return Err("No supported terminal emulator found".to_string());
+                }
+            }
+        }
+    }
 
     Ok(())
+}
+
+/// Simple URL encoding for the path
+fn urlencoding(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
+            ' ' => "%20".to_string(),
+            ':' => "%3A".to_string(),
+            '/' => "%2F".to_string(),
+            '\\' => "%5C".to_string(),
+            _ => format!("%{:02X}", c as u8),
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -281,8 +522,8 @@ pub fn start_integrated_service(
 }
 
 #[tauri::command]
-pub fn stop_integrated_service(state: State<AppState>, service_id: String) -> Result<(), String> {
-    state.process_manager.stop_service(&service_id)
+pub fn stop_integrated_service(app_handle: AppHandle, state: State<AppState>, service_id: String) -> Result<(), String> {
+    state.process_manager.stop_service(&app_handle, &service_id)
 }
 
 #[tauri::command]

@@ -21,9 +21,19 @@ export interface Project {
   services: Service[];
 }
 
+export type TerminalPreset =
+  | 'windowsterminal'
+  | 'powershell'
+  | 'cmd'
+  | 'warp'
+  | 'macterminal'
+  | 'iterm2'
+  | 'custom';
+
 export interface TerminalConfig {
-  executablePath: string;
-  arguments: string[];
+  preset: TerminalPreset;
+  customPath: string;
+  customArgs: string[];
 }
 
 export interface AppearanceConfig {

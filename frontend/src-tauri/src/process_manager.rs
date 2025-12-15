@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter};
 pub struct ProcessInfo {
     pub child: Child,
     pub service_id: String,
+    pub pid: u32,
 }
 
 pub struct ProcessManager {
@@ -135,6 +136,7 @@ impl ProcessManager {
                 ProcessInfo {
                     child,
                     service_id: service_id.clone(),
+                    pid,
                 },
             );
         }
@@ -212,13 +214,26 @@ impl ProcessManager {
         Ok(pid)
     }
 
-    pub fn stop_service(&self, service_id: &str) -> Result<(), String> {
+    pub fn stop_service(&self, app_handle: &AppHandle, service_id: &str) -> Result<(), String> {
         let mut processes = self.processes.lock();
 
         if let Some(mut info) = processes.remove(service_id) {
-            // Kill the process
+            // Kill the entire process tree (including child processes)
+            let _ = kill_process_tree(info.pid);
+            // Also try to kill and wait on the child handle for cleanup
             let _ = info.child.kill();
             let _ = info.child.wait();
+
+            // Emit stopped status to frontend
+            let _ = app_handle.emit(
+                "service-status",
+                ServiceStatusPayload {
+                    service_id: service_id.to_string(),
+                    status: ServiceStatus::Stopped,
+                    pid: None,
+                },
+            );
+
             Ok(())
         } else {
             Err("Service is not running".to_string())
@@ -238,6 +253,9 @@ impl ProcessManager {
     pub fn stop_all(&self) {
         let mut processes = self.processes.lock();
         for (_, mut info) in processes.drain() {
+            // Kill the entire process tree (including child processes)
+            let _ = kill_process_tree(info.pid);
+            // Also try to kill and wait on the child handle for cleanup
             let _ = info.child.kill();
             let _ = info.child.wait();
         }
@@ -248,6 +266,39 @@ impl Drop for ProcessManager {
     fn drop(&mut self) {
         self.stop_all();
     }
+}
+
+/// Kill a process and all its child processes on Windows
+#[cfg(target_os = "windows")]
+fn kill_process_tree(pid: u32) -> Result<(), std::io::Error> {
+    use std::os::windows::process::CommandExt;
+    Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .output()?;
+    Ok(())
+}
+
+/// Kill a process and all its child processes on Unix
+#[cfg(not(target_os = "windows"))]
+fn kill_process_tree(pid: u32) -> Result<(), std::io::Error> {
+    // On Unix, we use negative PID to kill the process group
+    // First try SIGTERM, then SIGKILL
+    use std::process::Command;
+
+    // Try to kill the process group
+    let _ = Command::new("kill")
+        .args(["-TERM", &format!("-{}", pid)])
+        .output();
+
+    // Give it a moment, then force kill
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let _ = Command::new("kill")
+        .args(["-KILL", &format!("-{}", pid)])
+        .output();
+
+    Ok(())
 }
 
 fn parse_command(command: &str) -> (String, Vec<String>) {
