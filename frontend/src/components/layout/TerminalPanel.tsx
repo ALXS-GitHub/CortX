@@ -12,6 +12,31 @@ import {
   Circle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import AnsiToHtml from 'ansi-to-html';
+
+// Create ANSI to HTML converter with dark theme colors
+const ansiConverter = new AnsiToHtml({
+  fg: '#d4d4d4',
+  bg: 'transparent',
+  colors: {
+    0: '#1e1e1e', // black
+    1: '#f44747', // red
+    2: '#6a9955', // green
+    3: '#dcdcaa', // yellow
+    4: '#569cd6', // blue
+    5: '#c586c0', // magenta
+    6: '#4ec9b0', // cyan
+    7: '#d4d4d4', // white
+    8: '#808080', // bright black
+    9: '#f44747', // bright red
+    10: '#6a9955', // bright green
+    11: '#dcdcaa', // bright yellow
+    12: '#569cd6', // bright blue
+    13: '#c586c0', // bright magenta
+    14: '#4ec9b0', // bright cyan
+    15: '#ffffff', // bright white
+  },
+});
 
 export function TerminalPanel() {
   const {
@@ -178,11 +203,12 @@ export function TerminalPanel() {
                         key={index}
                         className={cn(
                           'whitespace-pre-wrap break-all',
-                          log.stream === 'stderr' && 'text-red-500'
+                          log.stream === 'stderr' && 'text-red-400'
                         )}
-                      >
-                        {log.content}
-                      </div>
+                        dangerouslySetInnerHTML={{
+                          __html: ansiConverter.toHtml(log.content),
+                        }}
+                      />
                     ))
                   )}
                 </div>

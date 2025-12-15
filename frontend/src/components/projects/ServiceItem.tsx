@@ -16,7 +16,6 @@ import {
   ExternalLink,
   MoreVertical,
   Terminal,
-  Circle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';

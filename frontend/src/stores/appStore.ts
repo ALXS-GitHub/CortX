@@ -70,7 +70,7 @@ interface AppState {
   setActiveTerminalServiceId: (serviceId: string | null) => void;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set, _get) => ({
   // Initial state
   projects: [],
   selectedProjectId: null,
