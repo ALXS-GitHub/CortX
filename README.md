@@ -66,17 +66,34 @@ Download the latest release for your platform from the [Releases](https://github
 ### Build from Source
 
 Requirements:
-- [Node.js](https://nodejs.org/) 18+
+- [Bun](https://bun.sh/) (recommended) or [Node.js](https://nodejs.org/) 18+
 - [Rust](https://www.rust-lang.org/tools/install) 1.70+
-- [Tauri CLI](https://tauri.app/v1/guides/getting-started/prerequisites)
+
+**Using Bun (recommended):**
 
 ```bash
 # Clone the repository
 git clone https://github.com/ALXS-GitHub/CortX.git
-cd CortX
+cd CortX/frontend
 
 # Install dependencies
-cd frontend
+bun install
+
+# Run in development mode
+bun tauri:dev
+
+# Build for production
+bun tauri:build
+```
+
+**Using npm (alternative):**
+
+```bash
+# Clone the repository
+git clone https://github.com/ALXS-GitHub/CortX.git
+cd CortX/frontend
+
+# Install dependencies
 npm install
 
 # Run in development mode
