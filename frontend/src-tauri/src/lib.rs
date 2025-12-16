@@ -20,12 +20,21 @@ pub fn run() {
         process_manager: Arc::new(process_manager),
     };
 
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_fs::init());
+
+    // Only initialize updater in release builds
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -72,6 +81,14 @@ pub fn run() {
             commands::update_service,
             commands::delete_service,
             commands::reorder_services,
+            // Script commands
+            commands::add_script,
+            commands::update_script,
+            commands::delete_script,
+            commands::reorder_scripts,
+            commands::run_script,
+            commands::stop_script,
+            commands::is_script_running,
             // Launch commands
             commands::get_launch_command,
             commands::launch_external_terminal,
@@ -86,6 +103,16 @@ pub fn run() {
             commands::open_in_explorer,
             commands::open_in_vscode,
             commands::validate_path,
+            // Environment file commands
+            commands::discover_env_files,
+            commands::add_env_file,
+            commands::remove_env_file,
+            commands::refresh_env_file,
+            commands::refresh_all_env_files,
+            commands::get_env_files,
+            commands::get_env_file_content,
+            commands::compare_env_files,
+            commands::link_env_to_service,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

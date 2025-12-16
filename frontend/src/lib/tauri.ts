@@ -4,14 +4,25 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 import type {
   Project,
   Service,
+  Script,
   AppSettings,
   CreateProjectInput,
   UpdateProjectInput,
   CreateServiceInput,
   UpdateServiceInput,
+  CreateScriptInput,
+  UpdateScriptInput,
   ServiceLogPayload,
   ServiceStatusPayload,
   ServiceExitPayload,
+  ScriptLogPayload,
+  ScriptStatusPayload,
+  ScriptExitPayload,
+  EnvFile,
+  EnvComparison,
+  DiscoverEnvFilesInput,
+  AddEnvFileInput,
+  LinkEnvToServiceInput,
 } from '@/types';
 
 // Project commands
@@ -54,6 +65,35 @@ export async function deleteService(serviceId: string): Promise<void> {
 
 export async function reorderServices(projectId: string, serviceIds: string[]): Promise<void> {
   return invoke('reorder_services', { projectId, serviceIds });
+}
+
+// Script commands
+export async function addScript(projectId: string, input: CreateScriptInput): Promise<Script> {
+  return invoke('add_script', { projectId, input });
+}
+
+export async function updateScript(scriptId: string, input: UpdateScriptInput): Promise<Script> {
+  return invoke('update_script', { scriptId, input });
+}
+
+export async function deleteScript(scriptId: string): Promise<void> {
+  return invoke('delete_script', { scriptId });
+}
+
+export async function reorderScripts(projectId: string, scriptIds: string[]): Promise<void> {
+  return invoke('reorder_scripts', { projectId, scriptIds });
+}
+
+export async function runScript(scriptId: string): Promise<number> {
+  return invoke('run_script', { scriptId });
+}
+
+export async function stopScript(scriptId: string): Promise<void> {
+  return invoke('stop_script', { scriptId });
+}
+
+export async function isScriptRunning(scriptId: string): Promise<boolean> {
+  return invoke('is_script_running', { scriptId });
 }
 
 // Launch commands
@@ -126,4 +166,83 @@ export async function onServiceExit(
   return listen<ServiceExitPayload>('service-exit', (event) => {
     callback(event.payload);
   });
+}
+
+// Script event listeners
+export async function onScriptLog(
+  callback: (payload: ScriptLogPayload) => void
+): Promise<UnlistenFn> {
+  return listen<ScriptLogPayload>('script-log', (event) => {
+    callback(event.payload);
+  });
+}
+
+export async function onScriptStatus(
+  callback: (payload: ScriptStatusPayload) => void
+): Promise<UnlistenFn> {
+  return listen<ScriptStatusPayload>('script-status', (event) => {
+    callback(event.payload);
+  });
+}
+
+export async function onScriptExit(
+  callback: (payload: ScriptExitPayload) => void
+): Promise<UnlistenFn> {
+  return listen<ScriptExitPayload>('script-exit', (event) => {
+    callback(event.payload);
+  });
+}
+
+// Environment file commands
+export async function discoverEnvFiles(
+  projectId: string,
+  input: DiscoverEnvFilesInput
+): Promise<EnvFile[]> {
+  return invoke('discover_env_files', { projectId, input });
+}
+
+export async function addEnvFile(
+  projectId: string,
+  input: AddEnvFileInput
+): Promise<EnvFile> {
+  return invoke('add_env_file', { projectId, input });
+}
+
+export async function removeEnvFile(projectId: string, envFileId: string): Promise<void> {
+  return invoke('remove_env_file', { projectId, envFileId });
+}
+
+export async function refreshEnvFile(projectId: string, envFileId: string): Promise<EnvFile> {
+  return invoke('refresh_env_file', { projectId, envFileId });
+}
+
+export async function refreshAllEnvFiles(projectId: string): Promise<EnvFile[]> {
+  return invoke('refresh_all_env_files', { projectId });
+}
+
+export async function getEnvFiles(projectId: string): Promise<EnvFile[]> {
+  return invoke('get_env_files', { projectId });
+}
+
+export async function getEnvFileContent(
+  projectId: string,
+  envFileId: string
+): Promise<string> {
+  return invoke('get_env_file_content', { projectId, envFileId });
+}
+
+export async function compareEnvFiles(
+  projectId: string,
+  baseFileId: string,
+  exampleFileId: string
+): Promise<EnvComparison> {
+  return invoke('compare_env_files', { projectId, baseFileId, exampleFileId });
+}
+
+export async function linkEnvToService(
+  projectId: string,
+  envFileId: string,
+  input: LinkEnvToServiceInput
+): Promise<EnvFile> {
+  return invoke('link_env_to_service', { projectId, envFileId, input });
 }

@@ -10,7 +10,15 @@ import { Dashboard } from '@/views/Dashboard';
 import { ProjectView } from '@/views/ProjectView';
 import { Settings } from '@/views/Settings';
 import { useAppStore } from '@/stores/appStore';
-import { onServiceLog, onServiceStatus, onServiceExit, getRunningServices } from '@/lib/tauri';
+import {
+  onServiceLog,
+  onServiceStatus,
+  onServiceExit,
+  onScriptLog,
+  onScriptStatus,
+  onScriptExit,
+  getRunningServices,
+} from '@/lib/tauri';
 import type { LogEntry } from '@/types';
 
 // Minimized terminal bar height
@@ -59,13 +67,19 @@ function App() {
     if (listenersSetUp.current) return;
     listenersSetUp.current = true;
 
-    let unlistenLog: (() => void) | undefined;
-    let unlistenStatus: (() => void) | undefined;
-    let unlistenExit: (() => void) | undefined;
+    // Service listeners
+    let unlistenServiceLog: (() => void) | undefined;
+    let unlistenServiceStatus: (() => void) | undefined;
+    let unlistenServiceExit: (() => void) | undefined;
+    // Script listeners
+    let unlistenScriptLog: (() => void) | undefined;
+    let unlistenScriptStatus: (() => void) | undefined;
+    let unlistenScriptExit: (() => void) | undefined;
     let isCancelled = false;
 
     const setupListeners = async () => {
-      unlistenLog = await onServiceLog((payload) => {
+      // Service event listeners
+      unlistenServiceLog = await onServiceLog((payload) => {
         if (isCancelled) return;
         const { appendServiceLog } = useAppStore.getState();
         const logEntry: LogEntry = {
@@ -76,15 +90,40 @@ function App() {
         appendServiceLog(payload.serviceId, logEntry);
       });
 
-      unlistenStatus = await onServiceStatus((payload) => {
+      unlistenServiceStatus = await onServiceStatus((payload) => {
         if (isCancelled) return;
         const { updateServiceStatus } = useAppStore.getState();
         updateServiceStatus(payload.serviceId, payload.status, payload.pid);
       });
 
-      unlistenExit = await onServiceExit((payload) => {
+      unlistenServiceExit = await onServiceExit((payload) => {
         if (isCancelled) return;
         console.log(`Service ${payload.serviceId} exited with code ${payload.exitCode}`);
+      });
+
+      // Script event listeners
+      unlistenScriptLog = await onScriptLog((payload) => {
+        if (isCancelled) return;
+        const { appendScriptLog } = useAppStore.getState();
+        const logEntry: LogEntry = {
+          timestamp: new Date().toISOString(),
+          stream: payload.stream,
+          content: payload.content,
+        };
+        appendScriptLog(payload.scriptId, logEntry);
+      });
+
+      unlistenScriptStatus = await onScriptStatus((payload) => {
+        if (isCancelled) return;
+        const { updateScriptStatus } = useAppStore.getState();
+        updateScriptStatus(payload.scriptId, payload.status, payload.pid);
+      });
+
+      unlistenScriptExit = await onScriptExit((payload) => {
+        if (isCancelled) return;
+        console.log(`Script ${payload.scriptId} exited with code ${payload.exitCode}, success: ${payload.success}`);
+        const { setScriptExitResult } = useAppStore.getState();
+        setScriptExitResult(payload.scriptId, payload.exitCode, payload.success);
       });
     };
 
@@ -92,9 +131,12 @@ function App() {
 
     return () => {
       isCancelled = true;
-      unlistenLog?.();
-      unlistenStatus?.();
-      unlistenExit?.();
+      unlistenServiceLog?.();
+      unlistenServiceStatus?.();
+      unlistenServiceExit?.();
+      unlistenScriptLog?.();
+      unlistenScriptStatus?.();
+      unlistenScriptExit?.();
       listenersSetUp.current = false;
     };
   }, []);

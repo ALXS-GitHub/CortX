@@ -2,14 +2,9 @@
 
 Don't forget to update PRD when adding features
 
-- [ ] Add a .env locator -> the goal is to easily find .env files in a project and get their variables
-- [ ] In addition of services, add scripts support (that could be linked to services or standalone) e.g. a build script that is linked to the frontend service. a build script that is linked to multiple services (frontend and backend). A clean backup script which is standalone, a deploy script (linked to frontend or not...), etc...
 - [ ] Add modes for the services (e.g. dev, prod, test, etc...) we can have modes for each service and the possibility to run all services / individual services in a specific mode
-- [ ] Make the app updatable (check tauri docs for that) -> must be public repo, so please make sure its safe in term of security before pushing + readme is ready for public. Windows only for now is fine.
 - [ ] split terminal view to have multiple terminals visible at the same time (only horizontal split for now is fine)
 - [ ] sidebar should be resizable (when opened, and remember size for next time)
-- [ ] Check that on quit app all terminals are properly killed...
-- [ ] Set app version from tag version when building
 
 ## Done
 
@@ -27,3 +22,11 @@ Don't forget to update PRD when adding features
 - [X] Custom menu bar (with reduce / maximize / close buttons) to have a better integration with the app design (+ make sure it's draggable from anywhere on the top bar)
 - [X] Find a better name for the app (+ rename repo -> do this before making it public and before making the updates system)
 - [X] Generate a logo for the project (first write readme and give it to gemini to generate a logo)
+- [X] Make the app updatable (check tauri docs for that) -> must be public repo, so please make sure its safe in term of security before pushing + readme is ready for public. Windows only for now is fine.
+- [X] Fix updater : [2025-12-16][08:05:53][tauri_plugin_updater::updater][ERROR] update endpoint did not respond with a successful status code
+- [X] Check that on quit app all terminals are properly killed...
+
+- [X] Set app version properly everywhere (at the same time using the same version variable) + fix in the topbar the app version is fixed to 0.1.0
+- [X] Add a .env locator -> the goal is to easily find .env files in a project and get their variables
+- [X] In addition of services, add scripts support (that could be linked to services or standalone) e.g. a build script that is linked to the frontend service. a build script that is linked to multiple services (frontend and backend). A 'cleaning backup' script which is standalone, a deploy script (linked to frontend or not...), etc... (in this i call script any file in the codebase of the project and that is executable (e.g. .sh, .ps1, .py, .js, etc...), the user should be able to define a script by giving it a name, an optional description, the command to run it, the path to the script file (relative to the project root), and the linked services (optional, could be multiple or none))
+- [X] Add a see .env file content (full content at once that can be copied or exported)

@@ -12,7 +12,11 @@
       "WebFetch(domain:github.com)",
       "Bash(npx tauri:*)",
       "WebFetch(domain:v2.tauri.app)",
-      "WebFetch(domain:thatgurjot.com)"
+      "WebFetch(domain:thatgurjot.com)",
+      "Bash(powershell.exe -Command \"cd ''C:\\Users\\alxsm\\Desktop\\Programmes\\Perso\\Local-App-Launcher\\frontend''; npx shadcn@latest add checkbox -y\")",
+      "Bash(powershell.exe -Command \"cd ''C:\\Users\\alxsm\\Desktop\\Programmes\\Perso\\Local-App-Launcher\\frontend''; npm run build 2>&1\")",
+      "Bash(powershell.exe -Command \"cd ''C:\\Users\\alxsm\\Desktop\\Programmes\\Perso\\Local-App-Launcher\\frontend\\src-tauri''; cargo check 2>&1\")",
+      "Bash(powershell.exe -Command \"cd ''C:\\Users\\alxsm\\Desktop\\Programmes\\Perso\\Local-App-Launcher\\frontend''; npm install @tauri-apps/plugin-fs 2>&1\")"
     ]
   }
 }

@@ -36,6 +36,40 @@ impl Service {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Script {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script_path: Option<String>,
+    pub working_dir: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub linked_service_ids: Vec<String>,
+    pub order: u32,
+}
+
+impl Script {
+    pub fn new(name: String, working_dir: String, command: String) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name,
+            description: None,
+            command,
+            script_path: None,
+            working_dir,
+            color: None,
+            linked_service_ids: Vec::new(),
+            order: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Project {
     pub id: String,
     pub name: String,
@@ -49,6 +83,12 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_opened_at: Option<DateTime<Utc>>,
     pub services: Vec<Service>,
+    #[serde(default)]
+    pub scripts: Vec<Script>,
+    #[serde(default)]
+    pub env_files: Vec<EnvFile>,
+    #[serde(default)]
+    pub env_files_discovered: bool,
 }
 
 impl Project {
@@ -64,8 +104,82 @@ impl Project {
             updated_at: now,
             last_opened_at: None,
             services: Vec::new(),
+            scripts: Vec::new(),
+            env_files: Vec::new(),
+            env_files_discovered: false,
         }
     }
+}
+
+// Environment file models
+
+/// Represents a single environment variable from a .env file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvVariable {
+    pub key: String,
+    pub value: String,
+    pub line_number: u32,
+}
+
+/// Enum for common .env file variants
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum EnvFileVariant {
+    Base,        // .env
+    Local,       // .env.local
+    Development, // .env.development, .env.dev
+    Production,  // .env.production, .env.prod
+    Test,        // .env.test
+    Staging,     // .env.staging
+    Example,     // .env.example, .env.sample
+    Other,       // Any other variant
+}
+
+/// Represents a discovered .env file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvFile {
+    pub id: String,
+    pub path: String,
+    pub relative_path: String,
+    pub filename: String,
+    pub variant: EnvFileVariant,
+    pub variables: Vec<EnvVariable>,
+    pub is_manually_added: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linked_service_id: Option<String>,
+    pub discovered_at: DateTime<Utc>,
+    pub last_read_at: DateTime<Utc>,
+}
+
+impl EnvFile {
+    pub fn new(path: String, relative_path: String, filename: String, variant: EnvFileVariant, variables: Vec<EnvVariable>, is_manually_added: bool) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            path,
+            relative_path,
+            filename,
+            variant,
+            variables,
+            is_manually_added,
+            linked_service_id: None,
+            discovered_at: now,
+            last_read_at: now,
+        }
+    }
+}
+
+/// Result of comparing two env files (e.g., .env vs .env.example)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvComparison {
+    pub base_file_id: String,
+    pub example_file_id: String,
+    pub missing_in_base: Vec<String>,
+    pub extra_in_base: Vec<String>,
+    pub common_keys: Vec<String>,
 }
 
 /// Predefined terminal presets with known configurations
@@ -224,6 +338,50 @@ pub struct UpdateServiceInput {
     pub env_vars: Option<HashMap<String, String>>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateScriptInput {
+    pub name: String,
+    pub description: Option<String>,
+    pub command: String,
+    pub script_path: Option<String>,
+    pub working_dir: String,
+    pub color: Option<String>,
+    pub linked_service_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateScriptInput {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub command: Option<String>,
+    pub script_path: Option<String>,
+    pub working_dir: Option<String>,
+    pub color: Option<String>,
+    pub linked_service_ids: Option<Vec<String>>,
+}
+
+// Environment file input types
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoverEnvFilesInput {
+    pub force: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddEnvFileInput {
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkEnvToServiceInput {
+    pub service_id: Option<String>,
+}
+
 // Runtime state types (not persisted)
 
 #[derive(Debug, Clone, Serialize)]
@@ -281,4 +439,39 @@ pub struct ServiceStatusPayload {
 pub struct ServiceExitPayload {
     pub service_id: String,
     pub exit_code: Option<i32>,
+}
+
+// Script event payloads
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScriptStatus {
+    Idle,
+    Running,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptLogPayload {
+    pub script_id: String,
+    pub stream: LogStream,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptStatusPayload {
+    pub script_id: String,
+    pub status: ScriptStatus,
+    pub pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptExitPayload {
+    pub script_id: String,
+    pub exit_code: Option<i32>,
+    pub success: bool,
 }
