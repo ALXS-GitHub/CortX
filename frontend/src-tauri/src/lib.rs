@@ -53,8 +53,8 @@ pub fn run() {
                         log::info!("All services stopped, closing window...");
                     }
 
-                    // Now close the window
-                    let _ = window_clone.close();
+                    // Now destroy the window (not close, which would trigger another CloseRequested)
+                    let _ = window_clone.destroy();
                 });
             }
         })
