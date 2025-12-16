@@ -10,12 +10,35 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { FolderOpen } from 'lucide-react';
 import type { Service, CreateServiceInput, UpdateServiceInput } from '@/types';
+
+// Calculate relative path from base to target
+function getRelativePath(basePath: string, targetPath: string): string {
+  // Normalize paths (convert backslashes to forward slashes)
+  const normalizedBase = basePath.replace(/\\/g, '/').replace(/\/$/, '');
+  const normalizedTarget = targetPath.replace(/\\/g, '/').replace(/\/$/, '');
+
+  // If they're the same, return "."
+  if (normalizedBase === normalizedTarget) {
+    return '.';
+  }
+
+  // Check if target is inside base
+  if (normalizedTarget.startsWith(normalizedBase + '/')) {
+    return './' + normalizedTarget.slice(normalizedBase.length + 1);
+  }
+
+  // If target is not inside base, return the full path
+  return targetPath;
+}
 
 interface ServiceFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   service?: Service;
+  projectPath?: string;
   onSubmit: (data: CreateServiceInput | UpdateServiceInput) => Promise<void>;
 }
 
@@ -30,7 +53,7 @@ const SERVICE_COLORS = [
   '#ef4444', // red
 ];
 
-export function ServiceForm({ open: isOpen, onOpenChange, service, onSubmit }: ServiceFormProps) {
+export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, onSubmit }: ServiceFormProps) {
   const [name, setName] = useState(service?.name || '');
   const [workingDir, setWorkingDir] = useState(service?.workingDir || '.');
   const [command, setCommand] = useState(service?.command || '');
@@ -40,6 +63,36 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, onSubmit }: S
   const [error, setError] = useState<string | null>(null);
 
   const isEditing = !!service;
+
+  const handleBrowseWorkingDir = async () => {
+    if (!projectPath) return;
+
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        defaultPath: projectPath,
+        title: 'Select Working Directory',
+      });
+
+      if (selected && typeof selected === 'string') {
+        const relativePath = getRelativePath(projectPath, selected);
+        setWorkingDir(relativePath);
+
+        // Auto-fill name if empty
+        if (!name.trim() && relativePath !== '.') {
+          // Use the last part of the path as the name
+          const pathParts = relativePath.replace(/^\.\//, '').split('/');
+          const folderName = pathParts[pathParts.length - 1];
+          if (folderName) {
+            setName(folderName);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to open folder dialog:', error);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,12 +160,24 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, onSubmit }: S
 
             <div className="grid gap-2">
               <Label htmlFor="working-dir">Working Directory</Label>
-              <Input
-                id="working-dir"
-                value={workingDir}
-                onChange={(e) => setWorkingDir(e.target.value)}
-                placeholder="Relative path from project root (e.g., ./frontend)"
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="working-dir"
+                  value={workingDir}
+                  onChange={(e) => setWorkingDir(e.target.value)}
+                  placeholder="Relative path from project root (e.g., ./frontend)"
+                  className="flex-1"
+                />
+                {projectPath && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleBrowseWorkingDir}
+                  >
+                    <FolderOpen className="size-4" />
+                  </Button>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
                 Leave as "." to use the project root directory
               </p>

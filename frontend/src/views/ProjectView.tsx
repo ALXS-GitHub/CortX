@@ -3,7 +3,10 @@ import { useAppStore } from '@/stores/appStore';
 import { ServiceItem } from '@/components/projects/ServiceItem';
 import { ServiceForm } from '@/components/projects/ServiceForm';
 import { ProjectForm } from '@/components/projects/ProjectForm';
+import { EnvironmentTab } from '@/components/env';
+import { ScriptsTab } from '@/components/scripts';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +26,9 @@ import {
   Pencil,
   Trash2,
   Code,
+  Terminal,
+  FileKey,
+  FileCode,
 } from 'lucide-react';
 import { openInExplorer, openInVscode } from '@/lib/tauri';
 import type { Service, CreateServiceInput, UpdateServiceInput, UpdateProjectInput } from '@/types';
@@ -188,73 +194,117 @@ export function ProjectView() {
         </div>
       </div>
 
-      {/* Services Section */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Services</h2>
-            <p className="text-sm text-muted-foreground">
-              {project.services.length} service{project.services.length !== 1 ? 's' : ''} configured
-              {runningServices.length > 0 && ` (${runningServices.length} running)`}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+      {/* Tabs for Services and Environment */}
+      <Tabs defaultValue="services" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="services" className="flex items-center gap-2">
+            <Terminal className="size-4" />
+            Services
             {project.services.length > 0 && (
-              <>
-                {runningServices.length > 0 ? (
-                  <Button variant="outline" size="sm" onClick={handleStopAll}>
-                    <Square className="size-4 mr-2" />
-                    Stop All
-                  </Button>
-                ) : (
-                  <Button variant="outline" size="sm" onClick={handleStartAll}>
-                    <Play className="size-4 mr-2" />
-                    Start All
-                  </Button>
-                )}
-              </>
+              <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                {project.services.length}
+              </span>
             )}
-            <Button size="sm" onClick={() => setShowServiceForm(true)}>
-              <Plus className="size-4 mr-2" />
-              Add Service
-            </Button>
-          </div>
-        </div>
+          </TabsTrigger>
+          <TabsTrigger value="environment" className="flex items-center gap-2">
+            <FileKey className="size-4" />
+            Environment
+            {project.envFiles?.length > 0 && (
+              <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                {project.envFiles.length}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="scripts" className="flex items-center gap-2">
+            <FileCode className="size-4" />
+            Scripts
+            {project.scripts?.length > 0 && (
+              <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                {project.scripts.length}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
 
-        {project.services.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center border rounded-lg border-dashed">
-            <Play className="size-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium">No services configured</h3>
-            <p className="text-muted-foreground mb-4">
-              Add services to define how to start your project
-            </p>
-            <Button onClick={() => setShowServiceForm(true)}>
-              <Plus className="size-4 mr-2" />
-              Add Service
-            </Button>
+        {/* Services Tab */}
+        <TabsContent value="services" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Services</h2>
+              <p className="text-sm text-muted-foreground">
+                {project.services.length} service{project.services.length !== 1 ? 's' : ''} configured
+                {runningServices.length > 0 && ` (${runningServices.length} running)`}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {project.services.length > 0 && (
+                <>
+                  {runningServices.length > 0 ? (
+                    <Button variant="outline" size="sm" onClick={handleStopAll}>
+                      <Square className="size-4 mr-2" />
+                      Stop All
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" onClick={handleStartAll}>
+                      <Play className="size-4 mr-2" />
+                      Start All
+                    </Button>
+                  )}
+                </>
+              )}
+              <Button size="sm" onClick={() => setShowServiceForm(true)}>
+                <Plus className="size-4 mr-2" />
+                Add Service
+              </Button>
+            </div>
           </div>
-        ) : (
-          <div className="space-y-3">
-            {project.services
-              .slice()
-              .sort((a, b) => a.order - b.order)
-              .map((service) => (
-                <ServiceItem
-                  key={service.id}
-                  service={service}
-                  projectPath={project.rootPath}
-                  onEdit={() => setEditingService(service)}
-                  onDelete={() => setDeletingService(service)}
-                />
-              ))}
-          </div>
-        )}
-      </div>
+
+          {project.services.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center border rounded-lg border-dashed">
+              <Play className="size-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-medium">No services configured</h3>
+              <p className="text-muted-foreground mb-4">
+                Add services to define how to start your project
+              </p>
+              <Button onClick={() => setShowServiceForm(true)}>
+                <Plus className="size-4 mr-2" />
+                Add Service
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {project.services
+                .slice()
+                .sort((a, b) => a.order - b.order)
+                .map((service) => (
+                  <ServiceItem
+                    key={service.id}
+                    service={service}
+                    projectPath={project.rootPath}
+                    onEdit={() => setEditingService(service)}
+                    onDelete={() => setDeletingService(service)}
+                  />
+                ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Environment Tab */}
+        <TabsContent value="environment">
+          <EnvironmentTab project={project} />
+        </TabsContent>
+
+        {/* Scripts Tab */}
+        <TabsContent value="scripts">
+          <ScriptsTab project={project} />
+        </TabsContent>
+      </Tabs>
 
       {/* Add Service Dialog */}
       <ServiceForm
         open={showServiceForm}
         onOpenChange={setShowServiceForm}
+        projectPath={project.rootPath}
         onSubmit={handleAddService}
       />
 
@@ -264,6 +314,7 @@ export function ProjectView() {
           open={!!editingService}
           onOpenChange={(open) => !open && setEditingService(null)}
           service={editingService}
+          projectPath={project.rootPath}
           onSubmit={handleEditService}
         />
       )}

@@ -1,6 +1,6 @@
 [package]
 name = "cortx"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cortx - A dashboard for managing local dev applications"
 authors = ["ALXS-GitHub"]
 license = ""
@@ -26,9 +26,11 @@ tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-fs = "2"
 uuid = { version = "1.11", features = ["v4", "serde"] }
 directories = "5.0"
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
 parking_lot = "0.12"
 thiserror = "2.0"
+walkdir = "2.4"

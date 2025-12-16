@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "cortx"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "directories",
@@ -597,6 +597,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
+ "tauri-plugin-fs",
  "tauri-plugin-log",
  "tauri-plugin-process",
  "tauri-plugin-shell",
@@ -604,6 +605,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

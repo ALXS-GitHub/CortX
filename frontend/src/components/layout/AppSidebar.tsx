@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import {
   Sidebar,
   SidebarContent,
@@ -14,30 +15,42 @@ import {
   SidebarMenuSubButton,
 } from '@/components/ui/sidebar';
 import { useAppStore } from '@/stores/appStore';
-import { LayoutDashboard, Settings, FolderOpen, Terminal, Circle, Play, X, Square } from 'lucide-react';
+import { LayoutDashboard, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { View, ServiceStatus } from '@/types';
+import type { View, ServiceStatus, ScriptStatus } from '@/types';
 import { Button } from '@/components/ui/button';
+import { getVersion } from '@tauri-apps/api/app';
 
 // Minimized terminal bar height
 const MINIMIZED_TERMINAL_HEIGHT = 32;
 
 export function AppSidebar() {
+  const [appVersion, setAppVersion] = useState<string>('');
+
   const {
     currentView,
     setCurrentView,
     projects,
     selectProject,
     serviceRuntimes,
+    scriptRuntimes,
     showTerminal,
     hiddenTerminalIds,
     closedTerminalIds,
     startService,
     stopService,
     closeTerminal,
+    runScript,
+    stopScript,
+    closeScriptTerminal,
+    showScriptTerminal,
     terminalPanelOpen,
     terminalHeight,
   } = useAppStore();
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion(''));
+  }, []);
 
   // Calculate bottom padding based on terminal state
   const bottomPadding = terminalPanelOpen ? terminalHeight : MINIMIZED_TERMINAL_HEIGHT;
@@ -103,6 +116,60 @@ export function AppSidebar() {
     0
   );
 
+  // Get all scripts with runtime state, grouped by project
+  const scriptsByProject = new Map<string, {
+    projectId: string;
+    projectName: string;
+    scripts: {
+      scriptId: string;
+      scriptName: string;
+      status: ScriptStatus;
+      isHidden: boolean;
+    }[];
+  }>();
+
+  for (const [scriptId, runtime] of scriptRuntimes.entries()) {
+    // Skip closed terminals
+    if (closedTerminalIds.has(scriptId)) continue;
+    // Only show scripts that have logs or are not idle
+    if (runtime.logs.length === 0 && runtime.status === 'idle') continue;
+
+    // Find the project and script
+    for (const project of projects) {
+      const script = project.scripts?.find((s) => s.id === scriptId);
+      if (script) {
+        const existing = scriptsByProject.get(project.id);
+        const scriptInfo = {
+          scriptId,
+          scriptName: script.name,
+          status: runtime.status,
+          isHidden: hiddenTerminalIds.has(scriptId),
+        };
+
+        if (existing) {
+          existing.scripts.push(scriptInfo);
+        } else {
+          scriptsByProject.set(project.id, {
+            projectId: project.id,
+            projectName: project.name,
+            scripts: [scriptInfo],
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  const projectsWithScripts = Array.from(scriptsByProject.values());
+  const totalScriptCount = projectsWithScripts.reduce(
+    (acc, p) => acc + p.scripts.length,
+    0
+  );
+  const runningScriptsCount = projectsWithScripts.reduce(
+    (acc, p) => acc + p.scripts.filter(s => s.status === 'running').length,
+    0
+  );
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border">
@@ -114,7 +181,7 @@ export function AppSidebar() {
               </div>
               <div className="flex flex-col gap-0.5 leading-none">
                 <span className="font-semibold">Cortx</span>
-                <span className="text-xs text-muted-foreground">v0.1.0</span>
+                {appVersion && <span className="text-xs text-muted-foreground">v{appVersion}</span>}
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -331,6 +398,161 @@ export function AppSidebar() {
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
                       ))}
+                    </SidebarMenuSub>
+                  </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
+        {/* Scripts Section - Grouped by Project */}
+        {totalScriptCount > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>
+              <span className="flex items-center gap-2">
+                Scripts
+                {runningScriptsCount > 0 && (
+                  <span className="text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+                    {runningScriptsCount} running
+                  </span>
+                )}
+              </span>
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {projectsWithScripts.map(({ projectId, projectName, scripts }) => {
+                  const runningScripts = scripts.filter(s => s.status === 'running');
+                  const hasRunning = runningScripts.length > 0;
+
+                  const handleStopAllScripts = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    runningScripts.forEach(s => stopScript(s.scriptId));
+                  };
+
+                  const handleCloseAllScripts = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    scripts.forEach(s => closeScriptTerminal(s.scriptId));
+                  };
+
+                  const allStopped = !hasRunning;
+
+                  return (
+                  <SidebarMenuItem key={projectId}>
+                    <SidebarMenuButton className="font-medium group/project" tooltip={projectName}>
+                      <FolderOpen className="size-4" />
+                      <span className="flex-1">{projectName}</span>
+                      <span className="text-xs text-muted-foreground group-hover/project:hidden">
+                        {scripts.length}
+                      </span>
+                      {/* Project action buttons - visible on hover */}
+                      <div className="hidden group-hover/project:flex items-center gap-0.5">
+                        {hasRunning && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                            onClick={handleStopAllScripts}
+                            title="Stop all scripts"
+                          >
+                            <Square className="size-3" />
+                          </Button>
+                        )}
+                        {allStopped && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                            onClick={handleCloseAllScripts}
+                            title="Close all script terminals"
+                          >
+                            <X className="size-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </SidebarMenuButton>
+                    <SidebarMenuSub>
+                      {scripts.map(({ scriptId, scriptName, status, isHidden }) => {
+                        const isRunning = status === 'running';
+                        const isCompleted = status === 'completed';
+                        const isFailed = status === 'failed';
+
+                        // Status color
+                        let statusColor = 'fill-muted-foreground text-muted-foreground'; // idle
+                        if (isRunning) {
+                          statusColor = 'fill-blue-500 text-blue-500 animate-pulse';
+                        } else if (isCompleted) {
+                          statusColor = 'fill-green-500 text-green-500';
+                        } else if (isFailed) {
+                          statusColor = 'fill-red-500 text-red-500';
+                        }
+
+                        return (
+                        <SidebarMenuSubItem key={scriptId}>
+                          <SidebarMenuSubButton
+                            onClick={() => showScriptTerminal(scriptId)}
+                            className="relative group/script"
+                          >
+                            <div className="relative">
+                              <FileCode className="size-3.5" />
+                              {isHidden && (
+                                <Circle className="absolute -top-1 -right-1 size-1.5 fill-yellow-500 text-yellow-500 animate-pulse" />
+                              )}
+                            </div>
+                            <span className={cn('text-xs flex-1', isHidden && 'opacity-60')}>
+                              {scriptName}
+                            </span>
+                            {/* Status indicator */}
+                            <Circle className={cn('size-1.5', statusColor)} />
+                            {/* Action buttons - visible on hover */}
+                            <div className="hidden group-hover/script:flex items-center gap-0.5 ml-1">
+                              {isRunning ? (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    stopScript(scriptId);
+                                  }}
+                                  title="Stop script"
+                                >
+                                  <Square className="size-3" />
+                                </Button>
+                              ) : (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="size-5 p-0 hover:bg-blue-500/20 hover:text-blue-500"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      runScript(scriptId);
+                                    }}
+                                    title="Run script"
+                                  >
+                                    <Play className="size-3" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      closeScriptTerminal(scriptId);
+                                    }}
+                                    title="Close terminal"
+                                  >
+                                    <X className="size-3" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                        );
+                      })}
                     </SidebarMenuSub>
                   </SidebarMenuItem>
                   );

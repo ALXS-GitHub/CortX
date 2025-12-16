@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -20,9 +20,12 @@ import {
   ArrowDown,
   XCircle,
   GripHorizontal,
+  Terminal,
+  FileCode,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import AnsiToHtml from 'ansi-to-html';
+import type { LogEntry, ServiceStatus, ScriptStatus } from '@/types';
 import { open } from '@tauri-apps/plugin-shell';
 
 // Create ANSI to HTML converter with dark theme colors
@@ -104,6 +107,22 @@ function processTerminalContent(rawContent: string): string {
   return html;
 }
 
+// Terminal item type for unified handling
+type TerminalType = 'service' | 'script';
+
+interface TerminalItem {
+  id: string;
+  type: TerminalType;
+  name: string;
+  projectName: string;
+  projectId: string;
+  status: ServiceStatus | ScriptStatus;
+  logs: LogEntry[];
+  detectedPort?: number;
+  lastExitCode?: number;
+  lastSuccess?: boolean;
+}
+
 export function TerminalPanel() {
   const {
     terminalPanelOpen,
@@ -112,16 +131,28 @@ export function TerminalPanel() {
     setTerminalHeight,
     activeTerminalServiceId,
     setActiveTerminalServiceId,
+    activeTerminalScriptId,
+    setActiveTerminalScriptId,
     serviceRuntimes,
+    scriptRuntimes,
     projects,
     stopService,
+    stopScript,
     clearServiceLogs,
+    clearScriptLogs,
     closeAllTerminals,
     hideTerminal,
     showTerminal,
     hiddenTerminalIds,
     closedTerminalIds,
   } = useAppStore();
+
+  // Combined active terminal ID (prefixed to distinguish types)
+  const activeTerminalId = activeTerminalScriptId
+    ? `script:${activeTerminalScriptId}`
+    : activeTerminalServiceId
+    ? `service:${activeTerminalServiceId}`
+    : null;
 
   // Scroll state
   const containerRef = useRef<HTMLDivElement>(null);
@@ -182,41 +213,103 @@ export function TerminalPanel() {
     [projects]
   );
 
-  // Get all services with logs or running status (visible ones, excluding closed)
-  const visibleServices = Array.from(serviceRuntimes.entries())
-    .filter(
-      ([serviceId, runtime]) =>
-        !hiddenTerminalIds.has(serviceId) &&
-        !closedTerminalIds.has(serviceId) &&
-        (runtime.logs.length > 0 || runtime.status !== 'stopped')
-    )
-    .map(([serviceId, runtime]) => {
+  // Get script info helper
+  const getScriptInfo = useCallback(
+    (scriptId: string) => {
+      let scriptName = scriptId;
+      let projectName = '';
+      let projectId = '';
+      for (const project of projects) {
+        const script = project.scripts?.find((s) => s.id === scriptId);
+        if (script) {
+          scriptName = script.name;
+          projectName = project.name;
+          projectId = project.id;
+          break;
+        }
+      }
+      return { scriptName, projectName, projectId };
+    },
+    [projects]
+  );
+
+  // Build unified list of all terminal items (services + scripts)
+  const allTerminals = useMemo(() => {
+    const items: TerminalItem[] = [];
+
+    // Add services
+    for (const [serviceId, runtime] of serviceRuntimes.entries()) {
       const { serviceName, projectName, projectId } = getServiceInfo(serviceId);
-      return { serviceId, runtime, serviceName, projectName, projectId };
+      items.push({
+        id: `service:${serviceId}`,
+        type: 'service',
+        name: serviceName,
+        projectName,
+        projectId,
+        status: runtime.status,
+        logs: runtime.logs,
+        detectedPort: runtime.detectedPort,
+      });
+    }
+
+    // Add scripts
+    for (const [scriptId, runtime] of scriptRuntimes.entries()) {
+      const { scriptName, projectName, projectId } = getScriptInfo(scriptId);
+      items.push({
+        id: `script:${scriptId}`,
+        type: 'script',
+        name: scriptName,
+        projectName,
+        projectId,
+        status: runtime.status,
+        logs: runtime.logs,
+        lastExitCode: runtime.lastExitCode,
+        lastSuccess: runtime.lastSuccess,
+      });
+    }
+
+    return items;
+  }, [serviceRuntimes, scriptRuntimes, getServiceInfo, getScriptInfo]);
+
+  // Helper to extract raw ID from prefixed ID
+  const getRawId = (prefixedId: string) => prefixedId.split(':')[1];
+
+  // Get visible terminals (not hidden, not closed, has logs or is active)
+  const visibleTerminals = useMemo(() => {
+    return allTerminals.filter((item) => {
+      const rawId = getRawId(item.id);
+      const isHidden = hiddenTerminalIds.has(rawId);
+      const isClosed = closedTerminalIds.has(rawId);
+      const hasActivity = item.logs.length > 0 ||
+        (item.type === 'service' && item.status !== 'stopped') ||
+        (item.type === 'script' && item.status !== 'idle');
+      return !isHidden && !isClosed && hasActivity;
     });
+  }, [allTerminals, hiddenTerminalIds, closedTerminalIds]);
 
   // Get the project ID of the currently active terminal
-  const activeProjectId = activeTerminalServiceId
-    ? getServiceInfo(activeTerminalServiceId).projectId
-    : null;
+  const activeProjectId = useMemo(() => {
+    if (!activeTerminalId) return null;
+    const activeItem = allTerminals.find((t) => t.id === activeTerminalId);
+    return activeItem?.projectId || null;
+  }, [activeTerminalId, allTerminals]);
 
-  // Get hidden services that are still running or have logs (excluding closed)
-  // Filter to only show services from the same project as the active terminal
-  const hiddenServices = Array.from(serviceRuntimes.entries())
-    .filter(
-      ([serviceId, runtime]) =>
-        hiddenTerminalIds.has(serviceId) &&
-        !closedTerminalIds.has(serviceId) &&
-        (runtime.logs.length > 0 || runtime.status !== 'stopped')
-    )
-    .map(([serviceId, runtime]) => {
-      const { serviceName, projectName, projectId } = getServiceInfo(serviceId);
-      return { serviceId, runtime, serviceName, projectName, projectId };
-    })
-    .filter(({ projectId }) => !activeProjectId || projectId === activeProjectId);
+  // Get hidden terminals (filter by active project)
+  const hiddenTerminals = useMemo(() => {
+    return allTerminals.filter((item) => {
+      const rawId = getRawId(item.id);
+      const isHidden = hiddenTerminalIds.has(rawId);
+      const isClosed = closedTerminalIds.has(rawId);
+      const hasActivity = item.logs.length > 0 ||
+        (item.type === 'service' && item.status !== 'stopped') ||
+        (item.type === 'script' && item.status !== 'idle');
+      const sameProject = !activeProjectId || item.projectId === activeProjectId;
+      return isHidden && !isClosed && hasActivity && sameProject;
+    });
+  }, [allTerminals, hiddenTerminalIds, closedTerminalIds, activeProjectId]);
 
   // Total active count (visible + hidden)
-  const totalActiveCount = visibleServices.length + hiddenServices.length;
+  const totalActiveCount = visibleTerminals.length + hiddenTerminals.length;
 
   // Handle scroll events to detect if user scrolled up
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -251,7 +344,7 @@ export function TerminalPanel() {
       });
     });
     return () => cancelAnimationFrame(frame1);
-  }, [activeTerminalServiceId, scrollToBottom]);
+  }, [activeTerminalId, scrollToBottom]);
 
   // Auto-scroll when new logs arrive (only if not scrolled up)
   useEffect(() => {
@@ -261,7 +354,60 @@ export function TerminalPanel() {
         scrollToBottom();
       });
     }
-  }, [serviceRuntimes, userScrolledUp, scrollToBottom]);
+  }, [serviceRuntimes, scriptRuntimes, userScrolledUp, scrollToBottom]);
+
+  // Handle switching active terminal
+  const handleSwitchTerminal = useCallback(
+    (terminalId: string) => {
+      const [type, rawId] = terminalId.split(':');
+      if (type === 'script') {
+        setActiveTerminalScriptId(rawId);
+        setActiveTerminalServiceId(null);
+      } else {
+        setActiveTerminalServiceId(rawId);
+        setActiveTerminalScriptId(null);
+      }
+    },
+    [setActiveTerminalServiceId, setActiveTerminalScriptId]
+  );
+
+  // Handle stop for current terminal
+  const handleStopCurrent = useCallback(async () => {
+    if (!activeTerminalId) return;
+    const [type, rawId] = activeTerminalId.split(':');
+    if (type === 'script') {
+      await stopScript(rawId);
+    } else {
+      await stopService(rawId);
+    }
+  }, [activeTerminalId, stopScript, stopService]);
+
+  // Handle clear logs for current terminal
+  const handleClearCurrent = useCallback(() => {
+    if (!activeTerminalId) return;
+    const [type, rawId] = activeTerminalId.split(':');
+    if (type === 'script') {
+      clearScriptLogs(rawId);
+    } else {
+      clearServiceLogs(rawId);
+    }
+  }, [activeTerminalId, clearScriptLogs, clearServiceLogs]);
+
+  // Get current terminal info
+  const currentTerminal = useMemo(() => {
+    if (!activeTerminalId) return null;
+    return allTerminals.find((t) => t.id === activeTerminalId) || null;
+  }, [activeTerminalId, allTerminals]);
+
+  // Check if current terminal can be stopped
+  const canStopCurrent = useMemo(() => {
+    if (!currentTerminal) return false;
+    if (currentTerminal.type === 'service') {
+      return currentTerminal.status === 'running';
+    } else {
+      return currentTerminal.status === 'running';
+    }
+  }, [currentTerminal]);
 
   // Handle link clicks in terminal output
   const handleTerminalClick = useCallback(async (e: React.MouseEvent) => {
@@ -295,10 +441,6 @@ export function TerminalPanel() {
     );
   }
 
-  const currentRuntime = activeTerminalServiceId
-    ? serviceRuntimes.get(activeTerminalServiceId)
-    : null;
-
   return (
     <div
       ref={containerRef}
@@ -322,13 +464,13 @@ export function TerminalPanel() {
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Terminal</span>
           <span className="text-xs text-muted-foreground">
-            ({visibleServices.length} visible
-            {hiddenServices.length > 0 && `, ${hiddenServices.length} hidden`})
+            ({visibleTerminals.length} visible
+            {hiddenTerminals.length > 0 && `, ${hiddenTerminals.length} hidden`})
           </span>
         </div>
         <div className="flex items-center gap-1">
-          {/* Hidden services dropdown */}
-          {hiddenServices.length > 0 && (
+          {/* Hidden terminals dropdown */}
+          {hiddenTerminals.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon-sm" title="Show hidden terminals">
@@ -336,13 +478,18 @@ export function TerminalPanel() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                {hiddenServices.map(({ serviceId, runtime, serviceName, projectName }) => (
-                  <DropdownMenuItem key={serviceId} onClick={() => showTerminal(serviceId)}>
-                    <StatusIndicator status={runtime.status} />
+                {hiddenTerminals.map((item) => (
+                  <DropdownMenuItem key={item.id} onClick={() => showTerminal(getRawId(item.id))}>
+                    {item.type === 'script' ? (
+                      <FileCode className="size-3 mr-2 text-muted-foreground" />
+                    ) : (
+                      <Terminal className="size-3 mr-2 text-muted-foreground" />
+                    )}
+                    <StatusIndicator status={item.status} type={item.type} />
                     <span className="ml-2">
-                      {serviceName}
-                      {projectName && (
-                        <span className="text-muted-foreground ml-1">({projectName})</span>
+                      {item.name}
+                      {item.projectName && (
+                        <span className="text-muted-foreground ml-1">({item.projectName})</span>
                       )}
                     </span>
                   </DropdownMenuItem>
@@ -351,22 +498,22 @@ export function TerminalPanel() {
             </DropdownMenu>
           )}
 
-          {activeTerminalServiceId && currentRuntime && (
+          {currentTerminal && (
             <>
               <Button
                 variant="ghost"
                 size="icon-sm"
-                onClick={() => clearServiceLogs(activeTerminalServiceId)}
+                onClick={handleClearCurrent}
                 title="Clear logs"
               >
                 <Trash2 className="size-3.5" />
               </Button>
-              {currentRuntime.status === 'running' && (
+              {canStopCurrent && (
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => stopService(activeTerminalServiceId)}
-                  title="Stop service"
+                  onClick={handleStopCurrent}
+                  title={currentTerminal.type === 'script' ? 'Stop script' : 'Stop service'}
                 >
                   <Square className="size-3.5" />
                 </Button>
@@ -375,7 +522,7 @@ export function TerminalPanel() {
           )}
 
           {/* Close all terminals button */}
-          {visibleServices.length > 0 && (
+          {visibleTerminals.length > 0 && (
             <Button
               variant="ghost"
               size="icon-sm"
@@ -398,37 +545,54 @@ export function TerminalPanel() {
       </div>
 
       {/* Tabs and content */}
-      {visibleServices.length === 0 ? (
+      {visibleTerminals.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-muted-foreground">
           <p>
-            {hiddenServices.length > 0
+            {hiddenTerminals.length > 0
               ? 'All terminals are hidden. Click the eye icon to show them.'
-              : 'No active terminals. Start a service to see output here.'}
+              : 'No active terminals. Start a service or script to see output here.'}
           </p>
         </div>
       ) : (
         <Tabs
-          value={activeTerminalServiceId || visibleServices[0]?.serviceId}
-          onValueChange={setActiveTerminalServiceId}
+          value={activeTerminalId || visibleTerminals[0]?.id}
+          onValueChange={handleSwitchTerminal}
           className="flex-1 flex flex-col min-h-0"
         >
           <TabsList className="w-full justify-start rounded-none border-b bg-transparent h-auto p-0 overflow-x-auto overflow-y-hidden">
-            {visibleServices.map(({ serviceId, runtime, serviceName, projectName }) => (
+            {visibleTerminals.map((item) => (
               <TabsTrigger
-                key={serviceId}
-                value={serviceId}
+                key={item.id}
+                value={item.id}
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary px-3 py-1.5 gap-2 shrink-0"
               >
-                <StatusIndicator status={runtime.status} />
+                {item.type === 'script' ? (
+                  <FileCode className="size-3 text-muted-foreground" />
+                ) : (
+                  <Terminal className="size-3 text-muted-foreground" />
+                )}
+                <StatusIndicator status={item.status} type={item.type} />
                 <span className="text-xs">
-                  {serviceName}
-                  {projectName && (
-                    <span className="text-muted-foreground ml-1">({projectName})</span>
+                  {item.name}
+                  {item.projectName && (
+                    <span className="text-muted-foreground ml-1">({item.projectName})</span>
                   )}
                 </span>
-                {runtime.detectedPort && (
+                {item.type === 'service' && item.detectedPort && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-mono">
-                    :{runtime.detectedPort}
+                    :{item.detectedPort}
+                  </span>
+                )}
+                {item.type === 'script' && item.status !== 'idle' && item.status !== 'running' && (
+                  <span
+                    className={cn(
+                      'text-[10px] px-1.5 py-0.5 rounded font-mono',
+                      item.lastSuccess
+                        ? 'bg-green-500/20 text-green-600 dark:text-green-400'
+                        : 'bg-red-500/20 text-red-600 dark:text-red-400'
+                    )}
+                  >
+                    {item.lastSuccess ? 'OK' : `Exit ${item.lastExitCode}`}
                   </span>
                 )}
                 <Button
@@ -437,8 +601,8 @@ export function TerminalPanel() {
                   className="size-4 p-0 ml-1 hover:bg-destructive/20"
                   onClick={(e) => {
                     e.stopPropagation();
-                    // Just hide the terminal, don't stop the service
-                    hideTerminal(serviceId);
+                    // Just hide the terminal, don't stop the service/script
+                    hideTerminal(getRawId(item.id));
                   }}
                   title="Hide terminal"
                 >
@@ -448,10 +612,10 @@ export function TerminalPanel() {
             ))}
           </TabsList>
 
-          {visibleServices.map(({ serviceId, runtime }) => (
+          {visibleTerminals.map((item) => (
             <TabsContent
-              key={serviceId}
-              value={serviceId}
+              key={item.id}
+              value={item.id}
               className="flex-1 m-0 min-h-0 relative"
             >
               <ScrollArea
@@ -462,10 +626,10 @@ export function TerminalPanel() {
                   className="p-2 font-mono text-xs space-y-0.5"
                   onClick={handleTerminalClick}
                 >
-                  {runtime.logs.length === 0 ? (
+                  {item.logs.length === 0 ? (
                     <div className="text-muted-foreground">Waiting for output...</div>
                   ) : (
-                    runtime.logs.map((log, index) => (
+                    item.logs.map((log, index) => (
                       <div
                         key={index}
                         className={cn(
@@ -501,17 +665,28 @@ export function TerminalPanel() {
   );
 }
 
-function StatusIndicator({ status }: { status: string }) {
-  const colors = {
+function StatusIndicator({ status, type }: { status: string; type?: TerminalType }) {
+  // Service statuses: stopped, starting, running, error
+  // Script statuses: idle, running, completed, failed
+  const serviceColors = {
     stopped: 'text-muted-foreground',
     starting: 'text-yellow-500 animate-pulse',
     running: 'text-green-500',
     error: 'text-red-500',
   };
 
+  const scriptColors = {
+    idle: 'text-muted-foreground',
+    running: 'text-blue-500 animate-pulse',
+    completed: 'text-green-500',
+    failed: 'text-red-500',
+  };
+
+  const colors = type === 'script' ? scriptColors : serviceColors;
+
   return (
     <Circle
-      className={cn('size-2 fill-current', colors[status as keyof typeof colors] || colors.stopped)}
+      className={cn('size-2 fill-current', colors[status as keyof typeof colors] || 'text-muted-foreground')}
     />
   );
 }

@@ -17,6 +17,8 @@ pub enum StorageError {
     ProjectNotFound(String),
     #[error("Service not found: {0}")]
     ServiceNotFound(String),
+    #[error("Script not found: {0}")]
+    ScriptNotFound(String),
 }
 
 pub struct Storage {
@@ -193,6 +195,77 @@ impl Storage {
         for project in projects.iter() {
             if let Some(service) = project.services.iter().find(|s| s.id == service_id) {
                 return Some((project.clone(), service.clone()));
+            }
+        }
+        None
+    }
+
+    // Scripts
+
+    pub fn add_script(&self, project_id: &str, script: crate::models::Script) -> Result<crate::models::Script, StorageError> {
+        let script_clone = script.clone();
+        {
+            let mut projects = self.projects.write();
+            let project = projects
+                .iter_mut()
+                .find(|p| p.id == project_id)
+                .ok_or_else(|| StorageError::ProjectNotFound(project_id.to_string()))?;
+
+            project.scripts.push(script);
+            project.updated_at = chrono::Utc::now();
+        }
+        self.save_projects()?;
+        Ok(script_clone)
+    }
+
+    pub fn update_script(&self, script_id: &str, updater: impl FnOnce(&mut crate::models::Script)) -> Result<crate::models::Script, StorageError> {
+        let script = {
+            let mut projects = self.projects.write();
+            let mut found_script = None;
+
+            for project in projects.iter_mut() {
+                if let Some(script) = project.scripts.iter_mut().find(|s| s.id == script_id) {
+                    updater(script);
+                    found_script = Some(script.clone());
+                    project.updated_at = chrono::Utc::now();
+                    break;
+                }
+            }
+
+            found_script.ok_or_else(|| StorageError::ScriptNotFound(script_id.to_string()))?
+        };
+        self.save_projects()?;
+        Ok(script)
+    }
+
+    pub fn delete_script(&self, script_id: &str) -> Result<(), StorageError> {
+        {
+            let mut projects = self.projects.write();
+            let mut found = false;
+
+            for project in projects.iter_mut() {
+                let initial_len = project.scripts.len();
+                project.scripts.retain(|s| s.id != script_id);
+                if project.scripts.len() != initial_len {
+                    project.updated_at = chrono::Utc::now();
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                return Err(StorageError::ScriptNotFound(script_id.to_string()));
+            }
+        }
+        self.save_projects()?;
+        Ok(())
+    }
+
+    pub fn get_script(&self, script_id: &str) -> Option<(Project, crate::models::Script)> {
+        let projects = self.projects.read();
+        for project in projects.iter() {
+            if let Some(script) = project.scripts.iter().find(|s| s.id == script_id) {
+                return Some((project.clone(), script.clone()));
             }
         }
         None

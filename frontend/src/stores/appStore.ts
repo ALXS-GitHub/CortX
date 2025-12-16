@@ -2,14 +2,21 @@ import { create } from 'zustand';
 import type {
   Project,
   Service,
+  Script,
   AppSettings,
   CreateProjectInput,
   UpdateProjectInput,
   CreateServiceInput,
   UpdateServiceInput,
+  CreateScriptInput,
+  UpdateScriptInput,
   ServiceStatus,
+  ScriptStatus,
   LogEntry,
   View,
+  EnvFile,
+  EnvComparison,
+  AddEnvFileInput,
 } from '@/types';
 import * as api from '@/lib/tauri';
 
@@ -18,6 +25,14 @@ interface ServiceRuntime {
   pid?: number;
   logs: LogEntry[];
   detectedPort?: number;
+}
+
+interface ScriptRuntime {
+  status: ScriptStatus;
+  pid?: number;
+  logs: LogEntry[];
+  lastExitCode?: number;
+  lastSuccess?: boolean;
 }
 
 // Strip ANSI escape codes and orphaned bracket sequences
@@ -78,11 +93,19 @@ interface AppState {
   // Service runtime state
   serviceRuntimes: Map<string, ServiceRuntime>;
 
+  // Script runtime state
+  scriptRuntimes: Map<string, ScriptRuntime>;
+
+  // Environment files state
+  isDiscoveringEnvFiles: boolean;
+  envFileComparisons: Map<string, EnvComparison>;
+
   // UI state
   currentView: View;
   terminalPanelOpen: boolean;
   terminalHeight: number;
   activeTerminalServiceId: string | null;
+  activeTerminalScriptId: string | null;
   hiddenTerminalIds: Set<string>;
   closedTerminalIds: Set<string>;
 
@@ -97,6 +120,19 @@ interface AppState {
   addService: (projectId: string, input: CreateServiceInput) => Promise<Service>;
   updateService: (serviceId: string, input: UpdateServiceInput) => Promise<void>;
   deleteService: (serviceId: string) => Promise<void>;
+
+  // Actions - Scripts
+  addScript: (projectId: string, input: CreateScriptInput) => Promise<Script>;
+  updateScript: (scriptId: string, input: UpdateScriptInput) => Promise<void>;
+  deleteScript: (scriptId: string) => Promise<void>;
+  runScript: (scriptId: string) => Promise<void>;
+  stopScript: (scriptId: string) => Promise<void>;
+
+  // Actions - Script runtime updates
+  updateScriptStatus: (scriptId: string, status: ScriptStatus, pid?: number) => void;
+  appendScriptLog: (scriptId: string, log: LogEntry) => void;
+  clearScriptLogs: (scriptId: string) => void;
+  setScriptExitResult: (scriptId: string, exitCode?: number, success?: boolean) => void;
 
   // Actions - Launch
   startService: (serviceId: string) => Promise<void>;
@@ -113,7 +149,18 @@ interface AppState {
   // Actions - Terminal visibility
   hideTerminal: (serviceId: string) => void;
   showTerminal: (serviceId: string) => void;
+  showScriptTerminal: (scriptId: string) => void;
   closeTerminal: (serviceId: string) => void;
+  closeScriptTerminal: (scriptId: string) => void;
+
+  // Actions - Environment files
+  discoverEnvFiles: (projectId: string, force?: boolean) => Promise<EnvFile[]>;
+  addEnvFile: (projectId: string, input: AddEnvFileInput) => Promise<EnvFile>;
+  removeEnvFile: (projectId: string, envFileId: string) => Promise<void>;
+  refreshEnvFile: (projectId: string, envFileId: string) => Promise<EnvFile>;
+  refreshAllEnvFiles: (projectId: string) => Promise<EnvFile[]>;
+  compareEnvFiles: (projectId: string, baseFileId: string, exampleFileId: string) => Promise<EnvComparison>;
+  linkEnvToService: (projectId: string, envFileId: string, serviceId: string | null) => Promise<void>;
 
   // Actions - Settings
   loadSettings: () => Promise<void>;
@@ -123,6 +170,7 @@ interface AppState {
   setCurrentView: (view: View) => void;
   toggleTerminalPanel: () => void;
   setActiveTerminalServiceId: (serviceId: string | null) => void;
+  setActiveTerminalScriptId: (scriptId: string | null) => void;
   setTerminalHeight: (height: number) => void;
 }
 
@@ -134,10 +182,14 @@ export const useAppStore = create<AppState>((set, _get) => ({
   settings: null,
   isLoadingSettings: false,
   serviceRuntimes: new Map(),
+  scriptRuntimes: new Map(),
+  isDiscoveringEnvFiles: false,
+  envFileComparisons: new Map(),
   currentView: 'dashboard',
   terminalPanelOpen: false,
   terminalHeight: 256,
   activeTerminalServiceId: null,
+  activeTerminalScriptId: null,
   hiddenTerminalIds: new Set(),
   closedTerminalIds: new Set(),
 
@@ -215,6 +267,114 @@ export const useAppStore = create<AppState>((set, _get) => ({
     }));
   },
 
+  // Script actions
+  addScript: async (projectId, input) => {
+    const script = await api.addScript(projectId, input);
+    set((state) => ({
+      projects: state.projects.map((p) =>
+        p.id === projectId ? { ...p, scripts: [...(p.scripts || []), script] } : p
+      ),
+    }));
+    return script;
+  },
+
+  updateScript: async (scriptId, input) => {
+    const updated = await api.updateScript(scriptId, input);
+    set((state) => ({
+      projects: state.projects.map((p) => ({
+        ...p,
+        scripts: (p.scripts || []).map((s) => (s.id === scriptId ? updated : s)),
+      })),
+    }));
+  },
+
+  deleteScript: async (scriptId) => {
+    await api.deleteScript(scriptId);
+    set((state) => ({
+      projects: state.projects.map((p) => ({
+        ...p,
+        scripts: (p.scripts || []).filter((s) => s.id !== scriptId),
+      })),
+    }));
+  },
+
+  runScript: async (scriptId) => {
+    try {
+      await api.runScript(scriptId);
+      // Status will be updated via events
+      // Unhide terminal if hidden and remove from closed
+      set((state) => {
+        const hidden = new Set(state.hiddenTerminalIds);
+        hidden.delete(scriptId);
+        const closed = new Set(state.closedTerminalIds);
+        closed.delete(scriptId);
+        return {
+          terminalPanelOpen: true,
+          activeTerminalScriptId: scriptId,
+          activeTerminalServiceId: null, // Clear service selection
+          hiddenTerminalIds: hidden,
+          closedTerminalIds: closed,
+        };
+      });
+    } catch (error) {
+      console.error('Failed to run script:', error);
+      throw error;
+    }
+  },
+
+  stopScript: async (scriptId) => {
+    try {
+      await api.stopScript(scriptId);
+      // Status will be updated via events
+    } catch (error) {
+      console.error('Failed to stop script:', error);
+      throw error;
+    }
+  },
+
+  // Script runtime updates
+  updateScriptStatus: (scriptId, status, pid) => {
+    set((state) => {
+      const runtimes = new Map(state.scriptRuntimes);
+      const existing = runtimes.get(scriptId) || { status: 'idle', logs: [] };
+      runtimes.set(scriptId, { ...existing, status, pid });
+      return { scriptRuntimes: runtimes };
+    });
+  },
+
+  appendScriptLog: (scriptId, log) => {
+    set((state) => {
+      const runtimes = new Map(state.scriptRuntimes);
+      const existing = runtimes.get(scriptId) || { status: 'idle', logs: [] };
+      // Keep last 1000 logs
+      const logs = [...existing.logs, log].slice(-1000);
+      runtimes.set(scriptId, { ...existing, logs });
+      return { scriptRuntimes: runtimes };
+    });
+  },
+
+  clearScriptLogs: (scriptId) => {
+    set((state) => {
+      const runtimes = new Map(state.scriptRuntimes);
+      const existing = runtimes.get(scriptId);
+      if (existing) {
+        runtimes.set(scriptId, { ...existing, logs: [] });
+      }
+      return { scriptRuntimes: runtimes };
+    });
+  },
+
+  setScriptExitResult: (scriptId, exitCode, success) => {
+    set((state) => {
+      const runtimes = new Map(state.scriptRuntimes);
+      const existing = runtimes.get(scriptId);
+      if (existing) {
+        runtimes.set(scriptId, { ...existing, lastExitCode: exitCode, lastSuccess: success });
+      }
+      return { scriptRuntimes: runtimes };
+    });
+  },
+
   // Launch actions
   startService: async (serviceId) => {
     try {
@@ -229,6 +389,7 @@ export const useAppStore = create<AppState>((set, _get) => ({
         return {
           terminalPanelOpen: true,
           activeTerminalServiceId: serviceId,
+          activeTerminalScriptId: null, // Clear script selection
           hiddenTerminalIds: hidden,
           closedTerminalIds: closed,
         };
@@ -345,6 +506,20 @@ export const useAppStore = create<AppState>((set, _get) => ({
       return {
         hiddenTerminalIds: hidden,
         activeTerminalServiceId: serviceId,
+        activeTerminalScriptId: null,
+        terminalPanelOpen: true,
+      };
+    });
+  },
+
+  showScriptTerminal: (scriptId) => {
+    set((state) => {
+      const hidden = new Set(state.hiddenTerminalIds);
+      hidden.delete(scriptId);
+      return {
+        hiddenTerminalIds: hidden,
+        activeTerminalScriptId: scriptId,
+        activeTerminalServiceId: null,
         terminalPanelOpen: true,
       };
     });
@@ -382,6 +557,121 @@ export const useAppStore = create<AppState>((set, _get) => ({
     });
   },
 
+  closeScriptTerminal: (scriptId) => {
+    set((state) => {
+      // Add to closed, remove from hidden, clear logs and runtime
+      const closed = new Set(state.closedTerminalIds);
+      closed.add(scriptId);
+      const hidden = new Set(state.hiddenTerminalIds);
+      hidden.delete(scriptId);
+      const runtimes = new Map(state.scriptRuntimes);
+      runtimes.delete(scriptId);
+
+      // Update active terminal if needed
+      let newActiveScriptId = state.activeTerminalScriptId;
+      if (state.activeTerminalScriptId === scriptId) {
+        newActiveScriptId = null;
+        // Find another visible script terminal
+        for (const [id, runtime] of runtimes) {
+          if (!hidden.has(id) && !closed.has(id) && (runtime.logs.length > 0 || runtime.status !== 'idle')) {
+            newActiveScriptId = id;
+            break;
+          }
+        }
+      }
+
+      return {
+        closedTerminalIds: closed,
+        hiddenTerminalIds: hidden,
+        scriptRuntimes: runtimes,
+        activeTerminalScriptId: newActiveScriptId,
+      };
+    });
+  },
+
+  // Environment file actions
+  discoverEnvFiles: async (projectId, force = false) => {
+    set({ isDiscoveringEnvFiles: true });
+    try {
+      const envFiles = await api.discoverEnvFiles(projectId, { force });
+      set((state) => ({
+        projects: state.projects.map((p) =>
+          p.id === projectId ? { ...p, envFiles, envFilesDiscovered: true } : p
+        ),
+        isDiscoveringEnvFiles: false,
+      }));
+      return envFiles;
+    } catch (error) {
+      console.error('Failed to discover env files:', error);
+      set({ isDiscoveringEnvFiles: false });
+      throw error;
+    }
+  },
+
+  addEnvFile: async (projectId, input) => {
+    const envFile = await api.addEnvFile(projectId, input);
+    set((state) => ({
+      projects: state.projects.map((p) =>
+        p.id === projectId ? { ...p, envFiles: [...p.envFiles, envFile] } : p
+      ),
+    }));
+    return envFile;
+  },
+
+  removeEnvFile: async (projectId, envFileId) => {
+    await api.removeEnvFile(projectId, envFileId);
+    set((state) => ({
+      projects: state.projects.map((p) =>
+        p.id === projectId
+          ? { ...p, envFiles: p.envFiles.filter((f) => f.id !== envFileId) }
+          : p
+      ),
+    }));
+  },
+
+  refreshEnvFile: async (projectId, envFileId) => {
+    const envFile = await api.refreshEnvFile(projectId, envFileId);
+    set((state) => ({
+      projects: state.projects.map((p) =>
+        p.id === projectId
+          ? { ...p, envFiles: p.envFiles.map((f) => (f.id === envFileId ? envFile : f)) }
+          : p
+      ),
+    }));
+    return envFile;
+  },
+
+  refreshAllEnvFiles: async (projectId) => {
+    const envFiles = await api.refreshAllEnvFiles(projectId);
+    set((state) => ({
+      projects: state.projects.map((p) =>
+        p.id === projectId ? { ...p, envFiles } : p
+      ),
+    }));
+    return envFiles;
+  },
+
+  compareEnvFiles: async (projectId, baseFileId, exampleFileId) => {
+    const comparison = await api.compareEnvFiles(projectId, baseFileId, exampleFileId);
+    set((state) => {
+      const comparisons = new Map(state.envFileComparisons);
+      comparisons.set(baseFileId, comparison);
+      return { envFileComparisons: comparisons };
+    });
+    return comparison;
+  },
+
+  linkEnvToService: async (projectId, envFileId, serviceId) => {
+    const envFile = await api.linkEnvToService(projectId, envFileId, { serviceId });
+    set((state) => ({
+      projects: state.projects.map((p) =>
+        p.id === projectId
+          ? { ...p, envFiles: p.envFiles.map((f) => (f.id === envFileId ? envFile : f)) }
+          : p
+      ),
+    }));
+  },
+
   // Settings actions
   loadSettings: async () => {
     set({ isLoadingSettings: true });
@@ -412,7 +702,11 @@ export const useAppStore = create<AppState>((set, _get) => ({
   },
 
   setActiveTerminalServiceId: (serviceId) => {
-    set({ activeTerminalServiceId: serviceId });
+    set({ activeTerminalServiceId: serviceId, activeTerminalScriptId: null });
+  },
+
+  setActiveTerminalScriptId: (scriptId) => {
+    set({ activeTerminalScriptId: scriptId, activeTerminalServiceId: null });
   },
 
   setTerminalHeight: (height) => {

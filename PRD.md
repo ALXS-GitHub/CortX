@@ -623,6 +623,7 @@ Using **shadcn/ui** components:
 | **Frontend** | React | 19 |
 | **Language** | TypeScript | 5.x |
 | **Build Tool** | Vite + Rolldown | Latest |
+| **Package Manager** | bun (or npm as alternative) | Latest |
 | **Backend** | Rust | 1.70+ |
 | **UI Library** | shadcn/ui + Radix | Latest |
 | **Styling** | Tailwind CSS | v4 |

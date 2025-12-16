@@ -1,13 +1,17 @@
 use crate::models::{
-    AppSettings, CreateProjectInput, CreateServiceInput, Project, Service,
-    UpdateProjectInput, UpdateServiceInput,
+    AddEnvFileInput, AppSettings, CreateProjectInput, CreateServiceInput, CreateScriptInput,
+    DiscoverEnvFilesInput, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
+    LinkEnvToServiceInput, Project, Script, Service, UpdateProjectInput, UpdateScriptInput,
+    UpdateServiceInput,
 };
 use crate::process_manager::ProcessManager;
 use crate::storage::Storage;
 use chrono::Utc;
+use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
+use walkdir::WalkDir;
 
 pub struct AppState {
     pub storage: Arc<Storage>,
@@ -182,6 +186,96 @@ pub fn reorder_services(
                 }
             }
             project.services.sort_by_key(|s| s.order);
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// Script commands
+
+#[tauri::command]
+pub fn add_script(
+    state: State<AppState>,
+    project_id: String,
+    input: CreateScriptInput,
+) -> Result<Script, String> {
+    let mut script = Script::new(input.name, input.working_dir, input.command);
+    script.description = input.description;
+    script.script_path = input.script_path;
+    script.color = input.color;
+    script.linked_service_ids = input.linked_service_ids.unwrap_or_default();
+
+    // Set order to be last
+    if let Some(project) = state.storage.get_project(&project_id) {
+        script.order = project.scripts.len() as u32;
+    }
+
+    state
+        .storage
+        .add_script(&project_id, script)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_script(
+    state: State<AppState>,
+    script_id: String,
+    input: UpdateScriptInput,
+) -> Result<Script, String> {
+    state
+        .storage
+        .update_script(&script_id, |script| {
+            if let Some(name) = input.name {
+                script.name = name;
+            }
+            if input.description.is_some() {
+                script.description = input.description;
+            }
+            if let Some(command) = input.command {
+                script.command = command;
+            }
+            if input.script_path.is_some() {
+                script.script_path = input.script_path;
+            }
+            if let Some(working_dir) = input.working_dir {
+                script.working_dir = working_dir;
+            }
+            if input.color.is_some() {
+                script.color = input.color;
+            }
+            if let Some(linked_service_ids) = input.linked_service_ids {
+                script.linked_service_ids = linked_service_ids;
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_script(app_handle: AppHandle, state: State<AppState>, script_id: String) -> Result<(), String> {
+    // Stop if running
+    let _ = state.process_manager.stop_script(&app_handle, &script_id);
+
+    state
+        .storage
+        .delete_script(&script_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reorder_scripts(
+    state: State<AppState>,
+    project_id: String,
+    script_ids: Vec<String>,
+) -> Result<(), String> {
+    state
+        .storage
+        .update_project(&project_id, |project| {
+            for (order, id) in script_ids.iter().enumerate() {
+                if let Some(script) = project.scripts.iter_mut().find(|s| &s.id == id) {
+                    script.order = order as u32;
+                }
+            }
+            project.scripts.sort_by_key(|s| s.order);
         })
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -536,6 +630,44 @@ pub fn get_running_services(state: State<AppState>) -> Vec<String> {
     state.process_manager.get_running_services()
 }
 
+// Script execution commands
+
+#[tauri::command]
+pub fn run_script(
+    app_handle: AppHandle,
+    state: State<AppState>,
+    script_id: String,
+) -> Result<u32, String> {
+    let (project, script) = state
+        .storage
+        .get_script(&script_id)
+        .ok_or_else(|| format!("Script not found: {}", script_id))?;
+
+    let working_dir = if script.working_dir.is_empty() || script.working_dir == "." {
+        project.root_path.clone()
+    } else {
+        let path = Path::new(&project.root_path).join(&script.working_dir);
+        path.to_string_lossy().to_string()
+    };
+
+    state.process_manager.run_script(
+        app_handle,
+        script_id,
+        working_dir,
+        script.command,
+    )
+}
+
+#[tauri::command]
+pub fn stop_script(app_handle: AppHandle, state: State<AppState>, script_id: String) -> Result<(), String> {
+    state.process_manager.stop_script(&app_handle, &script_id)
+}
+
+#[tauri::command]
+pub fn is_script_running(state: State<AppState>, script_id: String) -> bool {
+    state.process_manager.is_script_running(&script_id)
+}
+
 // Settings commands
 
 #[tauri::command]
@@ -615,4 +747,513 @@ pub fn open_in_vscode(path: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+// Environment file commands
+
+/// Directories to skip during env file discovery
+const IGNORED_DIRECTORIES: &[&str] = &[
+    "node_modules",
+    ".git",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    "__pycache__",
+    "venv",
+    ".venv",
+    "vendor",
+    ".cargo",
+    ".cache",
+];
+
+/// Check if a filename is an env file
+fn is_env_file(filename: &str) -> bool {
+    let lower = filename.to_lowercase();
+    lower == ".env"
+        || lower.starts_with(".env.")
+        || lower == ".env.local"
+        || lower == ".env.development"
+        || lower == ".env.production"
+        || lower == ".env.test"
+        || lower == ".env.staging"
+        || lower == ".env.example"
+        || lower == ".env.sample"
+}
+
+/// Determine the variant type from filename
+fn detect_variant(filename: &str) -> EnvFileVariant {
+    let lower = filename.to_lowercase();
+    match lower.as_str() {
+        ".env" => EnvFileVariant::Base,
+        ".env.local" => EnvFileVariant::Local,
+        s if s.contains("development") || s.contains(".dev") => EnvFileVariant::Development,
+        s if s.contains("production") || s.contains(".prod") => EnvFileVariant::Production,
+        s if s.contains("test") => EnvFileVariant::Test,
+        s if s.contains("staging") => EnvFileVariant::Staging,
+        s if s.contains("example") || s.contains("sample") => EnvFileVariant::Example,
+        _ => EnvFileVariant::Other,
+    }
+}
+
+/// Strip surrounding quotes from a value
+fn strip_quotes(s: &str) -> String {
+    let trimmed = s.trim();
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        trimmed[1..trimmed.len() - 1].to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Parse .env file contents into key-value pairs
+fn parse_env_file(path: &Path) -> Result<Vec<EnvVariable>, String> {
+    let content = fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let mut variables = Vec::new();
+
+    for (line_num, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+
+        // Skip empty lines and comments
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Parse KEY=VALUE format
+        if let Some(eq_pos) = trimmed.find('=') {
+            let key = trimmed[..eq_pos].trim().to_string();
+            let value = trimmed[eq_pos + 1..].trim().to_string();
+
+            // Remove surrounding quotes if present
+            let value = strip_quotes(&value);
+
+            if !key.is_empty() {
+                variables.push(EnvVariable {
+                    key,
+                    value,
+                    line_number: (line_num + 1) as u32,
+                });
+            }
+        }
+    }
+
+    Ok(variables)
+}
+
+/// Auto-link env file to service if in same directory
+fn find_matching_service(env_file_dir: &Path, project: &Project) -> Option<String> {
+    for service in &project.services {
+        let service_dir = if service.working_dir.is_empty() || service.working_dir == "." {
+            Path::new(&project.root_path).to_path_buf()
+        } else {
+            Path::new(&project.root_path).join(&service.working_dir)
+        };
+
+        // Check if the env file is in the service directory
+        if let Ok(env_canonical) = env_file_dir.canonicalize() {
+            if let Ok(service_canonical) = service_dir.canonicalize() {
+                if env_canonical == service_canonical {
+                    return Some(service.id.clone());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Discover all .env files in a project directory
+#[tauri::command]
+pub fn discover_env_files(
+    state: State<AppState>,
+    project_id: String,
+    input: DiscoverEnvFilesInput,
+) -> Result<Vec<EnvFile>, String> {
+    let project = state
+        .storage
+        .get_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+
+    // Skip if already discovered and not forcing
+    if project.env_files_discovered && !input.force {
+        return Ok(project.env_files.clone());
+    }
+
+    let root_path = Path::new(&project.root_path);
+    if !root_path.exists() {
+        return Err(format!("Project root path does not exist: {}", project.root_path));
+    }
+
+    let mut discovered_files: Vec<EnvFile> = Vec::new();
+
+    // Walk the directory tree
+    for entry in WalkDir::new(root_path)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            // Skip ignored directories
+            if e.file_type().is_dir() {
+                if let Some(name) = e.file_name().to_str() {
+                    return !IGNORED_DIRECTORIES.contains(&name);
+                }
+            }
+            true
+        })
+    {
+        if let Ok(entry) = entry {
+            if entry.file_type().is_file() {
+                if let Some(filename) = entry.file_name().to_str() {
+                    if is_env_file(filename) {
+                        let full_path = entry.path();
+                        let relative_path = full_path
+                            .strip_prefix(root_path)
+                            .unwrap_or(full_path)
+                            .to_string_lossy()
+                            .to_string();
+
+                        // Parse the env file
+                        let variables = parse_env_file(full_path).unwrap_or_default();
+                        let variant = detect_variant(filename);
+
+                        let mut env_file = EnvFile::new(
+                            full_path.to_string_lossy().to_string(),
+                            relative_path,
+                            filename.to_string(),
+                            variant,
+                            variables,
+                            false, // not manually added
+                        );
+
+                        // Try to link to a service
+                        if let Some(parent_dir) = full_path.parent() {
+                            env_file.linked_service_id = find_matching_service(parent_dir, &project);
+                        }
+
+                        discovered_files.push(env_file);
+                    }
+                }
+            }
+        }
+    }
+
+    // If forcing, preserve manually added files
+    let manually_added: Vec<EnvFile> = if input.force {
+        project
+            .env_files
+            .iter()
+            .filter(|f| f.is_manually_added)
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    // Merge manually added files with discovered files
+    let mut final_files = discovered_files;
+    for manual_file in manually_added {
+        if !final_files.iter().any(|f| f.path == manual_file.path) {
+            final_files.push(manual_file);
+        }
+    }
+
+    // Update project with discovered files
+    state
+        .storage
+        .update_project(&project_id, |p| {
+            p.env_files = final_files.clone();
+            p.env_files_discovered = true;
+        })
+        .map_err(|e| e.to_string())?;
+
+    Ok(final_files)
+}
+
+/// Add a single .env file manually by path
+#[tauri::command]
+pub fn add_env_file(
+    state: State<AppState>,
+    project_id: String,
+    input: AddEnvFileInput,
+) -> Result<EnvFile, String> {
+    let project = state
+        .storage
+        .get_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+
+    let file_path = input.path.clone();
+    let path = Path::new(&file_path);
+    if !path.exists() {
+        return Err(format!("File does not exist: {}", file_path));
+    }
+
+    if !path.is_file() {
+        return Err(format!("Path is not a file: {}", file_path));
+    }
+
+    // Check if already tracked
+    if project.env_files.iter().any(|f| f.path == file_path) {
+        return Err("File is already tracked".to_string());
+    }
+
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(".env")
+        .to_string();
+
+    let root_path = Path::new(&project.root_path);
+    let relative_path = path
+        .strip_prefix(root_path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| file_path.clone());
+
+    let variables = parse_env_file(path)?;
+    let variant = detect_variant(&filename);
+
+    // Compute linked service before moving file_path
+    let linked_service_id = path
+        .parent()
+        .and_then(|parent_dir| find_matching_service(parent_dir, &project));
+
+    let mut env_file = EnvFile::new(
+        file_path,
+        relative_path,
+        filename,
+        variant,
+        variables,
+        true, // manually added
+    );
+    env_file.linked_service_id = linked_service_id;
+
+    let env_file_clone = env_file.clone();
+
+    state
+        .storage
+        .update_project(&project_id, |p| {
+            p.env_files.push(env_file_clone);
+        })
+        .map_err(|e| e.to_string())?;
+
+    Ok(env_file)
+}
+
+/// Remove an env file from tracking (does not delete the actual file)
+#[tauri::command]
+pub fn remove_env_file(
+    state: State<AppState>,
+    project_id: String,
+    env_file_id: String,
+) -> Result<(), String> {
+    state
+        .storage
+        .update_project(&project_id, |p| {
+            p.env_files.retain(|f| f.id != env_file_id);
+        })
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Refresh/re-read a single env file's contents
+#[tauri::command]
+pub fn refresh_env_file(
+    state: State<AppState>,
+    project_id: String,
+    env_file_id: String,
+) -> Result<EnvFile, String> {
+    let project = state
+        .storage
+        .get_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+
+    let env_file = project
+        .env_files
+        .iter()
+        .find(|f| f.id == env_file_id)
+        .ok_or_else(|| format!("Env file not found: {}", env_file_id))?;
+
+    let path = Path::new(&env_file.path);
+    if !path.exists() {
+        return Err(format!("File no longer exists: {}", env_file.path));
+    }
+
+    let variables = parse_env_file(path)?;
+    let updated_file_id = env_file_id.clone();
+
+    let mut result_file: Option<EnvFile> = None;
+
+    state
+        .storage
+        .update_project(&project_id, |p| {
+            if let Some(f) = p.env_files.iter_mut().find(|f| f.id == updated_file_id) {
+                f.variables = variables.clone();
+                f.last_read_at = Utc::now();
+                result_file = Some(f.clone());
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+    result_file.ok_or_else(|| "Failed to update env file".to_string())
+}
+
+/// Refresh all env files for a project
+#[tauri::command]
+pub fn refresh_all_env_files(
+    state: State<AppState>,
+    project_id: String,
+) -> Result<Vec<EnvFile>, String> {
+    let project = state
+        .storage
+        .get_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+
+    let mut updated_files: Vec<EnvFile> = Vec::new();
+
+    for env_file in &project.env_files {
+        let path = Path::new(&env_file.path);
+        if path.exists() {
+            let variables = parse_env_file(path).unwrap_or_default();
+            let mut updated = env_file.clone();
+            updated.variables = variables;
+            updated.last_read_at = Utc::now();
+            updated_files.push(updated);
+        } else {
+            // Keep the file in the list but with empty variables
+            let mut updated = env_file.clone();
+            updated.variables = Vec::new();
+            updated_files.push(updated);
+        }
+    }
+
+    let files_clone = updated_files.clone();
+
+    state
+        .storage
+        .update_project(&project_id, |p| {
+            p.env_files = files_clone;
+        })
+        .map_err(|e| e.to_string())?;
+
+    Ok(updated_files)
+}
+
+/// Get env files for a project
+#[tauri::command]
+pub fn get_env_files(state: State<AppState>, project_id: String) -> Result<Vec<EnvFile>, String> {
+    let project = state
+        .storage
+        .get_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+
+    Ok(project.env_files)
+}
+
+/// Get the raw content of an env file
+#[tauri::command]
+pub fn get_env_file_content(
+    state: State<AppState>,
+    project_id: String,
+    env_file_id: String,
+) -> Result<String, String> {
+    let project = state
+        .storage
+        .get_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+
+    let env_file = project
+        .env_files
+        .iter()
+        .find(|f| f.id == env_file_id)
+        .ok_or_else(|| format!("Env file not found: {}", env_file_id))?;
+
+    let path = Path::new(&env_file.path);
+    if !path.exists() {
+        return Err(format!("File no longer exists: {}", env_file.path));
+    }
+
+    std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read file: {}", e))
+}
+
+/// Compare .env with .env.example in the same directory
+#[tauri::command]
+pub fn compare_env_files(
+    state: State<AppState>,
+    project_id: String,
+    base_file_id: String,
+    example_file_id: String,
+) -> Result<EnvComparison, String> {
+    let project = state
+        .storage
+        .get_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+
+    let base_file = project
+        .env_files
+        .iter()
+        .find(|f| f.id == base_file_id)
+        .ok_or_else(|| format!("Base file not found: {}", base_file_id))?;
+
+    let example_file = project
+        .env_files
+        .iter()
+        .find(|f| f.id == example_file_id)
+        .ok_or_else(|| format!("Example file not found: {}", example_file_id))?;
+
+    let base_keys: std::collections::HashSet<&str> =
+        base_file.variables.iter().map(|v| v.key.as_str()).collect();
+    let example_keys: std::collections::HashSet<&str> = example_file
+        .variables
+        .iter()
+        .map(|v| v.key.as_str())
+        .collect();
+
+    let missing_in_base: Vec<String> = example_keys
+        .difference(&base_keys)
+        .map(|s| s.to_string())
+        .collect();
+
+    let extra_in_base: Vec<String> = base_keys
+        .difference(&example_keys)
+        .map(|s| s.to_string())
+        .collect();
+
+    let common_keys: Vec<String> = base_keys
+        .intersection(&example_keys)
+        .map(|s| s.to_string())
+        .collect();
+
+    Ok(EnvComparison {
+        base_file_id,
+        example_file_id,
+        missing_in_base,
+        extra_in_base,
+        common_keys,
+    })
+}
+
+/// Link an env file to a service
+#[tauri::command]
+pub fn link_env_to_service(
+    state: State<AppState>,
+    project_id: String,
+    env_file_id: String,
+    input: LinkEnvToServiceInput,
+) -> Result<EnvFile, String> {
+    let mut result_file: Option<EnvFile> = None;
+
+    state
+        .storage
+        .update_project(&project_id, |p| {
+            if let Some(f) = p.env_files.iter_mut().find(|f| f.id == env_file_id) {
+                f.linked_service_id = input.service_id.clone();
+                result_file = Some(f.clone());
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+    result_file.ok_or_else(|| format!("Env file not found: {}", env_file_id))
 }
