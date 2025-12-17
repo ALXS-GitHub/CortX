@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState, useCallback, useMemo, memo, Component, type ReactNode } from 'react';
-import { useAppStore } from '@/stores/appStore';
+import { useEffect, useRef, useState, useCallback, useMemo, memo, Component, type ReactNode, Fragment } from 'react';
+import { useAppStore, type TerminalPane } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,17 +16,21 @@ import {
   Square,
   Circle,
   Eye,
-  ArrowDown,
   XCircle,
   GripHorizontal,
   Terminal,
   FileCode,
   AlertTriangle,
+  ArrowDownToLine,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import AnsiToHtml from 'ansi-to-html';
-import type { LogEntry, ServiceStatus, ScriptStatus } from '@/types';
+import type { LogEntry } from '@/types';
 import { open } from '@tauri-apps/plugin-shell';
+import { TerminalDndContext, type TerminalItem, type TerminalType } from './terminal-dnd';
+import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
+import { useDroppable } from '@dnd-kit/core';
+import { SortableTerminalTab } from './terminal-dnd';
 
 // Error boundary to prevent crashes from taking down the whole app
 interface ErrorBoundaryState {
@@ -162,21 +165,252 @@ function processTerminalContent(rawContent: string): string {
   return html;
 }
 
-// Terminal item type for unified handling
-type TerminalType = 'service' | 'script';
+// Droppable pane component with edge drop zones
+function DroppablePaneContent({
+  pane,
+  paneTerminals,
+  activeTerminal,
+  isFocused,
+  onSelectTerminal,
+  onHideTerminal,
+  onClearLogs,
+  onStopTerminal,
+  onRemovePane,
+  onFocusPane,
+  showRemoveButton,
+  handleTerminalClick,
+}: {
+  pane: TerminalPane;
+  paneTerminals: TerminalItem[];
+  activeTerminal: TerminalItem | null;
+  isFocused: boolean;
+  onSelectTerminal: (terminalId: string) => void;
+  onHideTerminal: (terminalId: string) => void;
+  onClearLogs: (terminalId: string) => void;
+  onStopTerminal: (terminalId: string) => void;
+  onRemovePane: () => void;
+  onFocusPane: () => void;
+  showRemoveButton: boolean;
+  handleTerminalClick: (e: React.MouseEvent) => void;
+}) {
+  // Scroll state for this pane
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [userScrolledUp, setUserScrolledUp] = useState(false);
 
-interface TerminalItem {
-  id: string;
-  type: TerminalType;
-  name: string;
-  projectName: string;
-  projectId: string;
-  status: ServiceStatus | ScriptStatus;
-  logs: LogEntry[];
-  detectedPort?: number;
-  activeMode?: string;
-  lastExitCode?: number;
-  lastSuccess?: boolean;
+  // Scroll to bottom function
+  const scrollToBottom = useCallback(() => {
+    if (!scrollAreaRef.current) return;
+    const viewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
+    }
+    setUserScrolledUp(false);
+  }, []);
+
+  // Handle scroll events to detect if user scrolled up
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLDivElement;
+    const { scrollTop, scrollHeight, clientHeight } = target;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+    setUserScrolledUp(!isAtBottom);
+  }, []);
+
+  // Auto-scroll when logs change (only if not scrolled up)
+  useEffect(() => {
+    if (!userScrolledUp && activeTerminal) {
+      requestAnimationFrame(() => {
+        scrollToBottom();
+      });
+    }
+  }, [activeTerminal?.logs.length, userScrolledUp, scrollToBottom]);
+
+  // Scroll to bottom when switching active terminal in this pane
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollToBottom();
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pane.activeTerminalId, scrollToBottom]);
+
+  // Main pane drop zone (for dropping into center)
+  const { setNodeRef: setPaneRef, isOver: isOverPane } = useDroppable({
+    id: `pane-drop-${pane.id}`,
+    data: {
+      type: 'pane',
+      paneId: pane.id,
+    },
+  });
+
+  // Left edge drop zone for creating new pane
+  const { setNodeRef: setLeftEdgeRef, isOver: isOverLeftEdge } = useDroppable({
+    id: `edge-left-${pane.id}`,
+    data: {
+      type: 'edge',
+      position: 'left',
+      referencePaneId: pane.id,
+    },
+  });
+
+  // Right edge drop zone for creating new pane
+  const { setNodeRef: setRightEdgeRef, isOver: isOverRightEdge } = useDroppable({
+    id: `edge-right-${pane.id}`,
+    data: {
+      type: 'edge',
+      position: 'right',
+      referencePaneId: pane.id,
+    },
+  });
+
+  return (
+    <div
+      ref={setPaneRef}
+      className={cn(
+        'flex flex-col min-w-0 relative h-full',
+        isFocused && 'ring-1 ring-primary/50 ring-inset'
+      )}
+      onClick={onFocusPane}
+    >
+      {/* Left edge drop zone - pointer-events-none so it doesn't block clicks, dnd-kit still detects it */}
+      <div
+        ref={setLeftEdgeRef}
+        className="absolute left-0 top-0 bottom-0 w-12 z-30 pointer-events-none"
+      />
+      {isOverLeftEdge && (
+        <div className="absolute left-0 top-0 bottom-0 w-[30%] bg-muted/50 border-2 border-dashed border-primary rounded-l flex items-center justify-center z-20 pointer-events-none">
+          <span className="text-xs text-muted-foreground">New Pane</span>
+        </div>
+      )}
+
+      {/* Right edge drop zone - pointer-events-none so it doesn't block clicks */}
+      <div
+        ref={setRightEdgeRef}
+        className="absolute right-0 top-0 bottom-0 w-12 z-30 pointer-events-none"
+      />
+      {isOverRightEdge && (
+        <div className="absolute right-0 top-0 bottom-0 w-[30%] bg-muted/50 border-2 border-dashed border-primary rounded-r flex items-center justify-center z-20 pointer-events-none">
+          <span className="text-xs text-muted-foreground">New Pane</span>
+        </div>
+      )}
+
+      {/* Center pane drop indicator */}
+      {isOverPane && !isOverLeftEdge && !isOverRightEdge && (
+        <div className="absolute inset-2 bg-primary/10 border-2 border-primary border-dashed rounded z-20 pointer-events-none" />
+      )}
+
+      {/* Tabs bar */}
+      <div className="flex items-center bg-muted/30 border-b text-xs shrink-0 overflow-x-auto">
+        <SortableContext
+          items={pane.terminalIds}
+          strategy={horizontalListSortingStrategy}
+        >
+          {paneTerminals.length > 0 ? (
+            paneTerminals.map((terminal) => (
+              <SortableTerminalTab
+                key={terminal.id}
+                terminal={terminal}
+                paneId={pane.id}
+                isActive={pane.activeTerminalId === terminal.id}
+                onSelect={() => onSelectTerminal(terminal.id)}
+                onHide={() => onHideTerminal(terminal.id)}
+              />
+            ))
+          ) : (
+            <div className="px-2 py-1.5 text-muted-foreground">Empty pane</div>
+          )}
+        </SortableContext>
+
+        {/* Pane actions */}
+        <div className="ml-auto flex items-center shrink-0 px-1">
+          {activeTerminal && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClearLogs(activeTerminal.id);
+                }}
+                title="Clear logs"
+              >
+                <Trash2 className="size-3" />
+              </Button>
+              {activeTerminal.status === 'running' && (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onStopTerminal(activeTerminal.id);
+                  }}
+                  title="Stop"
+                >
+                  <Square className="size-3" />
+                </Button>
+              )}
+            </>
+          )}
+          {showRemoveButton && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemovePane();
+              }}
+              title="Close pane"
+              className="ml-1 border-l pl-1"
+            >
+              <X className="size-3" />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Pane content - shows active terminal's logs */}
+      {activeTerminal ? (
+        <TerminalErrorBoundary onReset={() => onClearLogs(activeTerminal.id)}>
+          <div ref={scrollAreaRef} className="flex-1 min-h-0 relative">
+            <ScrollArea
+              className="absolute inset-0"
+              onScrollCapture={handleScroll}
+            >
+              <div
+                className="p-2 font-mono text-xs space-y-0.5"
+                onClick={handleTerminalClick}
+              >
+                {activeTerminal.logs.length === 0 ? (
+                  <div className="text-muted-foreground">Waiting for output...</div>
+                ) : (
+                  <TerminalLogs logs={activeTerminal.logs} />
+                )}
+              </div>
+            </ScrollArea>
+            {/* Scroll to bottom button */}
+            {userScrolledUp && (
+              <Button
+                variant="secondary"
+                size="icon-sm"
+                className="absolute bottom-2 right-4 z-10 shadow-md opacity-90 hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  scrollToBottom();
+                }}
+                title="Scroll to bottom"
+              >
+                <ArrowDownToLine className="size-4" />
+              </Button>
+            )}
+          </div>
+        </TerminalErrorBoundary>
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-2">
+          <p className="text-sm">Drop a terminal here or start a service</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function TerminalPanel() {
@@ -186,9 +420,7 @@ export function TerminalPanel() {
     terminalHeight,
     setTerminalHeight,
     activeTerminalServiceId,
-    setActiveTerminalServiceId,
     activeTerminalScriptId,
-    setActiveTerminalScriptId,
     serviceRuntimes,
     scriptRuntimes,
     projects,
@@ -198,9 +430,18 @@ export function TerminalPanel() {
     clearScriptLogs,
     closeAllTerminals,
     hideTerminal,
+    hideScriptTerminal,
     showTerminal,
+    showScriptTerminal,
     hiddenTerminalIds,
     closedTerminalIds,
+    // Multi-pane state
+    terminalPanes,
+    focusedPaneId,
+    removePane,
+    setActiveTerminalInPane,
+    focusPane,
+    resizePanes,
   } = useAppStore();
 
   // Combined active terminal ID (prefixed to distinguish types)
@@ -210,9 +451,8 @@ export function TerminalPanel() {
     ? `service:${activeTerminalServiceId}`
     : null;
 
-  // Scroll state
+  // Container ref for resize functionality
   const containerRef = useRef<HTMLDivElement>(null);
-  const [userScrolledUp, setUserScrolledUp] = useState(false);
 
   // Resize state
   const [isResizing, setIsResizing] = useState(false);
@@ -368,63 +608,6 @@ export function TerminalPanel() {
   // Total active count (visible + hidden)
   const totalActiveCount = visibleTerminals.length + hiddenTerminals.length;
 
-  // Handle scroll events to detect if user scrolled up
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLDivElement;
-    const { scrollTop, scrollHeight, clientHeight } = target;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
-    setUserScrolledUp(!isAtBottom);
-  }, []);
-
-  // Scroll to bottom function - finds the scroll viewport directly
-  const scrollToBottom = useCallback(() => {
-    if (!containerRef.current) return;
-
-    // Find the scroll viewport directly within our container
-    const viewport = containerRef.current.querySelector('[data-radix-scroll-area-viewport]');
-    if (viewport) {
-      viewport.scrollTop = viewport.scrollHeight;
-    }
-    setUserScrolledUp(false);
-  }, []);
-
-  // Scroll to bottom when switching terminals - with delay to ensure DOM is updated
-  useEffect(() => {
-    // Use double requestAnimationFrame to ensure the tab switch is complete
-    // and the new content is rendered before scrolling
-    const frame1 = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        scrollToBottom();
-      });
-    });
-    return () => cancelAnimationFrame(frame1);
-  }, [activeTerminalId, scrollToBottom]);
-
-  // Auto-scroll when new logs arrive (only if not scrolled up)
-  useEffect(() => {
-    if (!userScrolledUp) {
-      // Small delay to ensure new content is rendered
-      requestAnimationFrame(() => {
-        scrollToBottom();
-      });
-    }
-  }, [serviceRuntimes, scriptRuntimes, userScrolledUp, scrollToBottom]);
-
-  // Handle switching active terminal
-  const handleSwitchTerminal = useCallback(
-    (terminalId: string) => {
-      const [type, rawId] = terminalId.split(':');
-      if (type === 'script') {
-        setActiveTerminalScriptId(rawId);
-        // Note: setActiveTerminalScriptId already clears activeTerminalServiceId
-      } else {
-        setActiveTerminalServiceId(rawId);
-        // Note: setActiveTerminalServiceId already clears activeTerminalScriptId
-      }
-    },
-    [setActiveTerminalServiceId, setActiveTerminalScriptId]
-  );
-
   // Handle stop for current terminal
   const handleStopCurrent = useCallback(async () => {
     if (!activeTerminalId) return;
@@ -435,6 +618,26 @@ export function TerminalPanel() {
       await stopService(rawId);
     }
   }, [activeTerminalId, stopScript, stopService]);
+
+  // Handle hide terminal (removes from pane, can be restored)
+  const handleHideTerminal = useCallback((terminalId: string) => {
+    const [type, rawId] = terminalId.split(':');
+    if (type === 'script') {
+      hideScriptTerminal(rawId);
+    } else {
+      hideTerminal(rawId);
+    }
+  }, [hideTerminal, hideScriptTerminal]);
+
+  // Handle show terminal from hidden list
+  const handleShowTerminal = useCallback((item: TerminalItem) => {
+    const rawId = getRawId(item.id);
+    if (item.type === 'script') {
+      showScriptTerminal(rawId);
+    } else {
+      showTerminal(rawId);
+    }
+  }, [showTerminal, showScriptTerminal]);
 
   // Handle clear logs for current terminal
   const handleClearCurrent = useCallback(() => {
@@ -479,6 +682,93 @@ export function TerminalPanel() {
     }
   }, []);
 
+  // Pane resize handlers
+  const panesContainerRef = useRef<HTMLDivElement>(null);
+  const [resizingPaneIndex, setResizingPaneIndex] = useState<number | null>(null);
+  const resizePaneStartX = useRef(0);
+  const resizePaneStartWidths = useRef<{ id: string; width: number }[]>([]);
+
+  const handlePaneResizeStart = useCallback((e: React.MouseEvent, paneIndex: number) => {
+    e.preventDefault();
+    setResizingPaneIndex(paneIndex);
+    resizePaneStartX.current = e.clientX;
+    resizePaneStartWidths.current = terminalPanes.map(p => ({ id: p.id, width: p.width }));
+  }, [terminalPanes]);
+
+  useEffect(() => {
+    if (resizingPaneIndex === null) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!panesContainerRef.current) return;
+
+      const containerWidth = panesContainerRef.current.getBoundingClientRect().width;
+      const deltaX = e.clientX - resizePaneStartX.current;
+      const deltaPercent = (deltaX / containerWidth) * 100;
+
+      const newWidths = [...resizePaneStartWidths.current];
+      const leftPane = newWidths[resizingPaneIndex];
+      const rightPane = newWidths[resizingPaneIndex + 1];
+
+      if (leftPane && rightPane) {
+        // Apply delta to left pane, subtract from right pane
+        const newLeftWidth = Math.max(15, leftPane.width + deltaPercent);
+        const newRightWidth = Math.max(15, rightPane.width - deltaPercent);
+
+        // Only apply if both panes would be at least 15%
+        if (newLeftWidth >= 15 && newRightWidth >= 15) {
+          newWidths[resizingPaneIndex] = { ...leftPane, width: newLeftWidth };
+          newWidths[resizingPaneIndex + 1] = { ...rightPane, width: newRightWidth };
+          resizePanes(newWidths);
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      setResizingPaneIndex(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingPaneIndex, resizePanes]);
+
+  // Get active terminal info for a pane
+  const getActiveTerminalForPane = useCallback((pane: TerminalPane): TerminalItem | null => {
+    if (!pane.activeTerminalId) return null;
+    return allTerminals.find(t => t.id === pane.activeTerminalId) || null;
+  }, [allTerminals]);
+
+  // Get all terminals in a pane
+  const getTerminalsInPane = useCallback((pane: TerminalPane): TerminalItem[] => {
+    return pane.terminalIds
+      .map(id => allTerminals.find(t => t.id === id))
+      .filter((t): t is TerminalItem => t !== undefined);
+  }, [allTerminals]);
+
+  // Clear logs for a specific pane's terminal
+  const handleClearPaneLogs = useCallback((terminalId: string) => {
+    const [type, rawId] = terminalId.split(':');
+    if (type === 'script') {
+      clearScriptLogs(rawId);
+    } else {
+      clearServiceLogs(rawId);
+    }
+  }, [clearScriptLogs, clearServiceLogs]);
+
+  // Stop service/script for a pane's terminal
+  const handleStopPaneTerminal = useCallback(async (terminalId: string) => {
+    const [type, rawId] = terminalId.split(':');
+    if (type === 'script') {
+      await stopScript(rawId);
+    } else {
+      await stopService(rawId);
+    }
+  }, [stopScript, stopService]);
+
   if (!terminalPanelOpen) {
     return (
       <div className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t">
@@ -496,223 +786,169 @@ export function TerminalPanel() {
   }
 
   return (
-    <div
-      ref={containerRef}
-      className={cn(
-        "fixed bottom-0 left-0 right-0 z-50 bg-card border-t flex flex-col",
-        isResizing && "select-none"
-      )}
-      style={{ height: terminalHeight }}
-    >
-      {/* Resize handle */}
+    <TerminalDndContext allTerminals={allTerminals}>
       <div
-        className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize hover:bg-primary/50 transition-colors flex items-center justify-center group"
-        onMouseDown={handleResizeStart}
+        ref={containerRef}
+        className={cn(
+          "fixed bottom-0 left-0 right-0 z-50 bg-card border-t flex flex-col",
+          isResizing && "select-none"
+        )}
+        style={{ height: terminalHeight }}
       >
-        <div className="absolute -top-1 left-0 right-0 h-3" /> {/* Larger hit area */}
-        <GripHorizontal className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-      </div>
-
-      {/* Header */}
-      <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/50 mt-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Terminal</span>
-          <span className="text-xs text-muted-foreground">
-            ({visibleTerminals.length} visible
-            {hiddenTerminals.length > 0 && `, ${hiddenTerminals.length} hidden`})
-          </span>
+        {/* Resize handle */}
+        <div
+          className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize hover:bg-primary/50 transition-colors flex items-center justify-center group"
+          onMouseDown={handleResizeStart}
+        >
+          <div className="absolute -top-1 left-0 right-0 h-3" /> {/* Larger hit area */}
+          <GripHorizontal className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
-        <div className="flex items-center gap-1">
-          {/* Hidden terminals dropdown */}
-          {hiddenTerminals.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" title="Show hidden terminals">
-                  <Eye className="size-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {hiddenTerminals.map((item) => (
-                  <DropdownMenuItem key={item.id} onClick={() => showTerminal(getRawId(item.id))}>
-                    {item.type === 'script' ? (
-                      <FileCode className="size-3 mr-2 text-muted-foreground" />
-                    ) : (
-                      <Terminal className="size-3 mr-2 text-muted-foreground" />
-                    )}
-                    <StatusIndicator status={item.status} type={item.type} />
-                    <span className="ml-2">
-                      {item.name}
-                      {item.projectName && (
-                        <span className="text-muted-foreground ml-1">({item.projectName})</span>
-                      )}
-                    </span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
 
-          {currentTerminal && (
-            <>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={handleClearCurrent}
-                title="Clear logs"
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-              {canStopCurrent && (
+        {/* Header */}
+        <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/50 mt-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">Terminal</span>
+            <span className="text-xs text-muted-foreground">
+              ({visibleTerminals.length} visible
+              {hiddenTerminals.length > 0 && `, ${hiddenTerminals.length} hidden`})
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            {/* Hidden terminals dropdown */}
+            {hiddenTerminals.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" title="Show hidden terminals">
+                    <Eye className="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {hiddenTerminals.map((item) => (
+                    <DropdownMenuItem key={item.id} onClick={() => handleShowTerminal(item)}>
+                      {item.type === 'script' ? (
+                        <FileCode className="size-3 mr-2 text-muted-foreground" />
+                      ) : (
+                        <Terminal className="size-3 mr-2 text-muted-foreground" />
+                      )}
+                      <StatusIndicator status={item.status} type={item.type} />
+                      <span className="ml-2">
+                        {item.name}
+                        {item.projectName && (
+                          <span className="text-muted-foreground ml-1">({item.projectName})</span>
+                        )}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            {currentTerminal && (
+              <>
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={handleStopCurrent}
-                  title={currentTerminal.type === 'script' ? 'Stop script' : 'Stop service'}
+                  onClick={handleClearCurrent}
+                  title="Clear logs"
                 >
-                  <Square className="size-3.5" />
+                  <Trash2 className="size-3.5" />
                 </Button>
-              )}
-            </>
-          )}
+                {canStopCurrent && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={handleStopCurrent}
+                    title={currentTerminal.type === 'script' ? 'Stop script' : 'Stop service'}
+                  >
+                    <Square className="size-3.5" />
+                  </Button>
+                )}
+              </>
+            )}
 
-          {/* Close all terminals button */}
-          {visibleTerminals.length > 0 && (
+            {/* Close all terminals button */}
+            {visibleTerminals.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={closeAllTerminals}
+                title="Close all terminals"
+              >
+                <XCircle className="size-3.5" />
+              </Button>
+            )}
+
             <Button
               variant="ghost"
               size="icon-sm"
-              onClick={closeAllTerminals}
-              title="Close all terminals"
+              onClick={toggleTerminalPanel}
+              title="Minimize"
             >
-              <XCircle className="size-3.5" />
+              <ChevronDown className="size-4" />
             </Button>
-          )}
+          </div>
+        </div>
 
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={toggleTerminalPanel}
-            title="Minimize"
-          >
-            <ChevronDown className="size-4" />
-          </Button>
+        {/* Panes container */}
+        <div
+          ref={panesContainerRef}
+          className={cn(
+            'flex-1 flex min-h-0',
+            (isResizing || resizingPaneIndex !== null) && 'select-none'
+          )}
+        >
+          {visibleTerminals.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center text-muted-foreground">
+              <p>
+                {hiddenTerminals.length > 0
+                  ? 'All terminals are hidden. Click the eye icon to show them.'
+                  : 'No active terminals. Start a service or script to see output here.'}
+              </p>
+            </div>
+          ) : (
+            <>
+              {terminalPanes.map((pane, paneIndex) => {
+                const paneTerminals = getTerminalsInPane(pane);
+                const activeTerminal = getActiveTerminalForPane(pane);
+                const isFocused = focusedPaneId === pane.id;
+                const totalWidth = terminalPanes.reduce((sum, p) => sum + p.width, 0);
+                const widthPercent = (pane.width / totalWidth) * 100;
+
+                return (
+                  <Fragment key={pane.id}>
+                    {/* Pane */}
+                    <div className="h-full" style={{ width: `${widthPercent}%` }}>
+                      <DroppablePaneContent
+                        pane={pane}
+                        paneTerminals={paneTerminals}
+                        activeTerminal={activeTerminal}
+                        isFocused={isFocused}
+                        onSelectTerminal={(terminalId) => setActiveTerminalInPane(pane.id, terminalId)}
+                        onHideTerminal={handleHideTerminal}
+                        onClearLogs={handleClearPaneLogs}
+                        onStopTerminal={handleStopPaneTerminal}
+                        onRemovePane={() => removePane(pane.id)}
+                        onFocusPane={() => focusPane(pane.id)}
+                        showRemoveButton={terminalPanes.length > 1}
+                        handleTerminalClick={handleTerminalClick}
+                      />
+                    </div>
+
+                    {/* Resize handle between panes */}
+                    {paneIndex < terminalPanes.length - 1 && (
+                      <div
+                        className="w-1 bg-border hover:bg-primary/50 cursor-col-resize flex-shrink-0 transition-colors"
+                        onMouseDown={(e) => handlePaneResizeStart(e, paneIndex)}
+                      />
+                    )}
+                  </Fragment>
+                );
+              })}
+            </>
+          )}
         </div>
       </div>
-
-      {/* Tabs and content */}
-      {visibleTerminals.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground">
-          <p>
-            {hiddenTerminals.length > 0
-              ? 'All terminals are hidden. Click the eye icon to show them.'
-              : 'No active terminals. Start a service or script to see output here.'}
-          </p>
-        </div>
-      ) : (
-        <Tabs
-          value={activeTerminalId || visibleTerminals[0]?.id}
-          onValueChange={handleSwitchTerminal}
-          className="flex-1 flex flex-col min-h-0"
-        >
-          <TabsList className="w-full justify-start rounded-none border-b bg-transparent h-auto p-0 overflow-x-auto overflow-y-hidden">
-            {visibleTerminals.map((item) => (
-              <TabsTrigger
-                key={item.id}
-                value={item.id}
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary px-3 py-1.5 gap-2 shrink-0"
-              >
-                {item.type === 'script' ? (
-                  <FileCode className="size-3 text-muted-foreground" />
-                ) : (
-                  <Terminal className="size-3 text-muted-foreground" />
-                )}
-                <StatusIndicator status={item.status} type={item.type} />
-                <span className="text-xs">
-                  {item.name}
-                  {item.activeMode && (
-                    <span className="text-muted-foreground ml-1">({item.activeMode})</span>
-                  )}
-                  {item.projectName && !item.activeMode && (
-                    <span className="text-muted-foreground ml-1">({item.projectName})</span>
-                  )}
-                </span>
-                {item.type === 'service' && item.detectedPort && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-mono">
-                    :{item.detectedPort}
-                  </span>
-                )}
-                {item.type === 'script' && item.status !== 'idle' && item.status !== 'running' && (
-                  <span
-                    className={cn(
-                      'text-[10px] px-1.5 py-0.5 rounded font-mono',
-                      item.lastSuccess
-                        ? 'bg-green-500/20 text-green-600 dark:text-green-400'
-                        : 'bg-red-500/20 text-red-600 dark:text-red-400'
-                    )}
-                  >
-                    {item.lastSuccess ? 'OK' : `Exit ${item.lastExitCode}`}
-                  </span>
-                )}
-                <div
-                  role="button"
-                  tabIndex={0}
-                  className="size-4 p-0 ml-1 flex items-center justify-center rounded hover:bg-destructive/20 cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    // Just hide the terminal, don't stop the service/script
-                    hideTerminal(getRawId(item.id));
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.stopPropagation();
-                      hideTerminal(getRawId(item.id));
-                    }
-                  }}
-                  title="Hide terminal"
-                >
-                  <X className="size-3" />
-                </div>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {/* Only render the active terminal's content - major performance optimization */}
-          {currentTerminal && (
-            <div className="flex-1 min-h-0 relative">
-              <TerminalErrorBoundary onReset={handleClearCurrent}>
-                <ScrollArea
-                  className="h-full"
-                  onScrollCapture={handleScroll}
-                >
-                  <div
-                    className="p-2 font-mono text-xs space-y-0.5"
-                    onClick={handleTerminalClick}
-                  >
-                    {currentTerminal.logs.length === 0 ? (
-                      <div className="text-muted-foreground">Waiting for output...</div>
-                    ) : (
-                      <TerminalLogs logs={currentTerminal.logs} />
-                    )}
-                  </div>
-                </ScrollArea>
-              </TerminalErrorBoundary>
-
-              {/* Scroll to bottom button */}
-              {userScrolledUp && (
-                <Button
-                  variant="secondary"
-                  size="icon-sm"
-                  className="absolute bottom-2 right-4 shadow-md"
-                  onClick={scrollToBottom}
-                  title="Scroll to bottom"
-                >
-                  <ArrowDown className="size-3.5" />
-                </Button>
-              )}
-            </div>
-          )}
-        </Tabs>
-      )}
-    </div>
+    </TerminalDndContext>
   );
 }
 

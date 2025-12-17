@@ -2,8 +2,10 @@
 
 Don't forget to update PRD when adding features
 
-- [ ] split terminal view to have multiple terminals visible at the same time (only horizontal split for now is fine)
 - [ ] Find if there is a better way to handle the port used detection (instead of parsing output, maybe use some library or other way to detect which ports are used by which process)
+- [ ] Adding message on close saying "closing running services" while it's closing them with a loading indicator
+- [ ] Fix the terminal scroll (there is no scroll anymore)
+  - [ ] Fix the scroll to bottom default behavior (again -> multiple panes might have messed this up)
 
 ## Done
 
@@ -38,3 +40,4 @@ Don't forget to update PRD when adding features
   - [X] Feedback : the default command could be set to a certain mode (e.g. instead of having the define the default command + the dev mode command, we could just define the dev mode command and set it as default, but we could also have a default command that is not linked to any mode)
   - [X] Feedback : should be able to run all project services using a specific mode (e.g. run all services in dev mode).
 - [X] Add extra command line arguments support (e.g. for variables, env variables, etc...)
+- [X] Multiple terminal panes support (each pane can have multiple terminal tabs)

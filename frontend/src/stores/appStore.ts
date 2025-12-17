@@ -37,6 +37,16 @@ interface ScriptRuntime {
   lastSuccess?: boolean;
 }
 
+// Terminal pane for multi-pane terminal view
+export interface TerminalPane {
+  id: string;                      // Unique pane ID
+  terminalIds: string[];           // Array of terminal IDs in this pane (the tabs)
+  activeTerminalId: string | null; // Which tab is currently visible in this pane
+  width: number;                   // Width as percentage (0-100), will be normalized
+}
+
+export type DragOverPosition = 'left' | 'center' | 'right' | null;
+
 // Strip ANSI escape codes and orphaned bracket sequences
 function stripAnsiCodes(str: string): string {
   // Remove proper ANSI escape codes (ESC [ ... m)
@@ -111,6 +121,12 @@ interface AppState {
   hiddenTerminalIds: Set<string>;
   closedTerminalIds: Set<string>;
 
+  // Multi-pane terminal state
+  terminalPanes: TerminalPane[];
+  focusedPaneId: string | null;
+  dragOverPaneId: string | null;
+  dragOverPosition: DragOverPosition;
+
   // Actions - Projects
   loadProjects: () => Promise<void>;
   createProject: (input: CreateProjectInput) => Promise<Project>;
@@ -150,6 +166,7 @@ interface AppState {
 
   // Actions - Terminal visibility
   hideTerminal: (serviceId: string) => void;
+  hideScriptTerminal: (scriptId: string) => void;
   showTerminal: (serviceId: string) => void;
   showScriptTerminal: (scriptId: string) => void;
   closeTerminal: (serviceId: string) => void;
@@ -174,6 +191,18 @@ interface AppState {
   setActiveTerminalServiceId: (serviceId: string | null) => void;
   setActiveTerminalScriptId: (scriptId: string | null) => void;
   setTerminalHeight: (height: number) => void;
+
+  // Actions - Multi-pane terminal
+  addPane: (position: 'left' | 'right', referenceId?: string) => string;
+  removePane: (paneId: string) => void;
+  setActiveTerminalInPane: (paneId: string, terminalId: string | null) => void;
+  addTerminalToPane: (paneId: string, terminalId: string) => void;
+  removeTerminalFromPane: (paneId: string, terminalId: string) => void;
+  moveTerminalToPane: (terminalId: string, targetPaneId: string) => void;
+  reorderTerminalInPane: (paneId: string, terminalId: string, newIndex: number) => void;
+  focusPane: (paneId: string) => void;
+  resizePanes: (paneWidths: { id: string; width: number }[]) => void;
+  setDragOverState: (paneId: string | null, position: DragOverPosition) => void;
 }
 
 export const useAppStore = create<AppState>((set, _get) => ({
@@ -194,6 +223,12 @@ export const useAppStore = create<AppState>((set, _get) => ({
   activeTerminalScriptId: null,
   hiddenTerminalIds: new Set(),
   closedTerminalIds: new Set(),
+
+  // Multi-pane terminal initial state
+  terminalPanes: [{ id: 'default', terminalIds: [], activeTerminalId: null, width: 100 }],
+  focusedPaneId: 'default',
+  dragOverPaneId: null,
+  dragOverPosition: null,
 
   // Project actions
   loadProjects: async () => {
@@ -305,17 +340,42 @@ export const useAppStore = create<AppState>((set, _get) => ({
       await api.runScript(scriptId);
       // Status will be updated via events
       // Unhide terminal if hidden and remove from closed
+      // Add terminal to focused pane's tabs
       set((state) => {
         const hidden = new Set(state.hiddenTerminalIds);
         hidden.delete(scriptId);
         const closed = new Set(state.closedTerminalIds);
         closed.delete(scriptId);
+
+        // Add terminal to focused pane (or first pane if none focused)
+        const terminalId = `script:${scriptId}`;
+        let terminalPanes = state.terminalPanes;
+        const isAlreadyInAnyPane = terminalPanes.some(p => p.terminalIds.includes(terminalId));
+
+        if (!isAlreadyInAnyPane) {
+          // Add to focused pane, or first pane
+          const targetPaneId = state.focusedPaneId || terminalPanes[0].id;
+          terminalPanes = terminalPanes.map(p =>
+            p.id === targetPaneId
+              ? { ...p, terminalIds: [...p.terminalIds, terminalId], activeTerminalId: terminalId }
+              : p
+          );
+        } else {
+          // Terminal already in a pane, just make it active in that pane
+          terminalPanes = terminalPanes.map(p =>
+            p.terminalIds.includes(terminalId)
+              ? { ...p, activeTerminalId: terminalId }
+              : p
+          );
+        }
+
         return {
           terminalPanelOpen: true,
           activeTerminalScriptId: scriptId,
           activeTerminalServiceId: null, // Clear service selection
           hiddenTerminalIds: hidden,
           closedTerminalIds: closed,
+          terminalPanes,
         };
       });
     } catch (error) {
@@ -383,17 +443,42 @@ export const useAppStore = create<AppState>((set, _get) => ({
       await api.startIntegratedService(serviceId, mode, argPreset);
       // Status will be updated via events
       // Also unhide terminal if it was hidden and remove from closed
+      // Add terminal to focused pane's tabs
       set((state) => {
         const hidden = new Set(state.hiddenTerminalIds);
         hidden.delete(serviceId);
         const closed = new Set(state.closedTerminalIds);
         closed.delete(serviceId);
+
+        // Add terminal to focused pane (or first pane if none focused)
+        const terminalId = `service:${serviceId}`;
+        let terminalPanes = state.terminalPanes;
+        const isAlreadyInAnyPane = terminalPanes.some(p => p.terminalIds.includes(terminalId));
+
+        if (!isAlreadyInAnyPane) {
+          // Add to focused pane, or first pane
+          const targetPaneId = state.focusedPaneId || terminalPanes[0].id;
+          terminalPanes = terminalPanes.map(p =>
+            p.id === targetPaneId
+              ? { ...p, terminalIds: [...p.terminalIds, terminalId], activeTerminalId: terminalId }
+              : p
+          );
+        } else {
+          // Terminal already in a pane, just make it active in that pane
+          terminalPanes = terminalPanes.map(p =>
+            p.terminalIds.includes(terminalId)
+              ? { ...p, activeTerminalId: terminalId }
+              : p
+          );
+        }
+
         return {
           terminalPanelOpen: true,
           activeTerminalServiceId: serviceId,
           activeTerminalScriptId: null, // Clear script selection
           hiddenTerminalIds: hidden,
           closedTerminalIds: closed,
+          terminalPanes,
         };
       });
     } catch (error) {
@@ -485,6 +570,37 @@ export const useAppStore = create<AppState>((set, _get) => ({
     set((state) => {
       const hidden = new Set(state.hiddenTerminalIds);
       hidden.add(serviceId);
+
+      // Remove from any pane's terminalIds
+      const terminalId = `service:${serviceId}`;
+      let terminalPanes = state.terminalPanes.map((p) => {
+        if (p.terminalIds.includes(terminalId)) {
+          const newIds = p.terminalIds.filter((id) => id !== terminalId);
+          return {
+            ...p,
+            terminalIds: newIds,
+            activeTerminalId: p.activeTerminalId === terminalId
+              ? (newIds[0] || null)
+              : p.activeTerminalId,
+          };
+        }
+        return p;
+      });
+
+      // Auto-close empty panes (if more than one pane exists)
+      if (terminalPanes.length > 1) {
+        const emptyPanes = terminalPanes.filter(p => p.terminalIds.length === 0);
+        if (emptyPanes.length > 0) {
+          terminalPanes = terminalPanes.filter(p => p.terminalIds.length > 0);
+          // Redistribute width proportionally
+          const totalWidth = terminalPanes.reduce((sum, p) => sum + p.width, 0);
+          terminalPanes = terminalPanes.map(p => ({
+            ...p,
+            width: (p.width / totalWidth) * 100,
+          }));
+        }
+      }
+
       // If hiding the active terminal, switch to another visible one or null
       let newActiveId = state.activeTerminalServiceId;
       if (state.activeTerminalServiceId === serviceId) {
@@ -499,7 +615,74 @@ export const useAppStore = create<AppState>((set, _get) => ({
           newActiveId = null;
         }
       }
-      return { hiddenTerminalIds: hidden, activeTerminalServiceId: newActiveId };
+
+      // Update focused pane if the focused pane was removed
+      let newFocusedPaneId = state.focusedPaneId;
+      if (newFocusedPaneId && !terminalPanes.find(p => p.id === newFocusedPaneId)) {
+        newFocusedPaneId = terminalPanes[0]?.id || null;
+      }
+
+      return { hiddenTerminalIds: hidden, activeTerminalServiceId: newActiveId, terminalPanes, focusedPaneId: newFocusedPaneId };
+    });
+  },
+
+  hideScriptTerminal: (scriptId) => {
+    set((state) => {
+      const hidden = new Set(state.hiddenTerminalIds);
+      hidden.add(scriptId);
+
+      // Remove from any pane's terminalIds
+      const terminalId = `script:${scriptId}`;
+      let terminalPanes = state.terminalPanes.map((p) => {
+        if (p.terminalIds.includes(terminalId)) {
+          const newIds = p.terminalIds.filter((id) => id !== terminalId);
+          return {
+            ...p,
+            terminalIds: newIds,
+            activeTerminalId: p.activeTerminalId === terminalId
+              ? (newIds[0] || null)
+              : p.activeTerminalId,
+          };
+        }
+        return p;
+      });
+
+      // Auto-close empty panes (if more than one pane exists)
+      if (terminalPanes.length > 1) {
+        const emptyPanes = terminalPanes.filter(p => p.terminalIds.length === 0);
+        if (emptyPanes.length > 0) {
+          terminalPanes = terminalPanes.filter(p => p.terminalIds.length > 0);
+          // Redistribute width proportionally
+          const totalWidth = terminalPanes.reduce((sum, p) => sum + p.width, 0);
+          terminalPanes = terminalPanes.map(p => ({
+            ...p,
+            width: (p.width / totalWidth) * 100,
+          }));
+        }
+      }
+
+      // If hiding the active terminal, switch to another visible one or null
+      let newActiveScriptId = state.activeTerminalScriptId;
+      if (state.activeTerminalScriptId === scriptId) {
+        // Find first visible script terminal
+        for (const [id, runtime] of state.scriptRuntimes) {
+          if (!hidden.has(id) && (runtime.logs.length > 0 || runtime.status !== 'idle')) {
+            newActiveScriptId = id;
+            break;
+          }
+        }
+        if (newActiveScriptId === scriptId) {
+          newActiveScriptId = null;
+        }
+      }
+
+      // Update focused pane if the focused pane was removed
+      let newFocusedPaneId = state.focusedPaneId;
+      if (newFocusedPaneId && !terminalPanes.find(p => p.id === newFocusedPaneId)) {
+        newFocusedPaneId = terminalPanes[0]?.id || null;
+      }
+
+      return { hiddenTerminalIds: hidden, activeTerminalScriptId: newActiveScriptId, terminalPanes, focusedPaneId: newFocusedPaneId };
     });
   },
 
@@ -507,11 +690,35 @@ export const useAppStore = create<AppState>((set, _get) => ({
     set((state) => {
       const hidden = new Set(state.hiddenTerminalIds);
       hidden.delete(serviceId);
+
+      // Add terminal to focused pane's tabs
+      const terminalId = `service:${serviceId}`;
+      let terminalPanes = state.terminalPanes;
+      const isAlreadyInAnyPane = terminalPanes.some(p => p.terminalIds.includes(terminalId));
+
+      if (!isAlreadyInAnyPane) {
+        // Add to focused pane, or first pane
+        const targetPaneId = state.focusedPaneId || terminalPanes[0].id;
+        terminalPanes = terminalPanes.map(p =>
+          p.id === targetPaneId
+            ? { ...p, terminalIds: [...p.terminalIds, terminalId], activeTerminalId: terminalId }
+            : p
+        );
+      } else {
+        // Terminal already in a pane, just make it active
+        terminalPanes = terminalPanes.map(p =>
+          p.terminalIds.includes(terminalId)
+            ? { ...p, activeTerminalId: terminalId }
+            : p
+        );
+      }
+
       return {
         hiddenTerminalIds: hidden,
         activeTerminalServiceId: serviceId,
         activeTerminalScriptId: null,
         terminalPanelOpen: true,
+        terminalPanes,
       };
     });
   },
@@ -520,11 +727,35 @@ export const useAppStore = create<AppState>((set, _get) => ({
     set((state) => {
       const hidden = new Set(state.hiddenTerminalIds);
       hidden.delete(scriptId);
+
+      // Add terminal to focused pane's tabs
+      const terminalId = `script:${scriptId}`;
+      let terminalPanes = state.terminalPanes;
+      const isAlreadyInAnyPane = terminalPanes.some(p => p.terminalIds.includes(terminalId));
+
+      if (!isAlreadyInAnyPane) {
+        // Add to focused pane, or first pane
+        const targetPaneId = state.focusedPaneId || terminalPanes[0].id;
+        terminalPanes = terminalPanes.map(p =>
+          p.id === targetPaneId
+            ? { ...p, terminalIds: [...p.terminalIds, terminalId], activeTerminalId: terminalId }
+            : p
+        );
+      } else {
+        // Terminal already in a pane, just make it active
+        terminalPanes = terminalPanes.map(p =>
+          p.terminalIds.includes(terminalId)
+            ? { ...p, activeTerminalId: terminalId }
+            : p
+        );
+      }
+
       return {
         hiddenTerminalIds: hidden,
         activeTerminalScriptId: scriptId,
         activeTerminalServiceId: null,
         terminalPanelOpen: true,
+        terminalPanes,
       };
     });
   },
@@ -717,5 +948,233 @@ export const useAppStore = create<AppState>((set, _get) => ({
     // Clamp height between 100px and 600px
     const clampedHeight = Math.min(Math.max(height, 100), 600);
     set({ terminalHeight: clampedHeight });
+  },
+
+  // Multi-pane terminal actions
+  addPane: (position, referenceId) => {
+    const newPaneId = `pane-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    set((state) => {
+      const panes = [...state.terminalPanes];
+      const referenceIndex = referenceId
+        ? panes.findIndex((p) => p.id === referenceId)
+        : position === 'right' ? panes.length - 1 : 0;
+
+      if (referenceIndex === -1) {
+        // Reference not found, add to end
+        panes.push({ id: newPaneId, terminalIds: [], activeTerminalId: null, width: 50 });
+      } else {
+        // Calculate new widths - split reference pane's width
+        const refPane = panes[referenceIndex];
+        const newWidth = refPane.width / 2;
+        refPane.width = newWidth;
+
+        const newPane: TerminalPane = { id: newPaneId, terminalIds: [], activeTerminalId: null, width: newWidth };
+
+        if (position === 'left') {
+          panes.splice(referenceIndex, 0, newPane);
+        } else {
+          panes.splice(referenceIndex + 1, 0, newPane);
+        }
+      }
+
+      return { terminalPanes: panes, focusedPaneId: newPaneId };
+    });
+
+    return newPaneId;
+  },
+
+  removePane: (paneId) => {
+    set((state) => {
+      const panes = state.terminalPanes;
+      if (panes.length <= 1) return state; // Can't remove last pane
+
+      const index = panes.findIndex((p) => p.id === paneId);
+      if (index === -1) return state;
+
+      const removedPane = panes[index];
+      const removedWidth = removedPane.width;
+
+      // Move terminals from removed pane to adjacent pane
+      const adjacentIndex = index === 0 ? 1 : index - 1;
+      const adjacentPane = panes[adjacentIndex];
+
+      const newPanes = panes.filter((p) => p.id !== paneId).map((p) => {
+        if (p.id === adjacentPane.id) {
+          return {
+            ...p,
+            terminalIds: [...p.terminalIds, ...removedPane.terminalIds],
+            activeTerminalId: p.activeTerminalId || removedPane.activeTerminalId,
+          };
+        }
+        return p;
+      });
+
+      // Redistribute width to remaining panes proportionally
+      const totalRemainingWidth = newPanes.reduce((sum, p) => sum + p.width, 0);
+      newPanes.forEach((p) => {
+        p.width = p.width + (removedWidth * p.width / totalRemainingWidth);
+      });
+
+      // Update focused pane if needed
+      let newFocusedId = state.focusedPaneId;
+      if (newFocusedId === paneId) {
+        newFocusedId = newPanes[Math.min(index, newPanes.length - 1)].id;
+      }
+
+      return { terminalPanes: newPanes, focusedPaneId: newFocusedId };
+    });
+  },
+
+  setActiveTerminalInPane: (paneId, terminalId) => {
+    set((state) => {
+      const panes = state.terminalPanes.map((p) =>
+        p.id === paneId ? { ...p, activeTerminalId: terminalId } : p
+      );
+      return { terminalPanes: panes, focusedPaneId: paneId };
+    });
+  },
+
+  addTerminalToPane: (paneId, terminalId) => {
+    set((state) => {
+      const panes = state.terminalPanes.map((p) => {
+        if (p.id === paneId && !p.terminalIds.includes(terminalId)) {
+          return {
+            ...p,
+            terminalIds: [...p.terminalIds, terminalId],
+            activeTerminalId: terminalId,
+          };
+        }
+        return p;
+      });
+      return { terminalPanes: panes, focusedPaneId: paneId };
+    });
+  },
+
+  removeTerminalFromPane: (paneId, terminalId) => {
+    set((state) => {
+      let panes = state.terminalPanes.map((p) => {
+        if (p.id === paneId) {
+          const newIds = p.terminalIds.filter((id) => id !== terminalId);
+          return {
+            ...p,
+            terminalIds: newIds,
+            activeTerminalId: p.activeTerminalId === terminalId
+              ? (newIds[0] || null)
+              : p.activeTerminalId,
+          };
+        }
+        return p;
+      });
+
+      // Auto-close empty panes (if more than one pane exists)
+      if (panes.length > 1) {
+        const emptyPane = panes.find(p => p.id === paneId && p.terminalIds.length === 0);
+        if (emptyPane) {
+          // Remove the empty pane and redistribute width
+          const emptyIndex = panes.findIndex(p => p.id === paneId);
+          const adjacentIndex = emptyIndex > 0 ? emptyIndex - 1 : emptyIndex + 1;
+          const adjacentPane = panes[adjacentIndex];
+
+          if (adjacentPane) {
+            panes = panes.filter(p => p.id !== paneId);
+            // Redistribute width proportionally
+            const totalWidth = panes.reduce((sum, p) => sum + p.width, 0);
+            panes = panes.map(p => ({
+              ...p,
+              width: (p.width / totalWidth) * 100,
+            }));
+          }
+        }
+      }
+
+      return { terminalPanes: panes };
+    });
+  },
+
+  moveTerminalToPane: (terminalId, targetPaneId) => {
+    set((state) => {
+      let sourcePaneId: string | null = null;
+
+      let panes = state.terminalPanes.map((p) => {
+        // Remove from source pane
+        if (p.terminalIds.includes(terminalId) && p.id !== targetPaneId) {
+          sourcePaneId = p.id;
+          const newIds = p.terminalIds.filter((id) => id !== terminalId);
+          return {
+            ...p,
+            terminalIds: newIds,
+            activeTerminalId: p.activeTerminalId === terminalId
+              ? (newIds[0] || null)
+              : p.activeTerminalId,
+          };
+        }
+        // Add to target pane
+        if (p.id === targetPaneId && !p.terminalIds.includes(terminalId)) {
+          return {
+            ...p,
+            terminalIds: [...p.terminalIds, terminalId],
+            activeTerminalId: terminalId,
+          };
+        }
+        return p;
+      });
+
+      // Auto-close empty source pane (if more than one pane exists)
+      if (panes.length > 1 && sourcePaneId) {
+        const emptyPane = panes.find(p => p.id === sourcePaneId && p.terminalIds.length === 0);
+        if (emptyPane) {
+          panes = panes.filter(p => p.id !== sourcePaneId);
+          // Redistribute width proportionally
+          const totalWidth = panes.reduce((sum, p) => sum + p.width, 0);
+          panes = panes.map(p => ({
+            ...p,
+            width: (p.width / totalWidth) * 100,
+          }));
+        }
+      }
+
+      return { terminalPanes: panes, focusedPaneId: targetPaneId };
+    });
+  },
+
+  reorderTerminalInPane: (paneId, terminalId, newIndex) => {
+    set((state) => {
+      const panes = state.terminalPanes.map((p) => {
+        if (p.id === paneId) {
+          const oldIndex = p.terminalIds.indexOf(terminalId);
+          if (oldIndex !== -1 && oldIndex !== newIndex) {
+            const newIds = [...p.terminalIds];
+            newIds.splice(oldIndex, 1);
+            newIds.splice(newIndex, 0, terminalId);
+            return { ...p, terminalIds: newIds };
+          }
+        }
+        return p;
+      });
+      return { terminalPanes: panes };
+    });
+  },
+
+  focusPane: (paneId) => {
+    set({ focusedPaneId: paneId });
+  },
+
+  resizePanes: (paneWidths) => {
+    set((state) => {
+      const panes = state.terminalPanes.map((p) => {
+        const newWidth = paneWidths.find((w) => w.id === p.id);
+        if (newWidth) {
+          // Enforce minimum width of 15%
+          return { ...p, width: Math.max(newWidth.width, 15) };
+        }
+        return p;
+      });
+      return { terminalPanes: panes };
+    });
+  },
+
+  setDragOverState: (paneId, position) => {
+    set({ dragOverPaneId: paneId, dragOverPosition: position });
   },
 }));
