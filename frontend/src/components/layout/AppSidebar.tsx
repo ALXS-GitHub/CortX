@@ -13,12 +13,12 @@ import {
   SidebarMenuSub,
   SidebarMenuSubItem,
   SidebarMenuSubButton,
+  useSidebar,
 } from '@/components/ui/sidebar';
 import { useAppStore } from '@/stores/appStore';
 import { LayoutDashboard, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { View, ServiceStatus, ScriptStatus } from '@/types';
-import { Button } from '@/components/ui/button';
 import { getVersion } from '@tauri-apps/api/app';
 
 // Minimized terminal bar height
@@ -26,6 +26,8 @@ const MINIMIZED_TERMINAL_HEIGHT = 32;
 
 export function AppSidebar() {
   const [appVersion, setAppVersion] = useState<string>('');
+  const { state: sidebarState } = useSidebar();
+  const isCollapsed = sidebarState === 'collapsed';
 
   const {
     currentView,
@@ -175,14 +177,16 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" className="gap-3" tooltip="Cortx">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg overflow-hidden">
+            <SidebarMenuButton size="lg" className={cn("gap-3", isCollapsed && "justify-center")} tooltip="Cortx">
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg overflow-hidden flex-shrink-0">
                 <img src="/cortx-logo.png" alt="Cortx" className="size-8 object-contain" />
               </div>
-              <div className="flex flex-col gap-0.5 leading-none">
-                <span className="font-semibold">Cortx</span>
-                {appVersion && <span className="text-xs text-muted-foreground">v{appVersion}</span>}
-              </div>
+              {!isCollapsed && (
+                <div className="flex flex-col gap-0.5 leading-none">
+                  <span className="font-semibold">Cortx</span>
+                  {appVersion && <span className="text-xs text-muted-foreground">v{appVersion}</span>}
+                </div>
+              )}
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -295,37 +299,40 @@ export function AppSidebar() {
                       {/* Project action buttons - visible on hover */}
                       <div className="hidden group-hover/project:flex items-center gap-0.5">
                         {hasStopped && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-5 p-0 hover:bg-green-500/20 hover:text-green-500"
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            className="size-5 p-0 flex items-center justify-center rounded hover:bg-green-500/20 hover:text-green-500 cursor-pointer"
                             onClick={handleStartAll}
+                            onKeyDown={(e) => e.key === 'Enter' && handleStartAll(e as unknown as React.MouseEvent)}
                             title="Start all services"
                           >
                             <Play className="size-3" />
-                          </Button>
+                          </div>
                         )}
                         {hasRunning && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                             onClick={handleStopAll}
+                            onKeyDown={(e) => e.key === 'Enter' && handleStopAll(e as unknown as React.MouseEvent)}
                             title="Stop all services"
                           >
                             <Square className="size-3" />
-                          </Button>
+                          </div>
                         )}
                         {allStopped && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                             onClick={handleCloseAll}
+                            onKeyDown={(e) => e.key === 'Enter' && handleCloseAll(e as unknown as React.MouseEvent)}
                             title="Close all terminals"
                           >
                             <X className="size-3" />
-                          </Button>
+                          </div>
                         )}
                       </div>
                     </SidebarMenuButton>
@@ -354,44 +361,47 @@ export function AppSidebar() {
                             {/* Action buttons - visible on hover */}
                             <div className="hidden group-hover/service:flex items-center gap-0.5 ml-1">
                               {status === 'running' ? (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     stopService(serviceId);
                                   }}
+                                  onKeyDown={(e) => e.key === 'Enter' && stopService(serviceId)}
                                   title="Stop service"
                                 >
                                   <Square className="size-3" />
-                                </Button>
+                                </div>
                               ) : (
                                 <>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="size-5 p-0 hover:bg-green-500/20 hover:text-green-500"
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    className="size-5 p-0 flex items-center justify-center rounded hover:bg-green-500/20 hover:text-green-500 cursor-pointer"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       startService(serviceId);
                                     }}
+                                    onKeyDown={(e) => e.key === 'Enter' && startService(serviceId)}
                                     title="Start service"
                                   >
                                     <Play className="size-3" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                                  </div>
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       closeTerminal(serviceId);
                                     }}
+                                    onKeyDown={(e) => e.key === 'Enter' && closeTerminal(serviceId)}
                                     title="Close terminal"
                                   >
                                     <X className="size-3" />
-                                  </Button>
+                                  </div>
                                 </>
                               )}
                             </div>
@@ -449,26 +459,28 @@ export function AppSidebar() {
                       {/* Project action buttons - visible on hover */}
                       <div className="hidden group-hover/project:flex items-center gap-0.5">
                         {hasRunning && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                             onClick={handleStopAllScripts}
+                            onKeyDown={(e) => e.key === 'Enter' && handleStopAllScripts(e as unknown as React.MouseEvent)}
                             title="Stop all scripts"
                           >
                             <Square className="size-3" />
-                          </Button>
+                          </div>
                         )}
                         {allStopped && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                             onClick={handleCloseAllScripts}
+                            onKeyDown={(e) => e.key === 'Enter' && handleCloseAllScripts(e as unknown as React.MouseEvent)}
                             title="Close all script terminals"
                           >
                             <X className="size-3" />
-                          </Button>
+                          </div>
                         )}
                       </div>
                     </SidebarMenuButton>
@@ -508,44 +520,47 @@ export function AppSidebar() {
                             {/* Action buttons - visible on hover */}
                             <div className="hidden group-hover/script:flex items-center gap-0.5 ml-1">
                               {isRunning ? (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     stopScript(scriptId);
                                   }}
+                                  onKeyDown={(e) => e.key === 'Enter' && stopScript(scriptId)}
                                   title="Stop script"
                                 >
                                   <Square className="size-3" />
-                                </Button>
+                                </div>
                               ) : (
                                 <>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="size-5 p-0 hover:bg-blue-500/20 hover:text-blue-500"
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    className="size-5 p-0 flex items-center justify-center rounded hover:bg-blue-500/20 hover:text-blue-500 cursor-pointer"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       runScript(scriptId);
                                     }}
+                                    onKeyDown={(e) => e.key === 'Enter' && runScript(scriptId)}
                                     title="Run script"
                                   >
                                     <Play className="size-3" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="size-5 p-0 hover:bg-destructive/20 hover:text-destructive"
+                                  </div>
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       closeScriptTerminal(scriptId);
                                     }}
+                                    onKeyDown={(e) => e.key === 'Enter' && closeScriptTerminal(scriptId)}
                                     title="Close terminal"
                                   >
                                     <X className="size-3" />
-                                  </Button>
+                                  </div>
                                 </>
                               )}
                             </div>
