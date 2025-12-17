@@ -32,12 +32,18 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { openInExplorer, openInVscode } from '@/lib/tauri';
 import type { Service, CreateServiceInput, UpdateServiceInput, UpdateProjectInput } from '@/types';
 import { toast } from 'sonner';
@@ -64,8 +70,10 @@ export function ProjectView() {
   const [showEditProject, setShowEditProject] = useState(false);
   const [showDeleteProject, setShowDeleteProject] = useState(false);
   // State for Start All mode/preset selection
+  // undefined = use default, null = explicitly none, string = use that value
   const [selectedModeForAll, setSelectedModeForAll] = useState<string | undefined>();
-  const [selectedPresetForAll, setSelectedPresetForAll] = useState<string | undefined>();
+  const [selectedPresetForAll, setSelectedPresetForAll] = useState<string | null | undefined>();
+  const [startAllPopoverOpen, setStartAllPopoverOpen] = useState(false);
 
   const project = projects.find((p) => p.id === selectedProjectId);
 
@@ -281,64 +289,87 @@ export function ProjectView() {
                       Stop All
                     </Button>
                   ) : (hasAnyModes || hasAnyPresets) ? (
-                    // Two separate dropdowns for mode and preset selection
-                    <div className="flex items-center gap-2">
-                      {hasAnyModes && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm">
-                              {selectedModeForAll || 'Mode'}
-                              <ChevronDown className="ml-1 size-3" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setSelectedModeForAll(undefined)}>
-                              Default
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            {allModeNames.map((modeName) => (
-                              <DropdownMenuItem
-                                key={modeName}
-                                onClick={() => setSelectedModeForAll(modeName)}
-                              >
-                                {modeName}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
-                      {hasAnyPresets && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm">
-                              {selectedPresetForAll || 'Preset'}
-                              <ChevronDown className="ml-1 size-3" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setSelectedPresetForAll(undefined)}>
-                              Default
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            {allPresetNames.map((presetName) => (
-                              <DropdownMenuItem
-                                key={presetName}
-                                onClick={() => setSelectedPresetForAll(presetName)}
-                              >
-                                {presetName}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
+                    // Popover modal for mode and preset selection
+                    <div className="flex items-center">
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleStartAll(selectedModeForAll, selectedPresetForAll)}
+                        className="rounded-r-none border-r-0"
+                        onClick={() => handleStartAll()}
                       >
                         <Play className="size-4 mr-2" />
                         Start All
                       </Button>
+                      <Popover open={startAllPopoverOpen} onOpenChange={setStartAllPopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-l-none px-2"
+                          >
+                            <ChevronDown className="size-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-56 p-3">
+                          <div className="space-y-3">
+                            {hasAnyModes && (
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Mode</Label>
+                                <Select
+                                  value={selectedModeForAll || '_default'}
+                                  onValueChange={(v) => setSelectedModeForAll(v === '_default' ? undefined : v)}
+                                >
+                                  <SelectTrigger className="h-8">
+                                    <SelectValue placeholder="Select mode" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="_default">Default</SelectItem>
+                                    {allModeNames.map((name) => (
+                                      <SelectItem key={name} value={name}>
+                                        {name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                            {hasAnyPresets && (
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Preset</Label>
+                                <Select
+                                  value={selectedPresetForAll === null ? '_none' : selectedPresetForAll || '_default'}
+                                  onValueChange={(v) => setSelectedPresetForAll(v === '_default' ? undefined : v === '_none' ? null : v)}
+                                >
+                                  <SelectTrigger className="h-8">
+                                    <SelectValue placeholder="Select preset" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="_default">Default</SelectItem>
+                                    <SelectItem value="_none">None</SelectItem>
+                                    {allPresetNames.map((name) => (
+                                      <SelectItem key={name} value={name}>
+                                        {name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                            <Button
+                              size="sm"
+                              className="w-full"
+                              onClick={() => {
+                                // null means "None" (pass empty string to skip default), undefined means "Default"
+                                handleStartAll(selectedModeForAll, selectedPresetForAll === null ? '' : selectedPresetForAll);
+                                setStartAllPopoverOpen(false);
+                              }}
+                            >
+                              <Play className="size-3.5 mr-2" />
+                              Start All
+                            </Button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     </div>
                   ) : (
                     <Button variant="outline" size="sm" onClick={() => handleStartAll()}>
