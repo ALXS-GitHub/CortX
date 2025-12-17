@@ -2,9 +2,14 @@
 
 Don't forget to update PRD when adding features
 
+- [ ] When multiple terminal are open, there is a bug when we click to switch between them, fix this (some terminals won't switch properly)
+- [ ] remove the trailing './' for the path display of a service (between root project and service path) e.g. Path: C:/Users/alxsm/Desktop/Programmes/Perso/My-Journal/./frontend
+- [ ] Running some services crash the app (e.g. investigate with the particle simulator rust service)
+- [ ] Fix the console errors (devtools), even if they don't seem to impact the app, they are still present and should be fixed
 - [ ] Add modes for the services (e.g. dev, prod, test, etc...) we can have modes for each service and the possibility to run all services / individual services in a specific mode
 - [ ] split terminal view to have multiple terminals visible at the same time (only horizontal split for now is fine)
 - [ ] sidebar should be resizable (when opened, and remember size for next time)
+
 
 ## Done
 

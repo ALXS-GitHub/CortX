@@ -1,6 +1,6 @@
 [package]
 name = "cortx"
-version = "0.2.0"
+version = "0.3.0"
 description = "Cortx - A dashboard for managing local dev applications"
 authors = ["ALXS-GitHub"]
 license = ""
