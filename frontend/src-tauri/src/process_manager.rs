@@ -18,6 +18,7 @@ pub struct ProcessInfo {
     pub child: Child,
     pub service_id: String,
     pub pid: u32,
+    pub active_mode: Option<String>,
 }
 
 pub struct ProcessManager {
@@ -47,6 +48,7 @@ impl ProcessManager {
         working_dir: String,
         command: String,
         env_vars: Option<HashMap<String, String>>,
+        mode: Option<String>,
     ) -> Result<u32, String> {
         // Check if already running
         {
@@ -63,6 +65,7 @@ impl ProcessManager {
                 service_id: service_id.clone(),
                 status: ServiceStatus::Starting,
                 pid: None,
+                active_mode: mode.clone(),
             },
         );
 
@@ -150,6 +153,7 @@ impl ProcessManager {
                     child,
                     service_id: service_id.clone(),
                     pid,
+                    active_mode: mode.clone(),
                 },
             );
         }
@@ -161,6 +165,7 @@ impl ProcessManager {
                 service_id: service_id.clone(),
                 status: ServiceStatus::Running,
                 pid: Some(pid),
+                active_mode: mode.clone(),
             },
         );
 
@@ -168,6 +173,7 @@ impl ProcessManager {
         let processes = self.processes.clone();
         let shutdown_flag = self.shutdown_flag.clone();
         let service_id_exit = service_id.clone();
+        let exit_mode = mode.clone();
         thread::spawn(move || {
             // Wait for the process to exit
             loop {
@@ -216,6 +222,7 @@ impl ProcessManager {
                                 service_id: service_id_exit.clone(),
                                 status: ServiceStatus::Stopped,
                                 pid: None,
+                                active_mode: exit_mode.clone(),
                             },
                         );
 
@@ -240,6 +247,8 @@ impl ProcessManager {
         let mut processes = self.processes.lock();
 
         if let Some(mut info) = processes.remove(service_id) {
+            let stopped_mode = info.active_mode.clone();
+
             // Kill the entire process tree (including child processes)
             let _ = kill_process_tree(info.pid);
             // Also try to kill and wait on the child handle for cleanup
@@ -253,6 +262,7 @@ impl ProcessManager {
                     service_id: service_id.to_string(),
                     status: ServiceStatus::Stopped,
                     pid: None,
+                    active_mode: stopped_mode,
                 },
             );
 
@@ -449,6 +459,7 @@ impl ProcessManager {
                     child,
                     service_id: script_id.clone(), // Reusing service_id field for script_id
                     pid,
+                    active_mode: None, // Scripts don't have modes
                 },
             );
         }

@@ -161,6 +161,7 @@ interface TerminalItem {
   status: ServiceStatus | ScriptStatus;
   logs: LogEntry[];
   detectedPort?: number;
+  activeMode?: string;
   lastExitCode?: number;
   lastSuccess?: boolean;
 }
@@ -291,6 +292,7 @@ export function TerminalPanel() {
         status: runtime.status,
         logs: runtime.logs,
         detectedPort: runtime.detectedPort,
+        activeMode: runtime.activeMode,
       });
     }
 
@@ -613,7 +615,10 @@ export function TerminalPanel() {
                 <StatusIndicator status={item.status} type={item.type} />
                 <span className="text-xs">
                   {item.name}
-                  {item.projectName && (
+                  {item.activeMode && (
+                    <span className="text-muted-foreground ml-1">({item.activeMode})</span>
+                  )}
+                  {item.projectName && !item.activeMode && (
                     <span className="text-muted-foreground ml-1">({item.projectName})</span>
                   )}
                 </span>

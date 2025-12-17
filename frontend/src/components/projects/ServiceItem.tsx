@@ -6,6 +6,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Service } from '@/types';
@@ -16,6 +17,7 @@ import {
   ExternalLink,
   MoreVertical,
   Terminal,
+  ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
@@ -44,11 +46,15 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
   const status = runtime?.status || 'stopped';
   const isRunning = status === 'running';
   const isStarting = status === 'starting';
+  const activeMode = runtime?.activeMode;
+  const hasModes = service.modes && Object.keys(service.modes).length > 0;
+  const modeNames = hasModes ? Object.keys(service.modes!) : [];
 
-  const handleStart = async () => {
+  const handleStart = async (mode?: string) => {
     try {
-      await startService(service.id);
-      toast.success(`Started ${service.name}`);
+      await startService(service.id, mode);
+      const modeLabel = mode ? ` (${mode})` : '';
+      toast.success(`Started ${service.name}${modeLabel}`);
     } catch (error) {
       toast.error(`Failed to start ${service.name}: ${error}`);
     }
@@ -109,7 +115,7 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="font-medium">{service.name}</h3>
-              <StatusBadge status={status} />
+              <StatusBadge status={status} activeMode={activeMode} />
             </div>
             <div className="mt-1 space-y-0.5 text-xs text-muted-foreground font-mono">
               <p className="truncate">Path: {fullPath}</p>
@@ -174,13 +180,56 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
                   <TooltipContent>Stop service</TooltipContent>
                 </Tooltip>
               </>
+            ) : hasModes ? (
+              // Split button with modes dropdown
+              <div className="flex items-center">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="default"
+                      size="icon-sm"
+                      className="rounded-r-none border-r-0"
+                      onClick={() => handleStart()}
+                    >
+                      <Play className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Start with default command</TooltipContent>
+                </Tooltip>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="default"
+                      size="icon-sm"
+                      className="rounded-l-none px-1.5"
+                    >
+                      <ChevronDown className="size-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleStart()}>
+                      Default
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    {modeNames.map((modeName) => (
+                      <DropdownMenuItem
+                        key={modeName}
+                        onClick={() => handleStart(modeName)}
+                      >
+                        {modeName}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             ) : (
+              // Simple play button when no modes
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="default"
                     size="icon-sm"
-                    onClick={handleStart}
+                    onClick={() => handleStart()}
                   >
                     <Play className="size-3.5" />
                   </Button>
@@ -229,7 +278,7 @@ function StatusOverlay({ status }: { status: string }) {
   return null;
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, activeMode }: { status: string; activeMode?: string }) {
   const styles = {
     stopped: 'bg-muted text-muted-foreground',
     starting: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400',
@@ -244,6 +293,11 @@ function StatusBadge({ status }: { status: string }) {
     error: 'Error',
   };
 
+  const label = labels[status as keyof typeof labels] || 'Unknown';
+  const modeLabel = activeMode && (status === 'running' || status === 'starting')
+    ? ` (${activeMode})`
+    : '';
+
   return (
     <span
       className={cn(
@@ -251,7 +305,7 @@ function StatusBadge({ status }: { status: string }) {
         styles[status as keyof typeof styles] || styles.stopped
       )}
     >
-      {labels[status as keyof typeof labels] || 'Unknown'}
+      {label}{modeLabel}
     </span>
   );
 }

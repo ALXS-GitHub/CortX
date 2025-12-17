@@ -114,6 +114,8 @@ pub fn add_service(
     input: CreateServiceInput,
 ) -> Result<Service, String> {
     let mut service = Service::new(input.name, input.working_dir, input.command);
+    service.modes = input.modes;
+    service.default_mode = input.default_mode;
     service.color = input.color;
     service.port = input.port;
     service.env_vars = input.env_vars;
@@ -147,6 +149,10 @@ pub fn update_service(
             if let Some(command) = input.command {
                 service.command = command;
             }
+            // Always update modes and default_mode to allow clearing them
+            // The frontend sends these fields on every update
+            service.modes = input.modes;
+            service.default_mode = input.default_mode;
             if input.color.is_some() {
                 service.color = input.color;
             }
@@ -593,6 +599,7 @@ pub fn start_integrated_service(
     app_handle: AppHandle,
     state: State<AppState>,
     service_id: String,
+    mode: Option<String>,
 ) -> Result<u32, String> {
     let (project, service) = state
         .storage
@@ -606,12 +613,30 @@ pub fn start_integrated_service(
         path.to_string_lossy().to_string()
     };
 
+    // Resolve effective mode: explicit mode > default_mode > none
+    let effective_mode = mode.or_else(|| service.default_mode.clone());
+
+    // Resolve command based on effective mode
+    let command = if let Some(ref mode_name) = effective_mode {
+        // Try to get command from modes map
+        service
+            .modes
+            .as_ref()
+            .and_then(|modes| modes.get(mode_name))
+            .cloned()
+            .ok_or_else(|| format!("Mode '{}' not found for service", mode_name))?
+    } else {
+        // Use default command
+        service.command
+    };
+
     state.process_manager.start_service(
         app_handle,
         service_id,
         working_dir,
-        service.command,
+        command,
         service.env_vars,
+        effective_mode,
     )
 }
 

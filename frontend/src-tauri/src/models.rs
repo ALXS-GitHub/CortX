@@ -11,6 +11,10 @@ pub struct Service {
     pub working_dir: String,
     pub command: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub modes: Option<HashMap<String, String>>,  // Optional: { modeName: command }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_mode: Option<String>,  // If set, use this mode's command as default
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
@@ -26,6 +30,8 @@ impl Service {
             name,
             working_dir,
             command,
+            modes: None,
+            default_mode: None,
             color: None,
             port: None,
             env_vars: None,
@@ -322,6 +328,8 @@ pub struct CreateServiceInput {
     pub name: String,
     pub working_dir: String,
     pub command: String,
+    pub modes: Option<HashMap<String, String>>,
+    pub default_mode: Option<String>,
     pub color: Option<String>,
     pub port: Option<u16>,
     pub env_vars: Option<HashMap<String, String>>,
@@ -333,6 +341,8 @@ pub struct UpdateServiceInput {
     pub name: Option<String>,
     pub working_dir: Option<String>,
     pub command: Option<String>,
+    pub modes: Option<HashMap<String, String>>,
+    pub default_mode: Option<String>,
     pub color: Option<String>,
     pub port: Option<u16>,
     pub env_vars: Option<HashMap<String, String>>,
@@ -399,6 +409,7 @@ pub struct ServiceState {
     pub service_id: String,
     pub status: ServiceStatus,
     pub pid: Option<u32>,
+    pub active_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -432,6 +443,7 @@ pub struct ServiceStatusPayload {
     pub service_id: String,
     pub status: ServiceStatus,
     pub pid: Option<u32>,
+    pub active_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
