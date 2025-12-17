@@ -4,8 +4,7 @@ Don't forget to update PRD when adding features
 
 - [ ] Find if there is a better way to handle the port used detection (instead of parsing output, maybe use some library or other way to detect which ports are used by which process)
 - [ ] Adding message on close saying "closing running services" while it's closing them with a loading indicator
-- [ ] Fix the terminal scroll (there is no scroll anymore)
-  - [ ] Fix the scroll to bottom default behavior (again -> multiple panes might have messed this up)
+- [ ] Adjust the areas position for dropping a terminal in current pane / left / right (I feel like it's not really 25 % / 50 % / 25 % of the pane width right now, because there are some gaps)
 
 ## Done
 
@@ -41,3 +40,5 @@ Don't forget to update PRD when adding features
   - [X] Feedback : should be able to run all project services using a specific mode (e.g. run all services in dev mode).
 - [X] Add extra command line arguments support (e.g. for variables, env variables, etc...)
 - [X] Multiple terminal panes support (each pane can have multiple terminal tabs)
+- [X] Fix the terminal scroll (there is no scroll anymore)
+  - [X] Fix the scroll to bottom default behavior (again -> multiple panes might have messed this up)

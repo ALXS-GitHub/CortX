@@ -7,7 +7,7 @@ use commands::AppState;
 use process_manager::ProcessManager;
 use storage::Storage;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -55,9 +55,20 @@ pub fn run() {
 
                 // Spawn a thread to handle cleanup
                 std::thread::spawn(move || {
-                    // Get the process manager and stop all services
+                    // Get the process manager and check if there are running processes
                     if let Some(state) = app_handle.try_state::<AppState>() {
-                        log::info!("Window close requested - stopping all services...");
+                        let has_running = state.process_manager.has_running_processes();
+
+                        if has_running {
+                            // Emit event to frontend to show closing modal
+                            log::info!("Window close requested - notifying frontend of cleanup...");
+                            let _ = window_clone.emit("app-closing", true);
+
+                            // Small delay to let frontend show modal
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+
+                        log::info!("Stopping all services...");
                         state.process_manager.stop_all();
                         log::info!("All services stopped, closing window...");
                     }
