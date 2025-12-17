@@ -29,7 +29,15 @@ import {
   Terminal,
   FileKey,
   FileCode,
+  ChevronDown,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { openInExplorer, openInVscode } from '@/lib/tauri';
 import type { Service, CreateServiceInput, UpdateServiceInput, UpdateProjectInput } from '@/types';
 import { toast } from 'sonner';
@@ -123,19 +131,28 @@ export function ProjectView() {
     toast.success('Project deleted');
   };
 
-  const handleStartAll = async () => {
+  const handleStartAll = async (mode?: string) => {
     for (const service of project.services) {
       const runtime = serviceRuntimes.get(service.id);
       if (!runtime || runtime.status === 'stopped') {
         try {
-          await startService(service.id);
+          // Only pass mode if the service has this mode defined
+          const serviceHasMode = mode && service.modes && service.modes[mode];
+          await startService(service.id, serviceHasMode ? mode : undefined);
         } catch (error) {
           console.error(`Failed to start ${service.name}:`, error);
         }
       }
     }
-    toast.success('Started all services');
+    const modeLabel = mode ? ` in ${mode} mode` : '';
+    toast.success(`Started all services${modeLabel}`);
   };
+
+  // Collect all unique mode names across all services
+  const allModeNames = [...new Set(
+    project.services
+      .flatMap(s => s.modes ? Object.keys(s.modes) : [])
+  )].sort();
 
   const handleStopAll = async () => {
     for (const service of project.services) {
@@ -244,8 +261,46 @@ export function ProjectView() {
                       <Square className="size-4 mr-2" />
                       Stop All
                     </Button>
+                  ) : allModeNames.length > 0 ? (
+                    // Split button with mode dropdown
+                    <div className="flex items-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-r-none border-r-0"
+                        onClick={() => handleStartAll()}
+                      >
+                        <Play className="size-4 mr-2" />
+                        Start All
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-l-none px-2"
+                          >
+                            <ChevronDown className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleStartAll()}>
+                            Default (use service defaults)
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          {allModeNames.map((modeName) => (
+                            <DropdownMenuItem
+                              key={modeName}
+                              onClick={() => handleStartAll(modeName)}
+                            >
+                              Start all in "{modeName}" mode
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   ) : (
-                    <Button variant="outline" size="sm" onClick={handleStartAll}>
+                    <Button variant="outline" size="sm" onClick={() => handleStartAll()}>
                       <Play className="size-4 mr-2" />
                       Start All
                     </Button>

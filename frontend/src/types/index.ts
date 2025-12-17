@@ -3,6 +3,8 @@ export interface Service {
   name: string;
   workingDir: string;
   command: string;
+  modes?: Record<string, string>;  // Optional: { modeName: command }
+  defaultMode?: string;  // If set, use this mode's command as default when starting
   color?: string;
   port?: number;
   envVars?: Record<string, string>;
@@ -110,6 +112,7 @@ export interface ServiceState {
   serviceId: string;
   status: ServiceStatus;
   pid?: number;
+  activeMode?: string;  // Track which mode is running
 }
 
 export type LogStream = 'stdout' | 'stderr';
@@ -131,6 +134,7 @@ export interface ServiceStatusPayload {
   serviceId: string;
   status: ServiceStatus;
   pid?: number;
+  activeMode?: string;
 }
 
 export interface ServiceExitPayload {
@@ -178,6 +182,8 @@ export interface CreateServiceInput {
   name: string;
   workingDir: string;
   command: string;
+  modes?: Record<string, string>;
+  defaultMode?: string;
   color?: string;
   port?: number;
   envVars?: Record<string, string>;
@@ -187,6 +193,8 @@ export interface UpdateServiceInput {
   name?: string;
   workingDir?: string;
   command?: string;
+  modes?: Record<string, string>;
+  defaultMode?: string;
   color?: string;
   port?: number;
   envVars?: Record<string, string>;

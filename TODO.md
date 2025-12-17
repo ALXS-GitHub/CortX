@@ -2,7 +2,6 @@
 
 Don't forget to update PRD when adding features
 
-- [ ] Add modes for the services (e.g. dev, prod, test, etc...) we can have modes for each service and the possibility to run all services / individual services in a specific mode. mode is optional (eg if there is only a single mode defined). for each mode we can define a different command to run the service with that mode. When running the terminal should indicate the mode used (if any)
 - [ ] split terminal view to have multiple terminals visible at the same time (only horizontal split for now is fine)
 
 
@@ -35,3 +34,6 @@ Don't forget to update PRD when adding features
 - [X] Running some services crash the app (e.g. investigate with the particle simulator rust service)
 - [X] Fix the console errors (devtools), even if they don't seem to impact the app, they are still present and should be fixed
 - [X] sidebar should be resizable (when opened, and remember size for next time)
+- [X] Add modes for the services (e.g. dev, prod, test, etc...) we can have modes for each service and the possibility to run all services / individual services in a specific mode. mode is optional (eg if there is only a single mode defined). for each mode we can define a different command to run the service with that mode. When running the terminal should indicate the mode used (if any)
+  - [X] Feedback : the default command could be set to a certain mode (e.g. instead of having the define the default command + the dev mode command, we could just define the dev mode command and set it as default, but we could also have a default command that is not linked to any mode)
+  - [X] Feedback : should be able to run all project services using a specific mode (e.g. run all services in dev mode).

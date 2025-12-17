@@ -25,6 +25,7 @@ interface ServiceRuntime {
   pid?: number;
   logs: LogEntry[];
   detectedPort?: number;
+  activeMode?: string;
 }
 
 interface ScriptRuntime {
@@ -135,13 +136,13 @@ interface AppState {
   setScriptExitResult: (scriptId: string, exitCode?: number, success?: boolean) => void;
 
   // Actions - Launch
-  startService: (serviceId: string) => Promise<void>;
+  startService: (serviceId: string, mode?: string) => Promise<void>;
   stopService: (serviceId: string) => Promise<void>;
   copyLaunchCommand: (serviceId: string) => Promise<string>;
   launchExternal: (serviceId: string) => Promise<void>;
 
   // Actions - Runtime updates
-  updateServiceStatus: (serviceId: string, status: ServiceStatus, pid?: number) => void;
+  updateServiceStatus: (serviceId: string, status: ServiceStatus, pid?: number, activeMode?: string) => void;
   appendServiceLog: (serviceId: string, log: LogEntry) => void;
   clearServiceLogs: (serviceId: string) => void;
   closeAllTerminals: () => void;
@@ -376,9 +377,9 @@ export const useAppStore = create<AppState>((set, _get) => ({
   },
 
   // Launch actions
-  startService: async (serviceId) => {
+  startService: async (serviceId, mode) => {
     try {
-      await api.startIntegratedService(serviceId);
+      await api.startIntegratedService(serviceId, mode);
       // Status will be updated via events
       // Also unhide terminal if it was hidden and remove from closed
       set((state) => {
@@ -420,13 +421,14 @@ export const useAppStore = create<AppState>((set, _get) => ({
   },
 
   // Runtime updates
-  updateServiceStatus: (serviceId, status, pid) => {
+  updateServiceStatus: (serviceId, status, pid, activeMode) => {
     set((state) => {
       const runtimes = new Map(state.serviceRuntimes);
       const existing = runtimes.get(serviceId) || { status: 'stopped', logs: [] };
-      // Clear detected port when service stops
+      // Clear detected port and mode when service stops
       const detectedPort = status === 'stopped' ? undefined : existing.detectedPort;
-      runtimes.set(serviceId, { ...existing, status, pid, detectedPort });
+      const mode = status === 'stopped' ? undefined : (activeMode ?? existing.activeMode);
+      runtimes.set(serviceId, { ...existing, status, pid, detectedPort, activeMode: mode });
       return { serviceRuntimes: runtimes };
     });
   },
