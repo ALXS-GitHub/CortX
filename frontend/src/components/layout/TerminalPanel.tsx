@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, memo, Component, type ReactNode } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,11 +22,52 @@ import {
   GripHorizontal,
   Terminal,
   FileCode,
+  AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import AnsiToHtml from 'ansi-to-html';
 import type { LogEntry, ServiceStatus, ScriptStatus } from '@/types';
 import { open } from '@tauri-apps/plugin-shell';
+
+// Error boundary to prevent crashes from taking down the whole app
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+class TerminalErrorBoundary extends Component<{ children: ReactNode; onReset: () => void }, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Terminal panel error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 p-4 text-muted-foreground">
+          <AlertTriangle className="size-8 text-yellow-500" />
+          <p className="text-sm">Terminal display error occurred</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              this.setState({ hasError: false });
+              this.props.onReset();
+            }}
+          >
+            Reset Terminal
+          </Button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // Create ANSI to HTML converter with dark theme colors
 const ansiConverter = new AnsiToHtml({
@@ -55,54 +96,55 @@ const ansiConverter = new AnsiToHtml({
 // URL regex pattern for detecting links
 const urlRegex = /(https?:\/\/[^\s<>"')\],;]+)/g;
 
-// Strip ANSI escape codes and orphaned bracket sequences
-function stripAnsi(str: string): string {
-  // Remove proper ANSI escape codes (ESC [ ... m)
-  let result = str.replace(/\x1b\[[0-9;]*m/g, '');
-  // Also remove orphaned bracket sequences that look like ANSI codes (e.g., [1m, [22m, [39m)
-  // These can appear when ESC character is lost during transmission
-  result = result.replace(/\[([0-9;]*)m/g, '');
-  return result;
-}
+// Cache for processed terminal content - avoids expensive re-computation
+// Using WeakRef approach isn't suitable here, so we use LRU-style cache
+const processedContentCache = new Map<string, string>();
+const MAX_CACHE_SIZE = 2000; // Allow caching ~2x max logs per terminal
 
 // Process terminal output: detect URLs in clean content, then wrap them in HTML
 function processTerminalContent(rawContent: string): string {
-  // Strip ANSI codes to find clean URLs
-  const cleanContent = stripAnsi(rawContent);
-
-  // Find all URLs in clean content
-  const urls: string[] = [];
-  let match;
-  const urlRegexCopy = new RegExp(urlRegex.source, 'g');
-  while ((match = urlRegexCopy.exec(cleanContent)) !== null) {
-    urls.push(match[0]);
+  // Check cache first
+  const cached = processedContentCache.get(rawContent);
+  if (cached !== undefined) {
+    return cached;
   }
 
-  // Convert ANSI to HTML
-  let html = ansiConverter.toHtml(rawContent);
+  let html: string;
 
-  // Also clean up any orphaned bracket sequences in the HTML output
-  html = html.replace(/\[([0-9;]*)m/g, '');
+  try {
+    // Convert ANSI to HTML
+    html = ansiConverter.toHtml(rawContent);
 
-  if (urls.length === 0) {
-    return html;
-  }
+    // Also clean up any orphaned bracket sequences in the HTML output
+    html = html.replace(/\[([0-9;]*)m/g, '');
 
-  // For each unique URL, wrap it in an anchor tag
-  // The URL text might be split across HTML spans, so we need a flexible pattern
-  for (const url of [...new Set(urls)]) {
-    const escapedUrl = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Pattern allows optional HTML tags between characters
-    const pattern = escapedUrl.split('').join('(?:<[^>]*>)*');
-    const regex = new RegExp(pattern, 'g');
-
-    html = html.replace(regex, (matchedText) => {
-      // matchedText contains the URL text possibly with HTML tags interspersed
-      // We use a span instead of anchor to prevent default navigation behavior
-      // The click handler will open the URL externally via Tauri shell
-      return `<span class="terminal-link" data-url="${url}">${matchedText}</span>`;
+    // Find URLs directly in the HTML output (simpler, safer approach)
+    // This handles the common case where URLs are not split by ANSI codes
+    html = html.replace(urlRegex, (url) => {
+      // Escape the URL for use in data attribute
+      const escapedUrl = url.replace(/"/g, '&quot;');
+      return `<span class="terminal-link" data-url="${escapedUrl}">${url}</span>`;
     });
+  } catch (error) {
+    // Fallback: just escape HTML and return plain text
+    console.error('Error processing terminal content:', error);
+    html = rawContent
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
+
+  // Manage cache size - remove oldest entries if too large
+  if (processedContentCache.size >= MAX_CACHE_SIZE) {
+    // Delete first 500 entries (oldest)
+    const keysToDelete = Array.from(processedContentCache.keys()).slice(0, 500);
+    for (const key of keysToDelete) {
+      processedContentCache.delete(key);
+    }
+  }
+
+  // Cache the result
+  processedContentCache.set(rawContent, html);
 
   return html;
 }
@@ -319,17 +361,14 @@ export function TerminalPanel() {
     setUserScrolledUp(!isAtBottom);
   }, []);
 
-  // Scroll to bottom function - finds the active tab's viewport dynamically
+  // Scroll to bottom function - finds the scroll viewport directly
   const scrollToBottom = useCallback(() => {
     if (!containerRef.current) return;
 
-    // Find the active tab panel within our container
-    const activePanel = containerRef.current.querySelector('[role="tabpanel"][data-state="active"]');
-    if (activePanel) {
-      const viewport = activePanel.querySelector('[data-radix-scroll-area-viewport]');
-      if (viewport) {
-        viewport.scrollTop = viewport.scrollHeight;
-      }
+    // Find the scroll viewport directly within our container
+    const viewport = containerRef.current.querySelector('[data-radix-scroll-area-viewport]');
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
     }
     setUserScrolledUp(false);
   }, []);
@@ -362,10 +401,10 @@ export function TerminalPanel() {
       const [type, rawId] = terminalId.split(':');
       if (type === 'script') {
         setActiveTerminalScriptId(rawId);
-        setActiveTerminalServiceId(null);
+        // Note: setActiveTerminalScriptId already clears activeTerminalServiceId
       } else {
         setActiveTerminalServiceId(rawId);
-        setActiveTerminalScriptId(null);
+        // Note: setActiveTerminalServiceId already clears activeTerminalScriptId
       }
     },
     [setActiveTerminalServiceId, setActiveTerminalScriptId]
@@ -612,38 +651,26 @@ export function TerminalPanel() {
             ))}
           </TabsList>
 
-          {visibleTerminals.map((item) => (
-            <TabsContent
-              key={item.id}
-              value={item.id}
-              className="flex-1 m-0 min-h-0 relative"
-            >
-              <ScrollArea
-                className="h-full"
-                onScrollCapture={handleScroll}
-              >
-                <div
-                  className="p-2 font-mono text-xs space-y-0.5"
-                  onClick={handleTerminalClick}
+          {/* Only render the active terminal's content - major performance optimization */}
+          {currentTerminal && (
+            <div className="flex-1 min-h-0 relative">
+              <TerminalErrorBoundary onReset={handleClearCurrent}>
+                <ScrollArea
+                  className="h-full"
+                  onScrollCapture={handleScroll}
                 >
-                  {item.logs.length === 0 ? (
-                    <div className="text-muted-foreground">Waiting for output...</div>
-                  ) : (
-                    item.logs.map((log, index) => (
-                      <div
-                        key={index}
-                        className={cn(
-                          'whitespace-pre-wrap break-all',
-                          log.stream === 'stderr' && 'text-red-400'
-                        )}
-                        dangerouslySetInnerHTML={{
-                          __html: processTerminalContent(log.content),
-                        }}
-                      />
-                    ))
-                  )}
-                </div>
-              </ScrollArea>
+                  <div
+                    className="p-2 font-mono text-xs space-y-0.5"
+                    onClick={handleTerminalClick}
+                  >
+                    {currentTerminal.logs.length === 0 ? (
+                      <div className="text-muted-foreground">Waiting for output...</div>
+                    ) : (
+                      <TerminalLogs logs={currentTerminal.logs} />
+                    )}
+                  </div>
+                </ScrollArea>
+              </TerminalErrorBoundary>
 
               {/* Scroll to bottom button */}
               {userScrolledUp && (
@@ -657,13 +684,39 @@ export function TerminalPanel() {
                   <ArrowDown className="size-3.5" />
                 </Button>
               )}
-            </TabsContent>
-          ))}
+            </div>
+          )}
         </Tabs>
       )}
     </div>
   );
 }
+
+// Memoized log line component to prevent unnecessary re-renders
+const LogLine = memo(function LogLine({ log }: { log: LogEntry }) {
+  return (
+    <div
+      className={cn(
+        'whitespace-pre-wrap break-all',
+        log.stream === 'stderr' && 'text-red-400'
+      )}
+      dangerouslySetInnerHTML={{
+        __html: processTerminalContent(log.content),
+      }}
+    />
+  );
+});
+
+// Memoized terminal logs component - only re-renders when logs array changes
+const TerminalLogs = memo(function TerminalLogs({ logs }: { logs: LogEntry[] }) {
+  return (
+    <>
+      {logs.map((log, index) => (
+        <LogLine key={index} log={log} />
+      ))}
+    </>
+  );
+});
 
 function StatusIndicator({ status, type }: { status: string; type?: TerminalType }) {
   // Service statuses: stopped, starting, running, error

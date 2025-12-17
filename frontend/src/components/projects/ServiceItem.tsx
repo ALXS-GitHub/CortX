@@ -91,7 +91,7 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
 
   const fullPath = service.workingDir === '.' || !service.workingDir
     ? projectPath
-    : `${projectPath}/${service.workingDir}`.replace(/\\/g, '/');
+    : `${projectPath}/${service.workingDir.replace(/^\.\//, '')}`.replace(/\\/g, '/');
 
   return (
     <Card className="group">
