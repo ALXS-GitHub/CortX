@@ -6,6 +6,7 @@ import { TitleBar } from '@/components/layout/TitleBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { TerminalPanel } from '@/components/layout/TerminalPanel';
 import { UpdateChecker } from '@/components/UpdateChecker';
+import { ClosingModal } from '@/components/ClosingModal';
 import { Dashboard } from '@/views/Dashboard';
 import { ProjectView } from '@/views/ProjectView';
 import { Settings } from '@/views/Settings';
@@ -197,6 +198,7 @@ function App() {
       </div>
       <Toaster position="bottom-right" />
       <UpdateChecker />
+      <ClosingModal />
     </TooltipProvider>
   );
 }

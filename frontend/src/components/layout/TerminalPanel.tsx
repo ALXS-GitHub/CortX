@@ -267,29 +267,29 @@ function DroppablePaneContent({
     <div
       ref={setPaneRef}
       className={cn(
-        'flex flex-col min-w-0 relative h-full',
+        'flex flex-col min-w-0 min-h-0 relative flex-1',
         isFocused && 'ring-1 ring-primary/50 ring-inset'
       )}
       onClick={onFocusPane}
     >
-      {/* Left edge drop zone - pointer-events-none so it doesn't block clicks, dnd-kit still detects it */}
+      {/* Left edge drop zone - detection handled by custom collision detection, starts below tabs */}
       <div
         ref={setLeftEdgeRef}
-        className="absolute left-0 top-0 bottom-0 w-12 z-30 pointer-events-none"
+        className="absolute left-0 top-9 bottom-0 w-[25%] z-30 pointer-events-none"
       />
       {isOverLeftEdge && (
-        <div className="absolute left-0 top-0 bottom-0 w-[30%] bg-muted/50 border-2 border-dashed border-primary rounded-l flex items-center justify-center z-20 pointer-events-none">
+        <div className="absolute left-0 top-9 bottom-0 w-[25%] bg-muted/50 border-2 border-dashed border-primary rounded-bl flex items-center justify-center z-20 pointer-events-none">
           <span className="text-xs text-muted-foreground">New Pane</span>
         </div>
       )}
 
-      {/* Right edge drop zone - pointer-events-none so it doesn't block clicks */}
+      {/* Right edge drop zone - detection handled by custom collision detection, starts below tabs */}
       <div
         ref={setRightEdgeRef}
-        className="absolute right-0 top-0 bottom-0 w-12 z-30 pointer-events-none"
+        className="absolute right-0 top-9 bottom-0 w-[25%] z-30 pointer-events-none"
       />
       {isOverRightEdge && (
-        <div className="absolute right-0 top-0 bottom-0 w-[30%] bg-muted/50 border-2 border-dashed border-primary rounded-r flex items-center justify-center z-20 pointer-events-none">
+        <div className="absolute right-0 top-9 bottom-0 w-[25%] bg-muted/50 border-2 border-dashed border-primary rounded-br flex items-center justify-center z-20 pointer-events-none">
           <span className="text-xs text-muted-foreground">New Pane</span>
         </div>
       )}
@@ -372,21 +372,24 @@ function DroppablePaneContent({
       {activeTerminal ? (
         <TerminalErrorBoundary onReset={() => onClearLogs(activeTerminal.id)}>
           <div ref={scrollAreaRef} className="flex-1 min-h-0 relative">
-            <ScrollArea
-              className="absolute inset-0"
-              onScrollCapture={handleScroll}
-            >
-              <div
-                className="p-2 font-mono text-xs space-y-0.5"
-                onClick={handleTerminalClick}
+            {/* Absolute container gives ScrollArea explicit dimensions */}
+            <div className="absolute inset-0">
+              <ScrollArea
+                className="h-full w-full"
+                onScrollCapture={handleScroll}
               >
-                {activeTerminal.logs.length === 0 ? (
-                  <div className="text-muted-foreground">Waiting for output...</div>
-                ) : (
-                  <TerminalLogs logs={activeTerminal.logs} />
-                )}
-              </div>
-            </ScrollArea>
+                <div
+                  className="p-2 font-mono text-xs space-y-0.5"
+                  onClick={handleTerminalClick}
+                >
+                  {activeTerminal.logs.length === 0 ? (
+                    <div className="text-muted-foreground">Waiting for output...</div>
+                  ) : (
+                    <TerminalLogs logs={activeTerminal.logs} />
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
             {/* Scroll to bottom button */}
             {userScrolledUp && (
               <Button
@@ -405,7 +408,7 @@ function DroppablePaneContent({
           </div>
         </TerminalErrorBoundary>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-2">
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-muted-foreground gap-2">
           <p className="text-sm">Drop a terminal here or start a service</p>
         </div>
       )}
@@ -916,8 +919,8 @@ export function TerminalPanel() {
 
                 return (
                   <Fragment key={pane.id}>
-                    {/* Pane */}
-                    <div className="h-full" style={{ width: `${widthPercent}%` }}>
+                    {/* Pane - flex container to allow children to use flex-1 */}
+                    <div className="flex flex-col min-h-0 min-w-0" style={{ width: `${widthPercent}%` }}>
                       <DroppablePaneContent
                         pane={pane}
                         paneTerminals={paneTerminals}

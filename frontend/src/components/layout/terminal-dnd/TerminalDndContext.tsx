@@ -10,12 +10,76 @@ import {
   type DragStartEvent,
   type DragEndEvent,
   type DragOverEvent,
+  type CollisionDetection,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
 import { useAppStore } from '@/stores/appStore';
 import { TabDragOverlay } from './TabDragOverlay';
 import type { TerminalItem, DragData, EdgeDropData, PaneDropData, TabDropData } from './types';
+
+// Custom collision detection that prioritizes edge zones based on pointer position
+// This eliminates gaps where tabs might "win" over edge zones with closestCenter
+// Edge zones only activate below the tabs bar (top ~36px) to allow tab reordering
+const TABS_BAR_HEIGHT = 36; // Approximate height of the tabs bar in pixels
+
+const edgePriorityCollisionDetection: CollisionDetection = (args) => {
+  const { droppableContainers, pointerCoordinates } = args;
+
+  if (!pointerCoordinates) {
+    return closestCenter(args);
+  }
+
+  // Find all pane containers and their edge zones
+  const paneContainers = Array.from(droppableContainers).filter(
+    (container) => String(container.id).startsWith('pane-drop-')
+  );
+
+  // Check each pane to see if pointer is in its edge zones
+  for (const paneContainer of paneContainers) {
+    const paneRect = paneContainer.rect.current;
+    if (!paneRect) continue;
+
+    const paneId = String(paneContainer.id).replace('pane-drop-', '');
+    const relativeY = pointerCoordinates.y - paneRect.top;
+
+    // Check if pointer is within this pane's bounds AND below the tabs bar
+    // This allows tab reordering in the tabs area without triggering edge zones
+    if (
+      pointerCoordinates.x >= paneRect.left &&
+      pointerCoordinates.x <= paneRect.right &&
+      pointerCoordinates.y >= paneRect.top &&
+      pointerCoordinates.y <= paneRect.bottom &&
+      relativeY > TABS_BAR_HEIGHT // Only trigger edge zones below tabs bar
+    ) {
+      const relativeX = pointerCoordinates.x - paneRect.left;
+      const paneWidth = paneRect.width;
+
+      // Left 25% of pane -> left edge zone
+      if (relativeX <= paneWidth * 0.25) {
+        const leftEdgeContainer = Array.from(droppableContainers).find(
+          (c) => String(c.id) === `edge-left-${paneId}`
+        );
+        if (leftEdgeContainer) {
+          return [{ id: leftEdgeContainer.id, data: { droppableContainer: leftEdgeContainer } }];
+        }
+      }
+
+      // Right 25% of pane -> right edge zone
+      if (relativeX >= paneWidth * 0.75) {
+        const rightEdgeContainer = Array.from(droppableContainers).find(
+          (c) => String(c.id) === `edge-right-${paneId}`
+        );
+        if (rightEdgeContainer) {
+          return [{ id: rightEdgeContainer.id, data: { droppableContainer: rightEdgeContainer } }];
+        }
+      }
+    }
+  }
+
+  // Fall back to closestCenter for tabs and pane center
+  return closestCenter(args);
+};
 
 interface TerminalDndContextProps {
   children: React.ReactNode;
@@ -121,7 +185,7 @@ export function TerminalDndContext({ children, allTerminals: _allTerminals }: Te
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={edgePriorityCollisionDetection}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
