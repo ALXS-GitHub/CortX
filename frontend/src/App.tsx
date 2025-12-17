@@ -93,7 +93,7 @@ function App() {
       unlistenServiceStatus = await onServiceStatus((payload) => {
         if (isCancelled) return;
         const { updateServiceStatus } = useAppStore.getState();
-        updateServiceStatus(payload.serviceId, payload.status, payload.pid, payload.activeMode);
+        updateServiceStatus(payload.serviceId, payload.status, payload.pid, payload.activeMode, payload.activeArgPreset);
       });
 
       unlistenServiceExit = await onServiceExit((payload) => {

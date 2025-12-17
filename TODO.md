@@ -3,6 +3,7 @@
 Don't forget to update PRD when adding features
 
 - [ ] split terminal view to have multiple terminals visible at the same time (only horizontal split for now is fine)
+- [ ] Add extra command line arguments support (e.g. for variables, env variables, etc...)
 
 
 ## Done

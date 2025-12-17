@@ -67,6 +67,20 @@ function arrayToModes(arr: { name: string; command: string }[]): Record<string, 
   return Object.fromEntries(filtered.map((m) => [m.name.trim(), m.command.trim()]));
 }
 
+// Helper to convert arg presets object to array for editing
+function presetsToArray(presets?: Record<string, string>): { name: string; args: string }[] {
+  if (!presets) return [];
+  return Object.entries(presets).map(([name, args]) => ({ name, args }));
+}
+
+// Helper to convert arg presets array back to object
+function arrayToPresets(arr: { name: string; args: string }[]): Record<string, string> | undefined {
+  // Presets must have non-empty args
+  const filtered = arr.filter((p) => p.name.trim() && p.args.trim());
+  if (filtered.length === 0) return undefined;
+  return Object.fromEntries(filtered.map((p) => [p.name.trim(), p.args.trim()]));
+}
+
 export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, onSubmit }: ServiceFormProps) {
   const [name, setName] = useState(service?.name || '');
   const [workingDir, setWorkingDir] = useState(service?.workingDir || '.');
@@ -75,6 +89,10 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
   const [color, setColor] = useState(service?.color || SERVICE_COLORS[0]);
   const [modes, setModes] = useState<{ name: string; command: string }[]>(modesToArray(service?.modes));
   const [defaultMode, setDefaultMode] = useState<string | undefined>(service?.defaultMode);
+  // Arguments state
+  const [extraArgs, setExtraArgs] = useState(service?.extraArgs || '');
+  const [argPresets, setArgPresets] = useState<{ name: string; args: string }[]>(presetsToArray(service?.argPresets));
+  const [defaultArgPreset, setDefaultArgPreset] = useState<string | undefined>(service?.defaultArgPreset);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,6 +108,9 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
       setColor(service?.color || SERVICE_COLORS[Math.floor(Math.random() * SERVICE_COLORS.length)]);
       setModes(modesToArray(service?.modes));
       setDefaultMode(service?.defaultMode);
+      setExtraArgs(service?.extraArgs || '');
+      setArgPresets(presetsToArray(service?.argPresets));
+      setDefaultArgPreset(service?.defaultArgPreset);
       setError(null);
     }
   }, [isOpen, service]);
@@ -152,12 +173,19 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
       const modesObj = arrayToModes(modes);
       const validDefaultMode = defaultMode && modesObj && modesObj[defaultMode] ? defaultMode : undefined;
 
+      // Validate defaultArgPreset exists in argPresets if set
+      const argPresetsObj = arrayToPresets(argPresets);
+      const validDefaultArgPreset = defaultArgPreset && argPresetsObj && argPresetsObj[defaultArgPreset] ? defaultArgPreset : undefined;
+
       const data: CreateServiceInput | UpdateServiceInput = {
         name: name.trim(),
         workingDir: workingDir.trim() || '.',
         command: command.trim() || '', // Can be empty if defaultMode is set
         modes: modesObj,
         defaultMode: validDefaultMode,
+        extraArgs: extraArgs.trim() || undefined,
+        argPresets: argPresetsObj,
+        defaultArgPreset: validDefaultArgPreset,
         color,
         port: port ? parseInt(port, 10) : undefined,
       };
@@ -171,6 +199,9 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
         setPort('');
         setModes([]);
         setDefaultMode(undefined);
+        setExtraArgs('');
+        setArgPresets([]);
+        setDefaultArgPreset(undefined);
         setColor(SERVICE_COLORS[Math.floor(Math.random() * SERVICE_COLORS.length)]);
       }
     } catch (e) {
@@ -199,11 +230,31 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
     }
   };
 
+  // Arg preset management
+  const addArgPreset = () => {
+    setArgPresets([...argPresets, { name: '', args: '' }]);
+  };
+
+  const updateArgPreset = (index: number, field: 'name' | 'args', value: string) => {
+    const newPresets = [...argPresets];
+    newPresets[index] = { ...newPresets[index], [field]: value };
+    setArgPresets(newPresets);
+  };
+
+  const removeArgPreset = (index: number) => {
+    const removedPreset = argPresets[index];
+    setArgPresets(argPresets.filter((_, i) => i !== index));
+    // Clear defaultArgPreset if we removed it
+    if (removedPreset && removedPreset.name.trim() === defaultArgPreset) {
+      setDefaultArgPreset(undefined);
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+        <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>{isEditing ? 'Edit Service' : 'Add New Service'}</DialogTitle>
             <DialogDescription>
               {isEditing
@@ -212,7 +263,7 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 py-4 overflow-y-auto flex-1 px-1">
             <div className="grid gap-2">
               <Label htmlFor="service-name">Service Name *</Label>
               <Input
@@ -339,6 +390,92 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
               )}
             </div>
 
+            {/* Arguments section */}
+            <div className="grid gap-2">
+              <Label htmlFor="extra-args">Extra Arguments (optional)</Label>
+              <Input
+                id="extra-args"
+                value={extraArgs}
+                onChange={(e) => setExtraArgs(e.target.value)}
+                placeholder="e.g., --verbose --debug"
+              />
+              <p className="text-xs text-muted-foreground">
+                Static arguments always appended to the command
+              </p>
+            </div>
+
+            {/* Arg Presets section */}
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label>Argument Presets (optional)</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addArgPreset}
+                >
+                  <Plus className="size-3 mr-1" />
+                  Add Preset
+                </Button>
+              </div>
+              {argPresets.length > 0 ? (
+                <div className="space-y-2">
+                  {argPresets.map((preset, index) => {
+                    const isDefault = preset.name.trim() === defaultArgPreset;
+                    return (
+                      <div key={index} className="flex gap-2 items-start">
+                        <Input
+                          value={preset.name}
+                          onChange={(e) => updateArgPreset(index, 'name', e.target.value)}
+                          placeholder="Preset name"
+                          className="w-28 flex-shrink-0"
+                        />
+                        <Input
+                          value={preset.args}
+                          onChange={(e) => updateArgPreset(index, 'args', e.target.value)}
+                          placeholder="Arguments (e.g., --config demo.toml)"
+                          className="flex-1"
+                        />
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => {
+                                const presetName = preset.name.trim();
+                                if (presetName && preset.args.trim()) {
+                                  setDefaultArgPreset(isDefault ? undefined : presetName);
+                                }
+                              }}
+                              className={isDefault ? 'text-yellow-500' : 'text-muted-foreground'}
+                            >
+                              <Star className={`size-4 ${isDefault ? 'fill-current' : ''}`} />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {isDefault ? 'Remove as default' : 'Set as default preset'}
+                          </TooltipContent>
+                        </Tooltip>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => removeArgPreset(index)}
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Add presets like "demo", "stress-test" to run with different argument sets
+                </p>
+              )}
+            </div>
+
             <div className="grid gap-2">
               <Label htmlFor="port">Port (optional)</Label>
               <Input
@@ -375,7 +512,7 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
             )}
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="flex-shrink-0 pt-4">
             <Button
               type="button"
               variant="outline"

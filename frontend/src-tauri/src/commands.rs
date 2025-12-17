@@ -116,6 +116,9 @@ pub fn add_service(
     let mut service = Service::new(input.name, input.working_dir, input.command);
     service.modes = input.modes;
     service.default_mode = input.default_mode;
+    service.extra_args = input.extra_args;
+    service.arg_presets = input.arg_presets;
+    service.default_arg_preset = input.default_arg_preset;
     service.color = input.color;
     service.port = input.port;
     service.env_vars = input.env_vars;
@@ -153,6 +156,10 @@ pub fn update_service(
             // The frontend sends these fields on every update
             service.modes = input.modes;
             service.default_mode = input.default_mode;
+            // Same for arg presets - always update to allow clearing
+            service.extra_args = input.extra_args;
+            service.arg_presets = input.arg_presets;
+            service.default_arg_preset = input.default_arg_preset;
             if input.color.is_some() {
                 service.color = input.color;
             }
@@ -600,6 +607,7 @@ pub fn start_integrated_service(
     state: State<AppState>,
     service_id: String,
     mode: Option<String>,
+    arg_preset: Option<String>,
 ) -> Result<u32, String> {
     let (project, service) = state
         .storage
@@ -616,8 +624,8 @@ pub fn start_integrated_service(
     // Resolve effective mode: explicit mode > default_mode > none
     let effective_mode = mode.or_else(|| service.default_mode.clone());
 
-    // Resolve command based on effective mode
-    let command = if let Some(ref mode_name) = effective_mode {
+    // Resolve base command based on effective mode
+    let base_command = if let Some(ref mode_name) = effective_mode {
         // Try to get command from modes map
         service
             .modes
@@ -627,16 +635,48 @@ pub fn start_integrated_service(
             .ok_or_else(|| format!("Mode '{}' not found for service", mode_name))?
     } else {
         // Use default command
-        service.command
+        service.command.clone()
     };
+
+    // Resolve effective arg preset: explicit preset > default_arg_preset > none
+    let effective_arg_preset = arg_preset.or_else(|| service.default_arg_preset.clone());
+
+    // Get preset args if preset is specified
+    let preset_args = if let Some(ref preset_name) = effective_arg_preset {
+        service
+            .arg_presets
+            .as_ref()
+            .and_then(|presets| presets.get(preset_name))
+            .cloned()
+    } else {
+        None
+    };
+
+    // Build final command: baseCommand + extraArgs + presetArgs
+    let mut final_command = base_command;
+
+    if let Some(ref extra) = service.extra_args {
+        let trimmed = extra.trim();
+        if !trimmed.is_empty() {
+            final_command = format!("{} {}", final_command, trimmed);
+        }
+    }
+
+    if let Some(ref args) = preset_args {
+        let trimmed = args.trim();
+        if !trimmed.is_empty() {
+            final_command = format!("{} {}", final_command, trimmed);
+        }
+    }
 
     state.process_manager.start_service(
         app_handle,
         service_id,
         working_dir,
-        command,
+        final_command,
         service.env_vars,
         effective_mode,
+        effective_arg_preset,
     )
 }
 

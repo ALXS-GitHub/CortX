@@ -63,6 +63,9 @@ export function ProjectView() {
   const [deletingService, setDeletingService] = useState<Service | null>(null);
   const [showEditProject, setShowEditProject] = useState(false);
   const [showDeleteProject, setShowDeleteProject] = useState(false);
+  // State for Start All mode/preset selection
+  const [selectedModeForAll, setSelectedModeForAll] = useState<string | undefined>();
+  const [selectedPresetForAll, setSelectedPresetForAll] = useState<string | undefined>();
 
   const project = projects.find((p) => p.id === selectedProjectId);
 
@@ -131,21 +134,28 @@ export function ProjectView() {
     toast.success('Project deleted');
   };
 
-  const handleStartAll = async (mode?: string) => {
+  const handleStartAll = async (mode?: string, argPreset?: string) => {
     for (const service of project.services) {
       const runtime = serviceRuntimes.get(service.id);
       if (!runtime || runtime.status === 'stopped') {
         try {
           // Only pass mode if the service has this mode defined
           const serviceHasMode = mode && service.modes && service.modes[mode];
-          await startService(service.id, serviceHasMode ? mode : undefined);
+          // Only pass preset if the service has this preset defined
+          const serviceHasPreset = argPreset && service.argPresets && service.argPresets[argPreset];
+          await startService(
+            service.id,
+            serviceHasMode ? mode : undefined,
+            serviceHasPreset ? argPreset : undefined
+          );
         } catch (error) {
           console.error(`Failed to start ${service.name}:`, error);
         }
       }
     }
-    const modeLabel = mode ? ` in ${mode} mode` : '';
-    toast.success(`Started all services${modeLabel}`);
+    const labels = [mode, argPreset].filter(Boolean);
+    const labelStr = labels.length > 0 ? ` (${labels.join(' + ')})` : '';
+    toast.success(`Started all services${labelStr}`);
   };
 
   // Collect all unique mode names across all services
@@ -153,6 +163,15 @@ export function ProjectView() {
     project.services
       .flatMap(s => s.modes ? Object.keys(s.modes) : [])
   )].sort();
+
+  // Collect all unique preset names across all services
+  const allPresetNames = [...new Set(
+    project.services
+      .flatMap(s => s.argPresets ? Object.keys(s.argPresets) : [])
+  )].sort();
+
+  const hasAnyModes = allModeNames.length > 0;
+  const hasAnyPresets = allPresetNames.length > 0;
 
   const handleStopAll = async () => {
     for (const service of project.services) {
@@ -261,43 +280,65 @@ export function ProjectView() {
                       <Square className="size-4 mr-2" />
                       Stop All
                     </Button>
-                  ) : allModeNames.length > 0 ? (
-                    // Split button with mode dropdown
-                    <div className="flex items-center">
+                  ) : (hasAnyModes || hasAnyPresets) ? (
+                    // Two separate dropdowns for mode and preset selection
+                    <div className="flex items-center gap-2">
+                      {hasAnyModes && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm">
+                              {selectedModeForAll || 'Mode'}
+                              <ChevronDown className="ml-1 size-3" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setSelectedModeForAll(undefined)}>
+                              Default
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {allModeNames.map((modeName) => (
+                              <DropdownMenuItem
+                                key={modeName}
+                                onClick={() => setSelectedModeForAll(modeName)}
+                              >
+                                {modeName}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                      {hasAnyPresets && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm">
+                              {selectedPresetForAll || 'Preset'}
+                              <ChevronDown className="ml-1 size-3" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setSelectedPresetForAll(undefined)}>
+                              Default
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {allPresetNames.map((presetName) => (
+                              <DropdownMenuItem
+                                key={presetName}
+                                onClick={() => setSelectedPresetForAll(presetName)}
+                              >
+                                {presetName}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
-                        className="rounded-r-none border-r-0"
-                        onClick={() => handleStartAll()}
+                        onClick={() => handleStartAll(selectedModeForAll, selectedPresetForAll)}
                       >
                         <Play className="size-4 mr-2" />
                         Start All
                       </Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="rounded-l-none px-2"
-                          >
-                            <ChevronDown className="size-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleStartAll()}>
-                            Default (use service defaults)
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          {allModeNames.map((modeName) => (
-                            <DropdownMenuItem
-                              key={modeName}
-                              onClick={() => handleStartAll(modeName)}
-                            >
-                              Start all in "{modeName}" mode
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
                     </div>
                   ) : (
                     <Button variant="outline" size="sm" onClick={() => handleStartAll()}>

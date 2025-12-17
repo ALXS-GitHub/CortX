@@ -15,6 +15,12 @@ pub struct Service {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_mode: Option<String>,  // If set, use this mode's command as default
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_args: Option<String>,  // Static args always appended to command
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arg_presets: Option<HashMap<String, String>>,  // { presetName: argsString }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_arg_preset: Option<String>,  // Default preset to use
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
@@ -32,6 +38,9 @@ impl Service {
             command,
             modes: None,
             default_mode: None,
+            extra_args: None,
+            arg_presets: None,
+            default_arg_preset: None,
             color: None,
             port: None,
             env_vars: None,
@@ -330,6 +339,9 @@ pub struct CreateServiceInput {
     pub command: String,
     pub modes: Option<HashMap<String, String>>,
     pub default_mode: Option<String>,
+    pub extra_args: Option<String>,
+    pub arg_presets: Option<HashMap<String, String>>,
+    pub default_arg_preset: Option<String>,
     pub color: Option<String>,
     pub port: Option<u16>,
     pub env_vars: Option<HashMap<String, String>>,
@@ -343,6 +355,9 @@ pub struct UpdateServiceInput {
     pub command: Option<String>,
     pub modes: Option<HashMap<String, String>>,
     pub default_mode: Option<String>,
+    pub extra_args: Option<String>,
+    pub arg_presets: Option<HashMap<String, String>>,
+    pub default_arg_preset: Option<String>,
     pub color: Option<String>,
     pub port: Option<u16>,
     pub env_vars: Option<HashMap<String, String>>,
@@ -410,6 +425,7 @@ pub struct ServiceState {
     pub status: ServiceStatus,
     pub pid: Option<u32>,
     pub active_mode: Option<String>,
+    pub active_arg_preset: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -444,6 +460,7 @@ pub struct ServiceStatusPayload {
     pub status: ServiceStatus,
     pub pid: Option<u32>,
     pub active_mode: Option<String>,
+    pub active_arg_preset: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
