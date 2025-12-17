@@ -5,6 +5,9 @@ export interface Service {
   command: string;
   modes?: Record<string, string>;  // Optional: { modeName: command }
   defaultMode?: string;  // If set, use this mode's command as default when starting
+  extraArgs?: string;  // Static args always appended to command
+  argPresets?: Record<string, string>;  // { presetName: argsString }
+  defaultArgPreset?: string;  // Default preset to use
   color?: string;
   port?: number;
   envVars?: Record<string, string>;
@@ -113,6 +116,7 @@ export interface ServiceState {
   status: ServiceStatus;
   pid?: number;
   activeMode?: string;  // Track which mode is running
+  activeArgPreset?: string;  // Track which arg preset is active
 }
 
 export type LogStream = 'stdout' | 'stderr';
@@ -135,6 +139,7 @@ export interface ServiceStatusPayload {
   status: ServiceStatus;
   pid?: number;
   activeMode?: string;
+  activeArgPreset?: string;
 }
 
 export interface ServiceExitPayload {
@@ -184,6 +189,9 @@ export interface CreateServiceInput {
   command: string;
   modes?: Record<string, string>;
   defaultMode?: string;
+  extraArgs?: string;
+  argPresets?: Record<string, string>;
+  defaultArgPreset?: string;
   color?: string;
   port?: number;
   envVars?: Record<string, string>;
@@ -195,6 +203,9 @@ export interface UpdateServiceInput {
   command?: string;
   modes?: Record<string, string>;
   defaultMode?: string;
+  extraArgs?: string;
+  argPresets?: Record<string, string>;
+  defaultArgPreset?: string;
   color?: string;
   port?: number;
   envVars?: Record<string, string>;

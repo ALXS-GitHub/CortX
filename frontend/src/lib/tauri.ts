@@ -105,8 +105,8 @@ export async function launchExternalTerminal(serviceId: string): Promise<void> {
   return invoke('launch_external_terminal', { serviceId });
 }
 
-export async function startIntegratedService(serviceId: string, mode?: string): Promise<number> {
-  return invoke('start_integrated_service', { serviceId, mode });
+export async function startIntegratedService(serviceId: string, mode?: string, argPreset?: string): Promise<number> {
+  return invoke('start_integrated_service', { serviceId, mode, argPreset });
 }
 
 export async function stopIntegratedService(serviceId: string): Promise<void> {

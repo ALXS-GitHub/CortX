@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -47,14 +48,29 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
   const isRunning = status === 'running';
   const isStarting = status === 'starting';
   const activeMode = runtime?.activeMode;
+  const activeArgPreset = runtime?.activeArgPreset;
   const hasModes = service.modes && Object.keys(service.modes).length > 0;
   const modeNames = hasModes ? Object.keys(service.modes!) : [];
+  const hasPresets = service.argPresets && Object.keys(service.argPresets).length > 0;
+  const presetNames = hasPresets ? Object.keys(service.argPresets!) : [];
+  const hasBoth = hasModes && hasPresets;
 
-  const handleStart = async (mode?: string) => {
+  // State for mode/preset selection (only used when hasBoth)
+  const [selectedMode, setSelectedMode] = useState<string | undefined>(service.defaultMode);
+  const [selectedPreset, setSelectedPreset] = useState<string | undefined>(service.defaultArgPreset);
+
+  // Reset selections when service changes
+  useEffect(() => {
+    setSelectedMode(service.defaultMode);
+    setSelectedPreset(service.defaultArgPreset);
+  }, [service.id, service.defaultMode, service.defaultArgPreset]);
+
+  const handleStart = async (mode?: string, argPreset?: string) => {
     try {
-      await startService(service.id, mode);
-      const modeLabel = mode ? ` (${mode})` : '';
-      toast.success(`Started ${service.name}${modeLabel}`);
+      await startService(service.id, mode, argPreset);
+      const labels = [mode, argPreset].filter(Boolean);
+      const labelStr = labels.length > 0 ? ` (${labels.join(' + ')})` : '';
+      toast.success(`Started ${service.name}${labelStr}`);
     } catch (error) {
       toast.error(`Failed to start ${service.name}: ${error}`);
     }
@@ -115,7 +131,7 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="font-medium">{service.name}</h3>
-              <StatusBadge status={status} activeMode={activeMode} />
+              <StatusBadge status={status} activeMode={activeMode} activeArgPreset={activeArgPreset} />
             </div>
             <div className="mt-1 space-y-0.5 text-xs text-muted-foreground font-mono">
               <p className="truncate">Path: {fullPath}</p>
@@ -180,8 +196,75 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
                   <TooltipContent>Stop service</TooltipContent>
                 </Tooltip>
               </>
+            ) : hasBoth ? (
+              // Both modes and presets - two separate dropdowns
+              <div className="flex items-center gap-1">
+                {/* Mode dropdown */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-7 text-xs px-2">
+                      {selectedMode || 'Mode'}
+                      <ChevronDown className="ml-1 size-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setSelectedMode(undefined)}>
+                      Default
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    {modeNames.map((name) => (
+                      <DropdownMenuItem
+                        key={name}
+                        onClick={() => setSelectedMode(name)}
+                      >
+                        {name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Preset dropdown */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-7 text-xs px-2">
+                      {selectedPreset || 'Preset'}
+                      <ChevronDown className="ml-1 size-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setSelectedPreset(undefined)}>
+                      Default
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    {presetNames.map((name) => (
+                      <DropdownMenuItem
+                        key={name}
+                        onClick={() => setSelectedPreset(name)}
+                      >
+                        {name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Play button */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="default"
+                      size="icon-sm"
+                      onClick={() => handleStart(selectedMode, selectedPreset)}
+                    >
+                      <Play className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Start{selectedMode || selectedPreset ? ` (${[selectedMode, selectedPreset].filter(Boolean).join(' + ')})` : ''}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
             ) : hasModes ? (
-              // Split button with modes dropdown
+              // Only modes - dropdown for modes
               <div className="flex items-center">
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -222,8 +305,50 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
+            ) : hasPresets ? (
+              // Only presets - dropdown for presets
+              <div className="flex items-center">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="default"
+                      size="icon-sm"
+                      className="rounded-r-none border-r-0"
+                      onClick={() => handleStart()}
+                    >
+                      <Play className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Start with default args</TooltipContent>
+                </Tooltip>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="default"
+                      size="icon-sm"
+                      className="rounded-l-none px-1.5"
+                    >
+                      <ChevronDown className="size-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleStart()}>
+                      Default
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    {presetNames.map((presetName) => (
+                      <DropdownMenuItem
+                        key={presetName}
+                        onClick={() => handleStart(undefined, presetName)}
+                      >
+                        {presetName}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             ) : (
-              // Simple play button when no modes
+              // Simple play button when no modes and no presets
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -278,7 +403,7 @@ function StatusOverlay({ status }: { status: string }) {
   return null;
 }
 
-function StatusBadge({ status, activeMode }: { status: string; activeMode?: string }) {
+function StatusBadge({ status, activeMode, activeArgPreset }: { status: string; activeMode?: string; activeArgPreset?: string }) {
   const styles = {
     stopped: 'bg-muted text-muted-foreground',
     starting: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400',
@@ -294,8 +419,10 @@ function StatusBadge({ status, activeMode }: { status: string; activeMode?: stri
   };
 
   const label = labels[status as keyof typeof labels] || 'Unknown';
-  const modeLabel = activeMode && (status === 'running' || status === 'starting')
-    ? ` (${activeMode})`
+  // Build label from mode and preset
+  const activeLabels = [activeMode, activeArgPreset].filter(Boolean);
+  const activeLabel = activeLabels.length > 0 && (status === 'running' || status === 'starting')
+    ? ` (${activeLabels.join(' + ')})`
     : '';
 
   return (
@@ -305,7 +432,7 @@ function StatusBadge({ status, activeMode }: { status: string; activeMode?: stri
         styles[status as keyof typeof styles] || styles.stopped
       )}
     >
-      {label}{modeLabel}
+      {label}{activeLabel}
     </span>
   );
 }
