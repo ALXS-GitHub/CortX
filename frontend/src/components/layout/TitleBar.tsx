@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getVersion } from '@tauri-apps/api/app';
 import { Minus, Square, X, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -7,6 +8,7 @@ const appWindow = getCurrentWindow();
 
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('');
 
   useEffect(() => {
     // Check initial maximized state
@@ -16,6 +18,9 @@ export function TitleBar() {
     const unlisten = appWindow.onResized(() => {
       appWindow.isMaximized().then(setIsMaximized);
     });
+
+    // Get app version
+    getVersion().then(setAppVersion).catch(() => setAppVersion(''));
 
     return () => {
       unlisten.then((fn) => fn());
@@ -39,22 +44,21 @@ export function TitleBar() {
       data-tauri-drag-region
       className="h-9 flex items-center justify-between bg-sidebar border-b border-sidebar-border select-none"
     >
-      {/* Left side - App branding */}
+      {/* Left side - App branding (pl-14 accounts for collapsed sidebar width ~3rem + padding) */}
       <div
         data-tauri-drag-region
-        className="flex items-center gap-2 px-3 h-full"
+        className="flex items-center gap-2 pl-14 pr-3 h-full min-w-0"
       >
-        <img
-          src="/cortx-logo.png"
-          alt="Cortx"
-          className="size-5 pointer-events-none"
-          draggable={false}
-        />
         <span
           data-tauri-drag-region
-          className="text-sm font-medium text-sidebar-foreground"
+          className="text-sm font-medium text-sidebar-foreground whitespace-nowrap"
         >
           Cortx
+          {appVersion && (
+            <span className="text-xs text-muted-foreground ml-1.5 font-normal">
+              v{appVersion}
+            </span>
+          )}
         </span>
       </div>
 

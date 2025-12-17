@@ -24,10 +24,13 @@ import { PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
+const SIDEBAR_WIDTH_MIN = 200 // px
+const SIDEBAR_WIDTH_MAX = 400 // px
+const SIDEBAR_WIDTH_DEFAULT = 256 // px (16rem)
+const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar_width"
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
@@ -37,6 +40,10 @@ type SidebarContextProps = {
   setOpenMobile: (open: boolean) => void
   isMobile: boolean
   toggleSidebar: () => void
+  width: number
+  setWidth: (width: number) => void
+  isResizing: boolean
+  setIsResizing: (isResizing: boolean) => void
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
@@ -65,6 +72,27 @@ function SidebarProvider({
 }) {
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
+  const [isResizing, setIsResizing] = React.useState(false)
+
+  // Width state with localStorage persistence
+  const [width, _setWidth] = React.useState(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)
+      if (stored) {
+        const parsed = parseInt(stored, 10)
+        if (!isNaN(parsed) && parsed >= SIDEBAR_WIDTH_MIN && parsed <= SIDEBAR_WIDTH_MAX) {
+          return parsed
+        }
+      }
+    }
+    return SIDEBAR_WIDTH_DEFAULT
+  })
+
+  const setWidth = React.useCallback((newWidth: number) => {
+    const clampedWidth = Math.min(Math.max(newWidth, SIDEBAR_WIDTH_MIN), SIDEBAR_WIDTH_MAX)
+    _setWidth(clampedWidth)
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(clampedWidth))
+  }, [])
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
@@ -119,8 +147,12 @@ function SidebarProvider({
       openMobile,
       setOpenMobile,
       toggleSidebar,
+      width,
+      setWidth,
+      isResizing,
+      setIsResizing,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
+    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, width, setWidth, isResizing, setIsResizing]
   )
 
   return (
@@ -129,7 +161,7 @@ function SidebarProvider({
         data-slot="sidebar-wrapper"
         style={
           {
-            "--sidebar-width": SIDEBAR_WIDTH,
+            "--sidebar-width": `${width}px`,
             "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
             ...style,
           } as React.CSSProperties
@@ -158,7 +190,45 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offExamples" | "icon" | "none"
 }) {
-  const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  const { isMobile, state, openMobile, setOpenMobile, width, setWidth, isResizing, setIsResizing } = useSidebar()
+  const resizeStartX = React.useRef(0)
+  const resizeStartWidth = React.useRef(0)
+
+  // Handle resize
+  React.useEffect(() => {
+    if (!isResizing) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = side === "left"
+        ? e.clientX - resizeStartX.current
+        : resizeStartX.current - e.clientX
+      const newWidth = resizeStartWidth.current + delta
+      setWidth(newWidth)
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+    }
+
+    document.addEventListener("mousemove", handleMouseMove)
+    document.addEventListener("mouseup", handleMouseUp)
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove)
+      document.removeEventListener("mouseup", handleMouseUp)
+    }
+  }, [isResizing, setIsResizing, setWidth, side])
+
+  const handleResizeStart = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    resizeStartX.current = e.clientX
+    resizeStartWidth.current = width
+    setIsResizing(true)
+    document.body.style.cursor = "ew-resize"
+    document.body.style.userSelect = "none"
+  }, [width, setIsResizing])
 
   if (collapsible === "none") {
     return (
@@ -213,7 +283,8 @@ function Sidebar({
       <div
         data-slot="sidebar-gap"
         className={cn(
-          "transition-[width] duration-200 ease-linear relative w-(--sidebar-width) bg-transparent",
+          "relative w-(--sidebar-width) bg-transparent",
+          isResizing ? "" : "transition-[width] duration-200 ease-linear",
           "group-data-[collapsible=offExamples]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
@@ -224,7 +295,8 @@ function Sidebar({
       <div
         data-slot="sidebar-container"
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex",
+          isResizing ? "" : "transition-[left,right,width] duration-200 ease-linear",
           side === "left"
             ? "left-0 group-data-[collapsible=offExamples]:left-[calc(var(--sidebar-width)*-1)]"
             : "right-0 group-data-[collapsible=offExamples]:right-[calc(var(--sidebar-width)*-1)]",
@@ -243,6 +315,19 @@ function Sidebar({
         >
           {children}
         </div>
+        {/* Resize handle - only show when expanded */}
+        {state === "expanded" && (
+          <div
+            data-slot="sidebar-resize-handle"
+            className={cn(
+              "absolute top-0 bottom-0 w-1 cursor-ew-resize hover:bg-primary/20 active:bg-primary/30 transition-colors z-20",
+              side === "left" ? "right-0" : "left-0"
+            )}
+            onMouseDown={handleResizeStart}
+          >
+            <div className="absolute inset-y-0 -left-1 -right-1" /> {/* Larger hit area */}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -634,19 +634,25 @@ export function TerminalPanel() {
                     {item.lastSuccess ? 'OK' : `Exit ${item.lastExitCode}`}
                   </span>
                 )}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="size-4 p-0 ml-1 hover:bg-destructive/20"
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="size-4 p-0 ml-1 flex items-center justify-center rounded hover:bg-destructive/20 cursor-pointer"
                   onClick={(e) => {
                     e.stopPropagation();
                     // Just hide the terminal, don't stop the service/script
                     hideTerminal(getRawId(item.id));
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.stopPropagation();
+                      hideTerminal(getRawId(item.id));
+                    }
+                  }}
                   title="Hide terminal"
                 >
                   <X className="size-3" />
-                </Button>
+                </div>
               </TabsTrigger>
             ))}
           </TabsList>
