@@ -96,12 +96,15 @@ const ansiConverter = new AnsiToHtml({
 // URL regex pattern for detecting links
 const urlRegex = /(https?:\/\/[^\s<>"')\],;]+)/g;
 
+// ANSI escape code pattern for stripping
+const ansiRegex = /\x1b\[[0-9;]*m/g;
+
 // Cache for processed terminal content - avoids expensive re-computation
 // Using WeakRef approach isn't suitable here, so we use LRU-style cache
 const processedContentCache = new Map<string, string>();
 const MAX_CACHE_SIZE = 2000; // Allow caching ~2x max logs per terminal
 
-// Process terminal output: detect URLs in clean content, then wrap them in HTML
+// Process terminal output: detect URLs in raw content, then convert ANSI and wrap URLs
 function processTerminalContent(rawContent: string): string {
   // Check cache first
   const cached = processedContentCache.get(rawContent);
@@ -112,18 +115,28 @@ function processTerminalContent(rawContent: string): string {
   let html: string;
 
   try {
+    // First, find URLs in raw content BEFORE ANSI conversion
+    // This prevents ANSI codes that colorize parts of URLs from breaking detection
+    const urlMatches: string[] = [];
+    const contentWithPlaceholders = rawContent.replace(urlRegex, (url) => {
+      const index = urlMatches.length;
+      urlMatches.push(url);
+      return `__URL_${index}__`;
+    });
+
     // Convert ANSI to HTML
-    html = ansiConverter.toHtml(rawContent);
+    html = ansiConverter.toHtml(contentWithPlaceholders);
 
     // Also clean up any orphaned bracket sequences in the HTML output
     html = html.replace(/\[([0-9;]*)m/g, '');
 
-    // Find URLs directly in the HTML output (simpler, safer approach)
-    // This handles the common case where URLs are not split by ANSI codes
-    html = html.replace(urlRegex, (url) => {
-      // Escape the URL for use in data attribute
-      const escapedUrl = url.replace(/"/g, '&quot;');
-      return `<span class="terminal-link" data-url="${escapedUrl}">${url}</span>`;
+    // Replace placeholders with clickable links
+    html = html.replace(/__URL_(\d+)__/g, (_, indexStr) => {
+      const rawUrl = urlMatches[parseInt(indexStr)];
+      // Strip ANSI codes from the URL for clean display and href
+      const cleanUrl = rawUrl.replace(ansiRegex, '');
+      const escapedUrl = cleanUrl.replace(/"/g, '&quot;');
+      return `<span class="terminal-link" data-url="${escapedUrl}">${cleanUrl}</span>`;
     });
   } catch (error) {
     // Fallback: just escape HTML and return plain text

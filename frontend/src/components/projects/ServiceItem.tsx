@@ -7,8 +7,20 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Service } from '@/types';
 import {
@@ -53,11 +65,12 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
   const modeNames = hasModes ? Object.keys(service.modes!) : [];
   const hasPresets = service.argPresets && Object.keys(service.argPresets).length > 0;
   const presetNames = hasPresets ? Object.keys(service.argPresets!) : [];
-  const hasBoth = hasModes && hasPresets;
 
-  // State for mode/preset selection (only used when hasBoth)
+  // State for mode/preset selection (used when hasModes or hasPresets)
+  // undefined = use default, null = explicitly none, string = use that value
   const [selectedMode, setSelectedMode] = useState<string | undefined>(service.defaultMode);
-  const [selectedPreset, setSelectedPreset] = useState<string | undefined>(service.defaultArgPreset);
+  const [selectedPreset, setSelectedPreset] = useState<string | null | undefined>(service.defaultArgPreset);
+  const [popoverOpen, setPopoverOpen] = useState(false);
 
   // Reset selections when service changes
   useEffect(() => {
@@ -196,75 +209,8 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
                   <TooltipContent>Stop service</TooltipContent>
                 </Tooltip>
               </>
-            ) : hasBoth ? (
-              // Both modes and presets - two separate dropdowns
-              <div className="flex items-center gap-1">
-                {/* Mode dropdown */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-7 text-xs px-2">
-                      {selectedMode || 'Mode'}
-                      <ChevronDown className="ml-1 size-3" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setSelectedMode(undefined)}>
-                      Default
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    {modeNames.map((name) => (
-                      <DropdownMenuItem
-                        key={name}
-                        onClick={() => setSelectedMode(name)}
-                      >
-                        {name}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                {/* Preset dropdown */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-7 text-xs px-2">
-                      {selectedPreset || 'Preset'}
-                      <ChevronDown className="ml-1 size-3" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setSelectedPreset(undefined)}>
-                      Default
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    {presetNames.map((name) => (
-                      <DropdownMenuItem
-                        key={name}
-                        onClick={() => setSelectedPreset(name)}
-                      >
-                        {name}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                {/* Play button */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="default"
-                      size="icon-sm"
-                      onClick={() => handleStart(selectedMode, selectedPreset)}
-                    >
-                      <Play className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    Start{selectedMode || selectedPreset ? ` (${[selectedMode, selectedPreset].filter(Boolean).join(' + ')})` : ''}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            ) : hasModes ? (
-              // Only modes - dropdown for modes
+            ) : (hasModes || hasPresets) ? (
+              // Has modes and/or presets - popover modal selector
               <div className="flex items-center">
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -277,10 +223,10 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
                       <Play className="size-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Start with default command</TooltipContent>
+                  <TooltipContent>Start with defaults</TooltipContent>
                 </Tooltip>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+                <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+                  <PopoverTrigger asChild>
                     <Button
                       variant="default"
                       size="icon-sm"
@@ -288,64 +234,67 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
                     >
                       <ChevronDown className="size-3" />
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleStart()}>
-                      Default
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    {modeNames.map((modeName) => (
-                      <DropdownMenuItem
-                        key={modeName}
-                        onClick={() => handleStart(modeName)}
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-56 p-3">
+                    <div className="space-y-3">
+                      {hasModes && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Mode</Label>
+                          <Select
+                            value={selectedMode || '_default'}
+                            onValueChange={(v) => setSelectedMode(v === '_default' ? undefined : v)}
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue placeholder="Select mode" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="_default">Default</SelectItem>
+                              {modeNames.map((name) => (
+                                <SelectItem key={name} value={name}>
+                                  {name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      {hasPresets && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Preset</Label>
+                          <Select
+                            value={selectedPreset === null ? '_none' : selectedPreset || '_default'}
+                            onValueChange={(v) => setSelectedPreset(v === '_default' ? undefined : v === '_none' ? null : v)}
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue placeholder="Select preset" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="_default">Default</SelectItem>
+                              <SelectItem value="_none">None</SelectItem>
+                              {presetNames.map((name) => (
+                                <SelectItem key={name} value={name}>
+                                  {name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      <Button
+                        size="sm"
+                        className="w-full"
+                        onClick={() => {
+                          // null means "None" (pass empty string to skip default), undefined means "Default"
+                          handleStart(selectedMode, selectedPreset === null ? '' : selectedPreset);
+                          setPopoverOpen(false);
+                        }}
                       >
-                        {modeName}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ) : hasPresets ? (
-              // Only presets - dropdown for presets
-              <div className="flex items-center">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="default"
-                      size="icon-sm"
-                      className="rounded-r-none border-r-0"
-                      onClick={() => handleStart()}
-                    >
-                      <Play className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Start with default args</TooltipContent>
-                </Tooltip>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="default"
-                      size="icon-sm"
-                      className="rounded-l-none px-1.5"
-                    >
-                      <ChevronDown className="size-3" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleStart()}>
-                      Default
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    {presetNames.map((presetName) => (
-                      <DropdownMenuItem
-                        key={presetName}
-                        onClick={() => handleStart(undefined, presetName)}
-                      >
-                        {presetName}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                        <Play className="size-3.5 mr-2" />
+                        Start
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             ) : (
               // Simple play button when no modes and no presets
