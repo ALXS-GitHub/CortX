@@ -175,7 +175,7 @@ function App() {
         console.log(`Global script ${payload.scriptId} exited with code ${payload.exitCode}, success: ${payload.success}`);
         const { setGlobalScriptExitResult, updateExecutionRecordOnExit } = useAppStore.getState();
         setGlobalScriptExitResult(payload.scriptId, payload.exitCode, payload.success);
-        updateExecutionRecordOnExit(payload.scriptId, payload.exitCode, payload.success);
+        updateExecutionRecordOnExit(payload.scriptId, payload.exitCode ?? null, payload.success);
       });
     };
 

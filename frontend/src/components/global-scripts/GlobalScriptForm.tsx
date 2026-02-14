@@ -40,6 +40,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, folders, onSubmit
   const [description, setDescription] = useState('');
   const [command, setCommand] = useState('');
   const [scriptPath, setScriptPath] = useState('');
+  const [workingDir, setWorkingDir] = useState('');
   const [color, setColor] = useState(SCRIPT_COLORS[0]);
   const [folderId, setFolderId] = useState<string>('');
   const [tags, setTags] = useState('');
@@ -89,6 +90,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, folders, onSubmit
         setDescription(script.description || '');
         setCommand(script.command);
         setScriptPath(script.scriptPath || '');
+        setWorkingDir(script.workingDir || '');
         setColor(script.color || SCRIPT_COLORS[0]);
         setFolderId(script.folderId || '');
         setTags(script.tags.join(', '));
@@ -97,6 +99,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, folders, onSubmit
         setDescription('');
         setCommand('');
         setScriptPath('');
+        setWorkingDir('');
         setColor(SCRIPT_COLORS[Math.floor(Math.random() * SCRIPT_COLORS.length)]);
         setFolderId('');
         setTags('');
@@ -129,6 +132,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, folders, onSubmit
         description: description.trim() || undefined,
         command: command.trim(),
         scriptPath: scriptPath.trim() || undefined,
+        workingDir: workingDir.trim() || undefined,
         color,
         folderId: folderId || undefined,
         tags: parsedTags.length > 0 ? parsedTags : undefined,
