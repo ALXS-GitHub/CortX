@@ -175,6 +175,7 @@ export function Settings() {
       defaults: {
         launchMethod,
       },
+      scriptsConfig: settings.scriptsConfig,
     };
 
     try {
