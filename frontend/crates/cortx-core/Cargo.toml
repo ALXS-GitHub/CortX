@@ -1,9 +1,9 @@
 [package]
 name = "cortx-core"
-version = "0.4.0"
+version.workspace = true
 description = "CortX shared core library - models, storage, and process management"
-edition = "2021"
-rust-version = "1.77.2"
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

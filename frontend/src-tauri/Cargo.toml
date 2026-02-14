@@ -1,12 +1,12 @@
 [package]
 name = "cortx-app"
-version = "0.4.0"
+version.workspace = true
 description = "Cortx - A dashboard for managing local dev applications"
 authors = ["ALXS-GitHub"]
 license = ""
 repository = ""
-edition = "2021"
-rust-version = "1.77.2"
+edition.workspace = true
+rust-version.workspace = true
 
 [lib]
 name = "cortx_lib"
