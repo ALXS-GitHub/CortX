@@ -2,6 +2,22 @@
 
 Don't forget to update PRD when adding features
 
+- [ ] New version of CortX - with CortX CLI : 
+  - [ ] For the moment cortex is mainly about projects and their services and also supports scripts for those projects but it doesn't support scripts only (not big project, here we just want a simple script, like for example a function to extract background of image, etc... (see the myhelp tool I've made for my powershell -> this would just be an improved version of it))
+  - [ ] To do that we will maybe need to have a "scripts" folder (and ability to set it's location) -> so it's just easier to have all scripts at the same place and also make a git to store them all at the same place (but separated from this cortx project). for example it could be the place where I store my powershell scripts and we could easily reuse them here in cortx. also we could also include other scripts that are located in different places.
+  - [ ] second objective is to have CortX available as CLI (for scripts in the first place, and maybe later for projects and services). so it's just easier to run whatever script in cli (use RATATUI for this). This GUI should be great looking, easy to use, super simple when we just want to execute things, but could go with much more things and complexity when we want to configure things (we could go as deep as possible but when we just want to do simple things the tui shouldn't have this complexity).
+  - [ ] We could do the same things in the GUI as in the TUI (TUI now is only for scripts)
+  - [ ] We have to integrate the scripts things in the app (I already said we have scripts relative to projects, but here this is not the goal of this part, we want to make scripts made by the user on his computer that are not specific to any project but rather global helpers easily accessible within CortX). So now basically in cortX we should have the 'projects/services' part and then another section 'scripts'. -> find a nice way to organize this on the GUI so it doesn't change anything of the UI for the projects, but just add this scripts things. (my idea here is just to look how the project specific scripts are working and basically do the same for global script but with different behaviors and organisation just so we know their are global scripts).
+  - [ ] The goal would be to have script being configured with different option (for example we could configure which -- parameters are usable and the value we want for them). Also we could have a feature that based on the --help automatically generates those config (should have a standard format to respect to make it possible -> to discuss). else it should be easily configurable and usable so we can easily change parameters, and so.
+  - [ ] The Tui and Gui should have everything shared (basically it's just the interface that changes and the way they interact with data/config, etc...)
+  - [ ] Since there are more and more projects I add in CortX (and I suppose it's going to be the same with scripts), we should also have a way to sort them (I think adding folders could be a nice way to do this and we could add them in different folders so it's easier to find them).
+  - [ ] Basically I want this to become the replacer of my powershell script config. (though this will not replace my powershell config with oh-my-posh, styling, helpers, tools -> it's only a replacer for the scripts part)
+  -> talk and plan all that with claude.
+
+---
+
+- [ ] Make sure it's written CortX not Cortx in the app (top bar, app name, etc...)
+- [ ] When opening in VSCode make sure it's doesn't open a terminal that execute the code command (this terminal should be hidden or use another method to directly open VSCode without opening a terminal)
 - [ ] Find if there is a better way to handle the port used detection (instead of parsing output, maybe use some library or other way to detect which ports are used by which process)
 - [ ] Adding message on close saying "closing running services" while it's closing them with a loading indicator
 - [ ] Adjust the areas position for dropping a terminal in current pane / left / right (I feel like it's not really 25 % / 50 % / 25 % of the pane width right now, because there are some gaps)

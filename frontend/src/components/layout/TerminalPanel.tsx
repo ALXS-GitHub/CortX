@@ -438,6 +438,12 @@ export function TerminalPanel() {
     showScriptTerminal,
     hiddenTerminalIds,
     closedTerminalIds,
+    globalScripts,
+    globalScriptRuntimes,
+    stopGlobalScript,
+    clearGlobalScriptLogs,
+    hideGlobalScriptTerminal,
+    showGlobalScriptTerminal,
     // Multi-pane state
     terminalPanes,
     focusedPaneId,
@@ -568,11 +574,36 @@ export function TerminalPanel() {
       });
     }
 
-    return items;
-  }, [serviceRuntimes, scriptRuntimes, getServiceInfo, getScriptInfo]);
+    // Add global scripts
+    for (const [scriptId, runtime] of globalScriptRuntimes.entries()) {
+      const script = globalScripts.find(s => s.id === scriptId);
+      items.push({
+        id: `global-script:${scriptId}`,
+        type: 'global-script',
+        name: script?.name || 'Unknown Script',
+        projectName: 'Global',
+        projectId: '',
+        status: runtime.status,
+        logs: runtime.logs,
+        lastExitCode: runtime.lastExitCode,
+        lastSuccess: runtime.lastSuccess,
+      });
+    }
 
-  // Helper to extract raw ID from prefixed ID
-  const getRawId = (prefixedId: string) => prefixedId.split(':')[1];
+    return items;
+  }, [serviceRuntimes, scriptRuntimes, globalScriptRuntimes, globalScripts, getServiceInfo, getScriptInfo]);
+
+  // Helper to extract raw ID from prefixed ID (handles "global-script:id" format)
+  const getRawId = (prefixedId: string) => {
+    if (prefixedId.startsWith('global-script:')) return prefixedId.slice('global-script:'.length);
+    return prefixedId.split(':')[1];
+  };
+
+  // Helper to extract type from prefixed ID
+  const getTerminalType = (prefixedId: string): string => {
+    if (prefixedId.startsWith('global-script:')) return 'global-script';
+    return prefixedId.split(':')[0];
+  };
 
   // Get visible terminals (not hidden, not closed, has logs or is active)
   const visibleTerminals = useMemo(() => {
@@ -582,7 +613,8 @@ export function TerminalPanel() {
       const isClosed = closedTerminalIds.has(rawId);
       const hasActivity = item.logs.length > 0 ||
         (item.type === 'service' && item.status !== 'stopped') ||
-        (item.type === 'script' && item.status !== 'idle');
+        (item.type === 'script' && item.status !== 'idle') ||
+        (item.type === 'global-script' && item.status !== 'idle');
       return !isHidden && !isClosed && hasActivity;
     });
   }, [allTerminals, hiddenTerminalIds, closedTerminalIds]);
@@ -602,7 +634,8 @@ export function TerminalPanel() {
       const isClosed = closedTerminalIds.has(rawId);
       const hasActivity = item.logs.length > 0 ||
         (item.type === 'service' && item.status !== 'stopped') ||
-        (item.type === 'script' && item.status !== 'idle');
+        (item.type === 'script' && item.status !== 'idle') ||
+        (item.type === 'global-script' && item.status !== 'idle');
       const sameProject = !activeProjectId || item.projectId === activeProjectId;
       return isHidden && !isClosed && hasActivity && sameProject;
     });
@@ -614,44 +647,55 @@ export function TerminalPanel() {
   // Handle stop for current terminal
   const handleStopCurrent = useCallback(async () => {
     if (!activeTerminalId) return;
-    const [type, rawId] = activeTerminalId.split(':');
-    if (type === 'script') {
+    const type = getTerminalType(activeTerminalId);
+    const rawId = getRawId(activeTerminalId);
+    if (type === 'global-script') {
+      await stopGlobalScript(rawId);
+    } else if (type === 'script') {
       await stopScript(rawId);
     } else {
       await stopService(rawId);
     }
-  }, [activeTerminalId, stopScript, stopService]);
+  }, [activeTerminalId, stopScript, stopService, stopGlobalScript]);
 
   // Handle hide terminal (removes from pane, can be restored)
   const handleHideTerminal = useCallback((terminalId: string) => {
-    const [type, rawId] = terminalId.split(':');
-    if (type === 'script') {
+    const type = getTerminalType(terminalId);
+    const rawId = getRawId(terminalId);
+    if (type === 'global-script') {
+      hideGlobalScriptTerminal(rawId);
+    } else if (type === 'script') {
       hideScriptTerminal(rawId);
     } else {
       hideTerminal(rawId);
     }
-  }, [hideTerminal, hideScriptTerminal]);
+  }, [hideTerminal, hideScriptTerminal, hideGlobalScriptTerminal]);
 
   // Handle show terminal from hidden list
   const handleShowTerminal = useCallback((item: TerminalItem) => {
     const rawId = getRawId(item.id);
-    if (item.type === 'script') {
+    if (item.type === 'global-script') {
+      showGlobalScriptTerminal(rawId);
+    } else if (item.type === 'script') {
       showScriptTerminal(rawId);
     } else {
       showTerminal(rawId);
     }
-  }, [showTerminal, showScriptTerminal]);
+  }, [showTerminal, showScriptTerminal, showGlobalScriptTerminal]);
 
   // Handle clear logs for current terminal
   const handleClearCurrent = useCallback(() => {
     if (!activeTerminalId) return;
-    const [type, rawId] = activeTerminalId.split(':');
-    if (type === 'script') {
+    const type = getTerminalType(activeTerminalId);
+    const rawId = getRawId(activeTerminalId);
+    if (type === 'global-script') {
+      clearGlobalScriptLogs(rawId);
+    } else if (type === 'script') {
       clearScriptLogs(rawId);
     } else {
       clearServiceLogs(rawId);
     }
-  }, [activeTerminalId, clearScriptLogs, clearServiceLogs]);
+  }, [activeTerminalId, clearScriptLogs, clearServiceLogs, clearGlobalScriptLogs]);
 
   // Get current terminal info
   const currentTerminal = useMemo(() => {
@@ -754,23 +798,29 @@ export function TerminalPanel() {
 
   // Clear logs for a specific pane's terminal
   const handleClearPaneLogs = useCallback((terminalId: string) => {
-    const [type, rawId] = terminalId.split(':');
-    if (type === 'script') {
+    const type = getTerminalType(terminalId);
+    const rawId = getRawId(terminalId);
+    if (type === 'global-script') {
+      clearGlobalScriptLogs(rawId);
+    } else if (type === 'script') {
       clearScriptLogs(rawId);
     } else {
       clearServiceLogs(rawId);
     }
-  }, [clearScriptLogs, clearServiceLogs]);
+  }, [clearScriptLogs, clearServiceLogs, clearGlobalScriptLogs]);
 
   // Stop service/script for a pane's terminal
   const handleStopPaneTerminal = useCallback(async (terminalId: string) => {
-    const [type, rawId] = terminalId.split(':');
-    if (type === 'script') {
+    const type = getTerminalType(terminalId);
+    const rawId = getRawId(terminalId);
+    if (type === 'global-script') {
+      await stopGlobalScript(rawId);
+    } else if (type === 'script') {
       await stopScript(rawId);
     } else {
       await stopService(rawId);
     }
-  }, [stopScript, stopService]);
+  }, [stopScript, stopService, stopGlobalScript]);
 
   if (!terminalPanelOpen) {
     return (

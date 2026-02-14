@@ -16,7 +16,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { useAppStore } from '@/stores/appStore';
-import { LayoutDashboard, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode } from 'lucide-react';
+import { LayoutDashboard, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode, ScrollText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { View, ServiceStatus, ScriptStatus } from '@/types';
 import { getVersion } from '@tauri-apps/api/app';
@@ -48,6 +48,12 @@ export function AppSidebar() {
     showScriptTerminal,
     terminalPanelOpen,
     terminalHeight,
+    globalScripts,
+    globalScriptRuntimes,
+    stopGlobalScript,
+    closeGlobalScriptTerminal,
+    showGlobalScriptTerminal,
+    openRunScriptDialog,
   } = useAppStore();
 
   useEffect(() => {
@@ -172,6 +178,26 @@ export function AppSidebar() {
     0
   );
 
+  // Get global scripts with runtime state
+  const globalScriptsWithRuntime = Array.from(globalScriptRuntimes.entries())
+    .filter(([scriptId, runtime]) => {
+      if (closedTerminalIds.has(scriptId)) return false;
+      return runtime.logs.length > 0 || runtime.status !== 'idle';
+    })
+    .map(([scriptId, runtime]) => {
+      const script = globalScripts.find(s => s.id === scriptId);
+      return {
+        scriptId,
+        scriptName: script?.name || 'Unknown',
+        status: runtime.status,
+        isHidden: hiddenTerminalIds.has(scriptId),
+      };
+    });
+
+  const runningGlobalScriptsCount = globalScriptsWithRuntime.filter(
+    s => s.status === 'running'
+  ).length;
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border">
@@ -205,6 +231,16 @@ export function AppSidebar() {
                 >
                   <LayoutDashboard className="size-4" />
                   <span>Dashboard</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={currentView === 'scripts' || currentView === 'script-detail'}
+                  onClick={() => handleNavigate('scripts')}
+                  tooltip="Scripts"
+                >
+                  <ScrollText className="size-4" />
+                  <span>Scripts</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -570,6 +606,113 @@ export function AppSidebar() {
                       })}
                     </SidebarMenuSub>
                   </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
+        {/* Global Scripts Section */}
+        {globalScriptsWithRuntime.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>
+              <span className="flex items-center gap-2">
+                Global Scripts
+                {runningGlobalScriptsCount > 0 && (
+                  <span className="text-xs bg-purple-500/20 text-purple-600 dark:text-purple-400 px-1.5 py-0.5 rounded-full">
+                    {runningGlobalScriptsCount} running
+                  </span>
+                )}
+              </span>
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {globalScriptsWithRuntime.map(({ scriptId, scriptName, status, isHidden }) => {
+                  const isRunning = status === 'running';
+                  const isCompleted = status === 'completed';
+                  const isFailed = status === 'failed';
+
+                  let statusColor = 'fill-muted-foreground text-muted-foreground';
+                  if (isRunning) {
+                    statusColor = 'fill-purple-500 text-purple-500 animate-pulse';
+                  } else if (isCompleted) {
+                    statusColor = 'fill-green-500 text-green-500';
+                  } else if (isFailed) {
+                    statusColor = 'fill-red-500 text-red-500';
+                  }
+
+                  return (
+                    <SidebarMenuItem key={scriptId}>
+                      <SidebarMenuButton
+                        onClick={() => showGlobalScriptTerminal(scriptId)}
+                        className="relative group/gscript"
+                        tooltip={scriptName}
+                      >
+                        <div className="relative">
+                          <ScrollText className="size-4" />
+                          {isHidden && (
+                            <Circle className="absolute -top-1 -right-1 size-1.5 fill-yellow-500 text-yellow-500 animate-pulse" />
+                          )}
+                        </div>
+                        <span className={cn('text-xs flex-1', isHidden && 'opacity-60')}>
+                          {scriptName}
+                        </span>
+                        <Circle className={cn('size-1.5', statusColor)} />
+                        <div className="hidden group-hover/gscript:flex items-center gap-0.5 ml-1">
+                          {isRunning ? (
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                stopGlobalScript(scriptId);
+                              }}
+                              onKeyDown={(e) => e.key === 'Enter' && stopGlobalScript(scriptId)}
+                              title="Stop script"
+                            >
+                              <Square className="size-3" />
+                            </div>
+                          ) : (
+                            <>
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                className="size-5 p-0 flex items-center justify-center rounded hover:bg-purple-500/20 hover:text-purple-500 cursor-pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const gs = globalScripts.find(s => s.id === scriptId);
+                                  if (gs) openRunScriptDialog(gs);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const gs = globalScripts.find(s => s.id === scriptId);
+                                    if (gs) openRunScriptDialog(gs);
+                                  }
+                                }}
+                                title="Run script"
+                              >
+                                <Play className="size-3" />
+                              </div>
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  closeGlobalScriptTerminal(scriptId);
+                                }}
+                                onKeyDown={(e) => e.key === 'Enter' && closeGlobalScriptTerminal(scriptId)}
+                                title="Close terminal"
+                              >
+                                <X className="size-3" />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
                   );
                 })}
               </SidebarMenu>

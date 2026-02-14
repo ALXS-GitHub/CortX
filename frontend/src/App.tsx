@@ -10,6 +10,9 @@ import { ClosingModal } from '@/components/ClosingModal';
 import { Dashboard } from '@/views/Dashboard';
 import { ProjectView } from '@/views/ProjectView';
 import { Settings } from '@/views/Settings';
+import { GlobalScriptsView } from '@/components/global-scripts/GlobalScriptsView';
+import { GlobalScriptDetail } from '@/components/global-scripts/GlobalScriptDetail';
+import { RunScriptDialog } from '@/components/global-scripts/RunScriptDialog';
 import { useAppStore } from '@/stores/appStore';
 import {
   onServiceLog,
@@ -18,6 +21,9 @@ import {
   onScriptLog,
   onScriptStatus,
   onScriptExit,
+  onGlobalScriptLog,
+  onGlobalScriptStatus,
+  onGlobalScriptExit,
   getRunningServices,
 } from '@/lib/tauri';
 import type { LogEntry } from '@/types';
@@ -42,8 +48,19 @@ function MainContent({ children }: { children: React.ReactNode }) {
   );
 }
 
+function RunScriptDialogGlobal() {
+  const { runScriptDialogTarget, closeRunScriptDialog } = useAppStore();
+  return (
+    <RunScriptDialog
+      script={runScriptDialogTarget}
+      open={!!runScriptDialogTarget}
+      onOpenChange={(open) => { if (!open) closeRunScriptDialog(); }}
+    />
+  );
+}
+
 function App() {
-  const { currentView, loadProjects, loadSettings } = useAppStore();
+  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadFolders, loadScriptGroups, loadScriptsConfig } = useAppStore();
 
   // Keep track of whether listeners are set up
   const listenersSetUp = useRef(false);
@@ -52,6 +69,10 @@ function App() {
   useEffect(() => {
     loadProjects();
     loadSettings();
+    loadGlobalScripts();
+    loadFolders();
+    loadScriptGroups();
+    loadScriptsConfig();
 
     // Check for running services on startup
     getRunningServices().then((serviceIds) => {
@@ -60,7 +81,7 @@ function App() {
         updateServiceStatus(serviceId, 'running');
       });
     });
-  }, [loadProjects, loadSettings]);
+  }, [loadProjects, loadSettings, loadGlobalScripts, loadFolders, loadScriptGroups, loadScriptsConfig]);
 
   // Set up event listeners - only once
   useEffect(() => {
@@ -76,6 +97,10 @@ function App() {
     let unlistenScriptLog: (() => void) | undefined;
     let unlistenScriptStatus: (() => void) | undefined;
     let unlistenScriptExit: (() => void) | undefined;
+    // Global script listeners
+    let unlistenGlobalScriptLog: (() => void) | undefined;
+    let unlistenGlobalScriptStatus: (() => void) | undefined;
+    let unlistenGlobalScriptExit: (() => void) | undefined;
     let isCancelled = false;
 
     const setupListeners = async () => {
@@ -126,6 +151,32 @@ function App() {
         const { setScriptExitResult } = useAppStore.getState();
         setScriptExitResult(payload.scriptId, payload.exitCode, payload.success);
       });
+
+      // Global script event listeners
+      unlistenGlobalScriptLog = await onGlobalScriptLog((payload) => {
+        if (isCancelled) return;
+        const { appendGlobalScriptLog } = useAppStore.getState();
+        const logEntry: LogEntry = {
+          timestamp: new Date().toISOString(),
+          stream: payload.stream,
+          content: payload.content,
+        };
+        appendGlobalScriptLog(payload.scriptId, logEntry);
+      });
+
+      unlistenGlobalScriptStatus = await onGlobalScriptStatus((payload) => {
+        if (isCancelled) return;
+        const { updateGlobalScriptStatus } = useAppStore.getState();
+        updateGlobalScriptStatus(payload.scriptId, payload.status, payload.pid);
+      });
+
+      unlistenGlobalScriptExit = await onGlobalScriptExit((payload) => {
+        if (isCancelled) return;
+        console.log(`Global script ${payload.scriptId} exited with code ${payload.exitCode}, success: ${payload.success}`);
+        const { setGlobalScriptExitResult, updateExecutionRecordOnExit } = useAppStore.getState();
+        setGlobalScriptExitResult(payload.scriptId, payload.exitCode, payload.success);
+        updateExecutionRecordOnExit(payload.scriptId, payload.exitCode, payload.success);
+      });
     };
 
     setupListeners();
@@ -138,6 +189,9 @@ function App() {
       unlistenScriptLog?.();
       unlistenScriptStatus?.();
       unlistenScriptExit?.();
+      unlistenGlobalScriptLog?.();
+      unlistenGlobalScriptStatus?.();
+      unlistenGlobalScriptExit?.();
       listenersSetUp.current = false;
     };
   }, []);
@@ -168,6 +222,10 @@ function App() {
         return <ProjectView />;
       case 'settings':
         return <Settings />;
+      case 'scripts':
+        return <GlobalScriptsView />;
+      case 'script-detail':
+        return <GlobalScriptDetail />;
       case 'dashboard':
       default:
         return <Dashboard />;
@@ -188,6 +246,8 @@ function App() {
                   {currentView === 'dashboard' && 'Dashboard'}
                   {currentView === 'project' && 'Project'}
                   {currentView === 'settings' && 'Settings'}
+                  {currentView === 'scripts' && 'Scripts'}
+                  {currentView === 'script-detail' && 'Script Detail'}
                 </div>
               </header>
               <MainContent>{renderView()}</MainContent>
@@ -199,6 +259,7 @@ function App() {
       <Toaster position="bottom-right" />
       <UpdateChecker />
       <ClosingModal />
+      <RunScriptDialogGlobal />
     </TooltipProvider>
   );
 }
