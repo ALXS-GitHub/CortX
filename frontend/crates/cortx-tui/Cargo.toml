@@ -1,9 +1,9 @@
 [package]
 name = "cortx-tui"
-version = "0.4.0"
+version.workspace = true
 description = "CortX TUI - Terminal User Interface for managing scripts"
-edition = "2021"
-rust-version = "1.77.2"
+edition.workspace = true
+rust-version.workspace = true
 
 [[bin]]
 name = "cortx"
