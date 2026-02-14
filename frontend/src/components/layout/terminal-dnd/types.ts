@@ -1,6 +1,6 @@
 import type { ServiceStatus, ScriptStatus, LogEntry } from '@/types';
 
-export type TerminalType = 'service' | 'script';
+export type TerminalType = 'service' | 'script' | 'global-script';
 
 export interface TerminalItem {
   id: string;

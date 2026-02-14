@@ -1,11 +1,15 @@
 use crate::models::{
-    AddEnvFileInput, AppSettings, CreateProjectInput, CreateServiceInput, CreateScriptInput,
+    AddEnvFileInput, AppSettings, CreateFolderInput, CreateGlobalScriptInput,
+    CreateProjectInput, CreateScriptGroupInput, CreateScriptInput, CreateServiceInput,
     DiscoverEnvFilesInput, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
-    LinkEnvToServiceInput, Project, Script, Service, UpdateProjectInput, UpdateScriptInput,
-    UpdateServiceInput,
+    DiscoveredScript, ExecutionRecord, GlobalScript, ImportResult, LinkEnvToServiceInput, Project, Script,
+    ScriptGroup, ScriptParameter, ScriptsConfig, Service, UpdateFolderInput,
+    UpdateGlobalScriptInput, UpdateProjectInput, UpdateScriptGroupInput, UpdateScriptInput,
+    UpdateServiceInput, VirtualFolder,
 };
-use crate::process_manager::ProcessManager;
+use crate::process_manager::{ProcessEventEmitter, ProcessManager};
 use crate::storage::Storage;
+use crate::tauri_emitter::TauriEmitter;
 use chrono::Utc;
 use std::fs;
 use std::path::Path;
@@ -85,9 +89,10 @@ pub fn update_project(
 #[tauri::command]
 pub fn delete_project(app_handle: AppHandle, state: State<AppState>, id: String) -> Result<(), String> {
     // Stop any running services for this project
+    let emitter = TauriEmitter::new(app_handle);
     if let Some(project) = state.storage.get_project(&id) {
         for service in &project.services {
-            let _ = state.process_manager.stop_service(&app_handle, &service.id);
+            let _ = state.process_manager.stop_service(&emitter, &service.id);
         }
     }
 
@@ -176,7 +181,8 @@ pub fn update_service(
 #[tauri::command]
 pub fn delete_service(app_handle: AppHandle, state: State<AppState>, service_id: String) -> Result<(), String> {
     // Stop if running
-    let _ = state.process_manager.stop_service(&app_handle, &service_id);
+    let emitter = TauriEmitter::new(app_handle);
+    let _ = state.process_manager.stop_service(&emitter, &service_id);
 
     state
         .storage
@@ -266,7 +272,8 @@ pub fn update_script(
 #[tauri::command]
 pub fn delete_script(app_handle: AppHandle, state: State<AppState>, script_id: String) -> Result<(), String> {
     // Stop if running
-    let _ = state.process_manager.stop_script(&app_handle, &script_id);
+    let emitter = TauriEmitter::new(app_handle);
+    let _ = state.process_manager.stop_script(&emitter, &script_id);
 
     state
         .storage
@@ -669,8 +676,9 @@ pub fn start_integrated_service(
         }
     }
 
+    let emitter: Arc<dyn ProcessEventEmitter> = Arc::new(TauriEmitter::new(app_handle));
     state.process_manager.start_service(
-        app_handle,
+        emitter,
         service_id,
         working_dir,
         final_command,
@@ -682,7 +690,8 @@ pub fn start_integrated_service(
 
 #[tauri::command]
 pub fn stop_integrated_service(app_handle: AppHandle, state: State<AppState>, service_id: String) -> Result<(), String> {
-    state.process_manager.stop_service(&app_handle, &service_id)
+    let emitter = TauriEmitter::new(app_handle);
+    state.process_manager.stop_service(&emitter, &service_id)
 }
 
 #[tauri::command]
@@ -715,8 +724,9 @@ pub fn run_script(
         path.to_string_lossy().to_string()
     };
 
+    let emitter: Arc<dyn ProcessEventEmitter> = Arc::new(TauriEmitter::new(app_handle));
     state.process_manager.run_script(
-        app_handle,
+        emitter,
         script_id,
         working_dir,
         script.command,
@@ -725,7 +735,8 @@ pub fn run_script(
 
 #[tauri::command]
 pub fn stop_script(app_handle: AppHandle, state: State<AppState>, script_id: String) -> Result<(), String> {
-    state.process_manager.stop_script(&app_handle, &script_id)
+    let emitter = TauriEmitter::new(app_handle);
+    state.process_manager.stop_script(&emitter, &script_id)
 }
 
 #[tauri::command]
@@ -1321,4 +1332,542 @@ pub fn link_env_to_service(
         .map_err(|e| e.to_string())?;
 
     result_file.ok_or_else(|| format!("Env file not found: {}", env_file_id))
+}
+
+// ============================================================================
+// Global Script commands
+// ============================================================================
+
+#[tauri::command]
+pub fn get_all_global_scripts(state: State<AppState>) -> Vec<GlobalScript> {
+    state.storage.get_all_global_scripts()
+}
+
+#[tauri::command]
+pub fn get_global_script(state: State<AppState>, id: String) -> Result<GlobalScript, String> {
+    state
+        .storage
+        .get_global_script(&id)
+        .ok_or_else(|| format!("Global script not found: {}", id))
+}
+
+#[tauri::command]
+pub fn create_global_script(
+    state: State<AppState>,
+    input: CreateGlobalScriptInput,
+) -> Result<GlobalScript, String> {
+    let mut script = GlobalScript::new(input.name, input.command, input.working_dir);
+    script.description = input.description;
+    script.script_path = input.script_path;
+    script.color = input.color;
+    script.folder_id = input.folder_id;
+    script.tags = input.tags.unwrap_or_default();
+    script.parameters = input.parameters.unwrap_or_default();
+    script.parameter_presets = input.parameter_presets.unwrap_or_default();
+    script.env_vars = input.env_vars;
+
+    // Set order to be last
+    let all = state.storage.get_all_global_scripts();
+    script.order = all.len() as u32;
+
+    state
+        .storage
+        .create_global_script(script)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_global_script(
+    state: State<AppState>,
+    id: String,
+    input: UpdateGlobalScriptInput,
+) -> Result<GlobalScript, String> {
+    state
+        .storage
+        .update_global_script(&id, |script| {
+            if let Some(name) = input.name {
+                script.name = name;
+            }
+            if input.description.is_some() {
+                script.description = input.description;
+            }
+            if let Some(command) = input.command {
+                script.command = command;
+            }
+            if input.script_path.is_some() {
+                script.script_path = input.script_path;
+            }
+            if input.working_dir.is_some() {
+                script.working_dir = input.working_dir;
+            }
+            if input.color.is_some() {
+                script.color = input.color;
+            }
+            if input.folder_id.is_some() {
+                script.folder_id = input.folder_id;
+            }
+            if let Some(tags) = input.tags {
+                script.tags = tags;
+            }
+            if let Some(parameters) = input.parameters {
+                script.parameters = parameters;
+            }
+            if let Some(presets) = input.parameter_presets {
+                script.parameter_presets = presets;
+            }
+            if input.default_preset_id.is_some() {
+                script.default_preset_id = input.default_preset_id;
+            }
+            if input.env_vars.is_some() {
+                script.env_vars = input.env_vars;
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_global_script(
+    app_handle: AppHandle,
+    state: State<AppState>,
+    id: String,
+) -> Result<(), String> {
+    // Stop if running
+    let emitter = TauriEmitter::new(app_handle);
+    let _ = state.process_manager.stop_global_script(&emitter, &id);
+
+    state
+        .storage
+        .delete_global_script(&id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reorder_global_scripts(
+    state: State<AppState>,
+    script_ids: Vec<String>,
+) -> Result<(), String> {
+    for (order, id) in script_ids.iter().enumerate() {
+        state
+            .storage
+            .update_global_script(id, |script| {
+                script.order = order as u32;
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn run_global_script(
+    app_handle: AppHandle,
+    state: State<AppState>,
+    script_id: String,
+    working_dir: String,
+    parameter_values: Option<std::collections::HashMap<String, String>>,
+    extra_args: Option<String>,
+) -> Result<u32, String> {
+    let script = state
+        .storage
+        .get_global_script(&script_id)
+        .ok_or_else(|| format!("Global script not found: {}", script_id))?;
+
+    // Replace {{SCRIPT_FILE}} placeholder with absolute script path
+    let mut final_command = if let Some(ref script_path) = script.script_path {
+        script.command.replace("{{SCRIPT_FILE}}", script_path)
+    } else {
+        script.command.clone()
+    };
+
+    if let Some(params) = &parameter_values {
+        for param_def in &script.parameters {
+            if let Some(value) = params.get(&param_def.name) {
+                if value.is_empty() {
+                    continue;
+                }
+                // For bool params, only add the flag if true
+                if param_def.param_type == crate::models::ScriptParamType::Bool {
+                    if value == "true" {
+                        if let Some(ref flag) = param_def.long_flag {
+                            final_command = format!("{} {}", final_command, flag);
+                        } else if let Some(ref flag) = param_def.short_flag {
+                            final_command = format!("{} {}", final_command, flag);
+                        }
+                    }
+                } else {
+                    // For other types, add flag + value
+                    if let Some(ref flag) = param_def.long_flag {
+                        final_command = format!("{} {} {}", final_command, flag, value);
+                    } else if let Some(ref flag) = param_def.short_flag {
+                        final_command = format!("{} {} {}", final_command, flag, value);
+                    } else {
+                        // Positional argument
+                        final_command = format!("{} {}", final_command, value);
+                    }
+                }
+            }
+        }
+    }
+
+    // Append extra args if provided
+    if let Some(ref args) = extra_args {
+        let trimmed = args.trim();
+        if !trimmed.is_empty() {
+            final_command = format!("{} {}", final_command, trimmed);
+        }
+    }
+
+    // Record execution start
+    let mut record = ExecutionRecord::new(script_id.clone());
+    if let Some(ref params) = parameter_values {
+        record.parameters_used = params.clone();
+    }
+    let _ = state.storage.add_execution_record(record);
+
+    let emitter: Arc<dyn ProcessEventEmitter> = Arc::new(TauriEmitter::new(app_handle));
+    let pid = state.process_manager.run_global_script(
+        emitter,
+        script_id.clone(),
+        working_dir,
+        final_command,
+        script.env_vars,
+    )?;
+
+    Ok(pid)
+}
+
+#[tauri::command]
+pub fn stop_global_script(
+    app_handle: AppHandle,
+    state: State<AppState>,
+    script_id: String,
+) -> Result<(), String> {
+    let emitter = TauriEmitter::new(app_handle);
+    state
+        .process_manager
+        .stop_global_script(&emitter, &script_id)
+}
+
+#[tauri::command]
+pub fn is_global_script_running(state: State<AppState>, script_id: String) -> bool {
+    state.process_manager.is_global_script_running(&script_id)
+}
+
+// ============================================================================
+// Virtual Folder commands
+// ============================================================================
+
+#[tauri::command]
+pub fn get_all_folders(state: State<AppState>) -> Vec<VirtualFolder> {
+    state.storage.get_all_folders()
+}
+
+#[tauri::command]
+pub fn create_folder(
+    state: State<AppState>,
+    input: CreateFolderInput,
+) -> Result<VirtualFolder, String> {
+    let mut folder = VirtualFolder::new(input.name, input.folder_type);
+    folder.color = input.color;
+    folder.icon = input.icon;
+    folder.order = input.order;
+
+    state
+        .storage
+        .create_folder(folder)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_folder(
+    state: State<AppState>,
+    id: String,
+    input: UpdateFolderInput,
+) -> Result<VirtualFolder, String> {
+    state
+        .storage
+        .update_folder(&id, |folder| {
+            if let Some(name) = input.name {
+                folder.name = name;
+            }
+            if input.color.is_some() {
+                folder.color = input.color;
+            }
+            if input.icon.is_some() {
+                folder.icon = input.icon;
+            }
+            folder.order = input.order;
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_folder(state: State<AppState>, id: String) -> Result<(), String> {
+    // Unlink all scripts/projects from this folder
+    let scripts = state.storage.get_all_global_scripts();
+    for script in scripts {
+        if script.folder_id.as_deref() == Some(&id) {
+            let _ = state.storage.update_global_script(&script.id, |s| {
+                s.folder_id = None;
+            });
+        }
+    }
+
+    let projects = state.storage.get_all_projects();
+    for project in projects {
+        if project.folder_id.as_deref() == Some(&id) {
+            let _ = state.storage.update_project(&project.id, |p| {
+                p.folder_id = None;
+            });
+        }
+    }
+
+    state.storage.delete_folder(&id).map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Script Group commands
+// ============================================================================
+
+#[tauri::command]
+pub fn get_all_script_groups(state: State<AppState>) -> Vec<ScriptGroup> {
+    state.storage.get_all_script_groups()
+}
+
+#[tauri::command]
+pub fn create_script_group(
+    state: State<AppState>,
+    input: CreateScriptGroupInput,
+) -> Result<ScriptGroup, String> {
+    let mut group = ScriptGroup::new(input.name, input.execution_mode);
+    group.description = input.description;
+    group.script_ids = input.script_ids;
+    group.stop_on_failure = input.stop_on_failure.unwrap_or(true);
+    group.folder_id = input.folder_id;
+
+    let all = state.storage.get_all_script_groups();
+    group.order = all.len() as u32;
+
+    state
+        .storage
+        .create_script_group(group)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_script_group(
+    state: State<AppState>,
+    id: String,
+    input: UpdateScriptGroupInput,
+) -> Result<ScriptGroup, String> {
+    state
+        .storage
+        .update_script_group(&id, |group| {
+            if let Some(name) = input.name {
+                group.name = name;
+            }
+            if input.description.is_some() {
+                group.description = input.description;
+            }
+            if let Some(script_ids) = input.script_ids {
+                group.script_ids = script_ids;
+            }
+            if let Some(mode) = input.execution_mode {
+                group.execution_mode = mode;
+            }
+            if let Some(stop) = input.stop_on_failure {
+                group.stop_on_failure = stop;
+            }
+            if input.folder_id.is_some() {
+                group.folder_id = input.folder_id;
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_script_group(state: State<AppState>, id: String) -> Result<(), String> {
+    state
+        .storage
+        .delete_script_group(&id)
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Execution History commands
+// ============================================================================
+
+#[tauri::command]
+pub fn get_execution_history(
+    state: State<AppState>,
+    script_id: String,
+    limit: Option<usize>,
+) -> Vec<ExecutionRecord> {
+    state
+        .storage
+        .get_execution_history(&script_id, limit.unwrap_or(50))
+}
+
+#[tauri::command]
+pub fn clear_execution_history(
+    state: State<AppState>,
+    script_id: String,
+) -> Result<(), String> {
+    state
+        .storage
+        .clear_execution_history(&script_id)
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Scripts Config commands
+// ============================================================================
+
+#[tauri::command]
+pub fn get_scripts_config(state: State<AppState>) -> ScriptsConfig {
+    state.storage.get_settings().scripts_config
+}
+
+#[tauri::command]
+pub fn update_scripts_config(
+    state: State<AppState>,
+    config: ScriptsConfig,
+) -> Result<(), String> {
+    let mut settings = state.storage.get_settings();
+    settings.scripts_config = config;
+    state
+        .storage
+        .update_settings(settings)
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Script Discovery / Scan
+// ============================================================================
+
+#[tauri::command]
+pub fn scan_scripts_folder(folder: String) -> Result<Vec<DiscoveredScript>, String> {
+    if folder.is_empty() {
+        return Err("No folder specified.".to_string());
+    }
+    let config = cortx_core::models::ScriptsConfig::default();
+    Ok(cortx_core::script_discovery::scan_folder(
+        &folder,
+        &config.scan_extensions,
+        &config.ignored_patterns,
+    ))
+}
+
+// ============================================================================
+// Help Parser / Auto-detect Parameters
+// ============================================================================
+
+#[tauri::command]
+pub fn auto_detect_script_params(command: String, script_path: Option<String>) -> Result<Vec<ScriptParameter>, String> {
+    // Resolve {{SCRIPT_FILE}} placeholder before running --help
+    let resolved = if let Some(ref path) = script_path {
+        command.replace("{{SCRIPT_FILE}}", path)
+    } else {
+        command
+    };
+    cortx_core::help_parser::detect_parameters(&resolved)
+}
+
+// ============================================================================
+// Script Group Execution
+// ============================================================================
+
+#[tauri::command]
+pub fn run_script_group(
+    app_handle: AppHandle,
+    state: State<AppState>,
+    group_id: String,
+) -> Result<Vec<(String, Result<u32, String>)>, String> {
+    let group = state
+        .storage
+        .get_all_script_groups()
+        .into_iter()
+        .find(|g| g.id == group_id)
+        .ok_or_else(|| format!("Script group not found: {}", group_id))?;
+
+    let scripts = state.storage.get_all_global_scripts();
+
+    let script_data: Vec<(String, String, String, Option<std::collections::HashMap<String, String>>)> = group
+        .script_ids
+        .iter()
+        .filter_map(|sid| {
+            scripts.iter().find(|s| s.id == *sid).map(|s| {
+                (
+                    s.id.clone(),
+                    s.working_dir.clone().unwrap_or_else(|| ".".to_string()),
+                    s.command.clone(),
+                    s.env_vars.clone(),
+                )
+            })
+        })
+        .collect();
+
+    let sequential = group.execution_mode == crate::models::GroupExecutionMode::Sequential;
+    let emitter: Arc<dyn ProcessEventEmitter> = Arc::new(TauriEmitter::new(app_handle));
+
+    Ok(state.process_manager.run_script_group(
+        emitter,
+        script_data,
+        sequential,
+        group.stop_on_failure,
+    ))
+}
+
+// ============================================================================
+// Import / Export
+// ============================================================================
+
+#[tauri::command]
+pub fn export_scripts_config(state: State<AppState>) -> Result<String, String> {
+    state
+        .storage
+        .export_scripts_config()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn import_scripts_config(
+    state: State<AppState>,
+    json: String,
+) -> Result<ImportResult, String> {
+    state
+        .storage
+        .import_scripts_config(&json)
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Execution History - Update Record on Exit
+// ============================================================================
+
+#[tauri::command]
+pub fn update_execution_record(
+    state: State<AppState>,
+    script_id: String,
+    exit_code: Option<i32>,
+    success: bool,
+) -> Result<(), String> {
+    let records = state.storage.get_execution_history(&script_id, 1);
+    if let Some(record) = records.first() {
+        if record.finished_at.is_none() {
+            let record_id = record.id.clone();
+            let started_at = record.started_at;
+            state
+                .storage
+                .update_execution_record(&record_id, |r| {
+                    r.finished_at = Some(Utc::now());
+                    r.success = success;
+                    r.exit_code = exit_code;
+                    r.duration_ms = Some(
+                        (Utc::now() - started_at).num_milliseconds().max(0) as u64
+                    );
+                })
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }

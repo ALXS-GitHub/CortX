@@ -30,6 +30,13 @@ jobs:
         working-directory: frontend
         run: bun install
 
+      - name: Build cortx TUI sidecar
+        working-directory: frontend
+        run: |
+          cargo build --release -p cortx-tui
+          mkdir -p src-tauri/binaries
+          cp target/release/cortx.exe "src-tauri/binaries/cortx-x86_64-pc-windows-msvc.exe"
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:

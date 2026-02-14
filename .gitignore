@@ -144,9 +144,16 @@ vite.config.ts.timestamp-*
 # Bun
 .bun
 
-# Tauri
-**/src-tauri/target/
+# Rust / Cargo
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Tauri generated code
 **/src-tauri/gen/
+
+# Tauri sidecar binaries (build artifacts)
+**/src-tauri/binaries/
 
 # Tauri signing keys (NEVER commit these!)
 .tauri/
@@ -165,3 +172,5 @@ tauri-signing-key*
 *.sln
 *.sw?
 *.local
+
+nul

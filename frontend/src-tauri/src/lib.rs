@@ -2,6 +2,7 @@ mod commands;
 mod models;
 mod process_manager;
 mod storage;
+mod tauri_emitter;
 
 use commands::AppState;
 use process_manager::ProcessManager;
@@ -124,6 +125,42 @@ pub fn run() {
             commands::get_env_file_content,
             commands::compare_env_files,
             commands::link_env_to_service,
+            // Global script commands
+            commands::get_all_global_scripts,
+            commands::get_global_script,
+            commands::create_global_script,
+            commands::update_global_script,
+            commands::delete_global_script,
+            commands::reorder_global_scripts,
+            commands::run_global_script,
+            commands::stop_global_script,
+            commands::is_global_script_running,
+            // Folder commands
+            commands::get_all_folders,
+            commands::create_folder,
+            commands::update_folder,
+            commands::delete_folder,
+            // Script group commands
+            commands::get_all_script_groups,
+            commands::create_script_group,
+            commands::update_script_group,
+            commands::delete_script_group,
+            // Execution history commands
+            commands::get_execution_history,
+            commands::clear_execution_history,
+            // Scripts config commands
+            commands::get_scripts_config,
+            commands::update_scripts_config,
+            commands::scan_scripts_folder,
+            // Help parser commands
+            commands::auto_detect_script_params,
+            // Script group execution
+            commands::run_script_group,
+            // Import / Export
+            commands::export_scripts_config,
+            commands::import_scripts_config,
+            // Execution history update
+            commands::update_execution_record,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

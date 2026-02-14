@@ -23,6 +23,20 @@ import type {
   DiscoverEnvFilesInput,
   AddEnvFileInput,
   LinkEnvToServiceInput,
+  GlobalScript,
+  CreateGlobalScriptInput,
+  UpdateGlobalScriptInput,
+  VirtualFolder,
+  CreateFolderInput,
+  UpdateFolderInput,
+  ScriptGroup,
+  CreateScriptGroupInput,
+  UpdateScriptGroupInput,
+  ExecutionRecord,
+  ScriptsConfig,
+  ScriptParameter,
+  ImportResult,
+  DiscoveredScript,
 } from '@/types';
 
 // Project commands
@@ -245,4 +259,158 @@ export async function linkEnvToService(
   input: LinkEnvToServiceInput
 ): Promise<EnvFile> {
   return invoke('link_env_to_service', { projectId, envFileId, input });
+}
+
+// Global script commands
+export async function getAllGlobalScripts(): Promise<GlobalScript[]> {
+  return invoke('get_all_global_scripts');
+}
+
+export async function getGlobalScript(id: string): Promise<GlobalScript> {
+  return invoke('get_global_script', { id });
+}
+
+export async function createGlobalScript(input: CreateGlobalScriptInput): Promise<GlobalScript> {
+  return invoke('create_global_script', { input });
+}
+
+export async function updateGlobalScript(id: string, input: UpdateGlobalScriptInput): Promise<GlobalScript> {
+  return invoke('update_global_script', { id, input });
+}
+
+export async function deleteGlobalScript(id: string): Promise<void> {
+  return invoke('delete_global_script', { id });
+}
+
+export async function reorderGlobalScripts(scriptIds: string[]): Promise<void> {
+  return invoke('reorder_global_scripts', { scriptIds });
+}
+
+export async function runGlobalScript(
+  scriptId: string,
+  workingDir: string,
+  parameterValues?: Record<string, string>,
+  extraArgs?: string
+): Promise<number> {
+  return invoke('run_global_script', { scriptId, workingDir, parameterValues, extraArgs });
+}
+
+export async function stopGlobalScript(scriptId: string): Promise<void> {
+  return invoke('stop_global_script', { scriptId });
+}
+
+export async function isGlobalScriptRunning(scriptId: string): Promise<boolean> {
+  return invoke('is_global_script_running', { scriptId });
+}
+
+// Folder commands
+export async function getAllFolders(): Promise<VirtualFolder[]> {
+  return invoke('get_all_folders');
+}
+
+export async function createFolder(input: CreateFolderInput): Promise<VirtualFolder> {
+  return invoke('create_folder', { input });
+}
+
+export async function updateFolder(id: string, input: UpdateFolderInput): Promise<VirtualFolder> {
+  return invoke('update_folder', { id, input });
+}
+
+export async function deleteFolder(id: string): Promise<void> {
+  return invoke('delete_folder', { id });
+}
+
+// Script group commands
+export async function getAllScriptGroups(): Promise<ScriptGroup[]> {
+  return invoke('get_all_script_groups');
+}
+
+export async function createScriptGroup(input: CreateScriptGroupInput): Promise<ScriptGroup> {
+  return invoke('create_script_group', { input });
+}
+
+export async function updateScriptGroup(id: string, input: UpdateScriptGroupInput): Promise<ScriptGroup> {
+  return invoke('update_script_group', { id, input });
+}
+
+export async function deleteScriptGroup(id: string): Promise<void> {
+  return invoke('delete_script_group', { id });
+}
+
+// Execution history commands
+export async function getExecutionHistory(
+  scriptId: string,
+  limit?: number
+): Promise<ExecutionRecord[]> {
+  return invoke('get_execution_history', { scriptId, limit });
+}
+
+export async function clearExecutionHistory(scriptId: string): Promise<void> {
+  return invoke('clear_execution_history', { scriptId });
+}
+
+// Scripts config commands
+export async function getScriptsConfig(): Promise<ScriptsConfig> {
+  return invoke('get_scripts_config');
+}
+
+export async function updateScriptsConfig(config: ScriptsConfig): Promise<void> {
+  return invoke('update_scripts_config', { config });
+}
+
+export async function scanScriptsFolder(folder: string): Promise<DiscoveredScript[]> {
+  return invoke('scan_scripts_folder', { folder });
+}
+
+// Help parser / auto-detect parameters
+export async function autoDetectScriptParams(command: string, scriptPath?: string): Promise<ScriptParameter[]> {
+  return invoke('auto_detect_script_params', { command, scriptPath });
+}
+
+// Script group execution
+export async function runScriptGroup(groupId: string): Promise<[string, { Ok: number } | { Err: string }][]> {
+  return invoke('run_script_group', { groupId });
+}
+
+// Import / Export
+export async function exportScriptsConfig(): Promise<string> {
+  return invoke('export_scripts_config');
+}
+
+export async function importScriptsConfig(json: string): Promise<ImportResult> {
+  return invoke('import_scripts_config', { json });
+}
+
+// Execution history update
+export async function updateExecutionRecord(
+  scriptId: string,
+  exitCode: number | null,
+  success: boolean
+): Promise<void> {
+  return invoke('update_execution_record', { scriptId, exitCode, success });
+}
+
+// Global script event listeners
+export async function onGlobalScriptLog(
+  callback: (payload: ScriptLogPayload) => void
+): Promise<UnlistenFn> {
+  return listen<ScriptLogPayload>('global-script-log', (event) => {
+    callback(event.payload);
+  });
+}
+
+export async function onGlobalScriptStatus(
+  callback: (payload: ScriptStatusPayload) => void
+): Promise<UnlistenFn> {
+  return listen<ScriptStatusPayload>('global-script-status', (event) => {
+    callback(event.payload);
+  });
+}
+
+export async function onGlobalScriptExit(
+  callback: (payload: ScriptExitPayload) => void
+): Promise<UnlistenFn> {
+  return listen<ScriptExitPayload>('global-script-exit', (event) => {
+    callback(event.payload);
+  });
 }

@@ -16,7 +16,24 @@
       "Bash(powershell.exe -Command \"cd ''C:\\Users\\alxsm\\Desktop\\Programmes\\Perso\\Local-App-Launcher\\frontend''; npx shadcn@latest add checkbox -y\")",
       "Bash(powershell.exe -Command \"cd ''C:\\Users\\alxsm\\Desktop\\Programmes\\Perso\\Local-App-Launcher\\frontend''; npm run build 2>&1\")",
       "Bash(powershell.exe -Command \"cd ''C:\\Users\\alxsm\\Desktop\\Programmes\\Perso\\Local-App-Launcher\\frontend\\src-tauri''; cargo check 2>&1\")",
-      "Bash(powershell.exe -Command \"cd ''C:\\Users\\alxsm\\Desktop\\Programmes\\Perso\\Local-App-Launcher\\frontend''; npm install @tauri-apps/plugin-fs 2>&1\")"
+      "Bash(powershell.exe -Command \"cd ''C:\\Users\\alxsm\\Desktop\\Programmes\\Perso\\Local-App-Launcher\\frontend''; npm install @tauri-apps/plugin-fs 2>&1\")",
+      "Bash(wc -l:*)",
+      "Bash(grep:*)",
+      "Bash(cargo build:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(cargo test:*)",
+      "Bash(dir /s /b \"C:\\\\Users\\\\alxsm\\\\Desktop\\\\Programmes\\\\Perso\\\\Local-App-Launcher\\\\frontend\\\\src\\\\components\\\\global-scripts\\\\*.tsx\")",
+      "Bash(cargo run:*)",
+      "Bash(dir:*)",
+      "Bash(cargo metadata:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:nsis.sourceforge.io)",
+      "WebFetch(domain:docs.rs)",
+      "Bash(rustc:*)",
+      "WebFetch(domain:schema.tauri.app)",
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(gh api:*)",
+      "Bash(git add:*)"
     ]
   }
 }

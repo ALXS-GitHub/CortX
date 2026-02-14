@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FolderOpen, Save, Info } from 'lucide-react';
+import { FolderOpen, Save, Info, Download, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AppSettings, TerminalPreset } from '@/types';
 
@@ -77,7 +77,7 @@ const getPlatform = (): 'windows' | 'macos' | 'linux' => {
 };
 
 export function Settings() {
-  const { settings, loadSettings, updateSettings, isLoadingSettings } = useAppStore();
+  const { settings, loadSettings, updateSettings, isLoadingSettings, exportScriptsConfig, importScriptsConfig } = useAppStore();
   const platform = getPlatform();
 
   const [terminalPreset, setTerminalPreset] = useState<TerminalPreset>('windowsterminal');
@@ -91,9 +91,7 @@ export function Settings() {
   const availablePresets = TERMINAL_PRESETS.filter((p) => p.platforms.includes(platform));
 
   useEffect(() => {
-    if (!settings) {
-      loadSettings();
-    }
+    if (!settings) loadSettings();
   }, [settings, loadSettings]);
 
   useEffect(() => {
@@ -125,6 +123,40 @@ export function Settings() {
       }
     } catch (e) {
       console.error('Failed to open file picker:', e);
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      const json = await exportScriptsConfig();
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'cortx-scripts-export.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Scripts config exported');
+    } catch (error) {
+      toast.error(`Failed to export: ${error}`);
+    }
+  };
+
+  const handleImport = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        title: 'Import Scripts Config',
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (selected && typeof selected === 'string') {
+        const { readTextFile } = await import('@tauri-apps/plugin-fs');
+        const json = await readTextFile(selected);
+        const result = await importScriptsConfig(json);
+        toast.success(`Imported: ${result.scriptsAdded} scripts, ${result.foldersAdded} folders, ${result.groupsAdded} groups`);
+      }
+    } catch (error) {
+      toast.error(`Failed to import: ${error}`);
     }
   };
 
@@ -356,6 +388,30 @@ export function Settings() {
           Save Settings
         </Button>
       </div>
+
+      <Separator />
+
+      {/* Import / Export */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Import / Export</CardTitle>
+          <CardDescription>
+            Export or import your global scripts, folders, and groups configuration
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleExport}>
+              <Download className="size-4 mr-2" />
+              Export
+            </Button>
+            <Button variant="outline" onClick={handleImport}>
+              <Upload className="size-4 mr-2" />
+              Import
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

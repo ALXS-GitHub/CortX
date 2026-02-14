@@ -1,0 +1,27 @@
+[package]
+name = "cortx-tui"
+version = "0.4.0"
+description = "CortX TUI - Terminal User Interface for managing scripts"
+edition = "2021"
+rust-version = "1.77.2"
+
+[[bin]]
+name = "cortx"
+path = "src/main.rs"
+
+[dependencies]
+cortx-core = { path = "../cortx-core" }
+ratatui = "0.29"
+crossterm = "0.28"
+clap = { version = "4", features = ["derive"] }
+nucleo = "0.5"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+unicode-width = "0.2"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+directories = "5.0"
+ansi-to-tui = "7"

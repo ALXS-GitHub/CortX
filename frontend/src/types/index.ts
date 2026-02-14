@@ -39,6 +39,7 @@ export interface Project {
   scripts: Script[];
   envFiles: EnvFile[];
   envFilesDiscovered: boolean;
+  folderId?: string;
 }
 
 // Environment file types
@@ -107,6 +108,7 @@ export interface AppSettings {
   terminal: TerminalConfig;
   appearance: AppearanceConfig;
   defaults: DefaultsConfig;
+  scriptsConfig: ScriptsConfig;
 }
 
 export type ServiceStatus = 'stopped' | 'starting' | 'running' | 'error';
@@ -245,5 +247,172 @@ export interface LinkEnvToServiceInput {
   serviceId: string | null;
 }
 
+// ============================================================================
+// Global Scripts types
+// ============================================================================
+
+export type ScriptParamType = 'string' | 'bool' | 'number' | 'enum' | 'path';
+
+export interface ScriptParameter {
+  name: string;
+  paramType: ScriptParamType;
+  shortFlag?: string;
+  longFlag?: string;
+  description?: string;
+  defaultValue?: string;
+  required: boolean;
+  enumValues: string[];
+}
+
+export interface ParameterPreset {
+  id: string;
+  name: string;
+  description?: string;
+  values: Record<string, string>;
+  enabled: Record<string, boolean>;
+}
+
+export interface GlobalScript {
+  id: string;
+  name: string;
+  description?: string;
+  command: string;
+  scriptPath?: string;
+  workingDir?: string;
+  color?: string;
+  folderId?: string;
+  tags: string[];
+  parameters: ScriptParameter[];
+  parameterPresets: ParameterPreset[];
+  defaultPresetId?: string;
+  envVars?: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+  order: number;
+  autoDiscovered: boolean;
+}
+
+export type FolderType = 'project' | 'script';
+
+export interface VirtualFolder {
+  id: string;
+  name: string;
+  color?: string;
+  icon?: string;
+  order?: number;
+  folderType: FolderType;
+}
+
+export type GroupExecutionMode = 'parallel' | 'sequential';
+
+export interface ScriptGroup {
+  id: string;
+  name: string;
+  description?: string;
+  scriptIds: string[];
+  executionMode: GroupExecutionMode;
+  stopOnFailure: boolean;
+  folderId?: string;
+  order: number;
+}
+
+export interface ExecutionRecord {
+  id: string;
+  scriptId: string;
+  startedAt: string;
+  finishedAt?: string;
+  durationMs?: number;
+  success: boolean;
+  exitCode?: number;
+  parametersUsed: Record<string, string>;
+  presetName?: string;
+}
+
+export interface ScriptsConfig {
+  mainFolder?: string;
+  scanExtensions: string[];
+  ignoredPatterns: string[];
+  autoScanOnStartup: boolean;
+}
+
+export interface DiscoveredScript {
+  path: string;
+  name: string;
+  description?: string;
+  extension: string;
+}
+
+// Input types for global script commands
+
+export interface CreateGlobalScriptInput {
+  name: string;
+  description?: string;
+  command: string;
+  scriptPath?: string;
+  workingDir?: string;
+  color?: string;
+  folderId?: string;
+  tags?: string[];
+  parameters?: ScriptParameter[];
+  parameterPresets?: ParameterPreset[];
+  envVars?: Record<string, string>;
+}
+
+export interface UpdateGlobalScriptInput {
+  name?: string;
+  description?: string;
+  command?: string;
+  scriptPath?: string;
+  workingDir?: string;
+  color?: string;
+  folderId?: string;
+  tags?: string[];
+  parameters?: ScriptParameter[];
+  parameterPresets?: ParameterPreset[];
+  defaultPresetId?: string;
+  envVars?: Record<string, string>;
+}
+
+export interface CreateFolderInput {
+  name: string;
+  color?: string;
+  icon?: string;
+  order?: number;
+  folderType: FolderType;
+}
+
+export interface UpdateFolderInput {
+  name?: string;
+  color?: string;
+  icon?: string;
+  order?: number;
+}
+
+export interface CreateScriptGroupInput {
+  name: string;
+  description?: string;
+  scriptIds: string[];
+  executionMode: GroupExecutionMode;
+  stopOnFailure?: boolean;
+  folderId?: string;
+}
+
+export interface UpdateScriptGroupInput {
+  name?: string;
+  description?: string;
+  scriptIds?: string[];
+  executionMode?: GroupExecutionMode;
+  stopOnFailure?: boolean;
+  folderId?: string;
+}
+
+// Import/Export result
+export interface ImportResult {
+  scriptsAdded: number;
+  foldersAdded: number;
+  groupsAdded: number;
+  skipped: number;
+}
+
 // View types
-export type View = 'dashboard' | 'project' | 'settings';
+export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail';

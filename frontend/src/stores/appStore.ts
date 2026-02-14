@@ -17,6 +17,19 @@ import type {
   EnvFile,
   EnvComparison,
   AddEnvFileInput,
+  GlobalScript,
+  CreateGlobalScriptInput,
+  UpdateGlobalScriptInput,
+  VirtualFolder,
+  CreateFolderInput,
+  UpdateFolderInput,
+  ScriptGroup,
+  CreateScriptGroupInput,
+  UpdateScriptGroupInput,
+  ScriptsConfig,
+  ScriptParameter,
+  ImportResult,
+  DiscoveredScript,
 } from '@/types';
 import * as api from '@/lib/tauri';
 
@@ -112,6 +125,18 @@ interface AppState {
   isDiscoveringEnvFiles: boolean;
   envFileComparisons: Map<string, EnvComparison>;
 
+  // Global scripts
+  globalScripts: GlobalScript[];
+  folders: VirtualFolder[];
+  scriptGroups: ScriptGroup[];
+  globalScriptRuntimes: Map<string, ScriptRuntime>;
+  scriptsConfig: ScriptsConfig | null;
+  selectedGlobalScriptId: string | null;
+  isLoadingGlobalScripts: boolean;
+
+  // Run Script Dialog
+  runScriptDialogTarget: GlobalScript | null;
+
   // UI state
   currentView: View;
   terminalPanelOpen: boolean;
@@ -185,6 +210,61 @@ interface AppState {
   loadSettings: () => Promise<void>;
   updateSettings: (settings: AppSettings) => Promise<void>;
 
+  // Actions - Global Scripts
+  loadGlobalScripts: () => Promise<void>;
+  createGlobalScript: (input: CreateGlobalScriptInput) => Promise<GlobalScript>;
+  updateGlobalScript: (id: string, input: UpdateGlobalScriptInput) => Promise<void>;
+  deleteGlobalScript: (id: string) => Promise<void>;
+  reorderGlobalScripts: (scriptIds: string[]) => Promise<void>;
+  runGlobalScript: (scriptId: string, workingDir: string, parameterValues?: Record<string, string>, extraArgs?: string) => Promise<void>;
+  stopGlobalScript: (scriptId: string) => Promise<void>;
+  selectGlobalScript: (id: string | null) => void;
+
+  // Actions - Global Script runtime updates
+  updateGlobalScriptStatus: (scriptId: string, status: ScriptStatus, pid?: number) => void;
+  appendGlobalScriptLog: (scriptId: string, log: LogEntry) => void;
+  clearGlobalScriptLogs: (scriptId: string) => void;
+  setGlobalScriptExitResult: (scriptId: string, exitCode?: number, success?: boolean) => void;
+
+  // Actions - Global Script terminals
+  hideGlobalScriptTerminal: (scriptId: string) => void;
+  showGlobalScriptTerminal: (scriptId: string) => void;
+  closeGlobalScriptTerminal: (scriptId: string) => void;
+
+  // Actions - Folders
+  loadFolders: () => Promise<void>;
+  createFolder: (input: CreateFolderInput) => Promise<VirtualFolder>;
+  updateFolder: (id: string, input: UpdateFolderInput) => Promise<void>;
+  deleteFolder: (id: string) => Promise<void>;
+
+  // Actions - Script Groups
+  loadScriptGroups: () => Promise<void>;
+  createScriptGroup: (input: CreateScriptGroupInput) => Promise<ScriptGroup>;
+  updateScriptGroup: (id: string, input: UpdateScriptGroupInput) => Promise<void>;
+  deleteScriptGroup: (id: string) => Promise<void>;
+
+  // Actions - Scripts Config
+  loadScriptsConfig: () => Promise<void>;
+  updateScriptsConfig: (config: ScriptsConfig) => Promise<void>;
+  scanScriptsFolder: (folder: string) => Promise<DiscoveredScript[]>;
+
+  // Actions - Help Parser
+  autoDetectScriptParams: (command: string, scriptPath?: string) => Promise<ScriptParameter[]>;
+
+  // Actions - Script Group Execution
+  runScriptGroup: (groupId: string) => Promise<void>;
+
+  // Actions - Import / Export
+  exportScriptsConfig: () => Promise<string>;
+  importScriptsConfig: (json: string) => Promise<ImportResult>;
+
+  // Actions - Execution History Update
+  updateExecutionRecordOnExit: (scriptId: string, exitCode: number | null, success: boolean) => Promise<void>;
+
+  // Actions - Run Script Dialog
+  openRunScriptDialog: (script: GlobalScript) => void;
+  closeRunScriptDialog: () => void;
+
   // Actions - UI
   setCurrentView: (view: View) => void;
   toggleTerminalPanel: () => void;
@@ -216,6 +296,14 @@ export const useAppStore = create<AppState>((set, _get) => ({
   scriptRuntimes: new Map(),
   isDiscoveringEnvFiles: false,
   envFileComparisons: new Map(),
+  globalScripts: [],
+  folders: [],
+  scriptGroups: [],
+  globalScriptRuntimes: new Map(),
+  scriptsConfig: null,
+  selectedGlobalScriptId: null,
+  isLoadingGlobalScripts: false,
+  runScriptDialogTarget: null,
   currentView: 'dashboard',
   terminalPanelOpen: false,
   terminalHeight: 256,
@@ -923,6 +1011,356 @@ export const useAppStore = create<AppState>((set, _get) => ({
     await api.updateSettings(settings);
     set({ settings });
   },
+
+  // Global Scripts actions
+  loadGlobalScripts: async () => {
+    set({ isLoadingGlobalScripts: true });
+    try {
+      const globalScripts = await api.getAllGlobalScripts();
+      set({ globalScripts, isLoadingGlobalScripts: false });
+    } catch (error) {
+      console.error('Failed to load global scripts:', error);
+      set({ isLoadingGlobalScripts: false });
+    }
+  },
+
+  createGlobalScript: async (input) => {
+    const script = await api.createGlobalScript(input);
+    set((state) => ({ globalScripts: [...state.globalScripts, script] }));
+    return script;
+  },
+
+  updateGlobalScript: async (id, input) => {
+    const updated = await api.updateGlobalScript(id, input);
+    set((state) => ({
+      globalScripts: state.globalScripts.map((s) => (s.id === id ? updated : s)),
+    }));
+  },
+
+  deleteGlobalScript: async (id) => {
+    await api.deleteGlobalScript(id);
+    set((state) => ({
+      globalScripts: state.globalScripts.filter((s) => s.id !== id),
+      selectedGlobalScriptId: state.selectedGlobalScriptId === id ? null : state.selectedGlobalScriptId,
+    }));
+  },
+
+  reorderGlobalScripts: async (scriptIds) => {
+    await api.reorderGlobalScripts(scriptIds);
+    set((state) => {
+      const ordered = scriptIds
+        .map((id) => state.globalScripts.find((s) => s.id === id))
+        .filter(Boolean) as GlobalScript[];
+      return { globalScripts: ordered };
+    });
+  },
+
+  runGlobalScript: async (scriptId, workingDir, parameterValues, extraArgs) => {
+    try {
+      await api.runGlobalScript(scriptId, workingDir, parameterValues, extraArgs);
+      // Status will be updated via events
+      // Add terminal to focused pane
+      set((state) => {
+        const hidden = new Set(state.hiddenTerminalIds);
+        hidden.delete(scriptId);
+        const closed = new Set(state.closedTerminalIds);
+        closed.delete(scriptId);
+
+        const terminalId = `global-script:${scriptId}`;
+        let terminalPanes = state.terminalPanes;
+        const isAlreadyInAnyPane = terminalPanes.some(p => p.terminalIds.includes(terminalId));
+
+        if (!isAlreadyInAnyPane) {
+          const targetPaneId = state.focusedPaneId || terminalPanes[0].id;
+          terminalPanes = terminalPanes.map(p =>
+            p.id === targetPaneId
+              ? { ...p, terminalIds: [...p.terminalIds, terminalId], activeTerminalId: terminalId }
+              : p
+          );
+        } else {
+          terminalPanes = terminalPanes.map(p =>
+            p.terminalIds.includes(terminalId)
+              ? { ...p, activeTerminalId: terminalId }
+              : p
+          );
+        }
+
+        return {
+          terminalPanelOpen: true,
+          activeTerminalScriptId: null,
+          activeTerminalServiceId: null,
+          hiddenTerminalIds: hidden,
+          closedTerminalIds: closed,
+          terminalPanes,
+        };
+      });
+    } catch (error) {
+      console.error('Failed to run global script:', error);
+      throw error;
+    }
+  },
+
+  stopGlobalScript: async (scriptId) => {
+    try {
+      await api.stopGlobalScript(scriptId);
+    } catch (error) {
+      console.error('Failed to stop global script:', error);
+      throw error;
+    }
+  },
+
+  selectGlobalScript: (id) => {
+    set({ selectedGlobalScriptId: id });
+    if (id) {
+      set({ currentView: 'script-detail' });
+    }
+  },
+
+  // Global Script runtime updates
+  updateGlobalScriptStatus: (scriptId, status, pid) => {
+    set((state) => {
+      const runtimes = new Map(state.globalScriptRuntimes);
+      const existing = runtimes.get(scriptId) || { status: 'idle', logs: [] };
+      runtimes.set(scriptId, { ...existing, status, pid });
+      return { globalScriptRuntimes: runtimes };
+    });
+  },
+
+  appendGlobalScriptLog: (scriptId, log) => {
+    set((state) => {
+      const runtimes = new Map(state.globalScriptRuntimes);
+      const existing = runtimes.get(scriptId) || { status: 'idle', logs: [] };
+      const logs = [...existing.logs, log].slice(-1000);
+      runtimes.set(scriptId, { ...existing, logs });
+      return { globalScriptRuntimes: runtimes };
+    });
+  },
+
+  clearGlobalScriptLogs: (scriptId) => {
+    set((state) => {
+      const runtimes = new Map(state.globalScriptRuntimes);
+      const existing = runtimes.get(scriptId);
+      if (existing) {
+        runtimes.set(scriptId, { ...existing, logs: [] });
+      }
+      return { globalScriptRuntimes: runtimes };
+    });
+  },
+
+  setGlobalScriptExitResult: (scriptId, exitCode, success) => {
+    set((state) => {
+      const runtimes = new Map(state.globalScriptRuntimes);
+      const existing = runtimes.get(scriptId);
+      if (existing) {
+        runtimes.set(scriptId, { ...existing, lastExitCode: exitCode, lastSuccess: success });
+      }
+      return { globalScriptRuntimes: runtimes };
+    });
+  },
+
+  // Global Script terminal actions
+  hideGlobalScriptTerminal: (scriptId) => {
+    set((state) => {
+      const hidden = new Set(state.hiddenTerminalIds);
+      hidden.add(scriptId);
+
+      const terminalId = `global-script:${scriptId}`;
+      let terminalPanes = state.terminalPanes.map((p) => {
+        if (p.terminalIds.includes(terminalId)) {
+          const newIds = p.terminalIds.filter((id) => id !== terminalId);
+          return {
+            ...p,
+            terminalIds: newIds,
+            activeTerminalId: p.activeTerminalId === terminalId
+              ? (newIds[0] || null)
+              : p.activeTerminalId,
+          };
+        }
+        return p;
+      });
+
+      if (terminalPanes.length > 1) {
+        const emptyPanes = terminalPanes.filter(p => p.terminalIds.length === 0);
+        if (emptyPanes.length > 0) {
+          terminalPanes = terminalPanes.filter(p => p.terminalIds.length > 0);
+          const totalWidth = terminalPanes.reduce((sum, p) => sum + p.width, 0);
+          terminalPanes = terminalPanes.map(p => ({
+            ...p,
+            width: (p.width / totalWidth) * 100,
+          }));
+        }
+      }
+
+      let newFocusedPaneId = state.focusedPaneId;
+      if (newFocusedPaneId && !terminalPanes.find(p => p.id === newFocusedPaneId)) {
+        newFocusedPaneId = terminalPanes[0]?.id || null;
+      }
+
+      return { hiddenTerminalIds: hidden, terminalPanes, focusedPaneId: newFocusedPaneId };
+    });
+  },
+
+  showGlobalScriptTerminal: (scriptId) => {
+    set((state) => {
+      const hidden = new Set(state.hiddenTerminalIds);
+      hidden.delete(scriptId);
+
+      const terminalId = `global-script:${scriptId}`;
+      let terminalPanes = state.terminalPanes;
+      const isAlreadyInAnyPane = terminalPanes.some(p => p.terminalIds.includes(terminalId));
+
+      if (!isAlreadyInAnyPane) {
+        const targetPaneId = state.focusedPaneId || terminalPanes[0].id;
+        terminalPanes = terminalPanes.map(p =>
+          p.id === targetPaneId
+            ? { ...p, terminalIds: [...p.terminalIds, terminalId], activeTerminalId: terminalId }
+            : p
+        );
+      } else {
+        terminalPanes = terminalPanes.map(p =>
+          p.terminalIds.includes(terminalId)
+            ? { ...p, activeTerminalId: terminalId }
+            : p
+        );
+      }
+
+      return {
+        hiddenTerminalIds: hidden,
+        terminalPanelOpen: true,
+        terminalPanes,
+      };
+    });
+  },
+
+  closeGlobalScriptTerminal: (scriptId) => {
+    set((state) => {
+      const closed = new Set(state.closedTerminalIds);
+      closed.add(scriptId);
+      const hidden = new Set(state.hiddenTerminalIds);
+      hidden.delete(scriptId);
+      const runtimes = new Map(state.globalScriptRuntimes);
+      runtimes.delete(scriptId);
+
+      return {
+        closedTerminalIds: closed,
+        hiddenTerminalIds: hidden,
+        globalScriptRuntimes: runtimes,
+      };
+    });
+  },
+
+  // Folders actions
+  loadFolders: async () => {
+    try {
+      const folders = await api.getAllFolders();
+      set({ folders });
+    } catch (error) {
+      console.error('Failed to load folders:', error);
+    }
+  },
+
+  createFolder: async (input) => {
+    const folder = await api.createFolder(input);
+    set((state) => ({ folders: [...state.folders, folder] }));
+    return folder;
+  },
+
+  updateFolder: async (id, input) => {
+    const updated = await api.updateFolder(id, input);
+    set((state) => ({
+      folders: state.folders.map((f) => (f.id === id ? updated : f)),
+    }));
+  },
+
+  deleteFolder: async (id) => {
+    await api.deleteFolder(id);
+    set((state) => ({
+      folders: state.folders.filter((f) => f.id !== id),
+    }));
+  },
+
+  // Script Groups actions
+  loadScriptGroups: async () => {
+    try {
+      const scriptGroups = await api.getAllScriptGroups();
+      set({ scriptGroups });
+    } catch (error) {
+      console.error('Failed to load script groups:', error);
+    }
+  },
+
+  createScriptGroup: async (input) => {
+    const group = await api.createScriptGroup(input);
+    set((state) => ({ scriptGroups: [...state.scriptGroups, group] }));
+    return group;
+  },
+
+  updateScriptGroup: async (id, input) => {
+    const updated = await api.updateScriptGroup(id, input);
+    set((state) => ({
+      scriptGroups: state.scriptGroups.map((g) => (g.id === id ? updated : g)),
+    }));
+  },
+
+  deleteScriptGroup: async (id) => {
+    await api.deleteScriptGroup(id);
+    set((state) => ({
+      scriptGroups: state.scriptGroups.filter((g) => g.id !== id),
+    }));
+  },
+
+  // Scripts Config actions
+  loadScriptsConfig: async () => {
+    try {
+      const scriptsConfig = await api.getScriptsConfig();
+      set({ scriptsConfig });
+    } catch (error) {
+      console.error('Failed to load scripts config:', error);
+    }
+  },
+
+  updateScriptsConfig: async (config) => {
+    await api.updateScriptsConfig(config);
+    set({ scriptsConfig: config });
+  },
+
+  scanScriptsFolder: async (folder) => {
+    return api.scanScriptsFolder(folder);
+  },
+
+  // Help Parser actions
+  autoDetectScriptParams: async (command, scriptPath?) => {
+    return api.autoDetectScriptParams(command, scriptPath);
+  },
+
+  // Script Group Execution actions
+  runScriptGroup: async (groupId) => {
+    await api.runScriptGroup(groupId);
+  },
+
+  // Import / Export actions
+  exportScriptsConfig: async () => {
+    return api.exportScriptsConfig();
+  },
+
+  importScriptsConfig: async (json) => {
+    const result = await api.importScriptsConfig(json);
+    // Reload all data after import
+    const globalScripts = await api.getAllGlobalScripts();
+    const folders = await api.getAllFolders();
+    const scriptGroups = await api.getAllScriptGroups();
+    set({ globalScripts, folders, scriptGroups });
+    return result;
+  },
+
+  // Execution History Update actions
+  updateExecutionRecordOnExit: async (scriptId, exitCode, success) => {
+    await api.updateExecutionRecord(scriptId, exitCode, success);
+  },
+
+  // Run Script Dialog actions
+  openRunScriptDialog: (script) => set({ runScriptDialogTarget: script }),
+  closeRunScriptDialog: () => set({ runScriptDialogTarget: null }),
 
   // UI actions
   setCurrentView: (view) => {

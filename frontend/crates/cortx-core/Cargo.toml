@@ -1,0 +1,19 @@
+[package]
+name = "cortx-core"
+version = "0.4.0"
+description = "CortX shared core library - models, storage, and process management"
+edition = "2021"
+rust-version = "1.77.2"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+directories = "5.0"
+parking_lot = "0.12"
+thiserror = "2.0"
+walkdir = "2.4"
+log = "0.4"
+fs2 = "0.4"
+regex = "1"
