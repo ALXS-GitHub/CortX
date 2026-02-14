@@ -738,6 +738,8 @@ pub struct ScriptsConfig {
     pub ignored_patterns: Vec<String>,
     #[serde(default)]
     pub auto_scan_on_startup: bool,
+    #[serde(default = "default_command_templates")]
+    pub command_templates: HashMap<String, String>,
 }
 
 fn default_scan_extensions() -> Vec<String> {
@@ -754,6 +756,21 @@ fn default_scan_extensions() -> Vec<String> {
         "rb".into(),
         "pl".into(),
     ]
+}
+
+fn default_command_templates() -> HashMap<String, String> {
+    HashMap::from([
+        ("py".into(), "python {{SCRIPT_FILE}}".into()),
+        ("ps1".into(), "powershell -ExecutionPolicy Bypass -File {{SCRIPT_FILE}}".into()),
+        ("bat".into(), "{{SCRIPT_FILE}}".into()),
+        ("cmd".into(), "{{SCRIPT_FILE}}".into()),
+        ("sh".into(), "bash {{SCRIPT_FILE}}".into()),
+        ("bash".into(), "bash {{SCRIPT_FILE}}".into()),
+        ("js".into(), "node {{SCRIPT_FILE}}".into()),
+        ("ts".into(), "npx tsx {{SCRIPT_FILE}}".into()),
+        ("rb".into(), "ruby {{SCRIPT_FILE}}".into()),
+        ("pl".into(), "perl {{SCRIPT_FILE}}".into()),
+    ])
 }
 
 fn default_ignored_patterns() -> Vec<String> {
@@ -773,6 +790,7 @@ impl Default for ScriptsConfig {
             scan_extensions: default_scan_extensions(),
             ignored_patterns: default_ignored_patterns(),
             auto_scan_on_startup: false,
+            command_templates: default_command_templates(),
         }
     }
 }
