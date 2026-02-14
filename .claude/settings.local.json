@@ -33,7 +33,25 @@
       "WebFetch(domain:schema.tauri.app)",
       "WebFetch(domain:deepwiki.com)",
       "Bash(gh api:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(chmod:*)",
+      "Bash(bash scripts/bump-version.sh:*)",
+      "Bash(node -e:*)",
+      "Bash(bun update:*)",
+      "Bash(git tag:*)",
+      "WebFetch(domain:v1.tauri.app)",
+      "Bash(git rm:*)",
+      "WebFetch(domain:docs.astral.sh)",
+      "WebFetch(domain:treyhunner.com)",
+      "Bash(uv:*)",
+      "Bash(where:*)",
+      "Bash(\"C:\\\\Users\\\\alxsm\\\\.local\\\\bin\\\\uv.exe\" self version)",
+      "Bash(pip uninstall:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(powershell.exe -NoProfile -Command \"Get-ItemProperty ''HKCU:\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\*'' | Where-Object { $_.DisplayName -like ''*Python*3.12*'' } | Select-Object -Property DisplayName, UninstallString\")",
+      "Bash(git status:*)"
     ]
   }
 }

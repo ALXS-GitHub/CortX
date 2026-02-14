@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FolderOpen, Save, Info, Download, Upload } from 'lucide-react';
+import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AppSettings, TerminalPreset } from '@/types';
 
@@ -85,6 +85,8 @@ export function Settings() {
   const [customArgs, setCustomArgs] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [launchMethod, setLaunchMethod] = useState<'clipboard' | 'external' | 'integrated'>('integrated');
+  const [commandTemplates, setCommandTemplates] = useState<Record<string, string>>({});
+  const [newExtension, setNewExtension] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
 
   // Filter presets for current platform
@@ -101,6 +103,7 @@ export function Settings() {
       setCustomArgs(settings.terminal.customArgs.join(' '));
       setTheme(settings.appearance.theme);
       setLaunchMethod(settings.defaults.launchMethod);
+      setCommandTemplates(settings.scriptsConfig.commandTemplates ?? {});
       setHasChanges(false);
     }
   }, [settings]);
@@ -175,7 +178,10 @@ export function Settings() {
       defaults: {
         launchMethod,
       },
-      scriptsConfig: settings.scriptsConfig,
+      scriptsConfig: {
+        ...settings.scriptsConfig,
+        commandTemplates,
+      },
     };
 
     try {
@@ -378,6 +384,101 @@ export function Settings() {
             <p className="text-xs text-muted-foreground">
               The default method used when starting services
             </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Script Command Templates */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Script Command Templates</CardTitle>
+          <CardDescription>
+            Configure the default command used when importing scripts by file extension.
+            Use <code className="bg-muted px-1 rounded text-xs">{'{{SCRIPT_FILE}}'}</code> as a placeholder for the script path.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {Object.entries(commandTemplates)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([ext, template]) => (
+              <div key={ext} className="flex items-center gap-2">
+                <div className="w-16 shrink-0">
+                  <span className="text-sm font-mono text-muted-foreground">.{ext}</span>
+                </div>
+                <Input
+                  value={template}
+                  onChange={(e) => {
+                    setCommandTemplates((prev) => ({ ...prev, [ext]: e.target.value }));
+                    setHasChanges(true);
+                  }}
+                  className="flex-1 font-mono text-sm"
+                  placeholder={`Command for .${ext} files`}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 size-8"
+                  onClick={() => {
+                    setCommandTemplates((prev) => {
+                      const next = { ...prev };
+                      delete next[ext];
+                      return next;
+                    });
+                    setHasChanges(true);
+                  }}
+                >
+                  <Trash2 className="size-3.5 text-muted-foreground" />
+                </Button>
+              </div>
+            ))}
+
+          <div className="flex items-center gap-2 pt-1">
+            <div className="w-16 shrink-0">
+              <Input
+                value={newExtension}
+                onChange={(e) => setNewExtension(e.target.value.replace(/^\./, '').replace(/\s/g, ''))}
+                placeholder="ext"
+                className="font-mono text-sm h-8"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!newExtension || newExtension in commandTemplates}
+              onClick={() => {
+                if (newExtension && !(newExtension in commandTemplates)) {
+                  setCommandTemplates((prev) => ({ ...prev, [newExtension]: `{{SCRIPT_FILE}}` }));
+                  setNewExtension('');
+                  setHasChanges(true);
+                }
+              }}
+            >
+              <Plus className="size-3.5 mr-1" />
+              Add Extension
+            </Button>
+            <div className="flex-1" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setCommandTemplates({
+                  py: 'python {{SCRIPT_FILE}}',
+                  ps1: 'powershell -ExecutionPolicy Bypass -File {{SCRIPT_FILE}}',
+                  bat: '{{SCRIPT_FILE}}',
+                  cmd: '{{SCRIPT_FILE}}',
+                  sh: 'bash {{SCRIPT_FILE}}',
+                  bash: 'bash {{SCRIPT_FILE}}',
+                  js: 'node {{SCRIPT_FILE}}',
+                  ts: 'npx tsx {{SCRIPT_FILE}}',
+                  rb: 'ruby {{SCRIPT_FILE}}',
+                  pl: 'perl {{SCRIPT_FILE}}',
+                });
+                setHasChanges(true);
+              }}
+            >
+              <RotateCcw className="size-3.5 mr-1" />
+              Reset Defaults
+            </Button>
           </div>
         </CardContent>
       </Card>

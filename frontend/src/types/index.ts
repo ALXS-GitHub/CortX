@@ -333,6 +333,7 @@ export interface ScriptsConfig {
   scanExtensions: string[];
   ignoredPatterns: string[];
   autoScanOnStartup: boolean;
+  commandTemplates: Record<string, string>;
 }
 
 export interface DiscoveredScript {

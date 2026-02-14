@@ -43,6 +43,7 @@ export function GlobalScriptsView() {
     globalScripts,
     folders,
     globalScriptRuntimes,
+    settings,
     createGlobalScript,
     updateGlobalScript,
     deleteGlobalScript,
@@ -231,20 +232,10 @@ export function GlobalScriptsView() {
     for (const script of discoveredScripts) {
       if (!selectedDiscovered.has(script.path)) continue;
       try {
-        // Determine the command based on extension
-        let command: string;
-        const ext = script.extension.toLowerCase();
-        if (ext === '.py') {
-          command = `python {{SCRIPT_FILE}}`;
-        } else if (ext === '.ps1') {
-          command = `powershell -ExecutionPolicy Bypass -File {{SCRIPT_FILE}}`;
-        } else if (ext === '.bat' || ext === '.cmd') {
-          command = `{{SCRIPT_FILE}}`;
-        } else if (ext === '.sh') {
-          command = `bash {{SCRIPT_FILE}}`;
-        } else {
-          command = `{{SCRIPT_FILE}}`;
-        }
+        // Determine the command from config templates
+        const ext = script.extension.toLowerCase().replace('.', '');
+        const templates = settings?.scriptsConfig?.commandTemplates ?? {};
+        const command = templates[ext] || `{{SCRIPT_FILE}}`;
 
         await createGlobalScript({
           name: script.name,
