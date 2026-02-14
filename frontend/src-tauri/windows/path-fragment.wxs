@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="CortxPathEnv" Guid="b7e3f1a2-9c4d-4e8f-a1b2-c3d4e5f6a7b8" Win64="yes" KeyPath="yes">
+        <Environment
+          Id="CortxPath"
+          Name="PATH"
+          Value="[INSTALLDIR]"
+          Action="set"
+          Part="last"
+          System="no"
+          Permanent="no"
+        />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>
