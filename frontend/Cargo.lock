@@ -665,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "cortx-app"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "chrono",
  "cortx-core",
@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "cortx-core"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "chrono",
  "directories",
@@ -704,7 +704,7 @@ dependencies = [
 
 [[package]]
 name = "cortx-tui"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ansi-to-tui",
  "anyhow",

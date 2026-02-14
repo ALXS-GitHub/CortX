@@ -84,8 +84,24 @@ pub fn scan_folder(
 /// Try to read the first comment line from a script file as its description.
 fn extract_description(path: &Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
-    for line in content.lines().take(10) {
+    let mut in_script_block = false;
+    for line in content.lines() {
         let trimmed = line.trim();
+        // Skip PEP 723 inline script metadata blocks (# /// script ... # ///)
+        if trimmed == "# /// script" {
+            in_script_block = true;
+            continue;
+        }
+        if in_script_block {
+            if trimmed == "# ///" {
+                in_script_block = false;
+            }
+            continue;
+        }
+        // Skip empty lines
+        if trimmed.is_empty() {
+            continue;
+        }
         // Skip shebang
         if trimmed.starts_with("#!") {
             continue;
@@ -96,6 +112,7 @@ fn extract_description(path: &Path) -> Option<String> {
             if !desc.is_empty() {
                 return Some(desc.to_string());
             }
+            continue;
         }
         // Batch REM comments
         if trimmed.to_uppercase().starts_with("REM ") {
@@ -112,9 +129,7 @@ fn extract_description(path: &Path) -> Option<String> {
             }
         }
         // If we hit a non-empty, non-comment line, stop looking
-        if !trimmed.is_empty() {
-            break;
-        }
+        break;
     }
     None
 }
