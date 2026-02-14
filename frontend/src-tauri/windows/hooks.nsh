@@ -1,43 +1,43 @@
 ; CortX NSIS Installer Hooks
 ; Handles adding/removing cortx CLI to/from the user's PATH
 
+!include "WinMessages.nsh"
+
 !macro NSIS_HOOK_POSTINSTALL
-  MessageBox MB_YESNO|MB_ICONQUESTION "Would you like to add the CortX CLI to your PATH?$\r$\nThis lets you run 'cortx' from any terminal window." IDYES _addPath IDNO _skipPath
+  MessageBox MB_YESNO|MB_ICONQUESTION "Would you like to add the CortX CLI to your system PATH?$\r$\nThis allows you to run 'cortx' from any terminal." IDNO cortx_skip_path
 
-  _addPath:
-    ; Read current user PATH
-    ReadRegStr $0 HKCU "Environment" "Path"
+  ; Read current user PATH
+  ReadRegStr $0 HKCU "Environment" "Path"
 
-    ; Check if $INSTDIR is already in PATH
-    ${StrLoc} $1 $0 "$INSTDIR" ">"
-    StrCmp $1 "" 0 _skipPath
+  ; If PATH is empty, just set it to INSTDIR
+  StrCmp $0 "" 0 cortx_path_append
+  WriteRegExpandStr HKCU "Environment" "Path" "$INSTDIR"
+  Goto cortx_path_done
 
-    ; Append to PATH
-    StrCmp $0 "" 0 +3
-      WriteRegExpandStr HKCU "Environment" "Path" "$INSTDIR"
-      Goto _pathDone
-    WriteRegExpandStr HKCU "Environment" "Path" "$0;$INSTDIR"
+  cortx_path_append:
+  ; Append INSTDIR to existing PATH
+  WriteRegExpandStr HKCU "Environment" "Path" "$0;$INSTDIR"
 
-    _pathDone:
-    ; Broadcast environment change to all windows
-    SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+  cortx_path_done:
+  ; Broadcast environment change so new terminals pick it up
+  SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
-    ; Store marker for uninstaller
-    WriteRegStr HKCU "Software\CortX" "AddedToPath" "1"
-    WriteRegStr HKCU "Software\CortX" "InstDir" "$INSTDIR"
+  ; Store marker so uninstaller can clean up
+  WriteRegStr HKCU "Software\CortX" "AddedToPath" "1"
+  WriteRegStr HKCU "Software\CortX" "InstDir" "$INSTDIR"
 
-  _skipPath:
+  cortx_skip_path:
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  ; Check if we added to PATH
+  ; Check if we previously added to PATH
   ReadRegStr $0 HKCU "Software\CortX" "AddedToPath"
-  StrCmp $0 "1" 0 _skipRemovePath
+  StrCmp $0 "1" 0 cortx_skip_remove
 
   ReadRegStr $1 HKCU "Software\CortX" "InstDir"
   ReadRegStr $2 HKCU "Environment" "Path"
 
-  ; Remove "$INSTDIR" from PATH (handles ";dir", "dir;" and standalone "dir")
+  ; Remove our entry from PATH
   ${WordReplace} $2 ";$1" "" "+" $2
   ${WordReplace} $2 "$1;" "" "+" $2
   ${WordReplace} $2 "$1" "" "+" $2
@@ -47,5 +47,5 @@
 
   DeleteRegKey HKCU "Software\CortX"
 
-  _skipRemovePath:
+  cortx_skip_remove:
 !macroend
