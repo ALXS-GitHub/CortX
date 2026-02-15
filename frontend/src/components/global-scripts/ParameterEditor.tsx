@@ -223,6 +223,11 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
                         {param.name || <span className="text-muted-foreground italic">unnamed</span>}
                       </span>
                       <span className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0">{typeBadge}</span>
+                      {param.nargs && (
+                        <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded shrink-0">
+                          {param.nargs === '+' ? 'multi' : `${param.nargs} values`}
+                        </span>
+                      )}
                       {flagSummary && (
                         <code className="text-xs text-muted-foreground font-mono truncate">{flagSummary}</code>
                       )}
@@ -321,6 +326,17 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
                             />
                           </div>
                         </div>
+                        {/* Nargs */}
+                        <div className="space-y-1">
+                          <Label className="text-xs">Expected values</Label>
+                          <Input
+                            value={param.nargs || ''}
+                            onChange={(e) => handleUpdateParam(index, 'nargs', e.target.value || undefined)}
+                            placeholder="1"
+                            className="h-8 text-xs font-mono"
+                          />
+                          <p className="text-[10px] text-muted-foreground">Number or + for variadic</p>
+                        </div>
                         {/* Enum values */}
                         {param.paramType === 'enum' && (
                           <div className="space-y-1 col-span-2">
@@ -369,6 +385,11 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
                   {p.longFlag || p.name}
                 </code>
                 <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{p.paramType}</span>
+                {p.nargs && (
+                  <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded">
+                    {p.nargs === '+' ? 'multi' : `${p.nargs} values`}
+                  </span>
+                )}
                 {p.description && (
                   <span className="text-muted-foreground text-xs truncate">{p.description}</span>
                 )}

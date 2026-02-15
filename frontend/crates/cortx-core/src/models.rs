@@ -538,6 +538,8 @@ pub struct ScriptParameter {
     pub required: bool,
     #[serde(default)]
     pub enum_values: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nargs: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

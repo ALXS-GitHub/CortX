@@ -262,6 +262,7 @@ export interface ScriptParameter {
   defaultValue?: string;
   required: boolean;
   enumValues: string[];
+  nargs?: string;
 }
 
 export interface ParameterPreset {
