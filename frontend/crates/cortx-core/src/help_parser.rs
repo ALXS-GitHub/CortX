@@ -20,12 +20,14 @@ pub fn parse_help_output(help_text: &str) -> Vec<ScriptParameter> {
     // Regex for option lines:
     // Matches: "  -s, --long [VALUE]   description" or "  --long VALUE" etc.
     // The description part is optional (may be on the next line in argparse format)
+    // Value hints support multi-value patterns: PLAYER [PLAYER ...], MIN MAX, etc.
+    let value_hint = r"[A-Z][A-Z0-9_.*-]*(?:[ \t]+(?:\.\.\.|[A-Z][A-Z0-9_.*-]*(?:[ \t]+\.\.\.)?|\[[^\]\n]+\]))*|<[^>\n]+>|\[[^\]\n]+\]";
     let option_with_short_re = Regex::new(
-        r"^[ \t]{1,8}(-[a-zA-Z0-9])(?:[ \t]*,?[ \t]*(--[\w][\w-]*))?(?:[ \t]+(?:=[ \t]*)?([A-Z][A-Z0-9_.*-]*(?:[ \t]+\.\.\.)?|<[^>\n]+>|\[[^\]\n]+\]))?(?:[ \t]{2,}(.+))?$"
+        &format!(r"^[ \t]{{1,8}}(-[a-zA-Z0-9])(?:[ \t]*,?[ \t]*(--[\w][\w-]*))?(?:[ \t]+(?:=[ \t]*)?({value_hint}))?(?:[ \t]{{2,}}(.+))?$")
     ).unwrap();
 
     let long_only_re = Regex::new(
-        r"^[ \t]{2,}(--[\w][\w-]*)(?:[ \t]+(?:=[ \t]*)?([A-Z][A-Z0-9_.*-]*(?:[ \t]+\.\.\.)?|<[^>\n]+>|\[[^\]\n]+\]))?(?:[ \t]{2,}(.+))?$"
+        &format!(r"^[ \t]{{2,}}(--[\w][\w-]*)(?:[ \t]+(?:=[ \t]*)?({value_hint}))?(?:[ \t]{{2,}}(.+))?$")
     ).unwrap();
 
     // Continuation line: starts with lots of whitespace, no dashes
@@ -93,6 +95,7 @@ pub fn parse_help_output(help_text: &str) -> Vec<ScriptParameter> {
                 seen_names.insert(name.clone());
                 let (param_type, _) = deduce_type(value_hint, description.as_deref(), false);
                 let default_value = extract_default(description.as_deref());
+                let nargs = detect_nargs(value_hint);
 
                 params.push(ScriptParameter {
                     name,
@@ -103,6 +106,7 @@ pub fn parse_help_output(help_text: &str) -> Vec<ScriptParameter> {
                     default_value,
                     required: false,
                     enum_values: Vec::new(),
+                    nargs,
                 });
             }
 
@@ -140,6 +144,7 @@ pub fn parse_help_output(help_text: &str) -> Vec<ScriptParameter> {
                 seen_names.insert(name.clone());
                 let (param_type, _) = deduce_type(value_hint, description.as_deref(), false);
                 let default_value = extract_default(description.as_deref());
+                let nargs = detect_nargs(value_hint);
 
                 params.push(ScriptParameter {
                     name,
@@ -150,6 +155,7 @@ pub fn parse_help_output(help_text: &str) -> Vec<ScriptParameter> {
                     default_value,
                     required: false,
                     enum_values: Vec::new(),
+                    nargs,
                 });
             }
 
@@ -203,6 +209,7 @@ pub fn parse_help_output(help_text: &str) -> Vec<ScriptParameter> {
                         default_value,
                         required: true, // positional args are required
                         enum_values: Vec::new(),
+                        nargs: None,
                     });
                 }
 
@@ -270,6 +277,24 @@ fn try_help_flag(command: &str, flag: &str) -> Result<String, String> {
     Ok(combined)
 }
 
+/// Detect nargs from a value hint string.
+/// Returns Some("+") for "PLAYER [PLAYER ...]", Some("2") for "MIN MAX", etc.
+fn detect_nargs(value_hint: Option<&str>) -> Option<String> {
+    let hint = value_hint?;
+    // Contains [...] with "..." inside → nargs='+'  e.g. "PLAYER [PLAYER ...]"
+    if hint.contains("[") && hint.contains("...") {
+        return Some("+".to_string());
+    }
+    // Multiple uppercase words without brackets → fixed nargs  e.g. "MIN MAX"
+    let words: Vec<&str> = hint.split_whitespace()
+        .filter(|w| w.chars().next().map_or(false, |c| c.is_ascii_uppercase()) && !w.starts_with('['))
+        .collect();
+    if words.len() > 1 {
+        return Some(words.len().to_string());
+    }
+    None
+}
+
 /// Derive a human-readable name from the long or short flag
 fn derive_name(long: Option<&str>, short: Option<&str>) -> String {
     if let Some(l) = long {
@@ -327,13 +352,14 @@ fn deduce_type(value_hint: Option<&str>, description: Option<&str>, is_positiona
 /// Try to extract a default value from the description
 fn extract_default(description: Option<&str>) -> Option<String> {
     let desc = description?;
-    // Match patterns like: (default: value), [default: value], (default value)
+    // Match patterns like: (default: value), [default: value], (default: val1 val2)
+    // Require opening bracket to avoid matching "Default number..." as a default value
     let default_re = Regex::new(
-        r#"(?i)(?:\(|\[)?\s*default[s]?\s*[:=]?\s*['"]?([^'")\]\s]+)['"]?\s*(?:\)|\])?"#
+        r#"(?i)(?:\(|\[)\s*defaults?\s*[:=]\s*['"]?([^'"\)\]]+?)['"]?\s*(?:\)|\])"#
     ).unwrap();
 
     default_re.captures(desc).map(|caps| {
-        caps.get(1).unwrap().as_str().to_string()
+        caps.get(1).unwrap().as_str().trim().to_string()
     })
 }
 
@@ -440,6 +466,65 @@ options:
     }
 
     #[test]
+    fn test_parse_multi_value_args() {
+        let help = r#"usage: imposter_game [-h] [--player-list] [--players PLAYER [PLAYER ...]]
+                     [--speed-range MIN MAX] [--nb-impostor N]
+                     [--special-impostor-odds JSON] [--dry-run]
+
+Imposter Game
+
+options:
+  -h, --help            show this help message and exit
+  --player-list         Show all configured players from user_map.json and exit.
+  --players PLAYER [PLAYER ...]
+                        Players for this session (by name or discord ID). At
+                        least 1 required.
+  --speed-range MIN MAX
+                        Speed range in km/h (default: 0 150).
+  --nb-impostor N       Default number of impostors (default: 1).
+  --special-impostor-odds JSON
+                        Odds for special impostor counts as JSON. Example:
+                        '{"2": 0.1, "all": 0.01}'
+  --special-rank-game PROB
+                        Probability (0-1) of a special rank game.
+  --dry-run             Run the game logic without sending Discord DMs.
+"#;
+        let params = parse_help_output(help);
+
+        // --players with nargs='+' (PLAYER [PLAYER ...])
+        let players = params.iter().find(|p| p.name == "players").expect("players param not found");
+        assert_eq!(players.long_flag.as_deref(), Some("--players"));
+        assert_eq!(players.param_type, ScriptParamType::String);
+        assert_eq!(players.nargs.as_deref(), Some("+"));
+        assert!(players.description.as_deref().unwrap().contains("Players for this session"));
+
+        // --speed-range with nargs=2 (MIN MAX)
+        let speed_range = params.iter().find(|p| p.name == "speed_range").expect("speed_range param not found");
+        assert_eq!(speed_range.long_flag.as_deref(), Some("--speed-range"));
+        assert_eq!(speed_range.nargs.as_deref(), Some("2"));
+        assert_eq!(speed_range.default_value.as_deref(), Some("0 150"));
+
+        // --nb-impostor with single value N
+        let nb_impostor = params.iter().find(|p| p.name == "nb_impostor").expect("nb_impostor param not found");
+        assert_eq!(nb_impostor.long_flag.as_deref(), Some("--nb-impostor"));
+        assert_eq!(nb_impostor.param_type, ScriptParamType::Number);
+        assert_eq!(nb_impostor.default_value.as_deref(), Some("1"));
+        assert!(nb_impostor.nargs.is_none());
+
+        // --special-impostor-odds JSON
+        let odds = params.iter().find(|p| p.name == "special_impostor_odds").expect("special_impostor_odds param not found");
+        assert_eq!(odds.param_type, ScriptParamType::String);
+
+        // --player-list (bool flag)
+        let player_list = params.iter().find(|p| p.name == "player_list").expect("player_list param not found");
+        assert_eq!(player_list.param_type, ScriptParamType::Bool);
+
+        // --dry-run (bool flag)
+        let dry_run = params.iter().find(|p| p.name == "dry_run").expect("dry_run param not found");
+        assert_eq!(dry_run.param_type, ScriptParamType::Bool);
+    }
+
+    #[test]
     fn test_extract_default_value() {
         assert_eq!(
             extract_default(Some("Output directory (default: ./out)")),
@@ -450,5 +535,15 @@ options:
             Some("8080".to_string())
         );
         assert_eq!(extract_default(Some("Simple description")), None);
+        // Multi-value default
+        assert_eq!(
+            extract_default(Some("Speed range in km/h (default: 0 150).")),
+            Some("0 150".to_string())
+        );
+        // Should not match "Default" at start of description
+        assert_eq!(
+            extract_default(Some("Default number of impostors (default: 1).")),
+            Some("1".to_string())
+        );
     }
 }

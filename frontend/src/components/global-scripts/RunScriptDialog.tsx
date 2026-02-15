@@ -348,6 +348,11 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
                         <Label className="text-xs flex-1">
                           <span className="font-medium">{param.name}</span>
                           {param.required && <span className="text-destructive ml-0.5">*</span>}
+                          {param.nargs && (
+                            <span className="ml-1.5 inline-flex items-center rounded-sm bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-500">
+                              {param.nargs === '+' ? 'multi' : `${param.nargs} values`}
+                            </span>
+                          )}
                           {param.longFlag && (
                             <code className="text-muted-foreground ml-1.5 font-mono">{param.longFlag}</code>
                           )}
@@ -403,7 +408,12 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
                                   [param.name]: e.target.value,
                                 }))
                               }
-                              placeholder={param.defaultValue || `Enter ${param.name}...`}
+                              placeholder={
+                                param.defaultValue ||
+                                (param.nargs
+                                  ? `Enter values separated by spaces...`
+                                  : `Enter ${param.name}...`)
+                              }
                               className="h-8 text-xs font-mono"
                             />
                           )}
