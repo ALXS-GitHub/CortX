@@ -73,6 +73,8 @@ pub struct ParamFormState {
     pub focused: usize,
     /// Whether we're editing the focused field's value
     pub editing: bool,
+    /// Cursor position within the currently edited field
+    pub cursor_pos: usize,
     /// Whether the preset picker is open
     pub picking_preset: bool,
     /// Currently highlighted preset index
@@ -158,6 +160,7 @@ impl ParamFormState {
             extra_args,
             focused: 0,
             editing: false,
+            cursor_pos: 0,
             picking_preset: false,
             preset_index: 0,
         }
@@ -228,60 +231,19 @@ impl ParamFormState {
 
     /// Build program + args from the form state (no shell intermediary)
     pub fn build_command(&self) -> (String, Vec<String>) {
-        let script = &self.script;
-
-        let base = if let Some(ref script_path) = script.script_path {
-            script.command.replace("{{SCRIPT_FILE}}", script_path)
-        } else {
-            script.command.clone()
-        };
-
-        let mut tokens: Vec<String> = base.split_whitespace().map(|s| s.to_string()).collect();
-        let program = if tokens.is_empty() { base.clone() } else { tokens.remove(0) };
-        let mut args = tokens;
-
-        for param in &script.parameters {
-            let is_enabled = self.enabled.get(&param.name).copied().unwrap_or(false);
-            if !is_enabled {
-                continue;
-            }
-
-            let value = self.values.get(&param.name).cloned().unwrap_or_default();
-
-            if param.param_type == ScriptParamType::Bool {
-                if value == "true" {
-                    if let Some(ref flag) = param.long_flag {
-                        args.push(flag.clone());
-                    } else if let Some(ref flag) = param.short_flag {
-                        args.push(flag.clone());
-                    }
-                }
-            } else if !value.is_empty() {
-                if let Some(ref flag) = param.long_flag {
-                    args.push(flag.clone());
-                } else if let Some(ref flag) = param.short_flag {
-                    args.push(flag.clone());
-                }
-                if param.nargs.is_some() {
-                    for v in value.split_whitespace() {
-                        args.push(v.to_string());
-                    }
-                } else {
-                    let clean = value
-                        .strip_prefix('\'').and_then(|s| s.strip_suffix('\''))
-                        .or_else(|| value.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
-                        .unwrap_or(&value);
-                    args.push(clean.to_string());
-                }
+        // Filter enabled params into a HashMap for the shared builder
+        let mut param_values = HashMap::new();
+        for param in &self.script.parameters {
+            if self.enabled.get(&param.name).copied().unwrap_or(false) {
+                let value = self.values.get(&param.name).cloned().unwrap_or_default();
+                param_values.insert(param.name.clone(), value);
             }
         }
 
-        // Append extra arguments
-        for part in self.extra_args.split_whitespace() {
-            args.push(part.to_string());
-        }
+        let extra: Vec<String> = self.extra_args.split_whitespace().map(|s| s.to_string()).collect();
 
-        (program, args)
+        cortx_core::command_builder::build_command(&self.script, &param_values, &extra)
+            .unwrap_or_else(|| (self.script.command.clone(), vec![]))
     }
 }
 

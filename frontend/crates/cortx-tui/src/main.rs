@@ -156,17 +156,8 @@ fn cmd_run(
         .find(|s| s.name.eq_ignore_ascii_case(name))
         .ok_or_else(|| anyhow::anyhow!("Script '{}' not found", name))?;
 
-    // Build program + args directly (no shell intermediary)
-    let base = if let Some(ref script_path) = script.script_path {
-        script.command.replace("{{SCRIPT_FILE}}", script_path)
-    } else {
-        script.command.clone()
-    };
-
-    let mut tokens: Vec<String> = base.split_whitespace().map(|s| s.to_string()).collect();
-    let program = if tokens.is_empty() { base.clone() } else { tokens.remove(0) };
-    let mut args = tokens;
-
+    // Build param_values HashMap from preset (if any)
+    let mut param_values = std::collections::HashMap::new();
     if let Some(preset_name) = preset_name {
         let preset = script
             .parameter_presets
@@ -183,42 +174,14 @@ fn cmd_run(
             if !is_enabled {
                 continue;
             }
-
             if let Some(value) = preset.values.get(&param.name) {
-                if param.param_type == cortx_core::models::ScriptParamType::Bool {
-                    if value == "true" {
-                        if let Some(ref flag) = param.long_flag {
-                            args.push(flag.clone());
-                        } else if let Some(ref flag) = param.short_flag {
-                            args.push(flag.clone());
-                        }
-                    }
-                } else if !value.is_empty() {
-                    if let Some(ref flag) = param.long_flag {
-                        args.push(flag.clone());
-                    } else if let Some(ref flag) = param.short_flag {
-                        args.push(flag.clone());
-                    }
-                    if param.nargs.is_some() {
-                        for v in value.split_whitespace() {
-                            args.push(v.to_string());
-                        }
-                    } else {
-                        let clean = value
-                            .strip_prefix('\'').and_then(|s| s.strip_suffix('\''))
-                            .or_else(|| value.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
-                            .unwrap_or(value);
-                        args.push(clean.to_string());
-                    }
-                }
+                param_values.insert(param.name.clone(), value.clone());
             }
         }
     }
 
-    // Append extra CLI arguments directly
-    for arg in extra_args {
-        args.push(arg.clone());
-    }
+    let (program, args) = cortx_core::command_builder::build_command(script, &param_values, extra_args)
+        .ok_or_else(|| anyhow::anyhow!("Empty command"))?;
 
     // Use a simple channel-based emitter that prints to stdout
     let (tx, rx) = mpsc::channel::<ProcessEvent>();
