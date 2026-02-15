@@ -156,12 +156,17 @@ fn cmd_run(
         .find(|s| s.name.eq_ignore_ascii_case(name))
         .ok_or_else(|| anyhow::anyhow!("Script '{}' not found", name))?;
 
-    // Resolve {{SCRIPT_FILE}} placeholder
-    let mut command = if let Some(ref script_path) = script.script_path {
+    // Build program + args directly (no shell intermediary)
+    let base = if let Some(ref script_path) = script.script_path {
         script.command.replace("{{SCRIPT_FILE}}", script_path)
     } else {
         script.command.clone()
     };
+
+    let mut tokens: Vec<String> = base.split_whitespace().map(|s| s.to_string()).collect();
+    let program = if tokens.is_empty() { base.clone() } else { tokens.remove(0) };
+    let mut args = tokens;
+
     if let Some(preset_name) = preset_name {
         let preset = script
             .parameter_presets
@@ -170,7 +175,6 @@ fn cmd_run(
             .ok_or_else(|| anyhow::anyhow!("Preset '{}' not found", preset_name))?;
 
         for param in &script.parameters {
-            // Check if param is enabled in preset (default: enabled if value exists)
             let is_enabled = if !preset.enabled.is_empty() {
                 preset.enabled.get(&param.name).copied().unwrap_or(false) || param.required
             } else {
@@ -184,52 +188,57 @@ fn cmd_run(
                 if param.param_type == cortx_core::models::ScriptParamType::Bool {
                     if value == "true" {
                         if let Some(ref flag) = param.long_flag {
-                            command = format!("{} {}", command, flag);
+                            args.push(flag.clone());
                         } else if let Some(ref flag) = param.short_flag {
-                            command = format!("{} {}", command, flag);
+                            args.push(flag.clone());
                         }
                     }
                 } else if !value.is_empty() {
                     if let Some(ref flag) = param.long_flag {
-                        command = format!("{} {} {}", command, flag, value);
+                        args.push(flag.clone());
                     } else if let Some(ref flag) = param.short_flag {
-                        command = format!("{} {} {}", command, flag, value);
+                        args.push(flag.clone());
+                    }
+                    if param.nargs.is_some() {
+                        for v in value.split_whitespace() {
+                            args.push(v.to_string());
+                        }
                     } else {
-                        command = format!("{} {}", command, value);
+                        let clean = value
+                            .strip_prefix('\'').and_then(|s| s.strip_suffix('\''))
+                            .or_else(|| value.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+                            .unwrap_or(value);
+                        args.push(clean.to_string());
                     }
                 }
             }
         }
     }
 
-    // Append extra CLI arguments
-    if !extra_args.is_empty() {
-        command = format!("{} {}", command, extra_args.join(" "));
+    // Append extra CLI arguments directly
+    for arg in extra_args {
+        args.push(arg.clone());
     }
 
     // Use a simple channel-based emitter that prints to stdout
     let (tx, rx) = mpsc::channel::<ProcessEvent>();
     let emitter = Arc::new(TuiEmitter::new(tx));
 
-    // TUI always uses CWD
     let working_dir = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| ".".to_string());
 
-    println!("Running: {}", command);
+    println!("Running: {} {}", program, args.join(" "));
     println!("Working dir: {}", working_dir);
     println!("{}", "-".repeat(50));
 
-    // Split command into program + args for direct execution
-    let mut tokens: Vec<String> = command.split_whitespace().map(|s| s.to_string()).collect();
-    let program = if tokens.is_empty() { command.clone() } else { tokens.remove(0) };
     let _pid = process_manager
         .run_global_script(
             emitter,
             script.id.clone(),
             working_dir,
             program,
-            tokens,
+            args,
             script.env_vars.clone(),
         )
         .map_err(|e| anyhow::anyhow!(e))?;
