@@ -136,23 +136,76 @@ fn handle_param_form(app: &mut App, key: KeyEvent) {
             KeyCode::Esc | KeyCode::Enter => {
                 form.editing = false;
             }
-            KeyCode::Backspace => {
-                if form.is_extra_args_focused() {
-                    form.extra_args.pop();
+            KeyCode::Left => {
+                if form.cursor_pos > 0 {
+                    form.cursor_pos -= 1;
+                }
+            }
+            KeyCode::Right => {
+                let len = if form.is_extra_args_focused() {
+                    form.extra_args.len()
                 } else if let Some(name) = form.focused_param_name() {
-                    let name = name.to_string();
-                    if let Some(val) = form.values.get_mut(&name) {
-                        val.pop();
+                    form.values.get(name).map_or(0, |v| v.len())
+                } else {
+                    0
+                };
+                if form.cursor_pos < len {
+                    form.cursor_pos += 1;
+                }
+            }
+            KeyCode::Home => {
+                form.cursor_pos = 0;
+            }
+            KeyCode::End => {
+                let len = if form.is_extra_args_focused() {
+                    form.extra_args.len()
+                } else if let Some(name) = form.focused_param_name() {
+                    form.values.get(name).map_or(0, |v| v.len())
+                } else {
+                    0
+                };
+                form.cursor_pos = len;
+            }
+            KeyCode::Backspace => {
+                if form.cursor_pos > 0 {
+                    if form.is_extra_args_focused() {
+                        form.extra_args.remove(form.cursor_pos - 1);
+                    } else if let Some(name) = form.focused_param_name() {
+                        let name = name.to_string();
+                        if let Some(val) = form.values.get_mut(&name) {
+                            val.remove(form.cursor_pos - 1);
+                        }
+                    }
+                    form.cursor_pos -= 1;
+                }
+            }
+            KeyCode::Delete => {
+                let len = if form.is_extra_args_focused() {
+                    form.extra_args.len()
+                } else if let Some(name) = form.focused_param_name() {
+                    form.values.get(name).map_or(0, |v| v.len())
+                } else {
+                    0
+                };
+                if form.cursor_pos < len {
+                    if form.is_extra_args_focused() {
+                        form.extra_args.remove(form.cursor_pos);
+                    } else if let Some(name) = form.focused_param_name() {
+                        let name = name.to_string();
+                        if let Some(val) = form.values.get_mut(&name) {
+                            val.remove(form.cursor_pos);
+                        }
                     }
                 }
             }
             KeyCode::Char(c) => {
                 if form.is_extra_args_focused() {
-                    form.extra_args.push(c);
+                    form.extra_args.insert(form.cursor_pos, c);
                 } else if let Some(name) = form.focused_param_name() {
                     let name = name.to_string();
-                    form.values.entry(name).or_default().push(c);
+                    form.values.entry(name).or_default().insert(form.cursor_pos, c);
                 }
+                form.cursor_pos += 1;
             }
             _ => {}
         }
@@ -188,24 +241,15 @@ fn handle_param_form(app: &mut App, key: KeyEvent) {
                 f.move_up();
             }
         }
-        // Toggle optional param / no-op on extra_args
+        // Toggle enabled/disabled for optional params
         KeyCode::Char(' ') => {
             if let Some(f) = app.param_form.as_mut() {
                 if f.is_extra_args_focused() {
                     // Space in extra_args starts editing
+                    f.cursor_pos = f.extra_args.len();
                     f.editing = true;
                 } else {
-                    let focused_name = f.focused_param_name().map(|s| s.to_string());
-                    if let Some(name) = focused_name {
-                        let param = f.script.parameters.iter().find(|p| p.name == name);
-                        if let Some(param) = param {
-                            if param.param_type == ScriptParamType::Bool {
-                                f.toggle_bool();
-                            } else {
-                                f.toggle_focused();
-                            }
-                        }
-                    }
+                    f.toggle_focused();
                 }
             }
         }
@@ -213,6 +257,7 @@ fn handle_param_form(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             if let Some(f) = app.param_form.as_mut() {
                 if f.is_extra_args_focused() {
+                    f.cursor_pos = f.extra_args.len();
                     f.editing = true;
                 } else {
                     let focused_name = f.focused_param_name().map(|s| s.to_string());
@@ -221,8 +266,12 @@ fn handle_param_form(app: &mut App, key: KeyEvent) {
                         if let Some(param) = param {
                             if param.param_type == ScriptParamType::Bool {
                                 f.toggle_bool();
+                                // Auto-enable the param when toggling its value
+                                f.enabled.insert(name, true);
                             } else {
                                 // Make sure param is enabled before editing
+                                let len = f.values.get(&name).map_or(0, |v| v.len());
+                                f.cursor_pos = len;
                                 f.enabled.insert(name, true);
                                 f.editing = true;
                             }

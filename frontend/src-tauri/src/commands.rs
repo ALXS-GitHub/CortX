@@ -1471,73 +1471,15 @@ pub fn run_global_script(
         .get_global_script(&script_id)
         .ok_or_else(|| format!("Global script not found: {}", script_id))?;
 
-    // Build program + args directly (no shell intermediary)
-    // Split the command template into tokens, replacing {{SCRIPT_FILE}}
-    let base_command = if let Some(ref script_path) = script.script_path {
-        script.command.replace("{{SCRIPT_FILE}}", script_path)
-    } else {
-        script.command.clone()
-    };
+    // Build program + args via shared builder
+    let extra: Vec<String> = extra_args
+        .as_deref()
+        .map(|e| e.split_whitespace().map(|s| s.to_string()).collect())
+        .unwrap_or_default();
+    let param_map = parameter_values.clone().unwrap_or_default();
 
-    let mut tokens: Vec<String> = base_command
-        .split_whitespace()
-        .map(|s| s.to_string())
-        .collect();
-
-    let program = if tokens.is_empty() {
-        return Err("Empty command".to_string());
-    } else {
-        tokens.remove(0)
-    };
-    let mut args = tokens;
-
-    // Append parameter values
-    if let Some(params) = &parameter_values {
-        for param_def in &script.parameters {
-            if let Some(value) = params.get(&param_def.name) {
-                if value.is_empty() {
-                    continue;
-                }
-                if param_def.param_type == crate::models::ScriptParamType::Bool {
-                    if value == "true" {
-                        if let Some(ref flag) = param_def.long_flag {
-                            args.push(flag.clone());
-                        } else if let Some(ref flag) = param_def.short_flag {
-                            args.push(flag.clone());
-                        }
-                    }
-                } else {
-                    // Add flag
-                    if let Some(ref flag) = param_def.long_flag {
-                        args.push(flag.clone());
-                    } else if let Some(ref flag) = param_def.short_flag {
-                        args.push(flag.clone());
-                    }
-                    // Add value(s) — split by whitespace for multi-value, single arg otherwise
-                    if param_def.nargs.is_some() {
-                        for v in value.split_whitespace() {
-                            args.push(v.to_string());
-                        }
-                    } else {
-                        // Strip surrounding quotes if present (users may type
-                        // shell-style quotes like '...' or "..." out of habit)
-                        let clean = value
-                            .strip_prefix('\'').and_then(|s| s.strip_suffix('\''))
-                            .or_else(|| value.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
-                            .unwrap_or(value);
-                        args.push(clean.to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    // Append extra args (raw, split by whitespace)
-    if let Some(ref extra) = extra_args {
-        for part in extra.split_whitespace() {
-            args.push(part.to_string());
-        }
-    }
+    let (program, args) = cortx_core::command_builder::build_command(&script, &param_map, &extra)
+        .ok_or_else(|| "Empty command".to_string())?;
 
     // Record execution start
     let mut record = ExecutionRecord::new(script_id.clone());
@@ -1819,21 +1761,19 @@ pub fn run_script_group(
         .script_ids
         .iter()
         .filter_map(|sid| {
-            scripts.iter().find(|s| s.id == *sid).map(|s| {
-                let base = if let Some(ref sp) = s.script_path {
-                    s.command.replace("{{SCRIPT_FILE}}", sp)
-                } else {
-                    s.command.clone()
-                };
-                let mut tokens: Vec<String> = base.split_whitespace().map(|t| t.to_string()).collect();
-                let program = if tokens.is_empty() { s.command.clone() } else { tokens.remove(0) };
-                (
+            scripts.iter().find(|s| s.id == *sid).and_then(|s| {
+                let (program, args) = cortx_core::command_builder::build_command(
+                    s,
+                    &std::collections::HashMap::new(),
+                    &[],
+                )?;
+                Some((
                     s.id.clone(),
                     s.working_dir.clone().unwrap_or_else(|| ".".to_string()),
                     program,
-                    tokens,
+                    args,
                     s.env_vars.clone(),
-                )
+                ))
             })
         })
         .collect();

@@ -119,11 +119,12 @@ pub fn render(f: &mut Frame, app: &App) {
         } else if !is_enabled {
             val_spans.push(Span::styled("(disabled)", Style::default().fg(theme::TEXT_MUTED)));
         } else if is_focused && form.editing {
-            // Show editable value with cursor
-            val_spans.push(Span::styled(
-                format!("{}█", value),
-                Style::default().fg(theme::TEXT_HIGHLIGHT),
-            ));
+            // Show editable value with cursor at position
+            let pos = form.cursor_pos.min(value.len());
+            let (before, after) = value.split_at(pos);
+            val_spans.push(Span::styled(before.to_string(), Style::default().fg(theme::TEXT_HIGHLIGHT)));
+            val_spans.push(Span::styled("█", Style::default().fg(theme::TEXT_HIGHLIGHT)));
+            val_spans.push(Span::styled(after.to_string(), Style::default().fg(theme::TEXT_HIGHLIGHT)));
         } else if value.is_empty() {
             let placeholder = param_def.default_value.as_deref().unwrap_or("(empty)");
             val_spans.push(Span::styled(
@@ -173,10 +174,11 @@ pub fn render(f: &mut Frame, app: &App) {
         let mut val_spans: Vec<Span> = Vec::new();
         val_spans.push(Span::raw("      "));
         if extra_focused && form.editing {
-            val_spans.push(Span::styled(
-                format!("{}█", form.extra_args),
-                Style::default().fg(theme::TEXT_HIGHLIGHT),
-            ));
+            let pos = form.cursor_pos.min(form.extra_args.len());
+            let (before, after) = form.extra_args.split_at(pos);
+            val_spans.push(Span::styled(before.to_string(), Style::default().fg(theme::TEXT_HIGHLIGHT)));
+            val_spans.push(Span::styled("█", Style::default().fg(theme::TEXT_HIGHLIGHT)));
+            val_spans.push(Span::styled(after.to_string(), Style::default().fg(theme::TEXT_HIGHLIGHT)));
         } else if form.extra_args.is_empty() {
             val_spans.push(Span::styled(
                 "(none)",
@@ -226,9 +228,9 @@ pub fn render(f: &mut Frame, app: &App) {
             Span::styled("j/k", Style::default().fg(theme::TEXT_HIGHLIGHT)),
             Span::raw(" Nav  "),
             Span::styled("Enter", Style::default().fg(theme::TEXT_HIGHLIGHT)),
-            Span::raw(" Edit  "),
+            Span::raw(" Edit/Toggle  "),
             Span::styled("Space", Style::default().fg(theme::TEXT_HIGHLIGHT)),
-            Span::raw(" Toggle  "),
+            Span::raw(" Enable  "),
         ];
         if !form.script.parameter_presets.is_empty() {
             spans.push(Span::styled("p", Style::default().fg(theme::TEXT_HIGHLIGHT)));

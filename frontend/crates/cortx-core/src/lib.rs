@@ -1,3 +1,4 @@
+pub mod command_builder;
 pub mod error;
 pub mod help_parser;
 pub mod models;
