@@ -484,7 +484,8 @@ impl ProcessManager {
         emitter: Arc<dyn ProcessEventEmitter>,
         script_id: String,
         working_dir: String,
-        command: String,
+        program: String,
+        args: Vec<String>,
         env_vars: Option<HashMap<String, String>>,
     ) -> Result<u32, String> {
         // Check if already running
@@ -496,8 +497,6 @@ impl ProcessManager {
         }
 
         emitter.emit_global_script_status(&script_id, ScriptStatus::Running, None);
-
-        let (program, args) = parse_command(&command);
 
         let mut cmd = Command::new(&program);
         cmd.args(&args)
@@ -670,19 +669,20 @@ impl ProcessManager {
     pub fn run_script_group(
         &self,
         emitter: Arc<dyn ProcessEventEmitter>,
-        scripts: Vec<(String, String, String, Option<HashMap<String, String>>)>, // (id, working_dir, command, env_vars)
+        scripts: Vec<(String, String, String, Vec<String>, Option<HashMap<String, String>>)>, // (id, working_dir, program, args, env_vars)
         sequential: bool,
         stop_on_failure: bool,
     ) -> Vec<(String, Result<u32, String>)> {
         let mut results = Vec::new();
 
         if sequential {
-            for (script_id, working_dir, command, env_vars) in scripts {
+            for (script_id, working_dir, program, args, env_vars) in scripts {
                 let pid_result = self.run_global_script(
                     emitter.clone(),
                     script_id.clone(),
                     working_dir,
-                    command,
+                    program,
+                    args,
                     env_vars,
                 );
 
@@ -705,12 +705,13 @@ impl ProcessManager {
             }
         } else {
             // Parallel: launch all at once
-            for (script_id, working_dir, command, env_vars) in scripts {
+            for (script_id, working_dir, program, args, env_vars) in scripts {
                 let pid_result = self.run_global_script(
                     emitter.clone(),
                     script_id.clone(),
                     working_dir,
-                    command,
+                    program,
+                    args,
                     env_vars,
                 );
                 results.push((script_id, pid_result));
@@ -997,3 +998,4 @@ fn parse_command(command: &str) -> (String, Vec<String>) {
         )
     }
 }
+
