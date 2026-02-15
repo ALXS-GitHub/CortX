@@ -220,12 +220,16 @@ fn cmd_run(
     println!("Working dir: {}", working_dir);
     println!("{}", "-".repeat(50));
 
+    // Split command into program + args for direct execution
+    let mut tokens: Vec<String> = command.split_whitespace().map(|s| s.to_string()).collect();
+    let program = if tokens.is_empty() { command.clone() } else { tokens.remove(0) };
     let _pid = process_manager
         .run_global_script(
             emitter,
             script.id.clone(),
             working_dir,
-            command,
+            program,
+            tokens,
             script.env_vars.clone(),
         )
         .map_err(|e| anyhow::anyhow!(e))?;

@@ -1471,48 +1471,71 @@ pub fn run_global_script(
         .get_global_script(&script_id)
         .ok_or_else(|| format!("Global script not found: {}", script_id))?;
 
-    // Replace {{SCRIPT_FILE}} placeholder with absolute script path
-    let mut final_command = if let Some(ref script_path) = script.script_path {
+    // Build program + args directly (no shell intermediary)
+    // Split the command template into tokens, replacing {{SCRIPT_FILE}}
+    let base_command = if let Some(ref script_path) = script.script_path {
         script.command.replace("{{SCRIPT_FILE}}", script_path)
     } else {
         script.command.clone()
     };
 
+    let mut tokens: Vec<String> = base_command
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+
+    let program = if tokens.is_empty() {
+        return Err("Empty command".to_string());
+    } else {
+        tokens.remove(0)
+    };
+    let mut args = tokens;
+
+    // Append parameter values
     if let Some(params) = &parameter_values {
         for param_def in &script.parameters {
             if let Some(value) = params.get(&param_def.name) {
                 if value.is_empty() {
                     continue;
                 }
-                // For bool params, only add the flag if true
                 if param_def.param_type == crate::models::ScriptParamType::Bool {
                     if value == "true" {
                         if let Some(ref flag) = param_def.long_flag {
-                            final_command = format!("{} {}", final_command, flag);
+                            args.push(flag.clone());
                         } else if let Some(ref flag) = param_def.short_flag {
-                            final_command = format!("{} {}", final_command, flag);
+                            args.push(flag.clone());
                         }
                     }
                 } else {
-                    // For other types, add flag + value
+                    // Add flag
                     if let Some(ref flag) = param_def.long_flag {
-                        final_command = format!("{} {} {}", final_command, flag, value);
+                        args.push(flag.clone());
                     } else if let Some(ref flag) = param_def.short_flag {
-                        final_command = format!("{} {} {}", final_command, flag, value);
+                        args.push(flag.clone());
+                    }
+                    // Add value(s) — split by whitespace for multi-value, single arg otherwise
+                    if param_def.nargs.is_some() {
+                        for v in value.split_whitespace() {
+                            args.push(v.to_string());
+                        }
                     } else {
-                        // Positional argument
-                        final_command = format!("{} {}", final_command, value);
+                        // Strip surrounding quotes if present (users may type
+                        // shell-style quotes like '...' or "..." out of habit)
+                        let clean = value
+                            .strip_prefix('\'').and_then(|s| s.strip_suffix('\''))
+                            .or_else(|| value.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+                            .unwrap_or(value);
+                        args.push(clean.to_string());
                     }
                 }
             }
         }
     }
 
-    // Append extra args if provided
-    if let Some(ref args) = extra_args {
-        let trimmed = args.trim();
-        if !trimmed.is_empty() {
-            final_command = format!("{} {}", final_command, trimmed);
+    // Append extra args (raw, split by whitespace)
+    if let Some(ref extra) = extra_args {
+        for part in extra.split_whitespace() {
+            args.push(part.to_string());
         }
     }
 
@@ -1528,7 +1551,8 @@ pub fn run_global_script(
         emitter,
         script_id.clone(),
         working_dir,
-        final_command,
+        program,
+        args,
         script.env_vars,
     )?;
 
@@ -1791,15 +1815,23 @@ pub fn run_script_group(
 
     let scripts = state.storage.get_all_global_scripts();
 
-    let script_data: Vec<(String, String, String, Option<std::collections::HashMap<String, String>>)> = group
+    let script_data: Vec<(String, String, String, Vec<String>, Option<std::collections::HashMap<String, String>>)> = group
         .script_ids
         .iter()
         .filter_map(|sid| {
             scripts.iter().find(|s| s.id == *sid).map(|s| {
+                let base = if let Some(ref sp) = s.script_path {
+                    s.command.replace("{{SCRIPT_FILE}}", sp)
+                } else {
+                    s.command.clone()
+                };
+                let mut tokens: Vec<String> = base.split_whitespace().map(|t| t.to_string()).collect();
+                let program = if tokens.is_empty() { s.command.clone() } else { tokens.remove(0) };
                 (
                     s.id.clone(),
                     s.working_dir.clone().unwrap_or_else(|| ".".to_string()),
-                    s.command.clone(),
+                    program,
+                    tokens,
                     s.env_vars.clone(),
                 )
             })

@@ -534,11 +534,15 @@ impl App {
         runtime.last_command = Some(command.clone());
 
         let emitter = self.emitter.clone();
+        // Split command into program + args for direct execution
+        let mut tokens: Vec<String> = command.split_whitespace().map(|s| s.to_string()).collect();
+        let program = if tokens.is_empty() { command.clone() } else { tokens.remove(0) };
         match self.process_manager.run_global_script(
             emitter,
             script.id.clone(),
             working_dir,
-            command,
+            program,
+            tokens,
             script.env_vars.clone(),
         ) {
             Ok(_pid) => {
