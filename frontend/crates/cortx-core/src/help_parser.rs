@@ -240,9 +240,11 @@ fn try_help_flag(command: &str, flag: &str) -> Result<String, String> {
     let mut cmd = std::process::Command::new(program);
     cmd.args(&args);
 
-    // Force UTF-8 on Windows
+    // Force UTF-8 and avoid console allocation on Windows
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         cmd.env("PYTHONUTF8", "1");
         cmd.env("PYTHONIOENCODING", "utf-8");
     }
