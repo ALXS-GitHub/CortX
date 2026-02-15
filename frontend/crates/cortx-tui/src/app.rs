@@ -226,15 +226,19 @@ impl ParamFormState {
         self.picking_preset = false;
     }
 
-    /// Build the full command from the form state
-    pub fn build_command(&self) -> String {
+    /// Build program + args from the form state (no shell intermediary)
+    pub fn build_command(&self) -> (String, Vec<String>) {
         let script = &self.script;
 
-        let mut command = if let Some(ref script_path) = script.script_path {
+        let base = if let Some(ref script_path) = script.script_path {
             script.command.replace("{{SCRIPT_FILE}}", script_path)
         } else {
             script.command.clone()
         };
+
+        let mut tokens: Vec<String> = base.split_whitespace().map(|s| s.to_string()).collect();
+        let program = if tokens.is_empty() { base.clone() } else { tokens.remove(0) };
+        let mut args = tokens;
 
         for param in &script.parameters {
             let is_enabled = self.enabled.get(&param.name).copied().unwrap_or(false);
@@ -247,30 +251,37 @@ impl ParamFormState {
             if param.param_type == ScriptParamType::Bool {
                 if value == "true" {
                     if let Some(ref flag) = param.long_flag {
-                        command = format!("{} {}", command, flag);
+                        args.push(flag.clone());
                     } else if let Some(ref flag) = param.short_flag {
-                        command = format!("{} {}", command, flag);
+                        args.push(flag.clone());
                     }
                 }
             } else if !value.is_empty() {
                 if let Some(ref flag) = param.long_flag {
-                    command = format!("{} {} {}", command, flag, value);
+                    args.push(flag.clone());
                 } else if let Some(ref flag) = param.short_flag {
-                    command = format!("{} {} {}", command, flag, value);
+                    args.push(flag.clone());
+                }
+                if param.nargs.is_some() {
+                    for v in value.split_whitespace() {
+                        args.push(v.to_string());
+                    }
                 } else {
-                    // Positional argument
-                    command = format!("{} {}", command, value);
+                    let clean = value
+                        .strip_prefix('\'').and_then(|s| s.strip_suffix('\''))
+                        .or_else(|| value.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+                        .unwrap_or(&value);
+                    args.push(clean.to_string());
                 }
             }
         }
 
         // Append extra arguments
-        let trimmed = self.extra_args.trim();
-        if !trimmed.is_empty() {
-            command = format!("{} {}", command, trimmed);
+        for part in self.extra_args.split_whitespace() {
+            args.push(part.to_string());
         }
 
-        command
+        (program, args)
     }
 }
 
@@ -524,25 +535,24 @@ impl App {
         self.input_mode = InputMode::Normal;
     }
 
-    fn run_script_with_command(&mut self, script: &GlobalScript, command: String) {
+    fn run_script_with_command(&mut self, script: &GlobalScript, command: (String, Vec<String>)) {
         let working_dir = std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| ".".to_string());
 
+        let (program, args) = command;
+
         // Store the resolved command in the runtime
         let runtime = self.runtimes.entry(script.id.clone()).or_default();
-        runtime.last_command = Some(command.clone());
+        runtime.last_command = Some(format!("{} {}", program, args.join(" ")));
 
         let emitter = self.emitter.clone();
-        // Split command into program + args for direct execution
-        let mut tokens: Vec<String> = command.split_whitespace().map(|s| s.to_string()).collect();
-        let program = if tokens.is_empty() { command.clone() } else { tokens.remove(0) };
         match self.process_manager.run_global_script(
             emitter,
             script.id.clone(),
             working_dir,
             program,
-            tokens,
+            args,
             script.env_vars.clone(),
         ) {
             Ok(_pid) => {

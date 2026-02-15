@@ -42,7 +42,8 @@ pub fn render(f: &mut Frame, app: &App) {
     let mut lines: Vec<Line> = Vec::new();
 
     // Command preview
-    let preview = form.build_command();
+    let (prog, cmd_args) = form.build_command();
+    let preview = format!("{} {}", prog, cmd_args.join(" "));
     lines.push(Line::from(vec![
         Span::styled("Command: ", Style::default().fg(theme::TEXT_SECONDARY)),
         Span::styled(
