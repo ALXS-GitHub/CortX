@@ -312,6 +312,9 @@ pub struct AppSettings {
     /// Global scripts configuration
     #[serde(default)]
     pub scripts_config: ScriptsConfig,
+    /// Base URL for toolbox documentation links
+    #[serde(default)]
+    pub toolbox_base_url: String,
 }
 
 // Input types for commands
@@ -622,6 +625,7 @@ impl GlobalScript {
 pub enum FolderType {
     Project,
     Script,
+    Tool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -894,6 +898,8 @@ pub struct ScriptExport {
     pub scripts: Vec<GlobalScript>,
     pub folders: Vec<VirtualFolder>,
     pub groups: Vec<ScriptGroup>,
+    #[serde(default)]
+    pub tools: Vec<Tool>,
     pub exported_at: DateTime<Utc>,
 }
 
@@ -904,4 +910,122 @@ pub struct ImportResult {
     pub folders_added: u32,
     pub groups_added: u32,
     pub skipped: u32,
+    pub tools_added: u32,
+}
+
+// ============================================================================
+// Tools & Config Registry
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolConfigPath {
+    pub label: String,
+    pub path: String,
+    #[serde(default)]
+    pub is_directory: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tool {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_location: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub homepage: Option<String>,
+    #[serde(default)]
+    pub config_paths: Vec<ToolConfigPath>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toolbox_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    pub order: u32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Tool {
+    pub fn new(name: String, status: String) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name,
+            description: None,
+            category: None,
+            tags: Vec::new(),
+            status,
+            replaced_by: None,
+            install_method: None,
+            install_location: None,
+            version: None,
+            homepage: None,
+            config_paths: Vec::new(),
+            toolbox_url: None,
+            notes: None,
+            folder_id: None,
+            color: None,
+            order: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateToolInput {
+    pub name: String,
+    pub description: Option<String>,
+    pub category: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub status: Option<String>,
+    pub replaced_by: Option<String>,
+    pub install_method: Option<String>,
+    pub install_location: Option<String>,
+    pub version: Option<String>,
+    pub homepage: Option<String>,
+    pub config_paths: Option<Vec<ToolConfigPath>>,
+    pub toolbox_url: Option<String>,
+    pub notes: Option<String>,
+    pub folder_id: Option<String>,
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateToolInput {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub category: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub status: Option<String>,
+    pub replaced_by: Option<String>,
+    pub install_method: Option<String>,
+    pub install_location: Option<String>,
+    pub version: Option<String>,
+    pub homepage: Option<String>,
+    pub config_paths: Option<Vec<ToolConfigPath>>,
+    pub toolbox_url: Option<String>,
+    pub notes: Option<String>,
+    pub folder_id: Option<String>,
+    pub color: Option<String>,
 }

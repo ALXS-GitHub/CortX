@@ -27,6 +27,8 @@ pub enum StorageError {
     FolderNotFound(String),
     #[error("Script group not found: {0}")]
     ScriptGroupNotFound(String),
+    #[error("Tool not found: {0}")]
+    ToolNotFound(String),
 }
 
 pub struct Storage {
@@ -37,6 +39,7 @@ pub struct Storage {
     folders: RwLock<Vec<VirtualFolder>>,
     script_groups: RwLock<Vec<ScriptGroup>>,
     execution_history: RwLock<Vec<ExecutionRecord>>,
+    tools: RwLock<Vec<Tool>>,
 }
 
 // File locking helpers
@@ -81,6 +84,7 @@ impl Storage {
             folders: RwLock::new(Vec::new()),
             script_groups: RwLock::new(Vec::new()),
             execution_history: RwLock::new(Vec::new()),
+            tools: RwLock::new(Vec::new()),
         };
 
         // Load existing data
@@ -90,6 +94,7 @@ impl Storage {
         storage.load_folders()?;
         storage.load_script_groups()?;
         storage.load_execution_history()?;
+        storage.load_tools()?;
 
         Ok(storage)
     }
@@ -122,6 +127,10 @@ impl Storage {
 
     fn execution_history_path(&self) -> PathBuf {
         self.app_dir.join("execution_history.json")
+    }
+
+    fn tools_path(&self) -> PathBuf {
+        self.app_dir.join("tools.json")
     }
 
     // ========================================================================
@@ -670,6 +679,75 @@ impl Storage {
     }
 
     // ========================================================================
+    // Tools
+    // ========================================================================
+
+    fn load_tools(&self) -> Result<(), StorageError> {
+        let path = self.tools_path();
+        if path.exists() {
+            let tools: Vec<Tool> = read_json_locked(&path)?;
+            *self.tools.write() = tools;
+        }
+        Ok(())
+    }
+
+    fn save_tools(&self) -> Result<(), StorageError> {
+        let path = self.tools_path();
+        let tools = self.tools.read();
+        write_json_locked(&path, &*tools)
+    }
+
+    pub fn get_all_tools(&self) -> Vec<Tool> {
+        self.tools.read().clone()
+    }
+
+    pub fn get_tool(&self, id: &str) -> Option<Tool> {
+        self.tools.read().iter().find(|t| t.id == id).cloned()
+    }
+
+    pub fn create_tool(&self, tool: Tool) -> Result<Tool, StorageError> {
+        {
+            let mut tools = self.tools.write();
+            tools.push(tool.clone());
+        }
+        self.save_tools()?;
+        Ok(tool)
+    }
+
+    pub fn update_tool(
+        &self,
+        id: &str,
+        updater: impl FnOnce(&mut Tool),
+    ) -> Result<Tool, StorageError> {
+        let tool = {
+            let mut tools = self.tools.write();
+            let tool = tools
+                .iter_mut()
+                .find(|t| t.id == id)
+                .ok_or_else(|| StorageError::ToolNotFound(id.to_string()))?;
+
+            updater(tool);
+            tool.updated_at = chrono::Utc::now();
+            tool.clone()
+        };
+        self.save_tools()?;
+        Ok(tool)
+    }
+
+    pub fn delete_tool(&self, id: &str) -> Result<(), StorageError> {
+        {
+            let mut tools = self.tools.write();
+            let initial_len = tools.len();
+            tools.retain(|t| t.id != id);
+            if tools.len() == initial_len {
+                return Err(StorageError::ToolNotFound(id.to_string()));
+            }
+        }
+        self.save_tools()?;
+        Ok(())
+    }
+
+    // ========================================================================
     // Import / Export
     // ========================================================================
 
@@ -680,6 +758,7 @@ impl Storage {
             scripts: self.get_all_global_scripts(),
             folders: self.get_all_folders(),
             groups: self.get_all_script_groups(),
+            tools: self.get_all_tools(),
             exported_at: chrono::Utc::now(),
         };
         serde_json::to_string_pretty(&export).map_err(StorageError::Json)
@@ -695,6 +774,7 @@ impl Storage {
         let mut folders_added = 0u32;
         let mut groups_added = 0u32;
         let mut skipped = 0u32;
+        let mut tools_added = 0u32;
 
         // Import folders first (scripts may reference them)
         let existing_folders = self.get_all_folders();
@@ -747,11 +827,29 @@ impl Storage {
             self.save_script_groups()?;
         }
 
+        // Import tools
+        let existing_tools = self.get_all_tools();
+        for tool in import.tools {
+            if existing_tools.iter().any(|t| t.id == tool.id) {
+                skipped += 1;
+                continue;
+            }
+            {
+                let mut tools = self.tools.write();
+                tools.push(tool);
+            }
+            tools_added += 1;
+        }
+        if tools_added > 0 {
+            self.save_tools()?;
+        }
+
         Ok(ImportResult {
             scripts_added,
             folders_added,
             groups_added,
             skipped,
+            tools_added,
         })
     }
 }

@@ -12,6 +12,8 @@ import { ProjectView } from '@/views/ProjectView';
 import { Settings } from '@/views/Settings';
 import { GlobalScriptsView } from '@/components/global-scripts/GlobalScriptsView';
 import { GlobalScriptDetail } from '@/components/global-scripts/GlobalScriptDetail';
+import { ToolsView } from '@/components/tools/ToolsView';
+import { ToolDetail } from '@/components/tools/ToolDetail';
 import { RunScriptDialog } from '@/components/global-scripts/RunScriptDialog';
 import { useAppStore } from '@/stores/appStore';
 import {
@@ -60,7 +62,7 @@ function RunScriptDialogGlobal() {
 }
 
 function App() {
-  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadFolders, loadScriptGroups, loadScriptsConfig } = useAppStore();
+  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadFolders, loadScriptGroups, loadScriptsConfig, loadTools } = useAppStore();
 
   // Keep track of whether listeners are set up
   const listenersSetUp = useRef(false);
@@ -73,6 +75,7 @@ function App() {
     loadFolders();
     loadScriptGroups();
     loadScriptsConfig();
+    loadTools();
 
     // Check for running services on startup
     getRunningServices().then((serviceIds) => {
@@ -81,7 +84,7 @@ function App() {
         updateServiceStatus(serviceId, 'running');
       });
     });
-  }, [loadProjects, loadSettings, loadGlobalScripts, loadFolders, loadScriptGroups, loadScriptsConfig]);
+  }, [loadProjects, loadSettings, loadGlobalScripts, loadFolders, loadScriptGroups, loadScriptsConfig, loadTools]);
 
   // Set up event listeners - only once
   useEffect(() => {
@@ -226,6 +229,10 @@ function App() {
         return <GlobalScriptsView />;
       case 'script-detail':
         return <GlobalScriptDetail />;
+      case 'tools':
+        return <ToolsView />;
+      case 'tool-detail':
+        return <ToolDetail />;
       case 'dashboard':
       default:
         return <Dashboard />;
@@ -248,6 +255,8 @@ function App() {
                   {currentView === 'settings' && 'Settings'}
                   {currentView === 'scripts' && 'Scripts'}
                   {currentView === 'script-detail' && 'Script Detail'}
+                  {currentView === 'tools' && 'Tools'}
+                  {currentView === 'tool-detail' && 'Tool Detail'}
                 </div>
               </header>
               <MainContent>{renderView()}</MainContent>

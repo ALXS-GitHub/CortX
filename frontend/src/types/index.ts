@@ -109,6 +109,7 @@ export interface AppSettings {
   appearance: AppearanceConfig;
   defaults: DefaultsConfig;
   scriptsConfig: ScriptsConfig;
+  toolboxBaseUrl: string;
 }
 
 export type ServiceStatus = 'stopped' | 'starting' | 'running' | 'error';
@@ -293,7 +294,7 @@ export interface GlobalScript {
   autoDiscovered: boolean;
 }
 
-export type FolderType = 'project' | 'script';
+export type FolderType = 'project' | 'script' | 'tool';
 
 export interface VirtualFolder {
   id: string;
@@ -342,6 +343,71 @@ export interface DiscoveredScript {
   name: string;
   description?: string;
   extension: string;
+}
+
+// Tool types
+export interface ToolConfigPath {
+  label: string;
+  path: string;
+  isDirectory: boolean;
+}
+
+export interface Tool {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+  tags: string[];
+  status: string;
+  replacedBy?: string;
+  installMethod?: string;
+  installLocation?: string;
+  version?: string;
+  homepage?: string;
+  configPaths: ToolConfigPath[];
+  toolboxUrl?: string;
+  notes?: string;
+  folderId?: string;
+  color?: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateToolInput {
+  name: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  status?: string;
+  replacedBy?: string;
+  installMethod?: string;
+  installLocation?: string;
+  version?: string;
+  homepage?: string;
+  configPaths?: ToolConfigPath[];
+  toolboxUrl?: string;
+  notes?: string;
+  folderId?: string;
+  color?: string;
+}
+
+export interface UpdateToolInput {
+  name?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  status?: string;
+  replacedBy?: string;
+  installMethod?: string;
+  installLocation?: string;
+  version?: string;
+  homepage?: string;
+  configPaths?: ToolConfigPath[];
+  toolboxUrl?: string;
+  notes?: string;
+  folderId?: string;
+  color?: string;
 }
 
 // Input types for global script commands
@@ -414,7 +480,10 @@ export interface ImportResult {
   foldersAdded: number;
   groupsAdded: number;
   skipped: number;
+  toolsAdded: number;
 }
 
 // View types
-export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail';
+export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail' | 'tools' | 'tool-detail';
+
+export type ListViewMode = 'card' | 'list' | 'compact';

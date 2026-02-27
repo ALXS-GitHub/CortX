@@ -32,8 +32,12 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '@/stores/appStore';
+import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { GlobalScriptCard } from './GlobalScriptCard';
+import { GlobalScriptCardView } from './GlobalScriptCardView';
+import { GlobalScriptCompactItem } from './GlobalScriptCompactItem';
 import { GlobalScriptForm } from './GlobalScriptForm';
+import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
 import { FolderForm } from './FolderManager';
 import { toast } from 'sonner';
 import type { GlobalScript, ScriptStatus, CreateGlobalScriptInput, UpdateGlobalScriptInput, VirtualFolder, CreateFolderInput, UpdateFolderInput, DiscoveredScript } from '@/types';
@@ -55,6 +59,7 @@ export function GlobalScriptsView() {
     deleteFolder,
     scanScriptsFolder,
   } = useAppStore();
+  const { scriptsViewMode, setScriptsViewMode } = useViewPrefsStore();
 
   const [search, setSearch] = useState('');
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -265,25 +270,36 @@ export function GlobalScriptsView() {
     });
   };
 
+  const scriptItemProps = (script: GlobalScript) => ({
+    key: script.id,
+    script,
+    status: getScriptStatus(script.id),
+    onRun: () => handleRun(script),
+    onStop: () => handleStop(script.id),
+    onEdit: () => { setEditingScript(script); setShowScriptForm(true); },
+    onDelete: () => setDeletingScript(script),
+    onClick: () => selectGlobalScript(script.id),
+  });
+
   const renderScriptList = (scripts: GlobalScript[]) => {
     if (scripts.length === 0) return null;
+    if (scriptsViewMode === 'card') {
+      return (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {scripts.map((script) => <GlobalScriptCardView {...scriptItemProps(script)} />)}
+        </div>
+      );
+    }
+    if (scriptsViewMode === 'compact') {
+      return (
+        <div className="space-y-1">
+          {scripts.map((script) => <GlobalScriptCompactItem {...scriptItemProps(script)} />)}
+        </div>
+      );
+    }
     return (
       <div className="space-y-2">
-        {scripts.map((script) => (
-          <GlobalScriptCard
-            key={script.id}
-            script={script}
-            status={getScriptStatus(script.id)}
-            onRun={() => handleRun(script)}
-            onStop={() => handleStop(script.id)}
-            onEdit={() => {
-              setEditingScript(script);
-              setShowScriptForm(true);
-            }}
-            onDelete={() => setDeletingScript(script)}
-            onClick={() => selectGlobalScript(script.id)}
-          />
-        ))}
+        {scripts.map((script) => <GlobalScriptCard {...scriptItemProps(script)} />)}
       </div>
     );
   };
@@ -394,6 +410,7 @@ export function GlobalScriptsView() {
             New Folder
           </Button>
         </div>
+        <ViewModeToggle value={scriptsViewMode} onChange={setScriptsViewMode} />
       </div>
 
       {/* Scripts list */}

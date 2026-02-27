@@ -37,6 +37,9 @@ import type {
   ScriptParameter,
   ImportResult,
   DiscoveredScript,
+  Tool,
+  CreateToolInput,
+  UpdateToolInput,
 } from '@/types';
 
 // Project commands
@@ -388,6 +391,47 @@ export async function updateExecutionRecord(
   success: boolean
 ): Promise<void> {
   return invoke('update_execution_record', { scriptId, exitCode, success });
+}
+
+// Tool commands
+export async function getAllTools(): Promise<Tool[]> {
+  return invoke('get_all_tools');
+}
+
+export async function getTool(id: string): Promise<Tool> {
+  return invoke('get_tool', { id });
+}
+
+export async function createTool(input: CreateToolInput): Promise<Tool> {
+  return invoke('create_tool', { input });
+}
+
+export async function updateTool(id: string, input: UpdateToolInput): Promise<Tool> {
+  return invoke('update_tool', { id, input });
+}
+
+export async function deleteTool(id: string): Promise<void> {
+  return invoke('delete_tool', { id });
+}
+
+export async function reorderTools(toolIds: string[]): Promise<void> {
+  return invoke('reorder_tools', { toolIds });
+}
+
+export async function openToolConfig(toolId: string, configIndex: number): Promise<void> {
+  return invoke('open_tool_config', { toolId, configIndex });
+}
+
+export async function openToolLocation(toolId: string): Promise<void> {
+  return invoke('open_tool_location', { toolId });
+}
+
+export async function openToolLocationVscode(toolId: string): Promise<void> {
+  return invoke('open_tool_location_vscode', { toolId });
+}
+
+export async function openToolUrl(url: string): Promise<void> {
+  return invoke('open_tool_url', { url });
 }
 
 // Global script event listeners

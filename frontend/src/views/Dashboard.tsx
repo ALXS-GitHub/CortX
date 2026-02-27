@@ -1,9 +1,13 @@
 import { useState } from 'react';
 import { useAppStore } from '@/stores/appStore';
+import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { ProjectCard } from '@/components/projects/ProjectCard';
+import { ProjectListItem } from '@/components/projects/ProjectListItem';
+import { ProjectCompactItem } from '@/components/projects/ProjectCompactItem';
 import { ProjectForm } from '@/components/projects/ProjectForm';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
 import {
   Select,
   SelectContent,
@@ -28,6 +32,7 @@ type SortOption = 'recent' | 'name' | 'created';
 
 export function Dashboard() {
   const { projects, createProject, updateProject, deleteProject, isLoadingProjects } = useAppStore();
+  const { projectsViewMode, setProjectsViewMode } = useViewPrefsStore();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOption>('recent');
   const [showAddForm, setShowAddForm] = useState(false);
@@ -116,6 +121,7 @@ export function Dashboard() {
             <SelectItem value="created">Date Created</SelectItem>
           </SelectContent>
         </Select>
+        <ViewModeToggle value={projectsViewMode} onChange={setProjectsViewMode} />
       </div>
 
       {/* Project Grid */}
@@ -143,10 +149,32 @@ export function Dashboard() {
             </>
           )}
         </div>
-      ) : (
+      ) : projectsViewMode === 'card' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredProjects.map((project) => (
             <ProjectCard
+              key={project.id}
+              project={project}
+              onEdit={() => setEditingProject(project)}
+              onDelete={() => setDeletingProject(project)}
+            />
+          ))}
+        </div>
+      ) : projectsViewMode === 'list' ? (
+        <div className="space-y-2">
+          {filteredProjects.map((project) => (
+            <ProjectListItem
+              key={project.id}
+              project={project}
+              onEdit={() => setEditingProject(project)}
+              onDelete={() => setDeletingProject(project)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {filteredProjects.map((project) => (
+            <ProjectCompactItem
               key={project.id}
               project={project}
               onEdit={() => setEditingProject(project)}
