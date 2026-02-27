@@ -10,7 +10,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { openInExplorer, openInVscode } from '@/lib/tauri';
-import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 interface ProjectCardProps {
