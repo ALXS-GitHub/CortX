@@ -30,6 +30,9 @@ import type {
   ScriptParameter,
   ImportResult,
   DiscoveredScript,
+  Tool,
+  CreateToolInput,
+  UpdateToolInput,
 } from '@/types';
 import * as api from '@/lib/tauri';
 
@@ -133,6 +136,11 @@ interface AppState {
   scriptsConfig: ScriptsConfig | null;
   selectedGlobalScriptId: string | null;
   isLoadingGlobalScripts: boolean;
+
+  // Tools
+  tools: Tool[];
+  selectedToolId: string | null;
+  isLoadingTools: boolean;
 
   // Run Script Dialog
   runScriptDialogTarget: GlobalScript | null;
@@ -254,6 +262,14 @@ interface AppState {
   // Actions - Script Group Execution
   runScriptGroup: (groupId: string) => Promise<void>;
 
+  // Actions - Tools
+  loadTools: () => Promise<void>;
+  createTool: (input: CreateToolInput) => Promise<Tool>;
+  updateTool: (id: string, input: UpdateToolInput) => Promise<void>;
+  deleteTool: (id: string) => Promise<void>;
+  reorderTools: (toolIds: string[]) => Promise<void>;
+  selectTool: (id: string | null) => void;
+
   // Actions - Import / Export
   exportScriptsConfig: () => Promise<string>;
   importScriptsConfig: (json: string) => Promise<ImportResult>;
@@ -303,6 +319,9 @@ export const useAppStore = create<AppState>((set, _get) => ({
   scriptsConfig: null,
   selectedGlobalScriptId: null,
   isLoadingGlobalScripts: false,
+  tools: [],
+  selectedToolId: null,
+  isLoadingTools: false,
   runScriptDialogTarget: null,
   currentView: 'dashboard',
   terminalPanelOpen: false,
@@ -1351,6 +1370,56 @@ export const useAppStore = create<AppState>((set, _get) => ({
     const scriptGroups = await api.getAllScriptGroups();
     set({ globalScripts, folders, scriptGroups });
     return result;
+  },
+
+  // Tool actions
+  loadTools: async () => {
+    set({ isLoadingTools: true });
+    try {
+      const tools = await api.getAllTools();
+      set({ tools, isLoadingTools: false });
+    } catch (error) {
+      console.error('Failed to load tools:', error);
+      set({ isLoadingTools: false });
+    }
+  },
+
+  createTool: async (input) => {
+    const tool = await api.createTool(input);
+    set((state) => ({ tools: [...state.tools, tool] }));
+    return tool;
+  },
+
+  updateTool: async (id, input) => {
+    const updated = await api.updateTool(id, input);
+    set((state) => ({
+      tools: state.tools.map((t) => (t.id === id ? updated : t)),
+    }));
+  },
+
+  deleteTool: async (id) => {
+    await api.deleteTool(id);
+    set((state) => ({
+      tools: state.tools.filter((t) => t.id !== id),
+      selectedToolId: state.selectedToolId === id ? null : state.selectedToolId,
+    }));
+  },
+
+  reorderTools: async (toolIds) => {
+    await api.reorderTools(toolIds);
+    set((state) => {
+      const ordered = toolIds
+        .map((id) => state.tools.find((t) => t.id === id))
+        .filter(Boolean) as Tool[];
+      return { tools: ordered };
+    });
+  },
+
+  selectTool: (id) => {
+    set({ selectedToolId: id });
+    if (id) {
+      set({ currentView: 'tool-detail' });
+    }
   },
 
   // Execution History Update actions

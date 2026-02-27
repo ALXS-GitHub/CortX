@@ -1,11 +1,11 @@
 use crate::models::{
     AddEnvFileInput, AppSettings, CreateFolderInput, CreateGlobalScriptInput,
     CreateProjectInput, CreateScriptGroupInput, CreateScriptInput, CreateServiceInput,
-    DiscoverEnvFilesInput, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
+    CreateToolInput, DiscoverEnvFilesInput, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
     DiscoveredScript, ExecutionRecord, GlobalScript, ImportResult, LinkEnvToServiceInput, Project, Script,
-    ScriptGroup, ScriptParameter, ScriptsConfig, Service, UpdateFolderInput,
+    ScriptGroup, ScriptParameter, ScriptsConfig, Service, Tool, UpdateFolderInput,
     UpdateGlobalScriptInput, UpdateProjectInput, UpdateScriptGroupInput, UpdateScriptInput,
-    UpdateServiceInput, VirtualFolder,
+    UpdateServiceInput, UpdateToolInput, VirtualFolder,
 };
 use crate::process_manager::{ProcessEventEmitter, ProcessManager};
 use crate::storage::Storage;
@@ -1587,6 +1587,15 @@ pub fn delete_folder(state: State<AppState>, id: String) -> Result<(), String> {
         }
     }
 
+    let tools = state.storage.get_all_tools();
+    for tool in tools {
+        if tool.folder_id.as_deref() == Some(&id) {
+            let _ = state.storage.update_tool(&tool.id, |t| {
+                t.folder_id = None;
+            });
+        }
+    }
+
     state.storage.delete_folder(&id).map_err(|e| e.to_string())
 }
 
@@ -1787,6 +1796,204 @@ pub fn run_script_group(
         sequential,
         group.stop_on_failure,
     ))
+}
+
+// ============================================================================
+// Tool commands
+// ============================================================================
+
+#[tauri::command]
+pub fn get_all_tools(state: State<AppState>) -> Vec<Tool> {
+    state.storage.get_all_tools()
+}
+
+#[tauri::command]
+pub fn get_tool(state: State<AppState>, id: String) -> Result<Tool, String> {
+    state
+        .storage
+        .get_tool(&id)
+        .ok_or_else(|| format!("Tool not found: {}", id))
+}
+
+#[tauri::command]
+pub fn create_tool(
+    state: State<AppState>,
+    input: CreateToolInput,
+) -> Result<Tool, String> {
+    let mut tool = Tool::new(input.name, input.status.unwrap_or_else(|| "Active".to_string()));
+    tool.description = input.description;
+    tool.category = input.category;
+    tool.tags = input.tags.unwrap_or_default();
+    tool.replaced_by = input.replaced_by;
+    tool.install_method = input.install_method;
+    tool.install_location = input.install_location;
+    tool.version = input.version;
+    tool.homepage = input.homepage;
+    tool.config_paths = input.config_paths.unwrap_or_default();
+    tool.toolbox_url = input.toolbox_url;
+    tool.notes = input.notes;
+    tool.folder_id = input.folder_id;
+    tool.color = input.color;
+
+    // Set order to be last
+    let all = state.storage.get_all_tools();
+    tool.order = all.len() as u32;
+
+    state
+        .storage
+        .create_tool(tool)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_tool(
+    state: State<AppState>,
+    id: String,
+    input: UpdateToolInput,
+) -> Result<Tool, String> {
+    state
+        .storage
+        .update_tool(&id, |tool| {
+            if let Some(name) = input.name {
+                tool.name = name;
+            }
+            if input.description.is_some() {
+                tool.description = input.description;
+            }
+            if input.category.is_some() {
+                tool.category = input.category;
+            }
+            if let Some(tags) = input.tags {
+                tool.tags = tags;
+            }
+            if let Some(status) = input.status {
+                tool.status = status;
+            }
+            if input.replaced_by.is_some() {
+                tool.replaced_by = input.replaced_by;
+            }
+            if input.install_method.is_some() {
+                tool.install_method = input.install_method;
+            }
+            if input.install_location.is_some() {
+                tool.install_location = input.install_location;
+            }
+            if input.version.is_some() {
+                tool.version = input.version;
+            }
+            if input.homepage.is_some() {
+                tool.homepage = input.homepage;
+            }
+            if let Some(config_paths) = input.config_paths {
+                tool.config_paths = config_paths;
+            }
+            if input.toolbox_url.is_some() {
+                tool.toolbox_url = input.toolbox_url;
+            }
+            if input.notes.is_some() {
+                tool.notes = input.notes;
+            }
+            if input.folder_id.is_some() {
+                tool.folder_id = input.folder_id;
+            }
+            if input.color.is_some() {
+                tool.color = input.color;
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_tool(state: State<AppState>, id: String) -> Result<(), String> {
+    state.storage.delete_tool(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reorder_tools(
+    state: State<AppState>,
+    tool_ids: Vec<String>,
+) -> Result<(), String> {
+    for (order, id) in tool_ids.iter().enumerate() {
+        state
+            .storage
+            .update_tool(id, |tool| {
+                tool.order = order as u32;
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_tool_config(state: State<AppState>, tool_id: String, config_index: usize) -> Result<(), String> {
+    let tool = state
+        .storage
+        .get_tool(&tool_id)
+        .ok_or_else(|| format!("Tool not found: {}", tool_id))?;
+
+    let config = tool
+        .config_paths
+        .get(config_index)
+        .ok_or_else(|| format!("Config path index {} out of range", config_index))?;
+
+    open_in_vscode(config.path.clone())
+}
+
+#[tauri::command]
+pub fn open_tool_location(state: State<AppState>, tool_id: String) -> Result<(), String> {
+    let tool = state
+        .storage
+        .get_tool(&tool_id)
+        .ok_or_else(|| format!("Tool not found: {}", tool_id))?;
+
+    let location = tool
+        .install_location
+        .ok_or_else(|| "No install location set".to_string())?;
+
+    open_in_explorer(location)
+}
+
+#[tauri::command]
+pub fn open_tool_location_vscode(state: State<AppState>, tool_id: String) -> Result<(), String> {
+    let tool = state
+        .storage
+        .get_tool(&tool_id)
+        .ok_or_else(|| format!("Tool not found: {}", tool_id))?;
+
+    let location = tool
+        .install_location
+        .ok_or_else(|| "No install location set".to_string())?;
+
+    open_in_vscode(location)
+}
+
+#[tauri::command]
+pub fn open_tool_url(_state: State<AppState>, url: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 // ============================================================================

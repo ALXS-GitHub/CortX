@@ -159,6 +159,17 @@ pub fn run() {
             // Import / Export
             commands::export_scripts_config,
             commands::import_scripts_config,
+            // Tool commands
+            commands::get_all_tools,
+            commands::get_tool,
+            commands::create_tool,
+            commands::update_tool,
+            commands::delete_tool,
+            commands::reorder_tools,
+            commands::open_tool_config,
+            commands::open_tool_location,
+            commands::open_tool_location_vscode,
+            commands::open_tool_url,
             // Execution history update
             commands::update_execution_record,
         ])

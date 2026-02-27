@@ -85,6 +85,7 @@ export function Settings() {
   const [customArgs, setCustomArgs] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [launchMethod, setLaunchMethod] = useState<'clipboard' | 'external' | 'integrated'>('integrated');
+  const [toolboxBaseUrl, setToolboxBaseUrl] = useState('');
   const [commandTemplates, setCommandTemplates] = useState<Record<string, string>>({});
   const [newExtension, setNewExtension] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
@@ -103,6 +104,7 @@ export function Settings() {
       setCustomArgs(settings.terminal.customArgs.join(' '));
       setTheme(settings.appearance.theme);
       setLaunchMethod(settings.defaults.launchMethod);
+      setToolboxBaseUrl(settings.toolboxBaseUrl ?? '');
       setCommandTemplates(settings.scriptsConfig.commandTemplates ?? {});
       setHasChanges(false);
     }
@@ -182,6 +184,7 @@ export function Settings() {
         ...settings.scriptsConfig,
         commandTemplates,
       },
+      toolboxBaseUrl,
     };
 
     try {
@@ -383,6 +386,33 @@ export function Settings() {
             </Select>
             <p className="text-xs text-muted-foreground">
               The default method used when starting services
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Toolbox Base URL */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Toolbox Documentation</CardTitle>
+          <CardDescription>
+            Set a base URL for your toolbox documentation site. When a tool's toolbox URL starts with "/", it will be appended to this base URL.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="toolbox-base-url">Base URL</Label>
+            <Input
+              id="toolbox-base-url"
+              value={toolboxBaseUrl}
+              onChange={(e) => {
+                setToolboxBaseUrl(e.target.value);
+                setHasChanges(true);
+              }}
+              placeholder="e.g., https://docs.example.com"
+            />
+            <p className="text-xs text-muted-foreground">
+              Tool URLs starting with "/" will be resolved relative to this base URL. Full URLs (https://...) are used as-is.
             </p>
           </div>
         </CardContent>
