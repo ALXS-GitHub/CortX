@@ -40,6 +40,7 @@ import type {
   Tool,
   CreateToolInput,
   UpdateToolInput,
+  DiscoveredTool,
 } from '@/types';
 
 // Project commands
@@ -432,6 +433,10 @@ export async function openToolLocationVscode(toolId: string): Promise<void> {
 
 export async function openToolUrl(url: string): Promise<void> {
   return invoke('open_tool_url', { url });
+}
+
+export async function scanInstalledTools(): Promise<DiscoveredTool[]> {
+  return invoke('scan_installed_tools');
 }
 
 // Global script event listeners

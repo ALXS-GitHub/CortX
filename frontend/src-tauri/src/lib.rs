@@ -170,6 +170,8 @@ pub fn run() {
             commands::open_tool_location,
             commands::open_tool_location_vscode,
             commands::open_tool_url,
+            // Tool discovery
+            commands::scan_installed_tools,
             // Execution history update
             commands::update_execution_record,
         ])

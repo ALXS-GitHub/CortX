@@ -13,6 +13,15 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -20,7 +29,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Plus, Search, FolderPlus, Pencil, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Search, FolderPlus, Pencil, Trash2, ChevronDown, ChevronRight, Loader2, Check, ScanSearch } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { ToolCard } from './ToolCard';
@@ -29,8 +38,9 @@ import { ToolCompactItem } from './ToolCompactItem';
 import { ToolForm } from './ToolForm';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
 import { FolderForm } from '@/components/global-scripts/FolderManager';
+import { scanInstalledTools } from '@/lib/tauri';
 import { toast } from 'sonner';
-import type { Tool, CreateToolInput, UpdateToolInput, VirtualFolder, CreateFolderInput, UpdateFolderInput } from '@/types';
+import type { Tool, CreateToolInput, UpdateToolInput, VirtualFolder, CreateFolderInput, UpdateFolderInput, DiscoveredTool } from '@/types';
 
 const DEFAULT_STATUSES = ['Active', 'Inactive', 'To Test', 'Archived', 'Replaced'];
 
@@ -59,6 +69,14 @@ export function ToolsView() {
   const [editingFolder, setEditingFolder] = useState<VirtualFolder | undefined>(undefined);
   const [deletingFolder, setDeletingFolder] = useState<VirtualFolder | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+
+  // Scan state
+  const [isScanning, setIsScanning] = useState(false);
+  const [discoveredTools, setDiscoveredTools] = useState<DiscoveredTool[]>([]);
+  const [selectedDiscovered, setSelectedDiscovered] = useState<Set<string>>(new Set());
+  const [showScanDialog, setShowScanDialog] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [scanTotal, setScanTotal] = useState(0);
 
   const toggleFolderCollapse = (folderId: string) => {
     setCollapsedFolders((prev) => {
@@ -185,6 +203,59 @@ export function ToolsView() {
     setDeletingFolder(null);
   };
 
+  const handleScanTools = async () => {
+    setIsScanning(true);
+    try {
+      const results = await scanInstalledTools();
+      setScanTotal(results.length);
+      const existingNames = new Set(tools.map(t => t.name.toLowerCase()));
+      const newTools = results.filter(d => !existingNames.has(d.name.toLowerCase()));
+      setDiscoveredTools(newTools);
+      setSelectedDiscovered(new Set(newTools.map(d => `${d.source}:${d.name}`)));
+      setShowScanDialog(true);
+    } catch (e) {
+      toast.error('Scan failed', { description: String(e) });
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const toggleDiscoveredTool = (key: string) => {
+    setSelectedDiscovered((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleImportDiscoveredTools = async () => {
+    setIsImporting(true);
+    try {
+      let count = 0;
+      for (const tool of discoveredTools) {
+        const key = `${tool.source}:${tool.name}`;
+        if (!selectedDiscovered.has(key)) continue;
+        await createTool({
+          name: tool.name,
+          description: tool.description,
+          version: tool.version,
+          installMethod: tool.source,
+          installLocation: tool.installLocation,
+          homepage: tool.homepage,
+          status: 'Active',
+        });
+        count++;
+      }
+      toast.success(`Imported ${count} tool(s)`);
+      setShowScanDialog(false);
+    } catch (e) {
+      toast.error('Import failed', { description: String(e) });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const toolItemProps = (tool: Tool) => ({
     key: tool.id,
     tool,
@@ -226,16 +297,22 @@ export function ToolsView() {
             Track your dev tools, CLI utilities, and their configurations
           </p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => {
-            setEditingTool(undefined);
-            setShowToolForm(true);
-          }}
-        >
-          <Plus className="size-4 mr-2" />
-          Add Tool
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleScanTools} disabled={isScanning}>
+            {isScanning ? <Loader2 className="size-4 mr-2 animate-spin" /> : <ScanSearch className="size-4 mr-2" />}
+            {isScanning ? 'Scanning...' : 'Scan Installed'}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditingTool(undefined);
+              setShowToolForm(true);
+            }}
+          >
+            <Plus className="size-4 mr-2" />
+            Add Tool
+          </Button>
+        </div>
       </div>
 
       {/* Search + filters */}
@@ -486,6 +563,82 @@ export function ToolsView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Scan Results Dialog */}
+      <Dialog open={showScanDialog} onOpenChange={setShowScanDialog}>
+        <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Discovered Tools</DialogTitle>
+            <DialogDescription>
+              {discoveredTools.length === 0 && scanTotal === 0
+                ? 'No tools found. Make sure Scoop or Chocolatey is installed.'
+                : discoveredTools.length === 0
+                  ? `Found ${scanTotal} tool(s), but all are already imported.`
+                  : `Found ${discoveredTools.length} new tool(s)${scanTotal > discoveredTools.length ? ` (${scanTotal - discoveredTools.length} already imported)` : ''}. Select which ones to import.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {discoveredTools.length > 0 && (
+            <div className="flex-1 min-h-0 overflow-y-auto border rounded-md">
+              <div className="space-y-1 p-2">
+                {discoveredTools.map((tool) => {
+                  const key = `${tool.source}:${tool.name}`;
+                  return (
+                    <label
+                      key={key}
+                      className="flex items-start gap-3 p-2 rounded-md hover:bg-muted cursor-pointer"
+                    >
+                      <Checkbox
+                        checked={selectedDiscovered.has(key)}
+                        onCheckedChange={() => toggleDiscoveredTool(key)}
+                        className="mt-0.5"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{tool.name}</span>
+                          {tool.version && (
+                            <Badge variant="outline" className="text-xs">
+                              {tool.version}
+                            </Badge>
+                          )}
+                          <Badge
+                            variant="secondary"
+                            className={`text-xs ${tool.source === 'scoop' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'}`}
+                          >
+                            {tool.source}
+                          </Badge>
+                        </div>
+                        {tool.description && (
+                          <p className="text-xs text-muted-foreground mt-0.5">{tool.description}</p>
+                        )}
+                        {tool.installLocation && (
+                          <p className="text-xs text-muted-foreground/60 mt-0.5 truncate">{tool.installLocation}</p>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="shrink-0">
+            <Button variant="outline" onClick={() => setShowScanDialog(false)}>
+              Cancel
+            </Button>
+            {discoveredTools.length > 0 && (
+              <Button onClick={handleImportDiscoveredTools} disabled={selectedDiscovered.size === 0 || isImporting}>
+                {isImporting ? (
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                ) : (
+                  <Check className="size-4 mr-2" />
+                )}
+                Import {selectedDiscovered.size} tool(s)
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

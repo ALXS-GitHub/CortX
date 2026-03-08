@@ -345,6 +345,16 @@ export interface DiscoveredScript {
   extension: string;
 }
 
+// Discovered tool (from package manager scanning)
+export interface DiscoveredTool {
+  name: string;
+  version?: string;
+  source: string;
+  description?: string;
+  installLocation?: string;
+  homepage?: string;
+}
+
 // Tool types
 export interface ToolConfigPath {
   label: string;
