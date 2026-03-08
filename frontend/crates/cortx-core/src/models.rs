@@ -813,6 +813,19 @@ pub struct DiscoveredScript {
     pub extension: String,
 }
 
+// Discovered tool (from package manager scanning)
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredTool {
+    pub name: String,
+    pub version: Option<String>,
+    pub source: String,
+    pub description: Option<String>,
+    pub install_location: Option<String>,
+    pub homepage: Option<String>,
+}
+
 // Input types for new commands
 
 #[derive(Debug, Deserialize)]

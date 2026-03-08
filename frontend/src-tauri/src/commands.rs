@@ -1,7 +1,7 @@
 use crate::models::{
     AddEnvFileInput, AppSettings, CreateFolderInput, CreateGlobalScriptInput,
     CreateProjectInput, CreateScriptGroupInput, CreateScriptInput, CreateServiceInput,
-    CreateToolInput, DiscoverEnvFilesInput, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
+    CreateToolInput, DiscoverEnvFilesInput, DiscoveredTool, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
     DiscoveredScript, ExecutionRecord, GlobalScript, ImportResult, LinkEnvToServiceInput, Project, Script,
     ScriptGroup, ScriptParameter, ScriptsConfig, Service, Tool, UpdateFolderInput,
     UpdateGlobalScriptInput, UpdateProjectInput, UpdateScriptGroupInput, UpdateScriptInput,
@@ -1730,6 +1730,15 @@ pub fn scan_scripts_folder(folder: String) -> Result<Vec<DiscoveredScript>, Stri
         &config.scan_extensions,
         &config.ignored_patterns,
     ))
+}
+
+// ============================================================================
+// Tool Discovery / Scan Package Managers
+// ============================================================================
+
+#[tauri::command]
+pub fn scan_installed_tools() -> Result<Vec<DiscoveredTool>, String> {
+    Ok(cortx_core::tool_discovery::scan_installed_tools())
 }
 
 // ============================================================================
