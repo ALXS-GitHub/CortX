@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use crate::app::{App, InputMode};
+use crate::app::{App, ActiveTab, InputMode};
 use crate::ui::theme;
 
 pub fn render(f: &mut Frame, app: &App) {
@@ -22,7 +22,11 @@ pub fn render(f: &mut Frame, app: &App) {
     // Clear background
     f.render_widget(Clear, popup_area);
 
-    let input_text = format!("/{}", app.search_query);
+    let query = match app.active_tab {
+        ActiveTab::Scripts => &app.search_query,
+        ActiveTab::Tools => &app.tools_search_query,
+    };
+    let input_text = format!("/{}", query);
 
     let block = Block::default()
         .title(" Search ")

@@ -8,7 +8,7 @@ mod util;
 use std::io;
 use std::sync::{mpsc, Arc};
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -22,22 +22,41 @@ use app::{App, ProcessEvent};
 use tui_emitter::TuiEmitter;
 
 #[derive(Parser)]
-#[command(name = "cortx", version, about = "CortX TUI - Manage and run scripts")]
+#[command(
+    name = "cortx",
+    version,
+    about = "CortX - Manage and run scripts & tools",
+    after_help = "Tip: `cortx <script_name>` is a shortcut for `cortx run <script_name>`"
+)]
 struct Cli {
-    /// Script name to run directly (without entering TUI)
-    script: Option<String>,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
 
-    /// Extra arguments to pass to the script
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    args: Vec<String>,
-
-    /// List all scripts and exit
-    #[arg(short, long)]
-    list: bool,
-
-    /// Use a specific parameter preset when running a script
-    #[arg(short, long)]
-    preset: Option<String>,
+#[derive(Subcommand)]
+enum Command {
+    /// Run a script by name
+    Run {
+        /// Script name
+        script: String,
+        /// Extra arguments to pass to the script
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+        /// Use a specific parameter preset
+        #[arg(short, long)]
+        preset: Option<String>,
+    },
+    /// List all scripts
+    Scripts,
+    /// List or scan tools
+    Tools {
+        /// Scan system for installed tools (Scoop/Chocolatey)
+        #[arg(long)]
+        scan: bool,
+    },
+    /// Fallback: bare `cortx <name>` still runs a script
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -48,16 +67,17 @@ fn main() -> anyhow::Result<()> {
     let storage = Arc::new(Storage::new()?);
     let process_manager = Arc::new(ProcessManager::new());
 
-    if cli.list {
-        return cmd_list(&storage);
+    match cli.command {
+        Some(Command::Scripts) => cmd_list(&storage),
+        Some(Command::Tools { scan }) => cmd_tools(&storage, scan),
+        Some(Command::Run { script, args, preset }) => {
+            cmd_run(&storage, &process_manager, &script, preset.as_deref(), &args)
+        }
+        Some(Command::External(args)) => {
+            cmd_run(&storage, &process_manager, &args[0], None, &args[1..].to_vec())
+        }
+        None => run_tui(storage, process_manager),
     }
-
-    if let Some(script_name) = &cli.script {
-        return cmd_run(&storage, &process_manager, script_name, cli.preset.as_deref(), &cli.args);
-    }
-
-    // Interactive TUI mode
-    run_tui(storage, process_manager)
 }
 
 /// List all global scripts, sorted by folder (matching TUI display)
@@ -139,6 +159,61 @@ fn cmd_list(storage: &Storage) -> anyhow::Result<()> {
         println!("{}{:pad$} {:<15} {}", display_name, "", tags, display_cmd, pad = pad);
     }
     println!("\n{} script(s)", scripts.len());
+    Ok(())
+}
+
+/// List or scan tools
+fn cmd_tools(storage: &Storage, scan: bool) -> anyhow::Result<()> {
+    if scan {
+        let tools = cortx_core::tool_discovery::scan_installed_tools();
+        if tools.is_empty() {
+            println!("No tools discovered from Scoop/Chocolatey.");
+            return Ok(());
+        }
+
+        println!("{:<30} {:<15} {:<12} {}", "NAME", "VERSION", "SOURCE", "LOCATION");
+        println!("{}", "-".repeat(80));
+
+        for t in &tools {
+            println!(
+                "{:<30} {:<15} {:<12} {}",
+                t.name,
+                t.version.as_deref().unwrap_or("-"),
+                t.source,
+                t.install_location.as_deref().unwrap_or("-"),
+            );
+        }
+        println!("\n{} tool(s) discovered", tools.len());
+    } else {
+        let tools = storage.get_all_tools();
+        if tools.is_empty() {
+            println!("No tools registered.");
+            return Ok(());
+        }
+
+        // Sort by category then name
+        let mut sorted: Vec<&cortx_core::models::Tool> = tools.iter().collect();
+        sorted.sort_by(|a, b| {
+            let ca = a.category.as_deref().unwrap_or("");
+            let cb = b.category.as_deref().unwrap_or("");
+            ca.to_lowercase().cmp(&cb.to_lowercase())
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+
+        println!("{:<30} {:<12} {:<15} {}", "NAME", "STATUS", "CATEGORY", "VERSION");
+        println!("{}", "-".repeat(75));
+
+        for t in &sorted {
+            println!(
+                "{:<30} {:<12} {:<15} {}",
+                t.name,
+                t.status,
+                t.category.as_deref().unwrap_or("-"),
+                t.version.as_deref().unwrap_or("-"),
+            );
+        }
+        println!("\n{} tool(s)", tools.len());
+    }
     Ok(())
 }
 
