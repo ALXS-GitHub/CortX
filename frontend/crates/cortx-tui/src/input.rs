@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, InputMode, ActivePanel};
+use crate::app::{App, InputMode, ActivePanel, ActiveTab};
 use cortx_core::models::ScriptParamType;
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
@@ -20,6 +20,49 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             app.should_quit = true;
         }
 
+        // Tab switching
+        KeyCode::Char('1') => app.active_tab = ActiveTab::Scripts,
+        KeyCode::Char('2') => app.active_tab = ActiveTab::Tools,
+
+        // Help
+        KeyCode::Char('?') => app.input_mode = InputMode::Help,
+
+        // Search — dispatch based on active tab
+        KeyCode::Char('/') => {
+            match app.active_tab {
+                ActiveTab::Scripts => app.enter_search(),
+                ActiveTab::Tools => app.enter_tools_search(),
+            }
+        }
+
+        // Clear filter — dispatch based on active tab
+        KeyCode::Esc => {
+            match app.active_tab {
+                ActiveTab::Scripts => app.clear_filter(),
+                ActiveTab::Tools => app.clear_tools_filter(),
+            }
+        }
+
+        // Reload — dispatch based on active tab
+        KeyCode::Char('r') => {
+            match app.active_tab {
+                ActiveTab::Scripts => app.reload_scripts(),
+                ActiveTab::Tools => app.reload_tools(),
+            }
+        }
+
+        // Tab-specific keys
+        _ => {
+            match app.active_tab {
+                ActiveTab::Scripts => handle_normal_scripts(app, key),
+                ActiveTab::Tools => handle_normal_tools(app, key),
+            }
+        }
+    }
+}
+
+fn handle_normal_scripts(app: &mut App, key: KeyEvent) {
+    match key.code {
         // Navigation
         KeyCode::Char('j') | KeyCode::Down => {
             match app.active_panel {
@@ -39,18 +82,12 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
         // Panel switch
         KeyCode::Tab => app.toggle_panel(),
 
-        // Clear search filter
-        KeyCode::Esc => app.clear_filter(),
-
         // Actions
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.quick_run();
         }
         KeyCode::Enter => app.enter_run(),
         KeyCode::Char('s') => app.stop_selected(),
-
-        // Search
-        KeyCode::Char('/') => app.enter_search(),
 
         // Output controls
         KeyCode::Char('c') => {
@@ -64,23 +101,40 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             }
         }
 
-        // Reload
-        KeyCode::Char('r') => app.reload_scripts(),
+        _ => {}
+    }
+}
 
-        // Help
-        KeyCode::Char('?') => app.input_mode = InputMode::Help,
-
+fn handle_normal_tools(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => app.tools_move_down(),
+        KeyCode::Char('k') | KeyCode::Up => app.tools_move_up(),
+        KeyCode::Char('g') => app.tools_move_top(),
+        KeyCode::Char('G') => app.tools_move_bottom(),
         _ => {}
     }
 }
 
 fn handle_search(app: &mut App, key: KeyEvent) {
-    match key.code {
-        KeyCode::Esc => app.exit_search(),
-        KeyCode::Enter => app.confirm_search(),
-        KeyCode::Backspace => app.search_backspace(),
-        KeyCode::Char(c) => app.search_input(c),
-        _ => {}
+    match app.active_tab {
+        ActiveTab::Scripts => {
+            match key.code {
+                KeyCode::Esc => app.exit_search(),
+                KeyCode::Enter => app.confirm_search(),
+                KeyCode::Backspace => app.search_backspace(),
+                KeyCode::Char(c) => app.search_input(c),
+                _ => {}
+            }
+        }
+        ActiveTab::Tools => {
+            match key.code {
+                KeyCode::Esc => app.exit_tools_search(),
+                KeyCode::Enter => app.confirm_tools_search(),
+                KeyCode::Backspace => app.tools_search_backspace(),
+                KeyCode::Char(c) => app.tools_search_input(c),
+                _ => {}
+            }
+        }
     }
 }
 

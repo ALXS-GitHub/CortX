@@ -1,4 +1,4 @@
-use cortx_core::models::{GlobalScript, VirtualFolder, ScriptGroup, ScriptStatus, ScriptParamType, LogStream};
+use cortx_core::models::{GlobalScript, Tool, VirtualFolder, ScriptGroup, ScriptStatus, ScriptParamType, LogStream};
 use cortx_core::process_manager::ProcessManager;
 use cortx_core::storage::Storage;
 use std::collections::HashMap;
@@ -23,6 +23,13 @@ pub enum InputMode {
 pub enum ActivePanel {
     ScriptList,
     Output,
+}
+
+/// Active tab in the TUI
+#[derive(Debug, Clone, PartialEq)]
+pub enum ActiveTab {
+    Scripts,
+    Tools,
 }
 
 /// A log line for display
@@ -275,6 +282,15 @@ pub struct App {
 
     // Parameter form state
     pub param_form: Option<ParamFormState>,
+
+    // Tabs
+    pub active_tab: ActiveTab,
+
+    // Tools state
+    pub tools: Vec<Tool>,
+    pub tools_filtered_indices: Vec<usize>,
+    pub tools_selected_index: usize,
+    pub tools_search_query: String,
 }
 
 impl App {
@@ -282,12 +298,14 @@ impl App {
         let mut scripts = storage.get_all_global_scripts();
         let folders = storage.get_all_folders();
         let groups = storage.get_all_script_groups();
+        let tools = storage.get_all_tools();
 
         // Sort scripts by folder (no-folder first, then by folder name)
         Self::sort_scripts_by_folder(&mut scripts, &folders);
 
         let script_count = scripts.len();
         let filtered_indices: Vec<usize> = (0..script_count).collect();
+        let tools_filtered_indices: Vec<usize> = (0..tools.len()).collect();
 
         Self {
             storage,
@@ -307,6 +325,11 @@ impl App {
             filtered_indices,
             active_script_id: None,
             param_form: None,
+            active_tab: ActiveTab::Scripts,
+            tools,
+            tools_filtered_indices,
+            tools_selected_index: 0,
+            tools_search_query: String::new(),
         }
     }
 
@@ -436,6 +459,99 @@ impl App {
             self.selected_index = 0;
         } else if self.selected_index >= self.filtered_indices.len() {
             self.selected_index = self.filtered_indices.len() - 1;
+        }
+    }
+
+    // === Tools methods ===
+
+    pub fn selected_tool(&self) -> Option<&Tool> {
+        self.tools_filtered_indices
+            .get(self.tools_selected_index)
+            .and_then(|&idx| self.tools.get(idx))
+    }
+
+    pub fn tools_move_up(&mut self) {
+        if self.tools_selected_index > 0 {
+            self.tools_selected_index -= 1;
+        }
+    }
+
+    pub fn tools_move_down(&mut self) {
+        if !self.tools_filtered_indices.is_empty() && self.tools_selected_index < self.tools_filtered_indices.len() - 1 {
+            self.tools_selected_index += 1;
+        }
+    }
+
+    pub fn tools_move_top(&mut self) {
+        self.tools_selected_index = 0;
+    }
+
+    pub fn tools_move_bottom(&mut self) {
+        if !self.tools_filtered_indices.is_empty() {
+            self.tools_selected_index = self.tools_filtered_indices.len() - 1;
+        }
+    }
+
+    pub fn reload_tools(&mut self) {
+        self.tools = self.storage.get_all_tools();
+        self.tools_search_query.clear();
+        self.apply_tools_filter();
+    }
+
+    pub fn enter_tools_search(&mut self) {
+        self.input_mode = InputMode::Search;
+        self.tools_search_query.clear();
+    }
+
+    pub fn exit_tools_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.tools_search_query.clear();
+        self.apply_tools_filter();
+    }
+
+    pub fn confirm_tools_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
+    pub fn tools_search_input(&mut self, c: char) {
+        self.tools_search_query.push(c);
+        self.apply_tools_filter();
+    }
+
+    pub fn tools_search_backspace(&mut self) {
+        self.tools_search_query.pop();
+        self.apply_tools_filter();
+    }
+
+    pub fn clear_tools_filter(&mut self) {
+        if !self.tools_search_query.is_empty() {
+            self.tools_search_query.clear();
+            self.apply_tools_filter();
+        }
+    }
+
+    fn apply_tools_filter(&mut self) {
+        if self.tools_search_query.is_empty() {
+            self.tools_filtered_indices = (0..self.tools.len()).collect();
+        } else {
+            let q = self.tools_search_query.to_lowercase();
+            self.tools_filtered_indices = self
+                .tools
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| {
+                    t.name.to_lowercase().contains(&q)
+                        || t.description.as_deref().unwrap_or("").to_lowercase().contains(&q)
+                        || t.tags.iter().any(|tag| tag.to_lowercase().contains(&q))
+                        || t.category.as_deref().unwrap_or("").to_lowercase().contains(&q)
+                })
+                .map(|(i, _)| i)
+                .collect();
+        }
+        if self.tools_filtered_indices.is_empty() {
+            self.tools_selected_index = 0;
+        } else if self.tools_selected_index >= self.tools_filtered_indices.len() {
+            self.tools_selected_index = self.tools_filtered_indices.len() - 1;
         }
     }
 

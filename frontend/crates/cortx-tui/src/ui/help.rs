@@ -11,7 +11,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     let area = f.area();
     let popup_width = 60u16.min(area.width.saturating_sub(4));
-    let popup_height = 22u16.min(area.height.saturating_sub(4));
+    let popup_height = 26u16.min(area.height.saturating_sub(4));
 
     let x = (area.width.saturating_sub(popup_width)) / 2;
     let y = (area.height.saturating_sub(popup_height)) / 2;
@@ -37,6 +37,13 @@ pub fn render(f: &mut Frame, app: &App) {
         help_line("/", "Search scripts"),
         help_line("Esc", "Clear search filter"),
         help_line("r", "Reload scripts (clears filter)"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Tabs:",
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+        )),
+        help_line("1", "Scripts tab"),
+        help_line("2", "Tools tab (read-only)"),
         Line::from(""),
         Line::from(Span::styled(
             "Output Panel:",
