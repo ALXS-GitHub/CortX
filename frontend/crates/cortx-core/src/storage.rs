@@ -761,6 +761,24 @@ impl Storage {
     }
 
     // ========================================================================
+    // Reload (for MCP concurrent access)
+    // ========================================================================
+
+    /// Re-read all JSON files from disk into the in-memory caches.
+    /// Used by the MCP server to ensure fresh data when Tauri or other
+    /// processes may have written to the same files.
+    pub fn reload_all(&self) -> Result<(), StorageError> {
+        self.load_projects()?;
+        self.load_settings()?;
+        self.load_global_scripts()?;
+        self.load_tag_definitions()?;
+        self.load_script_groups()?;
+        self.load_execution_history()?;
+        self.load_tools()?;
+        Ok(())
+    }
+
+    // ========================================================================
     // Import / Export
     // ========================================================================
 
