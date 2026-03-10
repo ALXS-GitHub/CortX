@@ -45,8 +45,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: frontend
+          tauriScript: bunx tauri
           tagName: v__VERSION__
-          releaseName: 'Cortx v__VERSION__'
+          releaseName: 'CortX v__VERSION__'
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: true
           prerelease: false

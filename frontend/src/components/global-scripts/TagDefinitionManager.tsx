@@ -38,7 +38,7 @@ interface TagDefinitionManagerProps {
 }
 
 export function TagDefinitionManager({ open, onOpenChange, editingTag }: TagDefinitionManagerProps) {
-  const { tagDefinitions, createTagDefinition, updateTagDefinition, deleteTagDefinition } = useAppStore();
+  const { tagDefinitions, deleteTagDefinition } = useAppStore();
 
   const [showForm, setShowForm] = useState(false);
   const [formTag, setFormTag] = useState<TagDefinition | null>(null);
