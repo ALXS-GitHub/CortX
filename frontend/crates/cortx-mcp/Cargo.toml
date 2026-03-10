@@ -1,0 +1,21 @@
+[package]
+name = "cortx-mcp"
+version.workspace = true
+description = "CortX MCP Server - AI agent interface for CortX"
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "cortx-mcp"
+path = "src/main.rs"
+
+[dependencies]
+cortx-core = { path = "../cortx-core" }
+rmcp = { version = "1.1", features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+parking_lot = "0.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
