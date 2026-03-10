@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { ToolForm } from './ToolForm';
+import { TagBadge } from '@/components/ui/TagBadge';
 import { toast } from 'sonner';
 import { openToolConfig, openToolLocation, openToolLocationVscode, openToolUrl, openInExplorer } from '@/lib/tauri';
 import type { UpdateToolInput } from '@/types';
@@ -49,7 +50,7 @@ function StatusBadge({ status }: { status: string }) {
 export function ToolDetail() {
   const {
     tools,
-    folders,
+    tagDefinitions,
     settings,
     selectedToolId,
     setCurrentView,
@@ -62,11 +63,6 @@ export function ToolDetail() {
   const tool = useMemo(
     () => tools.find((t) => t.id === selectedToolId),
     [tools, selectedToolId]
-  );
-
-  const folder = useMemo(
-    () => (tool?.folderId ? folders.find((f) => f.id === tool.folderId) : undefined),
-    [tool, folders]
   );
 
   const replacementTool = useMemo(
@@ -175,13 +171,6 @@ export function ToolDetail() {
             <StatusBadge status={tool.status} />
           </div>
 
-          {tool.category && (
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Category:</span>
-              <Badge variant="outline" className="text-xs">{tool.category}</Badge>
-            </div>
-          )}
-
           {tool.version && (
             <div>
               <span className="text-muted-foreground">Version:</span>
@@ -236,19 +225,11 @@ export function ToolDetail() {
             </div>
           )}
 
-          {folder && (
-            <div className="flex items-center gap-2">
-              <div className="size-3 rounded-sm" style={{ backgroundColor: folder.color || '#6b7280' }} />
-              <span className="text-muted-foreground">Folder:</span>
-              <span>{folder.name}</span>
-            </div>
-          )}
-
           {tool.tags.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
               <Tag className="size-3.5 text-muted-foreground" />
               {tool.tags.map((tag) => (
-                <Badge key={tag} variant="outline" className="text-xs py-0">{tag}</Badge>
+                <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
               ))}
             </div>
           )}
@@ -346,7 +327,7 @@ export function ToolDetail() {
         onOpenChange={setShowEditForm}
         tool={tool}
         tools={tools}
-        folders={folders}
+        tagDefinitions={tagDefinitions}
         onSubmit={handleUpdate}
       />
     </div>

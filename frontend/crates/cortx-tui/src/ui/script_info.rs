@@ -62,11 +62,17 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 
     if !script.tags.is_empty() {
-        let tags_str = script.tags.join(", ");
-        lines.push(Line::from(vec![
+        let mut spans = vec![
             Span::styled("Tags: ", Style::default().fg(theme::TEXT_SECONDARY)),
-            Span::styled(tags_str, Style::default().fg(theme::TAG_COLOR)),
-        ]));
+        ];
+        for (i, tag) in script.tags.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(", ", Style::default().fg(theme::TEXT_MUTED)));
+            }
+            let color = theme::tag_color(tag, &app.tag_definitions);
+            spans.push(Span::styled(tag.as_str(), Style::default().fg(color)));
+        }
+        lines.push(Line::from(spans));
     }
 
     if !script.parameters.is_empty() {

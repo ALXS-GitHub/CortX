@@ -4,6 +4,18 @@ use ratatui::widgets::Paragraph;
 use crate::app::{App, InputMode, ActivePanel, ActiveTab};
 use crate::ui::theme;
 
+fn tag_filter_spans(app: &App) -> Vec<Span<'_>> {
+    if let Some(ref tag) = app.active_tag_filter {
+        let color = theme::tag_color(tag, &app.tag_definitions);
+        vec![
+            Span::styled("  tag:", Style::default().fg(theme::TEXT_SECONDARY)),
+            Span::styled(tag.as_str(), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+        ]
+    } else {
+        vec![]
+    }
+}
+
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let (left_text, right_text) = match app.input_mode {
         InputMode::ParamForm => {
@@ -54,6 +66,20 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             ]);
             (left, right)
         }
+        InputMode::TagFilter => {
+            let left = Line::from(vec![
+                Span::styled(" Tag Filter", Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+            ]);
+            let right = Line::from(vec![
+                Span::styled("j/k", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                Span::raw(" Navigate  "),
+                Span::styled("Enter", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                Span::raw(" Select  "),
+                Span::styled("Esc", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                Span::raw(" Cancel"),
+            ]);
+            (left, right)
+        }
         InputMode::Normal => {
             match app.active_tab {
                 ActiveTab::Scripts => {
@@ -71,6 +97,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                                 Span::raw(" Quit  "),
                                 Span::styled("/", Style::default().fg(theme::TEXT_HIGHLIGHT)),
                                 Span::raw(" Search  "),
+                                Span::styled("t", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Tags  "),
                                 Span::styled("Enter", Style::default().fg(theme::TEXT_HIGHLIGHT)),
                                 Span::raw(" Run  "),
                                 Span::styled("C-Enter", Style::default().fg(theme::TEXT_HIGHLIGHT)),
@@ -79,12 +107,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                                 Span::raw(" Stop  "),
                                 Span::styled("Tab", Style::default().fg(theme::TEXT_HIGHLIGHT)),
                                 Span::raw(" Output  "),
-                                Span::styled("1/2", Style::default().fg(theme::TEXT_HIGHLIGHT)),
-                                Span::raw(" Tabs  "),
                                 Span::styled("?", Style::default().fg(theme::TEXT_HIGHLIGHT)),
                                 Span::raw(" Help"),
                             ];
-                            if !app.search_query.is_empty() {
+                            if !app.search_query.is_empty() || app.active_tag_filter.is_some() {
                                 hints.push(Span::raw("  "));
                                 hints.push(Span::styled("Esc", Style::default().fg(theme::TEXT_HIGHLIGHT)));
                                 hints.push(Span::raw(" Clear"));
@@ -108,20 +134,22 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                     };
 
                     let left = Line::from(hints);
-                    let right = Line::from(vec![
+                    let mut right_spans = vec![
                         Span::styled(
                             format!("{} scripts", script_count),
                             Style::default().fg(theme::TEXT_SECONDARY),
                         ),
-                        if running_count > 0 {
-                            Span::styled(
-                                format!("  {} running ", running_count),
-                                Style::default().fg(theme::STATUS_RUNNING),
-                            )
-                        } else {
-                            Span::raw(" ")
-                        },
-                    ]);
+                    ];
+                    right_spans.extend(tag_filter_spans(app));
+                    if running_count > 0 {
+                        right_spans.push(Span::styled(
+                            format!("  {} running ", running_count),
+                            Style::default().fg(theme::STATUS_RUNNING),
+                        ));
+                    } else {
+                        right_spans.push(Span::raw(" "));
+                    }
+                    let right = Line::from(right_spans);
                     (left, right)
                 }
                 ActiveTab::Tools => {
@@ -131,25 +159,28 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                         Span::raw(" Quit  "),
                         Span::styled("/", Style::default().fg(theme::TEXT_HIGHLIGHT)),
                         Span::raw(" Search  "),
+                        Span::styled("t", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                        Span::raw(" Tags  "),
                         Span::styled("r", Style::default().fg(theme::TEXT_HIGHLIGHT)),
                         Span::raw(" Reload  "),
-                        Span::styled("1/2", Style::default().fg(theme::TEXT_HIGHLIGHT)),
-                        Span::raw(" Tabs  "),
                         Span::styled("?", Style::default().fg(theme::TEXT_HIGHLIGHT)),
                         Span::raw(" Help"),
                     ];
-                    if !app.tools_search_query.is_empty() {
+                    if !app.tools_search_query.is_empty() || app.active_tag_filter.is_some() {
                         hints.push(Span::raw("  "));
                         hints.push(Span::styled("Esc", Style::default().fg(theme::TEXT_HIGHLIGHT)));
                         hints.push(Span::raw(" Clear"));
                     }
                     let left = Line::from(hints);
-                    let right = Line::from(vec![
+                    let mut right_spans = vec![
                         Span::styled(
-                            format!("{} tools ", tool_count),
+                            format!("{} tools", tool_count),
                             Style::default().fg(theme::TEXT_SECONDARY),
                         ),
-                    ]);
+                    ];
+                    right_spans.extend(tag_filter_spans(app));
+                    right_spans.push(Span::raw(" "));
+                    let right = Line::from(right_spans);
                     (left, right)
                 }
             }

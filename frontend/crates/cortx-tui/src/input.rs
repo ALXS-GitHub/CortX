@@ -9,6 +9,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         InputMode::Search => handle_search(app, key),
         InputMode::Help => handle_help(app, key),
         InputMode::ParamForm => handle_param_form(app, key),
+        InputMode::TagFilter => handle_tag_filter(app, key),
     }
 }
 
@@ -34,6 +35,9 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
                 ActiveTab::Tools => app.enter_tools_search(),
             }
         }
+
+        // Tag filter
+        KeyCode::Char('t') => app.enter_tag_filter(),
 
         // Clear filter — dispatch based on active tab
         KeyCode::Esc => {
@@ -143,6 +147,16 @@ fn handle_help(app: &mut App, key: KeyEvent) {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
             app.input_mode = InputMode::Normal;
         }
+        _ => {}
+    }
+}
+
+fn handle_tag_filter(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('t') => app.exit_tag_filter(),
+        KeyCode::Enter => app.confirm_tag_filter(),
+        KeyCode::Char('j') | KeyCode::Down => app.tag_filter_move_down(),
+        KeyCode::Char('k') | KeyCode::Up => app.tag_filter_move_up(),
         _ => {}
     }
 }

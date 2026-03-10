@@ -20,9 +20,9 @@ import type {
   GlobalScript,
   CreateGlobalScriptInput,
   UpdateGlobalScriptInput,
-  VirtualFolder,
-  CreateFolderInput,
-  UpdateFolderInput,
+  TagDefinition,
+  CreateTagDefinitionInput,
+  UpdateTagDefinitionInput,
   ScriptGroup,
   CreateScriptGroupInput,
   UpdateScriptGroupInput,
@@ -130,7 +130,7 @@ interface AppState {
 
   // Global scripts
   globalScripts: GlobalScript[];
-  folders: VirtualFolder[];
+  tagDefinitions: TagDefinition[];
   scriptGroups: ScriptGroup[];
   globalScriptRuntimes: Map<string, ScriptRuntime>;
   scriptsConfig: ScriptsConfig | null;
@@ -239,11 +239,11 @@ interface AppState {
   showGlobalScriptTerminal: (scriptId: string) => void;
   closeGlobalScriptTerminal: (scriptId: string) => void;
 
-  // Actions - Folders
-  loadFolders: () => Promise<void>;
-  createFolder: (input: CreateFolderInput) => Promise<VirtualFolder>;
-  updateFolder: (id: string, input: UpdateFolderInput) => Promise<void>;
-  deleteFolder: (id: string) => Promise<void>;
+  // Actions - Tag Definitions
+  loadTagDefinitions: () => Promise<void>;
+  createTagDefinition: (input: CreateTagDefinitionInput) => Promise<TagDefinition>;
+  updateTagDefinition: (name: string, input: UpdateTagDefinitionInput) => Promise<void>;
+  deleteTagDefinition: (name: string) => Promise<void>;
 
   // Actions - Script Groups
   loadScriptGroups: () => Promise<void>;
@@ -313,7 +313,7 @@ export const useAppStore = create<AppState>((set, _get) => ({
   isDiscoveringEnvFiles: false,
   envFileComparisons: new Map(),
   globalScripts: [],
-  folders: [],
+  tagDefinitions: [],
   scriptGroups: [],
   globalScriptRuntimes: new Map(),
   scriptsConfig: null,
@@ -1268,33 +1268,33 @@ export const useAppStore = create<AppState>((set, _get) => ({
     });
   },
 
-  // Folders actions
-  loadFolders: async () => {
+  // Tag Definitions actions
+  loadTagDefinitions: async () => {
     try {
-      const folders = await api.getAllFolders();
-      set({ folders });
+      const tagDefinitions = await api.getAllTagDefinitions();
+      set({ tagDefinitions });
     } catch (error) {
-      console.error('Failed to load folders:', error);
+      console.error('Failed to load tag definitions:', error);
     }
   },
 
-  createFolder: async (input) => {
-    const folder = await api.createFolder(input);
-    set((state) => ({ folders: [...state.folders, folder] }));
-    return folder;
+  createTagDefinition: async (input) => {
+    const def = await api.createTagDefinition(input);
+    set((state) => ({ tagDefinitions: [...state.tagDefinitions, def] }));
+    return def;
   },
 
-  updateFolder: async (id, input) => {
-    const updated = await api.updateFolder(id, input);
+  updateTagDefinition: async (name, input) => {
+    const updated = await api.updateTagDefinition(name, input);
     set((state) => ({
-      folders: state.folders.map((f) => (f.id === id ? updated : f)),
+      tagDefinitions: state.tagDefinitions.map((d) => (d.name.toLowerCase() === name.toLowerCase() ? updated : d)),
     }));
   },
 
-  deleteFolder: async (id) => {
-    await api.deleteFolder(id);
+  deleteTagDefinition: async (name) => {
+    await api.deleteTagDefinition(name);
     set((state) => ({
-      folders: state.folders.filter((f) => f.id !== id),
+      tagDefinitions: state.tagDefinitions.filter((d) => d.name.toLowerCase() !== name.toLowerCase()),
     }));
   },
 
@@ -1366,9 +1366,10 @@ export const useAppStore = create<AppState>((set, _get) => ({
     const result = await api.importScriptsConfig(json);
     // Reload all data after import
     const globalScripts = await api.getAllGlobalScripts();
-    const folders = await api.getAllFolders();
+    const tagDefinitions = await api.getAllTagDefinitions();
     const scriptGroups = await api.getAllScriptGroups();
-    set({ globalScripts, folders, scriptGroups });
+    const tools = await api.getAllTools();
+    set({ globalScripts, tagDefinitions, scriptGroups, tools });
     return result;
   },
 

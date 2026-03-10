@@ -39,7 +39,7 @@ export interface Project {
   scripts: Script[];
   envFiles: EnvFile[];
   envFilesDiscovered: boolean;
-  folderId?: string;
+  tags: string[];
 }
 
 // Environment file types
@@ -177,6 +177,7 @@ export interface CreateProjectInput {
   rootPath: string;
   description?: string;
   imagePath?: string;
+  tags?: string[];
 }
 
 export interface UpdateProjectInput {
@@ -184,6 +185,7 @@ export interface UpdateProjectInput {
   rootPath?: string;
   description?: string;
   imagePath?: string;
+  tags?: string[];
 }
 
 export interface CreateServiceInput {
@@ -282,7 +284,6 @@ export interface GlobalScript {
   scriptPath?: string;
   workingDir?: string;
   color?: string;
-  folderId?: string;
   tags: string[];
   parameters: ScriptParameter[];
   parameterPresets: ParameterPreset[];
@@ -294,15 +295,10 @@ export interface GlobalScript {
   autoDiscovered: boolean;
 }
 
-export type FolderType = 'project' | 'script' | 'tool';
-
-export interface VirtualFolder {
-  id: string;
+export interface TagDefinition {
   name: string;
   color?: string;
-  icon?: string;
   order?: number;
-  folderType: FolderType;
 }
 
 export type GroupExecutionMode = 'parallel' | 'sequential';
@@ -314,7 +310,7 @@ export interface ScriptGroup {
   scriptIds: string[];
   executionMode: GroupExecutionMode;
   stopOnFailure: boolean;
-  folderId?: string;
+  tags: string[];
   order: number;
 }
 
@@ -366,7 +362,6 @@ export interface Tool {
   id: string;
   name: string;
   description?: string;
-  category?: string;
   tags: string[];
   status: string;
   replacedBy?: string;
@@ -377,7 +372,6 @@ export interface Tool {
   configPaths: ToolConfigPath[];
   toolboxUrl?: string;
   notes?: string;
-  folderId?: string;
   color?: string;
   order: number;
   createdAt: string;
@@ -387,7 +381,6 @@ export interface Tool {
 export interface CreateToolInput {
   name: string;
   description?: string;
-  category?: string;
   tags?: string[];
   status?: string;
   replacedBy?: string;
@@ -398,14 +391,12 @@ export interface CreateToolInput {
   configPaths?: ToolConfigPath[];
   toolboxUrl?: string;
   notes?: string;
-  folderId?: string;
   color?: string;
 }
 
 export interface UpdateToolInput {
   name?: string;
   description?: string;
-  category?: string;
   tags?: string[];
   status?: string;
   replacedBy?: string;
@@ -416,7 +407,6 @@ export interface UpdateToolInput {
   configPaths?: ToolConfigPath[];
   toolboxUrl?: string;
   notes?: string;
-  folderId?: string;
   color?: string;
 }
 
@@ -429,7 +419,6 @@ export interface CreateGlobalScriptInput {
   scriptPath?: string;
   workingDir?: string;
   color?: string;
-  folderId?: string;
   tags?: string[];
   parameters?: ScriptParameter[];
   parameterPresets?: ParameterPreset[];
@@ -443,7 +432,6 @@ export interface UpdateGlobalScriptInput {
   scriptPath?: string;
   workingDir?: string;
   color?: string;
-  folderId?: string;
   tags?: string[];
   parameters?: ScriptParameter[];
   parameterPresets?: ParameterPreset[];
@@ -451,18 +439,15 @@ export interface UpdateGlobalScriptInput {
   envVars?: Record<string, string>;
 }
 
-export interface CreateFolderInput {
+export interface CreateTagDefinitionInput {
   name: string;
   color?: string;
-  icon?: string;
   order?: number;
-  folderType: FolderType;
 }
 
-export interface UpdateFolderInput {
+export interface UpdateTagDefinitionInput {
   name?: string;
   color?: string;
-  icon?: string;
   order?: number;
 }
 
@@ -472,7 +457,7 @@ export interface CreateScriptGroupInput {
   scriptIds: string[];
   executionMode: GroupExecutionMode;
   stopOnFailure?: boolean;
-  folderId?: string;
+  tags?: string[];
 }
 
 export interface UpdateScriptGroupInput {
@@ -481,16 +466,16 @@ export interface UpdateScriptGroupInput {
   scriptIds?: string[];
   executionMode?: GroupExecutionMode;
   stopOnFailure?: boolean;
-  folderId?: string;
+  tags?: string[];
 }
 
 // Import/Export result
 export interface ImportResult {
   scriptsAdded: number;
-  foldersAdded: number;
   groupsAdded: number;
   skipped: number;
   toolsAdded: number;
+  tagDefinitionsAdded: number;
 }
 
 // View types

@@ -28,8 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Plus, Search, FolderPlus, Pencil, Trash2, ChevronDown, ChevronRight, Loader2, Check, ScanSearch } from 'lucide-react';
+import { Plus, Search, Loader2, Check, ScanSearch } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { ToolCard } from './ToolCard';
@@ -37,39 +36,30 @@ import { ToolCardView } from './ToolCardView';
 import { ToolCompactItem } from './ToolCompactItem';
 import { ToolForm } from './ToolForm';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
-import { FolderForm } from '@/components/global-scripts/FolderManager';
+import { TagBadge } from '@/components/ui/TagBadge';
 import { scanInstalledTools } from '@/lib/tauri';
 import { toast } from 'sonner';
-import type { Tool, CreateToolInput, UpdateToolInput, VirtualFolder, CreateFolderInput, UpdateFolderInput, DiscoveredTool } from '@/types';
+import type { Tool, CreateToolInput, UpdateToolInput, DiscoveredTool } from '@/types';
 
 const DEFAULT_STATUSES = ['Active', 'Inactive', 'To Test', 'Archived', 'Replaced'];
 
 export function ToolsView() {
   const {
     tools,
-    folders,
+    tagDefinitions,
     createTool,
     updateTool,
     deleteTool,
     selectTool,
-    createFolder,
-    updateFolder,
-    deleteFolder,
   } = useAppStore();
   const { toolsViewMode, setToolsViewMode } = useViewPrefsStore();
 
   const [search, setSearch] = useState('');
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showToolForm, setShowToolForm] = useState(false);
   const [editingTool, setEditingTool] = useState<Tool | undefined>(undefined);
   const [deletingTool, setDeletingTool] = useState<Tool | null>(null);
-  const [showFolderForm, setShowFolderForm] = useState(false);
-  const [editingFolder, setEditingFolder] = useState<VirtualFolder | undefined>(undefined);
-  const [deletingFolder, setDeletingFolder] = useState<VirtualFolder | null>(null);
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
-
   // Scan state
   const [isScanning, setIsScanning] = useState(false);
   const [discoveredTools, setDiscoveredTools] = useState<DiscoveredTool[]>([]);
@@ -78,51 +68,48 @@ export function ToolsView() {
   const [isImporting, setIsImporting] = useState(false);
   const [scanTotal, setScanTotal] = useState(0);
 
-  const toggleFolderCollapse = (folderId: string) => {
-    setCollapsedFolders((prev) => {
+  const toggleTag = (tag: string) => {
+    setSelectedTags((prev) => {
       const next = new Set(prev);
-      if (next.has(folderId)) next.delete(folderId);
-      else next.add(folderId);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
       return next;
     });
   };
 
-  const toolFolders = useMemo(
-    () => folders
-      .filter(f => f.folderType === 'tool')
-      .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity)),
-    [folders]
-  );
+  // All unique tags from tools + tag definitions
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const td of tagDefinitions) set.add(td.name);
+    for (const t of tools) {
+      for (const tag of t.tags) set.add(tag);
+    }
+    return Array.from(set).sort((a, b) => {
+      const aDef = tagDefinitions.find((d) => d.name === a);
+      const bDef = tagDefinitions.find((d) => d.name === b);
+      const aOrder = aDef?.order ?? Infinity;
+      const bOrder = bDef?.order ?? Infinity;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return a.localeCompare(b);
+    });
+  }, [tools, tagDefinitions]);
 
-  const selectedFolder = useMemo(
-    () => toolFolders.find((f) => f.id === selectedFolderId),
-    [toolFolders, selectedFolderId]
-  );
-
-  // Unique statuses and categories from existing tools
+  // Unique statuses from existing tools
   const allStatuses = useMemo(() => {
     const set = new Set([...DEFAULT_STATUSES, ...tools.map(t => t.status)]);
     return Array.from(set);
   }, [tools]);
 
-  const allCategories = useMemo(() => {
-    const set = new Set(tools.map(t => t.category).filter(Boolean) as string[]);
-    return Array.from(set).sort();
-  }, [tools]);
-
   const filteredTools = useMemo(() => {
     let result = tools;
 
-    if (selectedFolderId) {
-      result = result.filter((t) => t.folderId === selectedFolderId);
+    // Tag filter (OR semantics): show tools that have at least one selected tag
+    if (selectedTags.size > 0) {
+      result = result.filter((t) => t.tags.some((tag) => selectedTags.has(tag)));
     }
 
     if (selectedStatus) {
       result = result.filter((t) => t.status === selectedStatus);
-    }
-
-    if (selectedCategory) {
-      result = result.filter((t) => t.category === selectedCategory);
     }
 
     if (search.trim()) {
@@ -131,30 +118,12 @@ export function ToolsView() {
         (t) =>
           t.name.toLowerCase().includes(q) ||
           t.description?.toLowerCase().includes(q) ||
-          t.category?.toLowerCase().includes(q) ||
           t.tags.some((tag) => tag.toLowerCase().includes(q))
       );
     }
 
     return result.slice().sort((a, b) => a.order - b.order);
-  }, [tools, selectedFolderId, selectedStatus, selectedCategory, search]);
-
-  const unfolderedTools = useMemo(
-    () => filteredTools.filter((t) => !t.folderId),
-    [filteredTools]
-  );
-
-  const toolsByFolder = useMemo(() => {
-    const map = new Map<string, Tool[]>();
-    for (const t of filteredTools) {
-      if (t.folderId) {
-        const existing = map.get(t.folderId) || [];
-        existing.push(t);
-        map.set(t.folderId, existing);
-      }
-    }
-    return map;
-  }, [filteredTools]);
+  }, [tools, selectedTags, selectedStatus, search]);
 
   const handleCreateTool = async (data: CreateToolInput | UpdateToolInput) => {
     await createTool(data as CreateToolInput);
@@ -176,31 +145,6 @@ export function ToolsView() {
       toast.error('Failed to delete tool', { description: String(e) });
     }
     setDeletingTool(null);
-  };
-
-  const handleCreateFolder = async (data: CreateFolderInput | UpdateFolderInput) => {
-    await createFolder(data as CreateFolderInput);
-    toast.success('Folder created');
-  };
-
-  const handleUpdateFolder = async (data: CreateFolderInput | UpdateFolderInput) => {
-    if (!editingFolder) return;
-    await updateFolder(editingFolder.id, data as UpdateFolderInput);
-    toast.success('Folder updated');
-  };
-
-  const handleDeleteFolder = async () => {
-    if (!deletingFolder) return;
-    try {
-      await deleteFolder(deletingFolder.id);
-      if (selectedFolderId === deletingFolder.id) {
-        setSelectedFolderId(null);
-      }
-      toast.success('Folder deleted');
-    } catch (e) {
-      toast.error('Failed to delete folder', { description: String(e) });
-    }
-    setDeletingFolder(null);
   };
 
   const handleScanTools = async () => {
@@ -259,6 +203,7 @@ export function ToolsView() {
   const toolItemProps = (tool: Tool) => ({
     key: tool.id,
     tool,
+    tagDefinitions,
     onEdit: () => { setEditingTool(tool); setShowToolForm(true); },
     onDelete: () => setDeletingTool(tool),
     onClick: () => selectTool(tool.id),
@@ -342,83 +287,40 @@ export function ToolsView() {
           </SelectContent>
         </Select>
 
-        {allCategories.length > 0 && (
-          <Select
-            value={selectedCategory ?? '__all__'}
-            onValueChange={(v) => setSelectedCategory(v === '__all__' ? null : v)}
-          >
-            <SelectTrigger size="sm" className="w-[160px]">
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All categories</SelectItem>
-              {allCategories.map(c => (
-                <SelectItem key={c} value={c}>{c}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
-        <div className="flex items-center gap-1.5">
-          <Select
-            value={selectedFolderId ?? '__all__'}
-            onValueChange={(v) => setSelectedFolderId(v === '__all__' ? null : v)}
-          >
-            <SelectTrigger size="sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All folders</SelectItem>
-              {toolFolders.map((folder) => (
-                <SelectItem key={folder.id} value={folder.id}>
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="size-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: folder.color || '#6b7280' }}
-                    />
-                    {folder.name}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {selectedFolder && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="size-8 p-0"
-                onClick={() => {
-                  setEditingFolder(selectedFolder);
-                  setShowFolderForm(true);
-                }}
-              >
-                <Pencil className="size-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="size-8 p-0 text-destructive hover:text-destructive"
-                onClick={() => setDeletingFolder(selectedFolder)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-            </>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setEditingFolder(undefined);
-              setShowFolderForm(true);
-            }}
-          >
-            <FolderPlus className="size-4 mr-1.5" />
-            New Folder
-          </Button>
-        </div>
         <ViewModeToggle value={toolsViewMode} onChange={setToolsViewMode} />
       </div>
+
+      {/* Tag filter pills */}
+      {allTags.length > 0 && (
+        <div className="flex gap-1.5 flex-wrap">
+          {allTags.map((tag) => {
+            const isActive = selectedTags.has(tag);
+            return (
+              <button
+                key={tag}
+                type="button"
+                className="cursor-pointer"
+                onClick={() => toggleTag(tag)}
+              >
+                <TagBadge
+                  tag={tag}
+                  tagDefinitions={tagDefinitions}
+                  className={isActive ? 'ring-2 ring-primary ring-offset-1' : 'opacity-60 hover:opacity-100'}
+                />
+              </button>
+            );
+          })}
+          {selectedTags.size > 0 && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground ml-1 cursor-pointer"
+              onClick={() => setSelectedTags(new Set())}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Status filter pills */}
       <div className="flex gap-2 flex-wrap">
@@ -461,40 +363,8 @@ export function ToolsView() {
             Add Tool
           </Button>
         </div>
-      ) : selectedFolderId ? (
-        renderToolList(filteredTools)
       ) : (
-        <div className="space-y-4">
-          {unfolderedTools.length > 0 && renderToolList(unfolderedTools)}
-
-          {toolFolders.map((folder) => {
-            const folderTools = toolsByFolder.get(folder.id);
-            if (!folderTools || folderTools.length === 0) return null;
-            const isOpen = !collapsedFolders.has(folder.id);
-            return (
-              <Collapsible key={folder.id} open={isOpen} onOpenChange={() => toggleFolderCollapse(folder.id)}>
-                <CollapsibleTrigger className="flex items-center gap-2 w-full py-1.5 hover:bg-muted/50 rounded-md px-2 transition-colors cursor-pointer">
-                  {isOpen ? (
-                    <ChevronDown className="size-4 text-muted-foreground shrink-0" />
-                  ) : (
-                    <ChevronRight className="size-4 text-muted-foreground shrink-0" />
-                  )}
-                  <span
-                    className="size-3 rounded-sm shrink-0"
-                    style={{ backgroundColor: folder.color || '#6b7280' }}
-                  />
-                  <span className="text-sm font-medium text-muted-foreground">
-                    {folder.name}
-                  </span>
-                  <span className="text-xs text-muted-foreground">({folderTools.length})</span>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2">
-                  {renderToolList(folderTools)}
-                </CollapsibleContent>
-              </Collapsible>
-            );
-          })}
-        </div>
+        renderToolList(filteredTools)
       )}
 
       {/* Tool Form */}
@@ -506,20 +376,8 @@ export function ToolsView() {
         }}
         tool={editingTool}
         tools={tools}
-        folders={folders}
+        tagDefinitions={tagDefinitions}
         onSubmit={editingTool ? handleUpdateTool : handleCreateTool}
-      />
-
-      {/* Folder Form */}
-      <FolderForm
-        open={showFolderForm}
-        onOpenChange={(open) => {
-          setShowFolderForm(open);
-          if (!open) setEditingFolder(undefined);
-        }}
-        folder={editingFolder}
-        folderType="tool"
-        onSubmit={editingFolder ? handleUpdateFolder : handleCreateFolder}
       />
 
       {/* Delete Tool Confirmation */}
@@ -535,27 +393,6 @@ export function ToolsView() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteTool}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Delete Folder Confirmation */}
-      <AlertDialog open={!!deletingFolder} onOpenChange={(open) => !open && setDeletingFolder(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Folder</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete the folder "{deletingFolder?.name}"? Tools in this folder will become unfoldered.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteFolder}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete

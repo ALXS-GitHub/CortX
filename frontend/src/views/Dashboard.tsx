@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { ProjectCard } from '@/components/projects/ProjectCard';
@@ -7,6 +7,7 @@ import { ProjectCompactItem } from '@/components/projects/ProjectCompactItem';
 import { ProjectForm } from '@/components/projects/ProjectForm';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
 import {
   Select,
@@ -31,32 +32,63 @@ import type { Project, CreateProjectInput, UpdateProjectInput } from '@/types';
 type SortOption = 'recent' | 'name' | 'created';
 
 export function Dashboard() {
-  const { projects, createProject, updateProject, deleteProject, isLoadingProjects } = useAppStore();
+  const { projects, tagDefinitions, createProject, updateProject, deleteProject, isLoadingProjects } = useAppStore();
   const { projectsViewMode, setProjectsViewMode } = useViewPrefsStore();
   const [search, setSearch] = useState('');
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortOption>('recent');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
 
-  const filteredProjects = projects
-    .filter((p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.description?.toLowerCase().includes(search.toLowerCase())
-    )
-    .sort((a, b) => {
+  const sortedTagDefs = useMemo(
+    () => [...tagDefinitions].sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity)),
+    [tagDefinitions]
+  );
+
+  const toggleTag = (tagName: string) => {
+    setSelectedTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tagName)) next.delete(tagName);
+      else next.add(tagName);
+      return next;
+    });
+  };
+
+  const filteredProjects = useMemo(() => {
+    let result = projects;
+
+    // Tag filter (OR semantics)
+    if (selectedTags.size > 0) {
+      result = result.filter((p) =>
+        p.tags.some((t) => selectedTags.has(t.toLowerCase()))
+      );
+    }
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter((p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.description?.toLowerCase().includes(q) ||
+        p.tags.some((t) => t.toLowerCase().includes(q))
+      );
+    }
+
+    return result.slice().sort((a, b) => {
       switch (sort) {
         case 'name':
           return a.name.localeCompare(b.name);
         case 'created':
           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         case 'recent':
-        default:
+        default: {
           const aDate = a.lastOpenedAt || a.createdAt;
           const bDate = b.lastOpenedAt || b.createdAt;
           return new Date(bDate).getTime() - new Date(aDate).getTime();
+        }
       }
     });
+  }, [projects, selectedTags, search, sort]);
 
   const handleAddProject = async (data: CreateProjectInput | UpdateProjectInput) => {
     await createProject(data as CreateProjectInput);
@@ -123,6 +155,50 @@ export function Dashboard() {
         </Select>
         <ViewModeToggle value={projectsViewMode} onChange={setProjectsViewMode} />
       </div>
+
+      {/* Tag filter pills */}
+      {sortedTagDefs.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {sortedTagDefs.map((tag) => {
+            const isActive = selectedTags.has(tag.name.toLowerCase());
+            return (
+              <button
+                key={tag.name}
+                type="button"
+                onClick={() => toggleTag(tag.name.toLowerCase())}
+                className="inline-flex items-center transition-all"
+              >
+                <Badge
+                  variant="outline"
+                  className={`text-xs cursor-pointer transition-all ${
+                    isActive ? 'ring-1 ring-offset-1 ring-primary' : 'opacity-60 hover:opacity-100'
+                  }`}
+                  style={
+                    tag.color
+                      ? {
+                          borderColor: tag.color,
+                          color: tag.color,
+                          backgroundColor: isActive ? `${tag.color}20` : `${tag.color}10`,
+                        }
+                      : undefined
+                  }
+                >
+                  {tag.name}
+                </Badge>
+              </button>
+            );
+          })}
+          {selectedTags.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedTags(new Set())}
+              className="text-xs text-muted-foreground hover:text-foreground ml-1"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Project Grid */}
       {filteredProjects.length === 0 ? (

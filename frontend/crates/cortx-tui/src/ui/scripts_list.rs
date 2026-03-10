@@ -19,52 +19,62 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(border_style);
 
-    let items: Vec<ListItem> = app
-        .filtered_indices
-        .iter()
-        .map(|&idx| {
-            let script = &app.scripts[idx];
-            let status = app
-                .runtimes
-                .get(&script.id)
-                .map(|r| &r.status)
-                .unwrap_or(&cortx_core::models::ScriptStatus::Idle);
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut display_selected: usize = 0;
+    let mut last_primary_tag: Option<&str> = None;
 
-            let symbol = theme::style_status_symbol(status);
-            let status_style = theme::style_status(status);
+    for (fi, &idx) in app.filtered_indices.iter().enumerate() {
+        let script = &app.scripts[idx];
+        let primary_tag = script.tags.first().map(|s| s.as_str());
 
-            // Build folder prefix with its configured color
-            let (folder_prefix, folder_color) = script
-                .folder_id
-                .as_ref()
-                .and_then(|fid| app.folders.iter().find(|f| f.id == *fid))
-                .map(|folder| {
-                    let color = folder.color.as_deref()
-                        .map(theme::color_from_hex)
-                        .unwrap_or(theme::FOLDER_COLOR);
-                    (format!("[{}] ", folder.name), color)
-                })
-                .unwrap_or_default();
-
-            let line = Line::from(vec![
-                Span::styled(format!("{} ", symbol), status_style),
-                Span::styled(folder_prefix, Style::default().fg(folder_color)),
-                Span::styled(&script.name, Style::default().fg(theme::TEXT_PRIMARY)),
+        // Insert separator when primary tag changes
+        if primary_tag != last_primary_tag {
+            let (label, color) = match primary_tag {
+                Some(t) => (t, theme::tag_color(t, &app.tag_definitions)),
+                None => ("other", theme::TEXT_MUTED),
+            };
+            let sep_line = Line::from(vec![
+                Span::styled("── ", Style::default().fg(theme::SEPARATOR_COLOR)),
+                Span::styled(label, Style::default().fg(color)),
+                Span::styled(" ──", Style::default().fg(theme::SEPARATOR_COLOR)),
             ]);
+            items.push(ListItem::new(sep_line));
 
-            ListItem::new(line)
-        })
-        .collect();
+            if fi <= app.selected_index {
+                display_selected += 1;
+            }
+            last_primary_tag = primary_tag;
+        }
+
+        // Build normal item
+        let status = app
+            .runtimes
+            .get(&script.id)
+            .map(|r| &r.status)
+            .unwrap_or(&cortx_core::models::ScriptStatus::Idle);
+
+        let symbol = theme::style_status_symbol(status);
+        let status_style = theme::style_status(status);
+
+        let line = Line::from(vec![
+            Span::styled(format!("{} ", symbol), status_style),
+            Span::styled(&script.name, Style::default().fg(theme::TEXT_PRIMARY)),
+        ]);
+
+        items.push(ListItem::new(line));
+    }
+
+    display_selected += app.selected_index;
 
     let mut state = ListState::default();
     if !app.filtered_indices.is_empty() {
-        state.select(Some(app.selected_index));
+        state.select(Some(display_selected));
     }
 
     let list = List::new(items)
         .block(block)
         .highlight_style(theme::style_selected())
-        .highlight_symbol("▶ ");
+        .highlight_symbol("\u{25b6} "); // ▶
 
     f.render_stateful_widget(list, area, &mut state);
 }

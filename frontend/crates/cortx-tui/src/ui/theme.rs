@@ -24,11 +24,12 @@ pub const LOG_STDERR: Color = Color::Red;
 pub const SEARCH_MATCH: Color = Color::Yellow;
 
 // Misc
-pub const FOLDER_COLOR: Color = Color::Magenta;
+pub const TAG_COLOR: Color = Color::Cyan;
+pub const SELECTED_BG: Color = Color::Rgb(40, 40, 60);
+pub const SEPARATOR_COLOR: Color = Color::DarkGray;
 
-/// Parse a hex color string (e.g. "#3b82f6") into a ratatui RGB Color.
-/// Falls back to FOLDER_COLOR if parsing fails.
-pub fn color_from_hex(hex: &str) -> Color {
+/// Parse a hex color string like "#3b82f6" into a ratatui Color
+pub fn color_from_hex(hex: &str) -> Option<Color> {
     let hex = hex.trim_start_matches('#');
     if hex.len() == 6 {
         if let (Ok(r), Ok(g), Ok(b)) = (
@@ -36,13 +37,21 @@ pub fn color_from_hex(hex: &str) -> Color {
             u8::from_str_radix(&hex[2..4], 16),
             u8::from_str_radix(&hex[4..6], 16),
         ) {
-            return Color::Rgb(r, g, b);
+            return Some(Color::Rgb(r, g, b));
         }
     }
-    FOLDER_COLOR
+    None
 }
-pub const TAG_COLOR: Color = Color::Cyan;
-pub const SELECTED_BG: Color = Color::Rgb(40, 40, 60);
+
+/// Resolve the color for a tag name from tag definitions, falling back to TAG_COLOR
+pub fn tag_color(tag: &str, tag_defs: &[cortx_core::models::TagDefinition]) -> Color {
+    tag_defs
+        .iter()
+        .find(|d| d.name.eq_ignore_ascii_case(tag))
+        .and_then(|d| d.color.as_deref())
+        .and_then(color_from_hex)
+        .unwrap_or(TAG_COLOR)
+}
 
 pub fn style_border_active() -> Style {
     Style::default().fg(BORDER_ACTIVE)

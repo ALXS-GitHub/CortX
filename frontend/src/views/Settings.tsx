@@ -13,8 +13,9 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw } from 'lucide-react';
+import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags } from 'lucide-react';
 import { toast } from 'sonner';
+import { TagDefinitionManager } from '@/components/global-scripts/TagDefinitionManager';
 import type { AppSettings, TerminalPreset } from '@/types';
 
 // Terminal preset labels and descriptions
@@ -80,6 +81,7 @@ export function Settings() {
   const { settings, loadSettings, updateSettings, isLoadingSettings, exportScriptsConfig, importScriptsConfig } = useAppStore();
   const platform = getPlatform();
 
+  const [showTagManager, setShowTagManager] = useState(false);
   const [terminalPreset, setTerminalPreset] = useState<TerminalPreset>('windowsterminal');
   const [customPath, setCustomPath] = useState('');
   const [customArgs, setCustomArgs] = useState('');
@@ -158,7 +160,7 @@ export function Settings() {
         const { readTextFile } = await import('@tauri-apps/plugin-fs');
         const json = await readTextFile(selected);
         const result = await importScriptsConfig(json);
-        toast.success(`Imported: ${result.scriptsAdded} scripts, ${result.foldersAdded} folders, ${result.groupsAdded} groups`);
+        toast.success(`Imported: ${result.scriptsAdded} scripts, ${result.groupsAdded} groups, ${result.toolsAdded} tools, ${result.tagDefinitionsAdded} tags`);
       }
     } catch (error) {
       toast.error(`Failed to import: ${error}`);
@@ -357,6 +359,22 @@ export function Settings() {
         </CardContent>
       </Card>
 
+      {/* Tags */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Tags</CardTitle>
+          <CardDescription>
+            Manage tag definitions shared across scripts, tools, and projects. Tags can have custom colors and display order.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={() => setShowTagManager(true)}>
+            <Tags className="size-4 mr-2" />
+            Manage Tags
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Defaults */}
       <Card>
         <CardHeader>
@@ -528,7 +546,7 @@ export function Settings() {
         <CardHeader>
           <CardTitle>Import / Export</CardTitle>
           <CardDescription>
-            Export or import your global scripts, folders, and groups configuration
+            Export or import your global scripts, tags, tools, and groups configuration
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -544,6 +562,12 @@ export function Settings() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Tag Definition Manager Dialog */}
+      <TagDefinitionManager
+        open={showTagManager}
+        onOpenChange={setShowTagManager}
+      />
     </div>
   );
 }

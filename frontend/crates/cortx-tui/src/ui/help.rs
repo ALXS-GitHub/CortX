@@ -34,9 +34,10 @@ pub fn render(f: &mut Frame, app: &App) {
         help_line("Enter", "Run script (opens run form)"),
         help_line("C-Enter", "Quick-run with last params"),
         help_line("s", "Stop active script"),
-        help_line("/", "Search scripts"),
-        help_line("Esc", "Clear search filter"),
-        help_line("r", "Reload scripts (clears filter)"),
+        help_line("/", "Search by name"),
+        help_line("t", "Filter by tag"),
+        help_line("Esc", "Clear all filters"),
+        help_line("r", "Reload data"),
         Line::from(""),
         Line::from(Span::styled(
             "Tabs:",

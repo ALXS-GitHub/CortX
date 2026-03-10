@@ -7,6 +7,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Play, Square, MoreVertical, FileCode, Circle, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAppStore } from '@/stores/appStore';
+import { TagBadge } from '@/components/ui/TagBadge';
 import type { GlobalScript, ScriptStatus } from '@/types';
 
 interface GlobalScriptCardProps {
@@ -41,6 +43,7 @@ export function GlobalScriptCardView({
   onDelete,
   onClick,
 }: GlobalScriptCardProps) {
+  const { tagDefinitions } = useAppStore();
   const isRunning = status === 'running';
 
   return (
@@ -89,7 +92,7 @@ export function GlobalScriptCardView({
         {script.tags.length > 0 && (
           <div className="mt-auto pt-3 flex items-center gap-1.5 flex-wrap">
             {script.tags.map((tag) => (
-              <Badge key={tag} variant="outline" className="text-xs py-0">{tag}</Badge>
+              <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} className="text-xs py-0" />
             ))}
           </div>
         )}

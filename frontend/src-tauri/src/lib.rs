@@ -135,11 +135,11 @@ pub fn run() {
             commands::run_global_script,
             commands::stop_global_script,
             commands::is_global_script_running,
-            // Folder commands
-            commands::get_all_folders,
-            commands::create_folder,
-            commands::update_folder,
-            commands::delete_folder,
+            // Tag definition commands
+            commands::get_all_tag_definitions,
+            commands::create_tag_definition,
+            commands::update_tag_definition,
+            commands::delete_tag_definition,
             // Script group commands
             commands::get_all_script_groups,
             commands::create_script_group,

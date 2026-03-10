@@ -21,6 +21,7 @@ import { GlobalScriptForm } from './GlobalScriptForm';
 import { ParameterEditor } from './ParameterEditor';
 import { PresetEditor } from './PresetEditor';
 import { ExecutionHistory } from './ExecutionHistory';
+import { TagBadge } from '@/components/ui/TagBadge';
 import { toast } from 'sonner';
 import type { ScriptStatus, UpdateGlobalScriptInput } from '@/types';
 import { formatCommandDisplay } from '@/lib/utils';
@@ -28,7 +29,7 @@ import { formatCommandDisplay } from '@/lib/utils';
 export function GlobalScriptDetail() {
   const {
     globalScripts,
-    folders,
+    tagDefinitions,
     globalScriptRuntimes,
     selectedGlobalScriptId,
     setCurrentView,
@@ -49,11 +50,6 @@ export function GlobalScriptDetail() {
     : undefined;
   const status: ScriptStatus = runtime?.status || 'idle';
   const isRunning = status === 'running';
-
-  const folder = useMemo(
-    () => (script?.folderId ? folders.find((f) => f.id === script.folderId) : undefined),
-    [script, folders]
-  );
 
   const handleRun = () => {
     if (!script) return;
@@ -185,20 +181,11 @@ export function GlobalScriptDetail() {
                   <span className="font-mono text-xs truncate">{script.scriptPath}</span>
                 </div>
               )}
-              {folder && (
-                <div className="flex items-center gap-2">
-                  <div className="size-3 rounded-sm" style={{ backgroundColor: folder.color || '#6b7280' }} />
-                  <span className="text-muted-foreground">Folder:</span>
-                  <span>{folder.name}</span>
-                </div>
-              )}
               {script.tags.length > 0 && (
                 <div className="flex items-center gap-2 flex-wrap">
                   <Tag className="size-3.5 text-muted-foreground" />
                   {script.tags.map((tag) => (
-                    <Badge key={tag} variant="outline" className="text-xs py-0">
-                      {tag}
-                    </Badge>
+                    <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} className="text-xs py-0" />
                   ))}
                 </div>
               )}
@@ -238,7 +225,6 @@ export function GlobalScriptDetail() {
         open={showEditForm}
         onOpenChange={setShowEditForm}
         script={script}
-        folders={folders}
         onSubmit={handleUpdate}
       />
     </div>

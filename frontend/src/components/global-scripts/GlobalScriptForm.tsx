@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -11,16 +11,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { FileSearch } from 'lucide-react';
-import type { GlobalScript, VirtualFolder, CreateGlobalScriptInput, UpdateGlobalScriptInput } from '@/types';
+import { FileSearch, X } from 'lucide-react';
+import { useAppStore } from '@/stores/appStore';
+import type { GlobalScript, CreateGlobalScriptInput, UpdateGlobalScriptInput } from '@/types';
 
 const SCRIPT_COLORS = [
   '#8b5cf6', '#06b6d4', '#f97316', '#22c55e',
@@ -31,24 +26,26 @@ interface GlobalScriptFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   script?: GlobalScript;
-  folders: VirtualFolder[];
   onSubmit: (data: CreateGlobalScriptInput | UpdateGlobalScriptInput) => Promise<void>;
 }
 
-export function GlobalScriptForm({ open, onOpenChange, script, folders, onSubmit }: GlobalScriptFormProps) {
+export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: GlobalScriptFormProps) {
+  const { tagDefinitions } = useAppStore();
+
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [command, setCommand] = useState('');
   const [scriptPath, setScriptPath] = useState('');
   const [workingDir, setWorkingDir] = useState('');
   const [color, setColor] = useState(SCRIPT_COLORS[0]);
-  const [folderId, setFolderId] = useState<string>('');
-  const [tags, setTags] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
 
   const isEditing = !!script;
-  const scriptFolders = folders.filter(f => f.folderType === 'script');
 
   const handleBrowseScriptPath = async () => {
     try {
@@ -92,8 +89,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, folders, onSubmit
         setScriptPath(script.scriptPath || '');
         setWorkingDir(script.workingDir || '');
         setColor(script.color || SCRIPT_COLORS[0]);
-        setFolderId(script.folderId || '');
-        setTags(script.tags.join(', '));
+        setTags([...script.tags]);
       } else {
         setName('');
         setDescription('');
@@ -101,12 +97,51 @@ export function GlobalScriptForm({ open, onOpenChange, script, folders, onSubmit
         setScriptPath('');
         setWorkingDir('');
         setColor(SCRIPT_COLORS[Math.floor(Math.random() * SCRIPT_COLORS.length)]);
-        setFolderId('');
-        setTags('');
+        setTags([]);
       }
+      setTagInput('');
+      setShowTagSuggestions(false);
       setError(null);
     }
   }, [open, script]);
+
+  const addTag = (tag: string) => {
+    const trimmed = tag.trim().toLowerCase();
+    if (trimmed && !tags.some((t) => t.toLowerCase() === trimmed)) {
+      setTags([...tags, trimmed]);
+    }
+    setTagInput('');
+    setShowTagSuggestions(false);
+    tagInputRef.current?.focus();
+  };
+
+  const removeTag = (tag: string) => {
+    setTags(tags.filter((t) => t !== tag));
+  };
+
+  const handleTagInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (tagInput.trim()) {
+        addTag(tagInput);
+      }
+    } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
+      setTags(tags.slice(0, -1));
+    }
+  };
+
+  const tagSuggestions = tagInput.trim()
+    ? tagDefinitions.filter(
+        (d) =>
+          d.name.toLowerCase().includes(tagInput.toLowerCase()) &&
+          !tags.some((t) => t.toLowerCase() === d.name.toLowerCase())
+      )
+    : tagDefinitions.filter(
+        (d) => !tags.some((t) => t.toLowerCase() === d.name.toLowerCase())
+      );
+
+  const getTagDef = (tag: string) =>
+    tagDefinitions.find((d) => d.name.toLowerCase() === tag.toLowerCase());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,11 +157,6 @@ export function GlobalScriptForm({ open, onOpenChange, script, folders, onSubmit
     }
     setIsSubmitting(true);
     try {
-      const parsedTags = tags
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean);
-
       const data: CreateGlobalScriptInput | UpdateGlobalScriptInput = {
         name: name.trim(),
         description: description.trim() || undefined,
@@ -134,8 +164,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, folders, onSubmit
         scriptPath: scriptPath.trim() || undefined,
         workingDir: workingDir.trim() || undefined,
         color,
-        folderId: folderId || undefined,
-        tags: parsedTags.length > 0 ? parsedTags : undefined,
+        tags: tags.length > 0 ? tags : undefined,
       };
       await onSubmit(data);
       onOpenChange(false);
@@ -215,33 +244,83 @@ export function GlobalScriptForm({ open, onOpenChange, script, folders, onSubmit
               </p>
             </div>
 
-            {scriptFolders.length > 0 && (
-              <div className="grid gap-2">
-                <Label>Folder</Label>
-                <Select value={folderId || "__none__"} onValueChange={(v) => setFolderId(v === "__none__" ? "" : v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="No folder" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">No folder</SelectItem>
-                    {scriptFolders.map((f) => (
-                      <SelectItem key={f.id} value={f.id}>
-                        {f.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
             <div className="grid gap-2">
               <Label htmlFor="gs-tags">Tags</Label>
-              <Input
-                id="gs-tags"
-                value={tags}
-                onChange={(e) => setTags(e.target.value)}
-                placeholder="devops, docker, cleanup (comma-separated)"
-              />
+              <div className="relative">
+                <div className="flex flex-wrap gap-1 items-center border rounded-md px-2 py-1.5 min-h-[36px] focus-within:ring-1 focus-within:ring-ring">
+                  {tags.map((tag) => {
+                    const def = getTagDef(tag);
+                    return (
+                      <Badge
+                        key={tag}
+                        variant="outline"
+                        className="text-xs gap-1 pr-1"
+                        style={
+                          def?.color
+                            ? {
+                                borderColor: def.color,
+                                color: def.color,
+                                backgroundColor: `${def.color}10`,
+                              }
+                            : undefined
+                        }
+                      >
+                        {tag}
+                        <button
+                          type="button"
+                          onClick={() => removeTag(tag)}
+                          className="hover:bg-muted rounded-sm p-0.5"
+                        >
+                          <X className="size-2.5" />
+                        </button>
+                      </Badge>
+                    );
+                  })}
+                  <input
+                    ref={tagInputRef}
+                    id="gs-tags"
+                    value={tagInput}
+                    onChange={(e) => {
+                      setTagInput(e.target.value);
+                      setShowTagSuggestions(true);
+                    }}
+                    onFocus={() => setShowTagSuggestions(true)}
+                    onBlur={() => {
+                      // Delay to allow click on suggestion
+                      setTimeout(() => setShowTagSuggestions(false), 150);
+                    }}
+                    onKeyDown={handleTagInputKeyDown}
+                    placeholder={tags.length === 0 ? 'Type to add tags...' : ''}
+                    className="flex-1 min-w-[80px] bg-transparent outline-none text-sm"
+                  />
+                </div>
+                {showTagSuggestions && tagSuggestions.length > 0 && (
+                  <div className="absolute z-10 top-full mt-1 w-full bg-popover border rounded-md shadow-md max-h-32 overflow-y-auto">
+                    {tagSuggestions.map((def) => (
+                      <button
+                        key={def.name}
+                        type="button"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted text-left"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          addTag(def.name);
+                        }}
+                      >
+                        {def.color && (
+                          <span
+                            className="size-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: def.color }}
+                          />
+                        )}
+                        {def.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Press Enter or comma to add a tag. Type to see suggestions.
+              </p>
             </div>
 
             <div className="grid gap-2">

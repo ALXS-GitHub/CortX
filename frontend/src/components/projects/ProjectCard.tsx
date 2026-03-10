@@ -1,6 +1,7 @@
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { TagBadge } from '@/components/ui/TagBadge';
 import { useAppStore } from '@/stores/appStore';
 import type { Project } from '@/types';
 import { Play, FolderOpen, MoreVertical, Circle, Code } from 'lucide-react';
@@ -21,7 +22,7 @@ interface ProjectCardProps {
 }
 
 export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
-  const { selectProject, serviceRuntimes, startService } = useAppStore();
+  const { selectProject, serviceRuntimes, startService, tagDefinitions } = useAppStore();
 
   const handleStartAll = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -69,6 +70,13 @@ export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
               <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                 {project.description}
               </p>
+            )}
+            {project.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {project.tags.map((tag) => (
+                  <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} className="text-xs py-0" />
+                ))}
+              </div>
             )}
           </div>
           <DropdownMenu>

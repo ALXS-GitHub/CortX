@@ -4,8 +4,10 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Play, Square, MoreVertical, FileCode, Circle, Pencil, Trash2, Tag } from 'lucide-react';
+import { Play, Square, MoreVertical, FileCode, Circle, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAppStore } from '@/stores/appStore';
+import { TagBadge } from '@/components/ui/TagBadge';
 import type { GlobalScript, ScriptStatus } from '@/types';
 
 interface GlobalScriptCardProps {
@@ -40,7 +42,9 @@ export function GlobalScriptCompactItem({
   onDelete,
   onClick,
 }: GlobalScriptCardProps) {
+  const { tagDefinitions } = useAppStore();
   const isRunning = status === 'running';
+  const primaryTag = script.tags.length > 0 ? script.tags[0] : null;
 
   return (
     <div
@@ -61,11 +65,13 @@ export function GlobalScriptCompactItem({
       {/* Status badge */}
       <StatusBadge status={status} />
 
-      {/* Tags count */}
-      {script.tags.length > 0 && (
-        <div className="flex items-center gap-0.5 text-xs text-muted-foreground ml-1.5 flex-shrink-0">
-          <Tag className="size-3" />
-          <span>{script.tags.length}</span>
+      {/* Primary tag with color */}
+      {primaryTag && (
+        <div className="flex items-center ml-1.5 flex-shrink-0">
+          <TagBadge tag={primaryTag} tagDefinitions={tagDefinitions} className="text-xs py-0 h-4" />
+          {script.tags.length > 1 && (
+            <span className="text-xs text-muted-foreground ml-1">+{script.tags.length - 1}</span>
+          )}
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -20,18 +20,13 @@ import {
 } from '@/components/ui/select';
 import { ComboboxInput } from '@/components/ui/combobox-input';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { Plus, Trash2, FolderSearch } from 'lucide-react';
-import type { Tool, VirtualFolder, CreateToolInput, UpdateToolInput, ToolConfigPath } from '@/types';
+import { Plus, Trash2, FolderSearch, X } from 'lucide-react';
+import { TagBadge } from '@/components/ui/TagBadge';
+import type { Tool, TagDefinition, CreateToolInput, UpdateToolInput, ToolConfigPath } from '@/types';
 
 const TOOL_COLORS = [
   '#8b5cf6', '#06b6d4', '#f97316', '#22c55e',
   '#ec4899', '#eab308', '#3b82f6', '#ef4444',
-];
-
-const DEFAULT_CATEGORIES = [
-  'CLI Tool', 'Terminal', 'Shell', 'Prompt', 'Editor/IDE',
-  'Window Manager', 'Font', 'Theme', 'Desktop/Ricing',
-  'DevOps', 'Language/Runtime', 'Browser', 'Utility',
 ];
 
 const DEFAULT_STATUSES = ['Active', 'Inactive', 'To Test', 'Archived', 'Replaced'];
@@ -41,17 +36,18 @@ interface ToolFormProps {
   onOpenChange: (open: boolean) => void;
   tool?: Tool;
   tools: Tool[];
-  folders: VirtualFolder[];
+  tagDefinitions: TagDefinition[];
   onSubmit: (data: CreateToolInput | UpdateToolInput) => Promise<void>;
 }
 
-export function ToolForm({ open, onOpenChange, tool, tools, folders, onSubmit }: ToolFormProps) {
+export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, onSubmit }: ToolFormProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('');
   const [status, setStatus] = useState('Active');
   const [replacedBy, setReplacedBy] = useState('');
-  const [tags, setTags] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [installMethod, setInstallMethod] = useState('');
   const [installLocation, setInstallLocation] = useState('');
   const [version, setVersion] = useState('');
@@ -59,21 +55,13 @@ export function ToolForm({ open, onOpenChange, tool, tools, folders, onSubmit }:
   const [configPaths, setConfigPaths] = useState<ToolConfigPath[]>([]);
   const [toolboxUrl, setToolboxUrl] = useState('');
   const [notes, setNotes] = useState('');
-  const [folderId, setFolderId] = useState('');
   const [color, setColor] = useState(TOOL_COLORS[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
 
   const isEditing = !!tool;
-  const toolFolders = folders.filter(f => f.folderType === 'tool');
-
-  // Gather existing categories from all tools for suggestions
-  const existingCategories = Array.from(
-    new Set([
-      ...DEFAULT_CATEGORIES,
-      ...tools.map(t => t.category).filter(Boolean) as string[],
-    ])
-  );
 
   // Gather existing statuses
   const existingStatuses = Array.from(
@@ -83,15 +71,34 @@ export function ToolForm({ open, onOpenChange, tool, tools, folders, onSubmit }:
     ])
   );
 
+  // All known tag names for autocomplete (from definitions + existing tools)
+  const allKnownTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const td of tagDefinitions) set.add(td.name);
+    for (const t of tools) {
+      for (const tag of t.tags) set.add(tag);
+    }
+    return Array.from(set).sort();
+  }, [tagDefinitions, tools]);
+
+  // Filtered suggestions based on current input
+  const tagSuggestions = useMemo(() => {
+    if (!tagInput.trim()) return allKnownTags.filter((t) => !tags.includes(t));
+    const q = tagInput.toLowerCase();
+    return allKnownTags.filter(
+      (t) => t.toLowerCase().includes(q) && !tags.includes(t)
+    );
+  }, [tagInput, allKnownTags, tags]);
+
   useEffect(() => {
     if (open) {
       if (tool) {
         setName(tool.name);
         setDescription(tool.description || '');
-        setCategory(tool.category || '');
         setStatus(tool.status || 'Active');
         setReplacedBy(tool.replacedBy || '');
-        setTags(tool.tags.join(', '));
+        setTags([...tool.tags]);
+        setTagInput('');
         setInstallMethod(tool.installMethod || '');
         setInstallLocation(tool.installLocation || '');
         setVersion(tool.version || '');
@@ -99,15 +106,14 @@ export function ToolForm({ open, onOpenChange, tool, tools, folders, onSubmit }:
         setConfigPaths(tool.configPaths.map(cp => ({ ...cp })));
         setToolboxUrl(tool.toolboxUrl || '');
         setNotes(tool.notes || '');
-        setFolderId(tool.folderId || '');
         setColor(tool.color || TOOL_COLORS[0]);
       } else {
         setName('');
         setDescription('');
-        setCategory('');
         setStatus('Active');
         setReplacedBy('');
-        setTags('');
+        setTags([]);
+        setTagInput('');
         setInstallMethod('');
         setInstallLocation('');
         setVersion('');
@@ -115,12 +121,55 @@ export function ToolForm({ open, onOpenChange, tool, tools, folders, onSubmit }:
         setConfigPaths([]);
         setToolboxUrl('');
         setNotes('');
-        setFolderId('');
         setColor(TOOL_COLORS[Math.floor(Math.random() * TOOL_COLORS.length)]);
       }
       setError(null);
+      setShowTagSuggestions(false);
     }
   }, [open, tool]);
+
+  // Close suggestions on outside click
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (
+        suggestionsRef.current &&
+        !suggestionsRef.current.contains(e.target as Node) &&
+        tagInputRef.current &&
+        !tagInputRef.current.contains(e.target as Node)
+      ) {
+        setShowTagSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const addTag = (tag: string) => {
+    const trimmed = tag.trim();
+    if (trimmed && !tags.includes(trimmed)) {
+      setTags([...tags, trimmed]);
+    }
+    setTagInput('');
+    setShowTagSuggestions(false);
+    tagInputRef.current?.focus();
+  };
+
+  const removeTag = (tag: string) => {
+    setTags(tags.filter((t) => t !== tag));
+  };
+
+  const handleTagInputKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (tagInput.trim()) {
+        addTag(tagInput);
+      }
+    } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
+      removeTag(tags[tags.length - 1]);
+    } else if (e.key === 'Escape') {
+      setShowTagSuggestions(false);
+    }
+  };
 
   const handleBrowseInstallLocation = async () => {
     try {
@@ -172,14 +221,12 @@ export function ToolForm({ open, onOpenChange, tool, tools, folders, onSubmit }:
 
     setIsSubmitting(true);
     try {
-      const parsedTags = tags.split(',').map(t => t.trim()).filter(Boolean);
       const validConfigs = configPaths.filter(cp => cp.path.trim());
 
       const data: CreateToolInput | UpdateToolInput = {
         name: name.trim(),
         description: description.trim() || undefined,
-        category: category.trim() || undefined,
-        tags: parsedTags.length > 0 ? parsedTags : undefined,
+        tags: tags.length > 0 ? tags : undefined,
         status: status || 'Active',
         replacedBy: replacedBy.trim() || undefined,
         installMethod: installMethod.trim() || undefined,
@@ -189,7 +236,6 @@ export function ToolForm({ open, onOpenChange, tool, tools, folders, onSubmit }:
         configPaths: validConfigs.length > 0 ? validConfigs : undefined,
         toolboxUrl: toolboxUrl.trim() || undefined,
         notes: notes.trim() || undefined,
-        folderId: folderId || undefined,
         color,
       };
       await onSubmit(data);
@@ -238,28 +284,15 @@ export function ToolForm({ open, onOpenChange, tool, tools, folders, onSubmit }:
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-category">Category</Label>
-                  <ComboboxInput
-                    id="tool-category"
-                    value={category}
-                    onChange={setCategory}
-                    options={existingCategories}
-                    placeholder="e.g., CLI Tool, Terminal"
-                  />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-status">Status</Label>
-                  <ComboboxInput
-                    id="tool-status"
-                    value={status}
-                    onChange={setStatus}
-                    options={existingStatuses}
-                    placeholder="e.g., Active, To Test"
-                  />
-                </div>
+              <div className="grid gap-2">
+                <Label htmlFor="tool-status">Status</Label>
+                <ComboboxInput
+                  id="tool-status"
+                  value={status}
+                  onChange={setStatus}
+                  options={existingStatuses}
+                  placeholder="e.g., Active, To Test"
+                />
               </div>
 
               {status.toLowerCase() === 'replaced' && (
@@ -280,48 +313,75 @@ export function ToolForm({ open, onOpenChange, tool, tools, folders, onSubmit }:
               )}
 
               <div className="grid gap-2">
-                <Label htmlFor="tool-tags">Tags</Label>
-                <Input
-                  id="tool-tags"
-                  value={tags}
-                  onChange={(e) => setTags(e.target.value)}
-                  placeholder="cli, prompt, rust (comma-separated)"
-                />
+                <Label>Tags</Label>
+                <div className="flex flex-wrap gap-1.5 p-2 border rounded-md min-h-[38px] focus-within:ring-2 focus-within:ring-ring">
+                  {tags.map((tag) => (
+                    <span key={tag} className="flex items-center gap-1">
+                      <TagBadge tag={tag} tagDefinitions={tagDefinitions} />
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-foreground"
+                        onClick={() => removeTag(tag)}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <div className="relative flex-1 min-w-[120px]">
+                    <input
+                      ref={tagInputRef}
+                      type="text"
+                      value={tagInput}
+                      onChange={(e) => {
+                        setTagInput(e.target.value);
+                        setShowTagSuggestions(true);
+                      }}
+                      onFocus={() => setShowTagSuggestions(true)}
+                      onKeyDown={handleTagInputKeyDown}
+                      placeholder={tags.length === 0 ? 'Add tags...' : ''}
+                      className="w-full bg-transparent border-none outline-none text-sm py-0.5"
+                    />
+                    {showTagSuggestions && tagSuggestions.length > 0 && (
+                      <div
+                        ref={suggestionsRef}
+                        className="absolute top-full left-0 z-50 mt-1 w-56 max-h-48 overflow-y-auto bg-popover border rounded-md shadow-md"
+                      >
+                        {tagSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion}
+                            type="button"
+                            className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted text-left cursor-pointer"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              addTag(suggestion);
+                            }}
+                          >
+                            <TagBadge tag={suggestion} tagDefinitions={tagDefinitions} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Type and press Enter to add a tag, or select from suggestions
+                </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                {toolFolders.length > 0 && (
-                  <div className="grid gap-2">
-                    <Label>Folder</Label>
-                    <Select value={folderId || '__none__'} onValueChange={(v) => setFolderId(v === '__none__' ? '' : v)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="No folder" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">No folder</SelectItem>
-                        {toolFolders.map((f) => (
-                          <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                <div className="grid gap-2">
-                  <Label>Color</Label>
-                  <div className="flex gap-2 items-center h-9">
-                    {TOOL_COLORS.map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        className={`size-6 rounded-full transition-all ${
-                          color === c ? 'ring-2 ring-offset-2 ring-primary' : ''
-                        }`}
-                        style={{ backgroundColor: c }}
-                        onClick={() => setColor(c)}
-                      />
-                    ))}
-                  </div>
+              <div className="grid gap-2">
+                <Label>Color</Label>
+                <div className="flex gap-2 items-center h-9">
+                  {TOOL_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`size-6 rounded-full transition-all ${
+                        color === c ? 'ring-2 ring-offset-2 ring-primary' : ''
+                      }`}
+                      style={{ backgroundColor: c }}
+                      onClick={() => setColor(c)}
+                    />
+                  ))}
                 </div>
               </div>
             </div>

@@ -108,9 +108,8 @@ pub struct Project {
     pub env_files: Vec<EnvFile>,
     #[serde(default)]
     pub env_files_discovered: bool,
-    /// Virtual folder this project belongs to
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 impl Project {
@@ -129,7 +128,7 @@ impl Project {
             scripts: Vec::new(),
             env_files: Vec::new(),
             env_files_discovered: false,
-            folder_id: None,
+            tags: Vec::new(),
         }
     }
 }
@@ -326,6 +325,8 @@ pub struct CreateProjectInput {
     pub root_path: String,
     pub description: Option<String>,
     pub image_path: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -335,6 +336,7 @@ pub struct UpdateProjectInput {
     pub root_path: Option<String>,
     pub description: Option<String>,
     pub image_path: Option<String>,
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -574,8 +576,6 @@ pub struct GlobalScript {
     pub working_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub folder_id: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -604,7 +604,6 @@ impl GlobalScript {
             script_path: None,
             working_dir,
             color: None,
-            folder_id: None,
             tags: Vec::new(),
             parameters: Vec::new(),
             parameter_presets: Vec::new(),
@@ -618,41 +617,16 @@ impl GlobalScript {
     }
 }
 
-// Virtual Folders (for projects and scripts)
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum FolderType {
-    Project,
-    Script,
-    Tool,
-}
+// Tag Definitions (enriched tags with color/order)
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VirtualFolder {
-    pub id: String,
+pub struct TagDefinition {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub order: Option<u32>,
-    pub folder_type: FolderType,
-}
-
-impl VirtualFolder {
-    pub fn new(name: String, folder_type: FolderType) -> Self {
-        Self {
-            id: Uuid::new_v4().to_string(),
-            name,
-            color: None,
-            icon: None,
-            order: None,
-            folder_type,
-        }
-    }
 }
 
 // Script Groups
@@ -674,8 +648,8 @@ pub struct ScriptGroup {
     pub script_ids: Vec<String>,
     pub execution_mode: GroupExecutionMode,
     pub stop_on_failure: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub order: u32,
 }
 
@@ -688,7 +662,7 @@ impl ScriptGroup {
             script_ids: Vec::new(),
             execution_mode,
             stop_on_failure: true,
-            folder_id: None,
+            tags: Vec::new(),
             order: 0,
         }
     }
@@ -837,7 +811,6 @@ pub struct CreateGlobalScriptInput {
     pub script_path: Option<String>,
     pub working_dir: Option<String>,
     pub color: Option<String>,
-    pub folder_id: Option<String>,
     pub tags: Option<Vec<String>>,
     pub parameters: Option<Vec<ScriptParameter>>,
     pub parameter_presets: Option<Vec<ParameterPreset>>,
@@ -853,7 +826,6 @@ pub struct UpdateGlobalScriptInput {
     pub script_path: Option<String>,
     pub working_dir: Option<String>,
     pub color: Option<String>,
-    pub folder_id: Option<String>,
     pub tags: Option<Vec<String>>,
     pub parameters: Option<Vec<ScriptParameter>>,
     pub parameter_presets: Option<Vec<ParameterPreset>>,
@@ -863,20 +835,17 @@ pub struct UpdateGlobalScriptInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateFolderInput {
+pub struct CreateTagDefinitionInput {
     pub name: String,
     pub color: Option<String>,
-    pub icon: Option<String>,
     pub order: Option<u32>,
-    pub folder_type: FolderType,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateFolderInput {
+pub struct UpdateTagDefinitionInput {
     pub name: Option<String>,
     pub color: Option<String>,
-    pub icon: Option<String>,
     pub order: Option<u32>,
 }
 
@@ -888,7 +857,7 @@ pub struct CreateScriptGroupInput {
     pub script_ids: Vec<String>,
     pub execution_mode: GroupExecutionMode,
     pub stop_on_failure: Option<bool>,
-    pub folder_id: Option<String>,
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -899,7 +868,7 @@ pub struct UpdateScriptGroupInput {
     pub script_ids: Option<Vec<String>>,
     pub execution_mode: Option<GroupExecutionMode>,
     pub stop_on_failure: Option<bool>,
-    pub folder_id: Option<String>,
+    pub tags: Option<Vec<String>>,
 }
 
 // Script export/import
@@ -909,10 +878,11 @@ pub struct UpdateScriptGroupInput {
 pub struct ScriptExport {
     pub version: String,
     pub scripts: Vec<GlobalScript>,
-    pub folders: Vec<VirtualFolder>,
     pub groups: Vec<ScriptGroup>,
     #[serde(default)]
     pub tools: Vec<Tool>,
+    #[serde(default)]
+    pub tag_definitions: Vec<TagDefinition>,
     pub exported_at: DateTime<Utc>,
 }
 
@@ -920,10 +890,10 @@ pub struct ScriptExport {
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub scripts_added: u32,
-    pub folders_added: u32,
     pub groups_added: u32,
     pub skipped: u32,
     pub tools_added: u32,
+    pub tag_definitions_added: u32,
 }
 
 // ============================================================================
@@ -946,8 +916,6 @@ pub struct Tool {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     pub status: String,
@@ -968,8 +936,6 @@ pub struct Tool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub folder_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     pub order: u32,
     pub created_at: DateTime<Utc>,
@@ -983,7 +949,6 @@ impl Tool {
             id: Uuid::new_v4().to_string(),
             name,
             description: None,
-            category: None,
             tags: Vec::new(),
             status,
             replaced_by: None,
@@ -994,7 +959,6 @@ impl Tool {
             config_paths: Vec::new(),
             toolbox_url: None,
             notes: None,
-            folder_id: None,
             color: None,
             order: 0,
             created_at: now,
@@ -1008,7 +972,6 @@ impl Tool {
 pub struct CreateToolInput {
     pub name: String,
     pub description: Option<String>,
-    pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub status: Option<String>,
     pub replaced_by: Option<String>,
@@ -1019,7 +982,6 @@ pub struct CreateToolInput {
     pub config_paths: Option<Vec<ToolConfigPath>>,
     pub toolbox_url: Option<String>,
     pub notes: Option<String>,
-    pub folder_id: Option<String>,
     pub color: Option<String>,
 }
 
@@ -1027,9 +989,8 @@ pub struct CreateToolInput {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateToolInput {
     pub name: Option<String>,
-    pub description: Option<String>,
-    pub category: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub description: Option<String>,
     pub status: Option<String>,
     pub replaced_by: Option<String>,
     pub install_method: Option<String>,
@@ -1039,6 +1000,5 @@ pub struct UpdateToolInput {
     pub config_paths: Option<Vec<ToolConfigPath>>,
     pub toolbox_url: Option<String>,
     pub notes: Option<String>,
-    pub folder_id: Option<String>,
     pub color: Option<String>,
 }

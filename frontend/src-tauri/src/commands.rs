@@ -1,11 +1,12 @@
 use crate::models::{
-    AddEnvFileInput, AppSettings, CreateFolderInput, CreateGlobalScriptInput,
+    AddEnvFileInput, AppSettings, CreateGlobalScriptInput,
     CreateProjectInput, CreateScriptGroupInput, CreateScriptInput, CreateServiceInput,
-    CreateToolInput, DiscoverEnvFilesInput, DiscoveredTool, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
+    CreateToolInput, CreateTagDefinitionInput, DiscoverEnvFilesInput, DiscoveredTool,
+    EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
     DiscoveredScript, ExecutionRecord, GlobalScript, ImportResult, LinkEnvToServiceInput, Project, Script,
-    ScriptGroup, ScriptParameter, ScriptsConfig, Service, Tool, UpdateFolderInput,
-    UpdateGlobalScriptInput, UpdateProjectInput, UpdateScriptGroupInput, UpdateScriptInput,
-    UpdateServiceInput, UpdateToolInput, VirtualFolder,
+    ScriptGroup, ScriptParameter, ScriptsConfig, Service, TagDefinition, Tool,
+    UpdateTagDefinitionInput, UpdateGlobalScriptInput, UpdateProjectInput, UpdateScriptGroupInput,
+    UpdateScriptInput, UpdateServiceInput, UpdateToolInput,
 };
 use crate::process_manager::{ProcessEventEmitter, ProcessManager};
 use crate::storage::Storage;
@@ -47,6 +48,7 @@ pub fn create_project(state: State<AppState>, input: CreateProjectInput) -> Resu
     let mut project = Project::new(input.name, input.root_path);
     project.description = input.description;
     project.image_path = input.image_path;
+    project.tags = input.tags;
 
     state
         .storage
@@ -81,6 +83,9 @@ pub fn update_project(
             }
             if input.image_path.is_some() {
                 project.image_path = input.image_path;
+            }
+            if let Some(tags) = input.tags {
+                project.tags = tags;
             }
         })
         .map_err(|e| e.to_string())
@@ -1360,7 +1365,6 @@ pub fn create_global_script(
     script.description = input.description;
     script.script_path = input.script_path;
     script.color = input.color;
-    script.folder_id = input.folder_id;
     script.tags = input.tags.unwrap_or_default();
     script.parameters = input.parameters.unwrap_or_default();
     script.parameter_presets = input.parameter_presets.unwrap_or_default();
@@ -1402,9 +1406,6 @@ pub fn update_global_script(
             }
             if input.color.is_some() {
                 script.color = input.color;
-            }
-            if input.folder_id.is_some() {
-                script.folder_id = input.folder_id;
             }
             if let Some(tags) = input.tags {
                 script.tags = tags;
@@ -1519,84 +1520,60 @@ pub fn is_global_script_running(state: State<AppState>, script_id: String) -> bo
 }
 
 // ============================================================================
-// Virtual Folder commands
+// Tag Definition commands
 // ============================================================================
 
 #[tauri::command]
-pub fn get_all_folders(state: State<AppState>) -> Vec<VirtualFolder> {
-    state.storage.get_all_folders()
+pub fn get_all_tag_definitions(state: State<AppState>) -> Vec<TagDefinition> {
+    state.storage.get_all_tag_definitions()
 }
 
 #[tauri::command]
-pub fn create_folder(
+pub fn create_tag_definition(
     state: State<AppState>,
-    input: CreateFolderInput,
-) -> Result<VirtualFolder, String> {
-    let mut folder = VirtualFolder::new(input.name, input.folder_type);
-    folder.color = input.color;
-    folder.icon = input.icon;
-    folder.order = input.order;
+    input: CreateTagDefinitionInput,
+) -> Result<TagDefinition, String> {
+    let def = TagDefinition {
+        name: input.name.to_lowercase(),
+        color: input.color,
+        order: input.order,
+    };
 
     state
         .storage
-        .create_folder(folder)
+        .create_tag_definition(def)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn update_folder(
+pub fn update_tag_definition(
     state: State<AppState>,
-    id: String,
-    input: UpdateFolderInput,
-) -> Result<VirtualFolder, String> {
+    name: String,
+    input: UpdateTagDefinitionInput,
+) -> Result<TagDefinition, String> {
     state
         .storage
-        .update_folder(&id, |folder| {
-            if let Some(name) = input.name {
-                folder.name = name;
+        .update_tag_definition(&name, |def| {
+            if let Some(new_name) = input.name {
+                def.name = new_name.to_lowercase();
             }
             if input.color.is_some() {
-                folder.color = input.color;
+                def.color = input.color;
             }
-            if input.icon.is_some() {
-                folder.icon = input.icon;
+            if input.order.is_some() {
+                def.order = input.order;
             }
-            folder.order = input.order;
         })
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn delete_folder(state: State<AppState>, id: String) -> Result<(), String> {
-    // Unlink all scripts/projects from this folder
-    let scripts = state.storage.get_all_global_scripts();
-    for script in scripts {
-        if script.folder_id.as_deref() == Some(&id) {
-            let _ = state.storage.update_global_script(&script.id, |s| {
-                s.folder_id = None;
-            });
-        }
-    }
-
-    let projects = state.storage.get_all_projects();
-    for project in projects {
-        if project.folder_id.as_deref() == Some(&id) {
-            let _ = state.storage.update_project(&project.id, |p| {
-                p.folder_id = None;
-            });
-        }
-    }
-
-    let tools = state.storage.get_all_tools();
-    for tool in tools {
-        if tool.folder_id.as_deref() == Some(&id) {
-            let _ = state.storage.update_tool(&tool.id, |t| {
-                t.folder_id = None;
-            });
-        }
-    }
-
-    state.storage.delete_folder(&id).map_err(|e| e.to_string())
+pub fn delete_tag_definition(state: State<AppState>, name: String) -> Result<(), String> {
+    // Non-destructive: only removes the definition (color/order), tag strings stay on items
+    state
+        .storage
+        .delete_tag_definition(&name)
+        .map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -1617,7 +1594,7 @@ pub fn create_script_group(
     group.description = input.description;
     group.script_ids = input.script_ids;
     group.stop_on_failure = input.stop_on_failure.unwrap_or(true);
-    group.folder_id = input.folder_id;
+    group.tags = input.tags.unwrap_or_default();
 
     let all = state.storage.get_all_script_groups();
     group.order = all.len() as u32;
@@ -1652,8 +1629,8 @@ pub fn update_script_group(
             if let Some(stop) = input.stop_on_failure {
                 group.stop_on_failure = stop;
             }
-            if input.folder_id.is_some() {
-                group.folder_id = input.folder_id;
+            if let Some(tags) = input.tags {
+                group.tags = tags;
             }
         })
         .map_err(|e| e.to_string())
@@ -1831,7 +1808,6 @@ pub fn create_tool(
 ) -> Result<Tool, String> {
     let mut tool = Tool::new(input.name, input.status.unwrap_or_else(|| "Active".to_string()));
     tool.description = input.description;
-    tool.category = input.category;
     tool.tags = input.tags.unwrap_or_default();
     tool.replaced_by = input.replaced_by;
     tool.install_method = input.install_method;
@@ -1841,7 +1817,6 @@ pub fn create_tool(
     tool.config_paths = input.config_paths.unwrap_or_default();
     tool.toolbox_url = input.toolbox_url;
     tool.notes = input.notes;
-    tool.folder_id = input.folder_id;
     tool.color = input.color;
 
     // Set order to be last
@@ -1868,9 +1843,6 @@ pub fn update_tool(
             }
             if input.description.is_some() {
                 tool.description = input.description;
-            }
-            if input.category.is_some() {
-                tool.category = input.category;
             }
             if let Some(tags) = input.tags {
                 tool.tags = tags;
@@ -1901,9 +1873,6 @@ pub fn update_tool(
             }
             if input.notes.is_some() {
                 tool.notes = input.notes;
-            }
-            if input.folder_id.is_some() {
-                tool.folder_id = input.folder_id;
             }
             if input.color.is_some() {
                 tool.color = input.color;

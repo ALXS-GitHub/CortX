@@ -26,9 +26,9 @@ import type {
   GlobalScript,
   CreateGlobalScriptInput,
   UpdateGlobalScriptInput,
-  VirtualFolder,
-  CreateFolderInput,
-  UpdateFolderInput,
+  TagDefinition,
+  CreateTagDefinitionInput,
+  UpdateTagDefinitionInput,
   ScriptGroup,
   CreateScriptGroupInput,
   UpdateScriptGroupInput,
@@ -307,21 +307,21 @@ export async function isGlobalScriptRunning(scriptId: string): Promise<boolean> 
   return invoke('is_global_script_running', { scriptId });
 }
 
-// Folder commands
-export async function getAllFolders(): Promise<VirtualFolder[]> {
-  return invoke('get_all_folders');
+// Tag definition commands
+export async function getAllTagDefinitions(): Promise<TagDefinition[]> {
+  return invoke('get_all_tag_definitions');
 }
 
-export async function createFolder(input: CreateFolderInput): Promise<VirtualFolder> {
-  return invoke('create_folder', { input });
+export async function createTagDefinition(input: CreateTagDefinitionInput): Promise<TagDefinition> {
+  return invoke('create_tag_definition', { input });
 }
 
-export async function updateFolder(id: string, input: UpdateFolderInput): Promise<VirtualFolder> {
-  return invoke('update_folder', { id, input });
+export async function updateTagDefinition(name: string, input: UpdateTagDefinitionInput): Promise<TagDefinition> {
+  return invoke('update_tag_definition', { name, input });
 }
 
-export async function deleteFolder(id: string): Promise<void> {
-  return invoke('delete_folder', { id });
+export async function deleteTagDefinition(name: string): Promise<void> {
+  return invoke('delete_tag_definition', { name });
 }
 
 // Script group commands

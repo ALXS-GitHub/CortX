@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { TagBadge } from '@/components/ui/TagBadge';
 import { useAppStore } from '@/stores/appStore';
 import type { Project } from '@/types';
 import { Play, FolderOpen, MoreVertical, Circle, Code } from 'lucide-react';
@@ -19,7 +20,7 @@ interface ProjectCardProps {
 }
 
 export function ProjectCompactItem({ project, onEdit, onDelete }: ProjectCardProps) {
-  const { selectProject, serviceRuntimes, startService } = useAppStore();
+  const { selectProject, serviceRuntimes, startService, tagDefinitions } = useAppStore();
 
   const handleStartAll = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -66,6 +67,11 @@ export function ProjectCompactItem({ project, onEdit, onDelete }: ProjectCardPro
 
       {/* Name */}
       <span className="font-medium truncate text-sm">{project.name}</span>
+
+      {/* Primary tag */}
+      {project.tags.length > 0 && (
+        <TagBadge tag={project.tags[0]} tagDefinitions={tagDefinitions} className="text-xs py-0 ml-1.5 flex-shrink-0" />
+      )}
 
       {/* Service count badge */}
       {project.services.length > 0 && (

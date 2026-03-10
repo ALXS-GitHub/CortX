@@ -9,6 +9,7 @@ mod param_form;
 mod tab_bar;
 mod tools_list;
 mod tool_info;
+mod tag_filter;
 
 use ratatui::prelude::*;
 
@@ -72,8 +73,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     status_bar::render(f, status, app);
 
-    // Overlays (search popup, help screen, param form)
+    // Overlays (search popup, help screen, param form, tag filter)
     search::render(f, app);
     help::render(f, app);
     param_form::render(f, app);
+    tag_filter::render(f, app);
 }
