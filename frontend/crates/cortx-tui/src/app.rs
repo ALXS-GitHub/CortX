@@ -1,4 +1,4 @@
-use cortx_core::models::{GlobalScript, Tool, VirtualFolder, ScriptGroup, ScriptStatus, ScriptParamType, LogStream};
+use cortx_core::models::{GlobalScript, Tool, TagDefinition, ScriptGroup, ScriptStatus, ScriptParamType, LogStream};
 use cortx_core::process_manager::ProcessManager;
 use cortx_core::storage::Storage;
 use std::collections::HashMap;
@@ -16,6 +16,7 @@ pub enum InputMode {
     Search,
     Help,
     ParamForm,
+    TagFilter,
 }
 
 /// Active panel
@@ -261,7 +262,7 @@ pub struct App {
 
     // Data
     pub scripts: Vec<GlobalScript>,
-    pub folders: Vec<VirtualFolder>,
+    pub tag_definitions: Vec<TagDefinition>,
     pub groups: Vec<ScriptGroup>,
     pub runtimes: HashMap<String, ScriptRuntime>,
 
@@ -291,17 +292,22 @@ pub struct App {
     pub tools_filtered_indices: Vec<usize>,
     pub tools_selected_index: usize,
     pub tools_search_query: String,
+
+    // Tag filter
+    pub active_tag_filter: Option<String>,
+    pub tag_filter_index: usize,
 }
 
 impl App {
     pub fn new(storage: Arc<Storage>, process_manager: Arc<ProcessManager>, emitter: Arc<TuiEmitter>) -> Self {
         let mut scripts = storage.get_all_global_scripts();
-        let folders = storage.get_all_folders();
+        let tag_definitions = storage.get_all_tag_definitions();
         let groups = storage.get_all_script_groups();
-        let tools = storage.get_all_tools();
+        let mut tools = storage.get_all_tools();
 
-        // Sort scripts by folder (no-folder first, then by folder name)
-        Self::sort_scripts_by_folder(&mut scripts, &folders);
+        // Sort scripts and tools by primary tag (tag definition order, then alphabetically)
+        Self::sort_by_primary_tag(&mut scripts, &tag_definitions);
+        Self::sort_tools_by_primary_tag(&mut tools, &tag_definitions);
 
         let script_count = scripts.len();
         let filtered_indices: Vec<usize> = (0..script_count).collect();
@@ -312,7 +318,7 @@ impl App {
             process_manager,
             emitter,
             scripts,
-            folders,
+            tag_definitions,
             groups,
             runtimes: HashMap::new(),
             input_mode: InputMode::Normal,
@@ -330,44 +336,92 @@ impl App {
             tools_filtered_indices,
             tools_selected_index: 0,
             tools_search_query: String::new(),
+            active_tag_filter: None,
+            tag_filter_index: 0,
         }
     }
 
     pub fn reload_scripts(&mut self) {
         self.scripts = self.storage.get_all_global_scripts();
-        self.folders = self.storage.get_all_folders();
+        self.tag_definitions = self.storage.get_all_tag_definitions();
         self.groups = self.storage.get_all_script_groups();
-        Self::sort_scripts_by_folder(&mut self.scripts, &self.folders);
+        Self::sort_by_primary_tag(&mut self.scripts, &self.tag_definitions);
         self.search_query.clear();
+        self.active_tag_filter = None;
         self.apply_filter();
     }
 
-    /// Sort scripts: no-folder first, then grouped by folder order (None order = last), then alphabetically by name
-    fn sort_scripts_by_folder(scripts: &mut [GlobalScript], folders: &[VirtualFolder]) {
+    /// Sort scripts by primary tag (first tag) definition order, then alphabetically by name.
+    /// No-tag first, then by tag definition order (None order = last), then tag name, then script name.
+    fn sort_by_primary_tag(scripts: &mut [GlobalScript], tag_defs: &[TagDefinition]) {
         scripts.sort_by(|a, b| {
-            let fa = a.folder_id.as_ref().and_then(|fid| folders.iter().find(|f| f.id == *fid));
-            let fb = b.folder_id.as_ref().and_then(|fid| folders.iter().find(|f| f.id == *fid));
-            let folder_ord = match (fa, fb) {
+            let ta = a.tags.first().and_then(|t| {
+                let tl = t.to_lowercase();
+                tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+            });
+            let tb = b.tags.first().and_then(|t| {
+                let tl = t.to_lowercase();
+                tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+            });
+            let tag_ord = match (a.tags.first(), b.tags.first()) {
                 (None, None) => std::cmp::Ordering::Equal,
                 (None, Some(_)) => std::cmp::Ordering::Less,
                 (Some(_), None) => std::cmp::Ordering::Greater,
-                // Folders with order come first, None order = last
-                (Some(fa), Some(fb)) => match (fa.order, fb.order) {
-                    (Some(ao), Some(bo)) => ao.cmp(&bo),
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => std::cmp::Ordering::Equal,
-                }.then_with(|| fa.name.to_lowercase().cmp(&fb.name.to_lowercase())),
+                (Some(at), Some(bt)) => {
+                    let ao = ta.and_then(|d| d.order);
+                    let bo = tb.and_then(|d| d.order);
+                    match (ao, bo) {
+                        (Some(ao), Some(bo)) => ao.cmp(&bo),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                    .then_with(|| at.to_lowercase().cmp(&bt.to_lowercase()))
+                }
             };
-            folder_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            tag_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
     }
 
-    /// Clear the active search filter and show all scripts
+    /// Sort tools by primary tag, same logic as scripts
+    fn sort_tools_by_primary_tag(tools: &mut [Tool], tag_defs: &[TagDefinition]) {
+        tools.sort_by(|a, b| {
+            let ta = a.tags.first().and_then(|t| {
+                let tl = t.to_lowercase();
+                tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+            });
+            let tb = b.tags.first().and_then(|t| {
+                let tl = t.to_lowercase();
+                tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+            });
+            let tag_ord = match (a.tags.first(), b.tags.first()) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(at), Some(bt)) => {
+                    let ao = ta.and_then(|d| d.order);
+                    let bo = tb.and_then(|d| d.order);
+                    match (ao, bo) {
+                        (Some(ao), Some(bo)) => ao.cmp(&bo),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                    .then_with(|| at.to_lowercase().cmp(&bt.to_lowercase()))
+                }
+            };
+            tag_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+    }
+
+    /// Clear the active search filter and tag filter
     pub fn clear_filter(&mut self) {
-        if !self.search_query.is_empty() {
-            self.search_query.clear();
+        let changed = !self.search_query.is_empty() || self.active_tag_filter.is_some();
+        self.search_query.clear();
+        self.active_tag_filter = None;
+        if changed {
             self.apply_filter();
+            self.apply_tools_filter();
         }
     }
 
@@ -437,23 +491,28 @@ impl App {
     }
 
     fn apply_filter(&mut self) {
-        if self.search_query.is_empty() {
-            self.filtered_indices = (0..self.scripts.len()).collect();
-        } else {
-            let q = self.search_query.to_lowercase();
-            self.filtered_indices = self
-                .scripts
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| {
-                    s.name.to_lowercase().contains(&q)
+        let q = self.search_query.to_lowercase();
+        self.filtered_indices = self
+            .scripts
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                // Tag filter (from `t` key)
+                if let Some(ref tag) = self.active_tag_filter {
+                    if !s.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                        return false;
+                    }
+                }
+                // Search filter (name, description, command only)
+                if !q.is_empty() {
+                    return s.name.to_lowercase().contains(&q)
                         || s.description.as_deref().unwrap_or("").to_lowercase().contains(&q)
-                        || s.tags.iter().any(|t| t.to_lowercase().contains(&q))
-                        || s.command.to_lowercase().contains(&q)
-                })
-                .map(|(i, _)| i)
-                .collect();
-        }
+                        || s.command.to_lowercase().contains(&q);
+                }
+                true
+            })
+            .map(|(i, _)| i)
+            .collect();
         // Clamp selection
         if self.filtered_indices.is_empty() {
             self.selected_index = 0;
@@ -494,7 +553,9 @@ impl App {
 
     pub fn reload_tools(&mut self) {
         self.tools = self.storage.get_all_tools();
+        Self::sort_tools_by_primary_tag(&mut self.tools, &self.tag_definitions);
         self.tools_search_query.clear();
+        self.active_tag_filter = None;
         self.apply_tools_filter();
     }
 
@@ -524,34 +585,100 @@ impl App {
     }
 
     pub fn clear_tools_filter(&mut self) {
-        if !self.tools_search_query.is_empty() {
-            self.tools_search_query.clear();
+        let changed = !self.tools_search_query.is_empty() || self.active_tag_filter.is_some();
+        self.tools_search_query.clear();
+        self.active_tag_filter = None;
+        if changed {
             self.apply_tools_filter();
+            self.apply_filter();
         }
     }
 
     fn apply_tools_filter(&mut self) {
-        if self.tools_search_query.is_empty() {
-            self.tools_filtered_indices = (0..self.tools.len()).collect();
-        } else {
-            let q = self.tools_search_query.to_lowercase();
-            self.tools_filtered_indices = self
-                .tools
-                .iter()
-                .enumerate()
-                .filter(|(_, t)| {
-                    t.name.to_lowercase().contains(&q)
-                        || t.description.as_deref().unwrap_or("").to_lowercase().contains(&q)
-                        || t.tags.iter().any(|tag| tag.to_lowercase().contains(&q))
-                        || t.category.as_deref().unwrap_or("").to_lowercase().contains(&q)
-                })
-                .map(|(i, _)| i)
-                .collect();
-        }
+        let q = self.tools_search_query.to_lowercase();
+        self.tools_filtered_indices = self
+            .tools
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                // Tag filter (from `t` key)
+                if let Some(ref tag) = self.active_tag_filter {
+                    if !t.tags.iter().any(|tt| tt.eq_ignore_ascii_case(tag)) {
+                        return false;
+                    }
+                }
+                // Search filter (name, description only)
+                if !q.is_empty() {
+                    return t.name.to_lowercase().contains(&q)
+                        || t.description.as_deref().unwrap_or("").to_lowercase().contains(&q);
+                }
+                true
+            })
+            .map(|(i, _)| i)
+            .collect();
         if self.tools_filtered_indices.is_empty() {
             self.tools_selected_index = 0;
         } else if self.tools_selected_index >= self.tools_filtered_indices.len() {
             self.tools_selected_index = self.tools_filtered_indices.len() - 1;
+        }
+    }
+
+    // === Tag filter methods ===
+
+    pub fn sorted_tag_defs(&self) -> Vec<&TagDefinition> {
+        let mut sorted: Vec<&TagDefinition> = self.tag_definitions.iter().collect();
+        sorted.sort_by(|a, b| {
+            match (a.order, b.order) {
+                (Some(ao), Some(bo)) => ao.cmp(&bo),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+        sorted
+    }
+
+    pub fn enter_tag_filter(&mut self) {
+        self.tag_filter_index = 0;
+        // Pre-select the current active filter
+        if let Some(ref active) = self.active_tag_filter {
+            let sorted = self.sorted_tag_defs();
+            if let Some(pos) = sorted.iter().position(|d| d.name.eq_ignore_ascii_case(active)) {
+                self.tag_filter_index = pos + 1; // +1 for "(All)"
+            }
+        }
+        self.input_mode = InputMode::TagFilter;
+    }
+
+    pub fn exit_tag_filter(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
+    pub fn confirm_tag_filter(&mut self) {
+        if self.tag_filter_index == 0 {
+            self.active_tag_filter = None;
+        } else {
+            let sorted = self.sorted_tag_defs();
+            if let Some(def) = sorted.get(self.tag_filter_index - 1) {
+                self.active_tag_filter = Some(def.name.clone());
+            }
+        }
+        self.input_mode = InputMode::Normal;
+        self.apply_filter();
+        self.apply_tools_filter();
+    }
+
+    pub fn tag_filter_move_up(&mut self) {
+        if self.tag_filter_index > 0 {
+            self.tag_filter_index -= 1;
+        }
+    }
+
+    pub fn tag_filter_move_down(&mut self) {
+        let max = self.tag_definitions.len(); // "(All)" + defs, last index = defs.len()
+        if self.tag_filter_index < max {
+            self.tag_filter_index += 1;
         }
     }
 

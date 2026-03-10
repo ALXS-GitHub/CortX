@@ -80,7 +80,7 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-/// List all global scripts, sorted by folder (matching TUI display)
+/// List all global scripts, sorted by primary tag (matching TUI display)
 fn cmd_list(storage: &Storage) -> anyhow::Result<()> {
     let scripts = storage.get_all_global_scripts();
     if scripts.is_empty() {
@@ -88,75 +88,55 @@ fn cmd_list(storage: &Storage) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let folders = storage.get_all_folders();
+    let tag_defs = storage.get_all_tag_definitions();
 
-    // Sort scripts by folder order (no-folder first, None order = last), then alphabetically by name
+    // Sort scripts by primary tag order, then alphabetically by name
     let mut sorted: Vec<&cortx_core::models::GlobalScript> = scripts.iter().collect();
     sorted.sort_by(|a, b| {
-        let fa = a.folder_id.as_ref().and_then(|fid| folders.iter().find(|f| f.id == *fid));
-        let fb = b.folder_id.as_ref().and_then(|fid| folders.iter().find(|f| f.id == *fid));
-        let folder_ord = match (fa, fb) {
+        let ta = a.tags.first().and_then(|t| {
+            let tl = t.to_lowercase();
+            tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+        });
+        let tb = b.tags.first().and_then(|t| {
+            let tl = t.to_lowercase();
+            tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+        });
+        let tag_ord = match (a.tags.first(), b.tags.first()) {
             (None, None) => std::cmp::Ordering::Equal,
             (None, Some(_)) => std::cmp::Ordering::Less,
             (Some(_), None) => std::cmp::Ordering::Greater,
-            (Some(fa), Some(fb)) => match (fa.order, fb.order) {
-                (Some(ao), Some(bo)) => ao.cmp(&bo),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            }.then_with(|| fa.name.to_lowercase().cmp(&fb.name.to_lowercase())),
+            (Some(at), Some(bt)) => {
+                let ao = ta.and_then(|d| d.order);
+                let bo = tb.and_then(|d| d.order);
+                match (ao, bo) {
+                    (Some(ao), Some(bo)) => ao.cmp(&bo),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+                .then_with(|| at.to_lowercase().cmp(&bt.to_lowercase()))
+            }
         };
-        folder_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        tag_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
     println!("{:<40} {:<15} {}", "NAME", "TAGS", "COMMAND");
     println!("{}", "-".repeat(75));
 
     for s in &sorted {
-        let folder = s
-            .folder_id
-            .as_ref()
-            .and_then(|fid| folders.iter().find(|f| f.id == *fid));
-
-        // Build display name with colored folder prefix using ANSI truecolor
-        let display_name = if let Some(f) = folder {
-            let colored_prefix = if let Some(ref hex) = f.color {
-                let hex = hex.trim_start_matches('#');
-                if hex.len() == 6 {
-                    if let (Ok(r), Ok(g), Ok(b)) = (
-                        u8::from_str_radix(&hex[0..2], 16),
-                        u8::from_str_radix(&hex[2..4], 16),
-                        u8::from_str_radix(&hex[4..6], 16),
-                    ) {
-                        format!("\x1b[38;2;{};{};{}m[{}]\x1b[0m ", r, g, b, f.name)
-                    } else {
-                        format!("[{}] ", f.name)
-                    }
-                } else {
-                    format!("[{}] ", f.name)
-                }
-            } else {
-                format!("[{}] ", f.name)
-            };
-            format!("{}{}", colored_prefix, s.name)
-        } else {
-            s.name.clone()
-        };
-
-        let tags = if s.tags.is_empty() {
+        let tags_display = if s.tags.is_empty() {
             String::from("-")
         } else {
-            s.tags.join(", ")
+            colorize_tags(&s.tags, &tag_defs)
+        };
+        let tags_visible = if s.tags.is_empty() {
+            1 // "-"
+        } else {
+            s.tags.join(", ").len()
         };
         let display_cmd = util::format_command_display(&s.command, s.script_path.as_deref());
-        // Pad using visible width (ANSI escapes are invisible but count in String length)
-        let visible_len = if let Some(f) = folder {
-            format!("[{}] {}", f.name, s.name).len()
-        } else {
-            s.name.len()
-        };
-        let pad = if visible_len < 40 { 40 - visible_len } else { 1 };
-        println!("{}{:pad$} {:<15} {}", display_name, "", tags, display_cmd, pad = pad);
+        let tags_pad = if tags_visible < 15 { 15 - tags_visible } else { 1 };
+        println!("{:<40} {}{:tags_pad$} {}", s.name, tags_display, "", display_cmd, tags_pad = tags_pad);
     }
     println!("\n{} script(s)", scripts.len());
     Ok(())
@@ -191,30 +171,68 @@ fn cmd_tools(storage: &Storage, scan: bool) -> anyhow::Result<()> {
             return Ok(());
         }
 
-        // Sort by category then name
+        let tag_defs = storage.get_all_tag_definitions();
+
+        // Sort by primary tag then name
         let mut sorted: Vec<&cortx_core::models::Tool> = tools.iter().collect();
         sorted.sort_by(|a, b| {
-            let ca = a.category.as_deref().unwrap_or("");
-            let cb = b.category.as_deref().unwrap_or("");
-            ca.to_lowercase().cmp(&cb.to_lowercase())
+            let ta = a.tags.first().map(|s| s.to_lowercase()).unwrap_or_default();
+            let tb = b.tags.first().map(|s| s.to_lowercase()).unwrap_or_default();
+            ta.cmp(&tb)
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
 
-        println!("{:<30} {:<12} {:<15} {}", "NAME", "STATUS", "CATEGORY", "VERSION");
+        println!("{:<30} {:<12} {:<15} {}", "NAME", "STATUS", "TAGS", "VERSION");
         println!("{}", "-".repeat(75));
 
         for t in &sorted {
+            let tags_display = if t.tags.is_empty() {
+                String::from("-")
+            } else {
+                colorize_tags(&t.tags, &tag_defs)
+            };
+            let tags_visible = if t.tags.is_empty() {
+                1
+            } else {
+                t.tags.join(", ").len()
+            };
+            let tags_pad = if tags_visible < 15 { 15 - tags_visible } else { 1 };
             println!(
-                "{:<30} {:<12} {:<15} {}",
+                "{:<30} {:<12} {}{:tags_pad$} {}",
                 t.name,
                 t.status,
-                t.category.as_deref().unwrap_or("-"),
+                tags_display,
+                "",
                 t.version.as_deref().unwrap_or("-"),
+                tags_pad = tags_pad,
             );
         }
         println!("\n{} tool(s)", tools.len());
     }
     Ok(())
+}
+
+/// Colorize a list of tags using ANSI truecolor from tag definitions
+fn colorize_tags(tags: &[String], tag_defs: &[cortx_core::models::TagDefinition]) -> String {
+    tags.iter()
+        .map(|tag| {
+            let def = tag_defs.iter().find(|d| d.name.eq_ignore_ascii_case(tag));
+            if let Some(hex) = def.and_then(|d| d.color.as_deref()) {
+                let hex = hex.trim_start_matches('#');
+                if hex.len() == 6 {
+                    if let (Ok(r), Ok(g), Ok(b)) = (
+                        u8::from_str_radix(&hex[0..2], 16),
+                        u8::from_str_radix(&hex[2..4], 16),
+                        u8::from_str_radix(&hex[4..6], 16),
+                    ) {
+                        return format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, tag);
+                    }
+                }
+            }
+            tag.clone()
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Run a script directly by name

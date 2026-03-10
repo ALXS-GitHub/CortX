@@ -5,10 +5,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Wrench, MoreVertical, Pencil, Trash2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Tool } from '@/types';
+import { TagBadge } from '@/components/ui/TagBadge';
+import type { Tool, TagDefinition } from '@/types';
 
 interface ToolCardProps {
   tool: Tool;
+  tagDefinitions?: TagDefinition[];
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
@@ -27,7 +29,7 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="secondary" className={className}>{status}</Badge>;
 }
 
-export function ToolCompactItem({ tool, onEdit, onDelete, onClick }: ToolCardProps) {
+export function ToolCompactItem({ tool, tagDefinitions, onEdit, onDelete, onClick }: ToolCardProps) {
   return (
     <div
       className="group flex items-center h-9 border rounded-md px-3 py-1.5 cursor-pointer hover:bg-muted/50 transition-colors"
@@ -36,8 +38,10 @@ export function ToolCompactItem({ tool, onEdit, onDelete, onClick }: ToolCardPro
       <Wrench className="size-3.5 flex-shrink-0 mr-2" style={{ color: tool.color || '#6b7280' }} />
       <span className="font-medium text-sm truncate mr-2">{tool.name}</span>
       <StatusBadge status={tool.status} />
-      {tool.category && (
-        <Badge variant="outline" className="text-xs py-0 ml-1.5">{tool.category}</Badge>
+      {tool.tags.length > 0 && (
+        <span className="ml-1.5">
+          <TagBadge tag={tool.tags[0]} tagDefinitions={tagDefinitions} />
+        </span>
       )}
       <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
         {tool.configPaths.length > 0 && (

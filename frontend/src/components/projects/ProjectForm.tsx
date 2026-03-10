@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -10,10 +10,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { useAppStore } from '@/stores/appStore';
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@/types';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, X } from 'lucide-react';
 
 interface ProjectFormProps {
   open: boolean;
@@ -23,13 +25,69 @@ interface ProjectFormProps {
 }
 
 export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: ProjectFormProps) {
+  const { tagDefinitions } = useAppStore();
+
   const [name, setName] = useState(project?.name || '');
   const [rootPath, setRootPath] = useState(project?.rootPath || '');
   const [description, setDescription] = useState(project?.description || '');
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
 
   const isEditing = !!project;
+
+  useEffect(() => {
+    if (isOpen) {
+      setName(project?.name || '');
+      setRootPath(project?.rootPath || '');
+      setDescription(project?.description || '');
+      setTags(project?.tags || []);
+      setTagInput('');
+      setShowTagSuggestions(false);
+      setError(null);
+    }
+  }, [isOpen, project]);
+
+  const addTag = (tag: string) => {
+    const trimmed = tag.trim().toLowerCase();
+    if (trimmed && !tags.some((t) => t.toLowerCase() === trimmed)) {
+      setTags([...tags, trimmed]);
+    }
+    setTagInput('');
+    setShowTagSuggestions(false);
+    tagInputRef.current?.focus();
+  };
+
+  const removeTag = (tag: string) => {
+    setTags(tags.filter((t) => t !== tag));
+  };
+
+  const handleTagInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (tagInput.trim()) {
+        addTag(tagInput);
+      }
+    } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
+      setTags(tags.slice(0, -1));
+    }
+  };
+
+  const tagSuggestions = tagInput.trim()
+    ? tagDefinitions.filter(
+        (d) =>
+          d.name.toLowerCase().includes(tagInput.toLowerCase()) &&
+          !tags.some((t) => t.toLowerCase() === d.name.toLowerCase())
+      )
+    : tagDefinitions.filter(
+        (d) => !tags.some((t) => t.toLowerCase() === d.name.toLowerCase())
+      );
+
+  const getTagDef = (tag: string) =>
+    tagDefinitions.find((d) => d.name.toLowerCase() === tag.toLowerCase());
 
   const handleBrowse = async () => {
     try {
@@ -73,11 +131,13 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
         ? {
             name: name.trim(),
             description: description.trim() || undefined,
+            tags,
           }
         : {
             name: name.trim(),
             rootPath: rootPath.trim(),
             description: description.trim() || undefined,
+            tags,
           };
       await onSubmit(data);
       onOpenChange(false);
@@ -143,6 +203,81 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
                 placeholder="A brief description of your project..."
                 rows={3}
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="proj-tags">Tags</Label>
+              <div className="relative">
+                <div className="flex flex-wrap gap-1 items-center border rounded-md px-2 py-1.5 min-h-[36px] focus-within:ring-1 focus-within:ring-ring">
+                  {tags.map((tag) => {
+                    const def = getTagDef(tag);
+                    return (
+                      <Badge
+                        key={tag}
+                        variant="outline"
+                        className="text-xs gap-1 py-0"
+                        style={
+                          def?.color
+                            ? {
+                                borderColor: def.color,
+                                color: def.color,
+                                backgroundColor: `${def.color}10`,
+                              }
+                            : undefined
+                        }
+                      >
+                        {tag}
+                        <button
+                          type="button"
+                          onClick={() => removeTag(tag)}
+                          className="hover:bg-muted rounded-sm p-0.5"
+                        >
+                          <X className="size-2.5" />
+                        </button>
+                      </Badge>
+                    );
+                  })}
+                  <input
+                    ref={tagInputRef}
+                    id="proj-tags"
+                    value={tagInput}
+                    onChange={(e) => {
+                      setTagInput(e.target.value);
+                      setShowTagSuggestions(true);
+                    }}
+                    onFocus={() => setShowTagSuggestions(true)}
+                    onBlur={() => {
+                      setTimeout(() => setShowTagSuggestions(false), 150);
+                    }}
+                    onKeyDown={handleTagInputKeyDown}
+                    placeholder={tags.length === 0 ? 'Type to add tags...' : ''}
+                    className="flex-1 min-w-[80px] bg-transparent outline-none text-sm"
+                  />
+                </div>
+                {showTagSuggestions && tagSuggestions.length > 0 && (
+                  <div className="absolute z-10 top-full mt-1 w-full bg-popover border rounded-md shadow-md max-h-32 overflow-y-auto">
+                    {tagSuggestions.map((def) => (
+                      <button
+                        key={def.name}
+                        type="button"
+                        className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted text-left"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          addTag(def.name);
+                        }}
+                      >
+                        {def.color && (
+                          <span
+                            className="size-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: def.color }}
+                          />
+                        )}
+                        {def.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {error && (

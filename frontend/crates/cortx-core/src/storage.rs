@@ -36,7 +36,7 @@ pub struct Storage {
     projects: RwLock<Vec<Project>>,
     settings: RwLock<AppSettings>,
     global_scripts: RwLock<Vec<GlobalScript>>,
-    folders: RwLock<Vec<VirtualFolder>>,
+    tag_definitions: RwLock<Vec<TagDefinition>>,
     script_groups: RwLock<Vec<ScriptGroup>>,
     execution_history: RwLock<Vec<ExecutionRecord>>,
     tools: RwLock<Vec<Tool>>,
@@ -81,7 +81,7 @@ impl Storage {
             projects: RwLock::new(Vec::new()),
             settings: RwLock::new(AppSettings::default()),
             global_scripts: RwLock::new(Vec::new()),
-            folders: RwLock::new(Vec::new()),
+            tag_definitions: RwLock::new(Vec::new()),
             script_groups: RwLock::new(Vec::new()),
             execution_history: RwLock::new(Vec::new()),
             tools: RwLock::new(Vec::new()),
@@ -91,7 +91,7 @@ impl Storage {
         storage.load_projects()?;
         storage.load_settings()?;
         storage.load_global_scripts()?;
-        storage.load_folders()?;
+        storage.load_tag_definitions()?;
         storage.load_script_groups()?;
         storage.load_execution_history()?;
         storage.load_tools()?;
@@ -117,8 +117,8 @@ impl Storage {
         self.app_dir.join("global_scripts.json")
     }
 
-    fn folders_path(&self) -> PathBuf {
-        self.app_dir.join("folders.json")
+    fn tag_definitions_path(&self) -> PathBuf {
+        self.app_dir.join("tag_definitions.json")
     }
 
     fn script_groups_path(&self) -> PathBuf {
@@ -470,66 +470,79 @@ impl Storage {
     }
 
     // ========================================================================
-    // Virtual Folders
+    // Tag Definitions
     // ========================================================================
 
-    fn load_folders(&self) -> Result<(), StorageError> {
-        let path = self.folders_path();
+    fn load_tag_definitions(&self) -> Result<(), StorageError> {
+        let path = self.tag_definitions_path();
         if path.exists() {
-            let folders: Vec<VirtualFolder> = read_json_locked(&path)?;
-            *self.folders.write() = folders;
+            let defs: Vec<TagDefinition> = read_json_locked(&path)?;
+            *self.tag_definitions.write() = defs;
         }
         Ok(())
     }
 
-    fn save_folders(&self) -> Result<(), StorageError> {
-        let path = self.folders_path();
-        let folders = self.folders.read();
-        write_json_locked(&path, &*folders)
+    fn save_tag_definitions(&self) -> Result<(), StorageError> {
+        let path = self.tag_definitions_path();
+        let defs = self.tag_definitions.read();
+        write_json_locked(&path, &*defs)
     }
 
-    pub fn get_all_folders(&self) -> Vec<VirtualFolder> {
-        self.folders.read().clone()
+    pub fn get_all_tag_definitions(&self) -> Vec<TagDefinition> {
+        self.tag_definitions.read().clone()
     }
 
-    pub fn create_folder(&self, folder: VirtualFolder) -> Result<VirtualFolder, StorageError> {
-        {
-            let mut folders = self.folders.write();
-            folders.push(folder.clone());
-        }
-        self.save_folders()?;
-        Ok(folder)
-    }
-
-    pub fn update_folder(
+    pub fn create_tag_definition(
         &self,
-        id: &str,
-        updater: impl FnOnce(&mut VirtualFolder),
-    ) -> Result<VirtualFolder, StorageError> {
-        let folder = {
-            let mut folders = self.folders.write();
-            let folder = folders
-                .iter_mut()
-                .find(|f| f.id == id)
-                .ok_or_else(|| StorageError::FolderNotFound(id.to_string()))?;
-
-            updater(folder);
-            folder.clone()
-        };
-        self.save_folders()?;
-        Ok(folder)
+        def: TagDefinition,
+    ) -> Result<TagDefinition, StorageError> {
+        {
+            let mut defs = self.tag_definitions.write();
+            // Prevent duplicate names (case-insensitive)
+            let name_lower = def.name.to_lowercase();
+            if defs.iter().any(|d| d.name.to_lowercase() == name_lower) {
+                return Err(StorageError::Io(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("Tag definition '{}' already exists", def.name),
+                )));
+            }
+            defs.push(def.clone());
+        }
+        self.save_tag_definitions()?;
+        Ok(def)
     }
 
-    pub fn delete_folder(&self, id: &str) -> Result<(), StorageError> {
+    pub fn update_tag_definition(
+        &self,
+        name: &str,
+        updater: impl FnOnce(&mut TagDefinition),
+    ) -> Result<TagDefinition, StorageError> {
+        let def = {
+            let mut defs = self.tag_definitions.write();
+            let name_lower = name.to_lowercase();
+            let def = defs
+                .iter_mut()
+                .find(|d| d.name.to_lowercase() == name_lower)
+                .ok_or_else(|| StorageError::FolderNotFound(name.to_string()))?;
+
+            updater(def);
+            def.clone()
+        };
+        self.save_tag_definitions()?;
+        Ok(def)
+    }
+
+    pub fn delete_tag_definition(&self, name: &str) -> Result<(), StorageError> {
         {
-            let mut folders = self.folders.write();
-            let initial_len = folders.len();
-            folders.retain(|f| f.id != id);
-            if folders.len() == initial_len {
-                return Err(StorageError::FolderNotFound(id.to_string()));
+            let mut defs = self.tag_definitions.write();
+            let name_lower = name.to_lowercase();
+            let initial_len = defs.len();
+            defs.retain(|d| d.name.to_lowercase() != name_lower);
+            if defs.len() == initial_len {
+                return Err(StorageError::FolderNotFound(name.to_string()));
             }
         }
-        self.save_folders()?;
+        self.save_tag_definitions()?;
         Ok(())
     }
 
@@ -751,46 +764,50 @@ impl Storage {
     // Import / Export
     // ========================================================================
 
-    /// Export all scripts, folders, and groups as a ScriptExport JSON string
+    /// Export all scripts, tag definitions, groups, and tools as a ScriptExport JSON string
     pub fn export_scripts_config(&self) -> Result<String, StorageError> {
         let export = ScriptExport {
-            version: "1.0".to_string(),
+            version: "2.0".to_string(),
             scripts: self.get_all_global_scripts(),
-            folders: self.get_all_folders(),
             groups: self.get_all_script_groups(),
             tools: self.get_all_tools(),
+            tag_definitions: self.get_all_tag_definitions(),
             exported_at: chrono::Utc::now(),
         };
         serde_json::to_string_pretty(&export).map_err(StorageError::Json)
     }
 
-    /// Import scripts, folders, and groups from a ScriptExport JSON string.
-    /// Merges with existing data (skips items with duplicate IDs).
+    /// Import scripts, tag definitions, groups, and tools from a ScriptExport JSON string.
+    /// Merges with existing data (skips items with duplicate IDs/names).
     pub fn import_scripts_config(&self, json: &str) -> Result<ImportResult, StorageError> {
         let import: ScriptExport =
             serde_json::from_str(json).map_err(StorageError::Json)?;
 
         let mut scripts_added = 0u32;
-        let mut folders_added = 0u32;
         let mut groups_added = 0u32;
         let mut skipped = 0u32;
         let mut tools_added = 0u32;
+        let mut tag_definitions_added = 0u32;
 
-        // Import folders first (scripts may reference them)
-        let existing_folders = self.get_all_folders();
-        for folder in import.folders {
-            if existing_folders.iter().any(|f| f.id == folder.id) {
+        // Import tag definitions
+        let existing_defs = self.get_all_tag_definitions();
+        for def in import.tag_definitions {
+            if existing_defs.iter().any(|d| d.name.to_lowercase() == def.name.to_lowercase()) {
                 skipped += 1;
                 continue;
             }
             {
-                let mut folders = self.folders.write();
-                folders.push(folder);
+                let mut defs = self.tag_definitions.write();
+                if defs.iter().any(|d| d.name.to_lowercase() == def.name.to_lowercase()) {
+                    skipped += 1;
+                    continue;
+                }
+                defs.push(def);
             }
-            folders_added += 1;
+            tag_definitions_added += 1;
         }
-        if folders_added > 0 {
-            self.save_folders()?;
+        if tag_definitions_added > 0 {
+            self.save_tag_definitions()?;
         }
 
         // Import scripts
@@ -846,10 +863,10 @@ impl Storage {
 
         Ok(ImportResult {
             scripts_added,
-            folders_added,
             groups_added,
             skipped,
             tools_added,
+            tag_definitions_added,
         })
     }
 }

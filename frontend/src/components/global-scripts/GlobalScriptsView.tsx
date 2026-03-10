@@ -12,7 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Plus, Search, FolderPlus, Pencil, Trash2, ScanSearch, Check, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Search, ScanSearch, Check, Loader2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -22,14 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
@@ -38,14 +30,13 @@ import { GlobalScriptCardView } from './GlobalScriptCardView';
 import { GlobalScriptCompactItem } from './GlobalScriptCompactItem';
 import { GlobalScriptForm } from './GlobalScriptForm';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
-import { FolderForm } from './FolderManager';
 import { toast } from 'sonner';
-import type { GlobalScript, ScriptStatus, CreateGlobalScriptInput, UpdateGlobalScriptInput, VirtualFolder, CreateFolderInput, UpdateFolderInput, DiscoveredScript } from '@/types';
+import type { GlobalScript, ScriptStatus, CreateGlobalScriptInput, UpdateGlobalScriptInput, DiscoveredScript } from '@/types';
 
 export function GlobalScriptsView() {
   const {
     globalScripts,
-    folders,
+    tagDefinitions,
     globalScriptRuntimes,
     settings,
     createGlobalScript,
@@ -54,34 +45,15 @@ export function GlobalScriptsView() {
     stopGlobalScript,
     selectGlobalScript,
     openRunScriptDialog,
-    createFolder,
-    updateFolder,
-    deleteFolder,
     scanScriptsFolder,
   } = useAppStore();
   const { scriptsViewMode, setScriptsViewMode } = useViewPrefsStore();
 
   const [search, setSearch] = useState('');
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [showScriptForm, setShowScriptForm] = useState(false);
   const [editingScript, setEditingScript] = useState<GlobalScript | undefined>(undefined);
   const [deletingScript, setDeletingScript] = useState<GlobalScript | null>(null);
-  const [showFolderForm, setShowFolderForm] = useState(false);
-  const [editingFolder, setEditingFolder] = useState<VirtualFolder | undefined>(undefined);
-  const [deletingFolder, setDeletingFolder] = useState<VirtualFolder | null>(null);
-
-  // Collapsible folder state
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
-
-  const toggleFolderCollapse = (folderId: string) => {
-    setCollapsedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(folderId)) next.delete(folderId);
-      else next.add(folderId);
-      return next;
-    });
-  };
-
   // Scan state
   const [isScanning, setIsScanning] = useState(false);
   const [discoveredScripts, setDiscoveredScripts] = useState<DiscoveredScript[]>([]);
@@ -89,18 +61,19 @@ export function GlobalScriptsView() {
   const [showScanDialog, setShowScanDialog] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
-  const scriptFolders = useMemo(
-    () => folders
-      .filter(f => f.folderType === 'script')
-      .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity)),
-    [folders]
+  const sortedTagDefs = useMemo(
+    () => [...tagDefinitions].sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity)),
+    [tagDefinitions]
   );
 
-  // Resolve the currently selected folder object for edit/delete buttons
-  const selectedFolder = useMemo(
-    () => scriptFolders.find((f) => f.id === selectedFolderId),
-    [scriptFolders, selectedFolderId]
-  );
+  const toggleTag = (tagName: string) => {
+    setSelectedTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tagName)) next.delete(tagName);
+      else next.add(tagName);
+      return next;
+    });
+  };
 
   const getScriptStatus = (scriptId: string): ScriptStatus => {
     return globalScriptRuntimes.get(scriptId)?.status || 'idle';
@@ -109,8 +82,11 @@ export function GlobalScriptsView() {
   const filteredScripts = useMemo(() => {
     let scripts = globalScripts;
 
-    if (selectedFolderId) {
-      scripts = scripts.filter((s) => s.folderId === selectedFolderId);
+    // Tag filter (OR semantics): show scripts that have at least one of the selected tags
+    if (selectedTags.size > 0) {
+      scripts = scripts.filter((s) =>
+        s.tags.some((t) => selectedTags.has(t.toLowerCase()))
+      );
     }
 
     if (search.trim()) {
@@ -125,26 +101,7 @@ export function GlobalScriptsView() {
     }
 
     return scripts.slice().sort((a, b) => a.order - b.order);
-  }, [globalScripts, selectedFolderId, search]);
-
-  // Scripts without a folder
-  const unfolderedScripts = useMemo(
-    () => filteredScripts.filter((s) => !s.folderId),
-    [filteredScripts]
-  );
-
-  // Scripts grouped by folder
-  const scriptsByFolder = useMemo(() => {
-    const map = new Map<string, GlobalScript[]>();
-    for (const s of filteredScripts) {
-      if (s.folderId) {
-        const existing = map.get(s.folderId) || [];
-        existing.push(s);
-        map.set(s.folderId, existing);
-      }
-    }
-    return map;
-  }, [filteredScripts]);
+  }, [globalScripts, selectedTags, search]);
 
   const handleCreateScript = async (data: CreateGlobalScriptInput | UpdateGlobalScriptInput) => {
     await createGlobalScript(data as CreateGlobalScriptInput);
@@ -178,31 +135,6 @@ export function GlobalScriptsView() {
     } catch (e) {
       toast.error('Failed to stop script', { description: String(e) });
     }
-  };
-
-  const handleCreateFolder = async (data: CreateFolderInput | UpdateFolderInput) => {
-    await createFolder(data as CreateFolderInput);
-    toast.success('Folder created');
-  };
-
-  const handleUpdateFolder = async (data: CreateFolderInput | UpdateFolderInput) => {
-    if (!editingFolder) return;
-    await updateFolder(editingFolder.id, data as UpdateFolderInput);
-    toast.success('Folder updated');
-  };
-
-  const handleDeleteFolder = async () => {
-    if (!deletingFolder) return;
-    try {
-      await deleteFolder(deletingFolder.id);
-      if (selectedFolderId === deletingFolder.id) {
-        setSelectedFolderId(null);
-      }
-      toast.success('Folder deleted');
-    } catch (e) {
-      toast.error('Failed to delete folder', { description: String(e) });
-    }
-    setDeletingFolder(null);
   };
 
   const [scanTotal, setScanTotal] = useState(0);
@@ -341,76 +273,64 @@ export function GlobalScriptsView() {
         </div>
       </div>
 
-      {/* Search + folder filter */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-          <Input
-            placeholder="Search scripts..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
+      {/* Search + tag filter */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Input
+              placeholder="Search scripts..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <ViewModeToggle value={scriptsViewMode} onChange={setScriptsViewMode} />
         </div>
-        <div className="flex items-center gap-1.5">
-          <Select
-            value={selectedFolderId ?? '__all__'}
-            onValueChange={(value) => setSelectedFolderId(value === '__all__' ? null : value)}
-          >
-            <SelectTrigger size="sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All folders</SelectItem>
-              {scriptFolders.map((folder) => (
-                <SelectItem key={folder.id} value={folder.id}>
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="size-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: folder.color || '#6b7280' }}
-                    />
-                    {folder.name}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {selectedFolder && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="size-8 p-0"
-                onClick={() => {
-                  setEditingFolder(selectedFolder);
-                  setShowFolderForm(true);
-                }}
+
+        {/* Tag filter pills */}
+        {sortedTagDefs.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {sortedTagDefs.map((tag) => {
+              const isActive = selectedTags.has(tag.name.toLowerCase());
+              return (
+                <button
+                  key={tag.name}
+                  type="button"
+                  onClick={() => toggleTag(tag.name.toLowerCase())}
+                  className="inline-flex items-center transition-all"
+                >
+                  <Badge
+                    variant="outline"
+                    className={`text-xs cursor-pointer transition-all ${
+                      isActive ? 'ring-1 ring-offset-1 ring-primary' : 'opacity-60 hover:opacity-100'
+                    }`}
+                    style={
+                      tag.color
+                        ? {
+                            borderColor: tag.color,
+                            color: tag.color,
+                            backgroundColor: isActive ? `${tag.color}20` : `${tag.color}10`,
+                          }
+                        : undefined
+                    }
+                  >
+                    {tag.name}
+                  </Badge>
+                </button>
+              );
+            })}
+            {selectedTags.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedTags(new Set())}
+                className="text-xs text-muted-foreground hover:text-foreground ml-1"
               >
-                <Pencil className="size-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="size-8 p-0 text-destructive hover:text-destructive"
-                onClick={() => setDeletingFolder(selectedFolder)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-            </>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setEditingFolder(undefined);
-              setShowFolderForm(true);
-            }}
-          >
-            <FolderPlus className="size-4 mr-1.5" />
-            New Folder
-          </Button>
-        </div>
-        <ViewModeToggle value={scriptsViewMode} onChange={setScriptsViewMode} />
+                Clear
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Scripts list */}
@@ -429,44 +349,8 @@ export function GlobalScriptsView() {
             Add Script
           </Button>
         </div>
-      ) : selectedFolderId ? (
-        // When a folder is selected, show flat list
-        renderScriptList(filteredScripts)
       ) : (
-        // Show grouped by folder with collapsible sections
-        <div className="space-y-4">
-          {/* Unfoldered scripts first */}
-          {unfolderedScripts.length > 0 && renderScriptList(unfolderedScripts)}
-
-          {/* Foldered scripts in collapsible sections */}
-          {scriptFolders.map((folder) => {
-            const scripts = scriptsByFolder.get(folder.id);
-            if (!scripts || scripts.length === 0) return null;
-            const isOpen = !collapsedFolders.has(folder.id);
-            return (
-              <Collapsible key={folder.id} open={isOpen} onOpenChange={() => toggleFolderCollapse(folder.id)}>
-                <CollapsibleTrigger className="flex items-center gap-2 w-full py-1.5 hover:bg-muted/50 rounded-md px-2 transition-colors cursor-pointer">
-                  {isOpen ? (
-                    <ChevronDown className="size-4 text-muted-foreground shrink-0" />
-                  ) : (
-                    <ChevronRight className="size-4 text-muted-foreground shrink-0" />
-                  )}
-                  <span
-                    className="size-3 rounded-sm shrink-0"
-                    style={{ backgroundColor: folder.color || '#6b7280' }}
-                  />
-                  <span className="text-sm font-medium text-muted-foreground">
-                    {folder.name}
-                  </span>
-                  <span className="text-xs text-muted-foreground">({scripts.length})</span>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2">
-                  {renderScriptList(scripts)}
-                </CollapsibleContent>
-              </Collapsible>
-            );
-          })}
-        </div>
+        renderScriptList(filteredScripts)
       )}
 
       {/* Script Form */}
@@ -477,20 +361,7 @@ export function GlobalScriptsView() {
           if (!open) setEditingScript(undefined);
         }}
         script={editingScript}
-        folders={folders}
         onSubmit={editingScript ? handleUpdateScript : handleCreateScript}
-      />
-
-      {/* Folder Form */}
-      <FolderForm
-        open={showFolderForm}
-        onOpenChange={(open) => {
-          setShowFolderForm(open);
-          if (!open) setEditingFolder(undefined);
-        }}
-        folder={editingFolder}
-        folderType="script"
-        onSubmit={editingFolder ? handleUpdateFolder : handleCreateFolder}
       />
 
       {/* Delete Script Confirmation */}
@@ -506,27 +377,6 @@ export function GlobalScriptsView() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteScript}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Delete Folder Confirmation */}
-      <AlertDialog open={!!deletingFolder} onOpenChange={(open) => !open && setDeletingFolder(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Folder</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete the folder "{deletingFolder?.name}"? Scripts in this folder will become unfoldered.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteFolder}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete

@@ -6,10 +6,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Wrench, MoreVertical, Pencil, Trash2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Tool } from '@/types';
+import { TagBadge } from '@/components/ui/TagBadge';
+import type { Tool, TagDefinition } from '@/types';
 
 interface ToolCardProps {
   tool: Tool;
+  tagDefinitions?: TagDefinition[];
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
@@ -28,7 +30,7 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="secondary" className={className}>{status}</Badge>;
 }
 
-export function ToolCardView({ tool, onEdit, onDelete, onClick }: ToolCardProps) {
+export function ToolCardView({ tool, tagDefinitions, onEdit, onDelete, onClick }: ToolCardProps) {
   return (
     <Card className="group cursor-pointer hover:border-primary/50 transition-colors h-full flex flex-col" onClick={onClick}>
       <CardHeader className="pb-2 px-4 pt-4">
@@ -67,14 +69,13 @@ export function ToolCardView({ tool, onEdit, onDelete, onClick }: ToolCardProps)
           <p className="text-sm text-muted-foreground line-clamp-2">{tool.description}</p>
         )}
         <div className="mt-auto pt-3 space-y-2">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {tool.category && (
-              <Badge variant="outline" className="text-xs py-0">{tool.category}</Badge>
-            )}
-            {tool.tags.map((tag) => (
-              <Badge key={tag} variant="outline" className="text-xs py-0">{tag}</Badge>
-            ))}
-          </div>
+          {tool.tags.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {tool.tags.map((tag) => (
+                <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
+              ))}
+            </div>
+          )}
           {tool.configPaths.length > 0 && (
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <FileText className="size-3" />

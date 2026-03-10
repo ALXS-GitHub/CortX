@@ -62,7 +62,7 @@ function RunScriptDialogGlobal() {
 }
 
 function App() {
-  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadFolders, loadScriptGroups, loadScriptsConfig, loadTools } = useAppStore();
+  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools } = useAppStore();
 
   // Keep track of whether listeners are set up
   const listenersSetUp = useRef(false);
@@ -72,7 +72,7 @@ function App() {
     loadProjects();
     loadSettings();
     loadGlobalScripts();
-    loadFolders();
+    loadTagDefinitions();
     loadScriptGroups();
     loadScriptsConfig();
     loadTools();
@@ -84,7 +84,7 @@ function App() {
         updateServiceStatus(serviceId, 'running');
       });
     });
-  }, [loadProjects, loadSettings, loadGlobalScripts, loadFolders, loadScriptGroups, loadScriptsConfig, loadTools]);
+  }, [loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools]);
 
   // Set up event listeners - only once
   useEffect(() => {
@@ -250,7 +250,7 @@ function App() {
               <header className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
                 <SidebarTrigger className="-ml-1" />
                 <div className="text-sm font-medium text-muted-foreground">
-                  {currentView === 'dashboard' && 'Dashboard'}
+                  {currentView === 'dashboard' && 'Projects'}
                   {currentView === 'project' && 'Project'}
                   {currentView === 'settings' && 'Settings'}
                   {currentView === 'scripts' && 'Scripts'}

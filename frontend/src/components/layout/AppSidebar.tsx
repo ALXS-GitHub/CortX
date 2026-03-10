@@ -16,7 +16,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { useAppStore } from '@/stores/appStore';
-import { LayoutDashboard, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode, ScrollText, Wrench } from 'lucide-react';
+import { FolderKanban, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode, ScrollText, Wrench } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { View, ServiceStatus, ScriptStatus } from '@/types';
 import { getVersion } from '@tauri-apps/api/app';
@@ -227,10 +227,10 @@ export function AppSidebar() {
                 <SidebarMenuButton
                   isActive={currentView === 'dashboard'}
                   onClick={() => handleNavigate('dashboard')}
-                  tooltip="Dashboard"
+                  tooltip="Projects"
                 >
-                  <LayoutDashboard className="size-4" />
-                  <span>Dashboard</span>
+                  <FolderKanban className="size-4" />
+                  <span>Projects</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

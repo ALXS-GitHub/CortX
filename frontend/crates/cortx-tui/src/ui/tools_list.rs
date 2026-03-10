@@ -13,39 +13,54 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(border_style);
 
-    let items: Vec<ListItem> = app
-        .tools_filtered_indices
-        .iter()
-        .map(|&idx| {
-            let tool = &app.tools[idx];
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut display_selected: usize = 0;
+    let mut last_primary_tag: Option<&str> = None;
 
-            let (symbol, status_color) = match tool.status.as_str() {
-                "Active" => ("\u{25cf}", theme::STATUS_RUNNING),    // ●
-                "Inactive" => ("\u{25cb}", theme::TEXT_MUTED),       // ○
-                "Archived" | "Replaced" => ("\u{2717}", theme::STATUS_FAILED), // ✗
-                _ => ("\u{25cb}", theme::TEXT_MUTED),                // ○
+    for (fi, &idx) in app.tools_filtered_indices.iter().enumerate() {
+        let tool = &app.tools[idx];
+        let primary_tag = tool.tags.first().map(|s| s.as_str());
+
+        // Insert separator when primary tag changes
+        if primary_tag != last_primary_tag {
+            let (label, color) = match primary_tag {
+                Some(t) => (t, theme::tag_color(t, &app.tag_definitions)),
+                None => ("other", theme::TEXT_MUTED),
             };
+            let sep_line = Line::from(vec![
+                Span::styled("── ", Style::default().fg(theme::SEPARATOR_COLOR)),
+                Span::styled(label, Style::default().fg(color)),
+                Span::styled(" ──", Style::default().fg(theme::SEPARATOR_COLOR)),
+            ]);
+            items.push(ListItem::new(sep_line));
 
-            let mut spans = vec![
-                Span::styled(format!("{} ", symbol), Style::default().fg(status_color)),
-            ];
-
-            if let Some(ref cat) = tool.category {
-                spans.push(Span::styled(
-                    format!("[{}] ", cat),
-                    Style::default().fg(theme::FOLDER_COLOR),
-                ));
+            if fi <= app.tools_selected_index {
+                display_selected += 1;
             }
+            last_primary_tag = primary_tag;
+        }
 
-            spans.push(Span::styled(&tool.name, Style::default().fg(theme::TEXT_PRIMARY)));
+        // Build normal item
+        let (symbol, status_color) = match tool.status.as_str() {
+            "Active" => ("\u{25cf}", theme::STATUS_RUNNING),    // ●
+            "Inactive" => ("\u{25cb}", theme::TEXT_MUTED),       // ○
+            "Archived" | "Replaced" => ("\u{2717}", theme::STATUS_FAILED), // ✗
+            _ => ("\u{25cb}", theme::TEXT_MUTED),                // ○
+        };
 
-            ListItem::new(Line::from(spans))
-        })
-        .collect();
+        let line = Line::from(vec![
+            Span::styled(format!("{} ", symbol), Style::default().fg(status_color)),
+            Span::styled(&tool.name, Style::default().fg(theme::TEXT_PRIMARY)),
+        ]);
+
+        items.push(ListItem::new(line));
+    }
+
+    display_selected += app.tools_selected_index;
 
     let mut state = ListState::default();
     if !app.tools_filtered_indices.is_empty() {
-        state.select(Some(app.tools_selected_index));
+        state.select(Some(display_selected));
     }
 
     let list = List::new(items)
