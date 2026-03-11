@@ -439,6 +439,11 @@ export async function scanInstalledTools(): Promise<DiscoveredTool[]> {
   return invoke('scan_installed_tools');
 }
 
+// Data change listener (file watcher)
+export async function onDataChanged(callback: () => void): Promise<UnlistenFn> {
+  return listen('data-changed', () => callback());
+}
+
 // Global script event listeners
 export async function onGlobalScriptLog(
   callback: (payload: ScriptLogPayload) => void

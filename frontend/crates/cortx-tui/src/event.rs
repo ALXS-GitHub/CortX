@@ -10,6 +10,8 @@ pub enum Event {
     Key(KeyEvent),
     /// Process event from the emitter channel
     Process(ProcessEvent),
+    /// External data change detected by file watcher
+    DataChanged,
     /// Tick (for refreshing UI)
     Tick,
 }

@@ -51,7 +51,17 @@
       "Bash(pip uninstall:*)",
       "Bash(powershell -Command:*)",
       "Bash(powershell.exe -NoProfile -Command \"Get-ItemProperty ''HKCU:\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\*'' | Where-Object { $_.DisplayName -like ''*Python*3.12*'' } | Select-Object -Property DisplayName, UninstallString\")",
-      "Bash(git status:*)"
+      "Bash(git status:*)",
+      "Bash(echo:*)",
+      "Bash(powershell.exe -NoProfile -Command \"[Environment]::GetEnvironmentVariable\\(''Path'', ''User''\\)\")",
+      "Bash(tr:*)",
+      "Bash(gh run list:*)",
+      "Bash(cargo update:*)",
+      "Bash(ls does:*)",
+      "Read(//c/Users/alxsm/Desktop/Programmes/Perso/**)",
+      "Bash(mv \"Local-App-Launcher\" \"CortX\")",
+      "WebFetch(domain:rup12.net)",
+      "WebFetch(domain:workos.com)"
     ]
   }
 }

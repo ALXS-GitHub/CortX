@@ -5,6 +5,7 @@ mod storage;
 mod tauri_emitter;
 
 use commands::AppState;
+use cortx_core::file_watcher;
 use process_manager::ProcessManager;
 use storage::Storage;
 use std::sync::Arc;
@@ -44,6 +45,27 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // Start file watcher for cross-process data sync
+            let app_handle = app.handle().clone();
+            let state: tauri::State<AppState> = app.state();
+            let storage_ref = state.storage.clone();
+            let watch_dir = storage_ref.app_dir().to_path_buf();
+
+            let watcher_handle = file_watcher::start_watching(watch_dir, move |_changed| {
+                if storage_ref.is_watcher_suppressed() {
+                    return;
+                }
+                if let Err(e) = storage_ref.reload_all() {
+                    log::error!("File watcher reload failed: {}", e);
+                    return;
+                }
+                let _ = app_handle.emit("data-changed", ());
+            })?;
+
+            // Keep watcher alive for the lifetime of the app
+            app.manage(watcher_handle);
+
             Ok(())
         })
         .on_window_event(|window, event| {
