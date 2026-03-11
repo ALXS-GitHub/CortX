@@ -30,6 +30,8 @@ pub enum StorageError {
     ScriptGroupNotFound(String),
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
+    #[error("Alias not found: {0}")]
+    AliasNotFound(String),
 }
 
 pub struct Storage {
@@ -41,6 +43,7 @@ pub struct Storage {
     script_groups: RwLock<Vec<ScriptGroup>>,
     execution_history: RwLock<Vec<ExecutionRecord>>,
     tools: RwLock<Vec<Tool>>,
+    aliases: RwLock<Vec<ShellAlias>>,
     suppress_watcher: AtomicBool,
 }
 
@@ -87,6 +90,7 @@ impl Storage {
             script_groups: RwLock::new(Vec::new()),
             execution_history: RwLock::new(Vec::new()),
             tools: RwLock::new(Vec::new()),
+            aliases: RwLock::new(Vec::new()),
             suppress_watcher: AtomicBool::new(false),
         };
 
@@ -98,6 +102,7 @@ impl Storage {
         storage.load_script_groups()?;
         storage.load_execution_history()?;
         storage.load_tools()?;
+        storage.load_aliases()?;
 
         Ok(storage)
     }
@@ -152,6 +157,10 @@ impl Storage {
 
     fn tools_path(&self) -> PathBuf {
         self.app_dir.join("tools.json")
+    }
+
+    fn aliases_path(&self) -> PathBuf {
+        self.app_dir.join("aliases.json")
     }
 
     // ========================================================================
@@ -789,6 +798,106 @@ impl Storage {
     }
 
     // ========================================================================
+    // Aliases
+    // ========================================================================
+
+    fn load_aliases(&self) -> Result<(), StorageError> {
+        let path = self.aliases_path();
+        if path.exists() {
+            let aliases: Vec<ShellAlias> = read_json_locked(&path)?;
+            *self.aliases.write() = aliases;
+        }
+        Ok(())
+    }
+
+    fn save_aliases(&self) -> Result<(), StorageError> {
+        self.set_suppress_watcher();
+        let result = write_json_locked(&self.aliases_path(), &*self.aliases.read());
+        self.clear_suppress_watcher();
+        result
+    }
+
+    pub fn get_all_aliases(&self) -> Vec<ShellAlias> {
+        self.aliases.read().clone()
+    }
+
+    pub fn get_alias(&self, id: &str) -> Option<ShellAlias> {
+        self.aliases.read().iter().find(|a| a.id == id).cloned()
+    }
+
+    pub fn get_alias_by_name(&self, name: &str) -> Option<ShellAlias> {
+        self.aliases
+            .read()
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(name))
+            .cloned()
+    }
+
+    pub fn create_alias(&self, alias: ShellAlias) -> Result<ShellAlias, StorageError> {
+        {
+            let mut aliases = self.aliases.write();
+            // Check for duplicate name
+            let name_lower = alias.name.to_lowercase();
+            if aliases.iter().any(|a| a.name.to_lowercase() == name_lower) {
+                return Err(StorageError::Io(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("Alias '{}' already exists", alias.name),
+                )));
+            }
+            aliases.push(alias.clone());
+        }
+        self.save_aliases()?;
+        Ok(alias)
+    }
+
+    pub fn update_alias(
+        &self,
+        id: &str,
+        updater: impl FnOnce(&mut ShellAlias),
+    ) -> Result<ShellAlias, StorageError> {
+        let alias = {
+            let mut aliases = self.aliases.write();
+            let alias = aliases
+                .iter_mut()
+                .find(|a| a.id == id)
+                .ok_or_else(|| StorageError::AliasNotFound(id.to_string()))?;
+
+            updater(alias);
+            alias.updated_at = chrono::Utc::now();
+
+            // Check for duplicate name (case-insensitive) against other aliases
+            let name_lower = alias.name.to_lowercase();
+            let alias_id = alias.id.clone();
+            let alias_clone = alias.clone();
+            if aliases.iter().any(|a| a.id != alias_id && a.name.to_lowercase() == name_lower) {
+                // Revert in-memory mutation by reloading from disk
+                drop(aliases);
+                let _ = self.load_aliases();
+                return Err(StorageError::Io(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("Alias '{}' already exists", alias_clone.name),
+                )));
+            }
+            alias_clone
+        };
+        self.save_aliases()?;
+        Ok(alias)
+    }
+
+    pub fn delete_alias(&self, id: &str) -> Result<(), StorageError> {
+        {
+            let mut aliases = self.aliases.write();
+            let initial_len = aliases.len();
+            aliases.retain(|a| a.id != id);
+            if aliases.len() == initial_len {
+                return Err(StorageError::AliasNotFound(id.to_string()));
+            }
+        }
+        self.save_aliases()?;
+        Ok(())
+    }
+
+    // ========================================================================
     // Reload (for MCP concurrent access)
     // ========================================================================
 
@@ -803,6 +912,7 @@ impl Storage {
         self.load_script_groups()?;
         self.load_execution_history()?;
         self.load_tools()?;
+        self.load_aliases()?;
         Ok(())
     }
 
@@ -813,11 +923,12 @@ impl Storage {
     /// Export all scripts, tag definitions, groups, and tools as a ScriptExport JSON string
     pub fn export_scripts_config(&self) -> Result<String, StorageError> {
         let export = ScriptExport {
-            version: "2.0".to_string(),
+            version: "3.0".to_string(),
             scripts: self.get_all_global_scripts(),
             groups: self.get_all_script_groups(),
             tools: self.get_all_tools(),
             tag_definitions: self.get_all_tag_definitions(),
+            aliases: self.get_all_aliases(),
             exported_at: chrono::Utc::now(),
         };
         serde_json::to_string_pretty(&export).map_err(StorageError::Json)
@@ -907,12 +1018,31 @@ impl Storage {
             self.save_tools()?;
         }
 
+        // Import aliases
+        let mut aliases_added = 0u32;
+        let existing_aliases = self.get_all_aliases();
+        for alias in import.aliases {
+            if existing_aliases.iter().any(|a| a.id == alias.id || a.name.to_lowercase() == alias.name.to_lowercase()) {
+                skipped += 1;
+                continue;
+            }
+            {
+                let mut aliases = self.aliases.write();
+                aliases.push(alias);
+            }
+            aliases_added += 1;
+        }
+        if aliases_added > 0 {
+            self.save_aliases()?;
+        }
+
         Ok(ImportResult {
             scripts_added,
             groups_added,
             skipped,
             tools_added,
             tag_definitions_added,
+            aliases_added,
         })
     }
 }

@@ -10,6 +10,8 @@ mod tab_bar;
 mod tools_list;
 mod tool_info;
 mod tag_filter;
+mod aliases_list;
+mod alias_info;
 
 use ratatui::prelude::*;
 
@@ -68,6 +70,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
             tools_list::render(f, h_chunks[0], app);
             tool_info::render(f, h_chunks[1], app);
+        }
+        ActiveTab::Aliases => {
+            // Body: left panel (aliases list) | right panel (alias info, full height)
+            let h_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+                .split(body);
+
+            aliases_list::render(f, h_chunks[0], app);
+            alias_info::render(f, h_chunks[1], app);
         }
     }
 

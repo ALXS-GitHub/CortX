@@ -41,6 +41,9 @@ import type {
   CreateToolInput,
   UpdateToolInput,
   DiscoveredTool,
+  ShellAlias,
+  CreateShellAliasInput,
+  UpdateShellAliasInput,
 } from '@/types';
 
 // Project commands
@@ -437,6 +440,35 @@ export async function openToolUrl(url: string): Promise<void> {
 
 export async function scanInstalledTools(): Promise<DiscoveredTool[]> {
   return invoke('scan_installed_tools');
+}
+
+// Alias commands
+export async function getAllAliases(): Promise<ShellAlias[]> {
+  return invoke('get_all_aliases');
+}
+
+export async function getAlias(id: string): Promise<ShellAlias> {
+  return invoke('get_alias', { id });
+}
+
+export async function createAlias(input: CreateShellAliasInput): Promise<ShellAlias> {
+  return invoke('create_alias', { input });
+}
+
+export async function updateAlias(id: string, input: UpdateShellAliasInput): Promise<ShellAlias> {
+  return invoke('update_alias', { id, input });
+}
+
+export async function deleteAlias(id: string): Promise<void> {
+  return invoke('delete_alias', { id });
+}
+
+export async function reorderAliases(aliasIds: string[]): Promise<void> {
+  return invoke('reorder_aliases', { aliasIds });
+}
+
+export async function generateShellInit(shell: string): Promise<string> {
+  return invoke('generate_shell_init', { shell });
 }
 
 // Data change listener (file watcher)

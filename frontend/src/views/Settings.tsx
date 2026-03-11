@@ -13,9 +13,10 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags } from 'lucide-react';
+import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags, Copy, Check, TerminalSquare, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { TagDefinitionManager } from '@/components/global-scripts/TagDefinitionManager';
+import { generateShellInit } from '@/lib/tauri';
 import type { AppSettings, TerminalPreset } from '@/types';
 
 // Terminal preset labels and descriptions
@@ -160,7 +161,7 @@ export function Settings() {
         const { readTextFile } = await import('@tauri-apps/plugin-fs');
         const json = await readTextFile(selected);
         const result = await importScriptsConfig(json);
-        toast.success(`Imported: ${result.scriptsAdded} scripts, ${result.groupsAdded} groups, ${result.toolsAdded} tools, ${result.tagDefinitionsAdded} tags`);
+        toast.success(`Imported: ${result.scriptsAdded} scripts, ${result.groupsAdded} groups, ${result.toolsAdded} tools, ${result.aliasesAdded} aliases, ${result.tagDefinitionsAdded} tags`);
       }
     } catch (error) {
       toast.error(`Failed to import: ${error}`);
@@ -375,6 +376,9 @@ export function Settings() {
         </CardContent>
       </Card>
 
+      {/* Shell Aliases Init */}
+      <ShellSetupCard />
+
       {/* Defaults */}
       <Card>
         <CardHeader>
@@ -546,7 +550,7 @@ export function Settings() {
         <CardHeader>
           <CardTitle>Import / Export</CardTitle>
           <CardDescription>
-            Export or import your global scripts, tags, tools, and groups configuration
+            Export or import your global scripts, tags, tools, aliases, and groups configuration
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -569,5 +573,147 @@ export function Settings() {
         onOpenChange={setShowTagManager}
       />
     </div>
+  );
+}
+
+// ============================================================================
+// Shell Setup Card (cortx init)
+// ============================================================================
+
+const SHELL_INIT_LINES: { shell: string; label: string; profileLine: string; profileFile: string }[] = [
+  {
+    shell: 'powershell',
+    label: 'PowerShell',
+    profileLine: 'Invoke-Expression (& cortx init powershell)',
+    profileFile: '$PROFILE',
+  },
+  {
+    shell: 'bash',
+    label: 'Bash',
+    profileLine: 'eval "$(cortx init bash)"',
+    profileFile: '~/.bashrc',
+  },
+  {
+    shell: 'zsh',
+    label: 'Zsh',
+    profileLine: 'eval "$(cortx init zsh)"',
+    profileFile: '~/.zshrc',
+  },
+  {
+    shell: 'fish',
+    label: 'Fish',
+    profileLine: 'cortx init fish | source',
+    profileFile: '~/.config/fish/config.fish',
+  },
+];
+
+function ShellSetupCard() {
+  const { aliases } = useAppStore();
+  const [selectedShell, setSelectedShell] = useState('powershell');
+  const [copiedLine, setCopiedLine] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewOutput, setPreviewOutput] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const selected = SHELL_INIT_LINES.find((s) => s.shell === selectedShell) ?? SHELL_INIT_LINES[0];
+
+  const handleCopyLine = async () => {
+    try {
+      await navigator.clipboard.writeText(selected.profileLine);
+      setCopiedLine(true);
+      setTimeout(() => setCopiedLine(false), 2000);
+      toast.success('Copied to clipboard');
+    } catch {
+      toast.error('Failed to copy');
+    }
+  };
+
+  const handleTogglePreview = async () => {
+    if (showPreview) {
+      setShowPreview(false);
+      return;
+    }
+    setIsGenerating(true);
+    try {
+      const output = await generateShellInit(selectedShell);
+      setPreviewOutput(output);
+      setShowPreview(true);
+    } catch (e) {
+      toast.error('Failed to generate preview', { description: String(e) });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <TerminalSquare className="size-5 text-muted-foreground" />
+          <div>
+            <CardTitle>Shell Aliases Setup</CardTitle>
+            <CardDescription>
+              Add this line to your shell profile to enable all CortX aliases ({aliases.length} alias{aliases.length !== 1 ? 'es' : ''})
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Shell selector */}
+        <div className="flex gap-1">
+          {SHELL_INIT_LINES.map((s) => (
+            <Button
+              key={s.shell}
+              variant={selectedShell === s.shell ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                setSelectedShell(s.shell);
+                setShowPreview(false);
+                setPreviewOutput(null);
+              }}
+            >
+              {s.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* Profile line to copy */}
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">
+            Add to <code className="bg-muted px-1 rounded">{selected.profileFile}</code>
+          </Label>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 bg-muted px-3 py-2 rounded-md text-sm font-mono select-all">
+              {selected.profileLine}
+            </code>
+            <Button variant="outline" size="icon" className="shrink-0" onClick={handleCopyLine}>
+              {copiedLine ? (
+                <Check className="size-4 text-green-500" />
+              ) : (
+                <Copy className="size-4" />
+              )}
+            </Button>
+          </div>
+        </div>
+
+        {/* Preview toggle */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground"
+          onClick={handleTogglePreview}
+          disabled={isGenerating}
+        >
+          {showPreview ? <ChevronUp className="size-4 mr-1" /> : <ChevronDown className="size-4 mr-1" />}
+          {isGenerating ? 'Generating...' : showPreview ? 'Hide generated script' : 'Preview generated script'}
+        </Button>
+
+        {showPreview && previewOutput && (
+          <pre className="bg-muted p-4 rounded-md text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto">
+            {previewOutput}
+          </pre>
+        )}
+      </CardContent>
+    </Card>
   );
 }

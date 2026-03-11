@@ -476,9 +476,36 @@ export interface ImportResult {
   skipped: number;
   toolsAdded: number;
   tagDefinitionsAdded: number;
+  aliasesAdded: number;
 }
 
 // View types
-export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail' | 'tools' | 'tool-detail';
+export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail' | 'tools' | 'tool-detail' | 'aliases' | 'alias-detail';
 
 export type ListViewMode = 'card' | 'list' | 'compact';
+
+// Shell Alias types
+export interface ShellAlias {
+  id: string;
+  name: string;
+  command: string;
+  description?: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+  order: number;
+}
+
+export interface CreateShellAliasInput {
+  name: string;
+  command: string;
+  description?: string;
+  tags?: string[];
+}
+
+export interface UpdateShellAliasInput {
+  name?: string;
+  command?: string;
+  description?: string;
+  tags?: string[];
+}

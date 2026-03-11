@@ -45,6 +45,7 @@ pub fn render(f: &mut Frame, app: &App) {
         )),
         help_line("1", "Scripts tab"),
         help_line("2", "Tools tab (read-only)"),
+        help_line("3", "Aliases tab"),
         Line::from(""),
         Line::from(Span::styled(
             "Output Panel:",

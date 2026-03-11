@@ -14,6 +14,8 @@ import { GlobalScriptsView } from '@/components/global-scripts/GlobalScriptsView
 import { GlobalScriptDetail } from '@/components/global-scripts/GlobalScriptDetail';
 import { ToolsView } from '@/components/tools/ToolsView';
 import { ToolDetail } from '@/components/tools/ToolDetail';
+import { AliasesView } from '@/components/aliases/AliasesView';
+import { AliasDetail } from '@/components/aliases/AliasDetail';
 import { RunScriptDialog } from '@/components/global-scripts/RunScriptDialog';
 import { useAppStore } from '@/stores/appStore';
 import {
@@ -63,7 +65,7 @@ function RunScriptDialogGlobal() {
 }
 
 function App() {
-  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools } = useAppStore();
+  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools, loadAliases } = useAppStore();
 
   // Keep track of whether listeners are set up
   const listenersSetUp = useRef(false);
@@ -77,6 +79,7 @@ function App() {
     loadScriptGroups();
     loadScriptsConfig();
     loadTools();
+    loadAliases();
 
     // Check for running services on startup
     getRunningServices().then((serviceIds) => {
@@ -85,7 +88,7 @@ function App() {
         updateServiceStatus(serviceId, 'running');
       });
     });
-  }, [loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools]);
+  }, [loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools, loadAliases]);
 
   // Set up event listeners - only once
   useEffect(() => {
@@ -194,6 +197,7 @@ function App() {
         store.loadScriptGroups();
         store.loadSettings();
         store.loadTools();
+        store.loadAliases();
       });
     };
 
@@ -249,6 +253,10 @@ function App() {
         return <ToolsView />;
       case 'tool-detail':
         return <ToolDetail />;
+      case 'aliases':
+        return <AliasesView />;
+      case 'alias-detail':
+        return <AliasDetail />;
       case 'dashboard':
       default:
         return <Dashboard />;
@@ -273,6 +281,8 @@ function App() {
                   {currentView === 'script-detail' && 'Script Detail'}
                   {currentView === 'tools' && 'Tools'}
                   {currentView === 'tool-detail' && 'Tool Detail'}
+                  {currentView === 'aliases' && 'Aliases'}
+                  {currentView === 'alias-detail' && 'Alias Detail'}
                 </div>
               </header>
               <MainContent>{renderView()}</MainContent>

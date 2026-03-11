@@ -42,6 +42,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             let query = match app.active_tab {
                 ActiveTab::Scripts => &app.search_query,
                 ActiveTab::Tools => &app.tools_search_query,
+                ActiveTab::Aliases => &app.aliases_search_query,
             };
             let left = Line::from(vec![
                 Span::styled(" /", Style::default().fg(theme::SEARCH_MATCH).add_modifier(Modifier::BOLD)),
@@ -175,6 +176,37 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                     let mut right_spans = vec![
                         Span::styled(
                             format!("{} tools", tool_count),
+                            Style::default().fg(theme::TEXT_SECONDARY),
+                        ),
+                    ];
+                    right_spans.extend(tag_filter_spans(app));
+                    right_spans.push(Span::raw(" "));
+                    let right = Line::from(right_spans);
+                    (left, right)
+                }
+                ActiveTab::Aliases => {
+                    let alias_count = app.aliases_filtered_indices.len();
+                    let mut hints = vec![
+                        Span::styled(" q", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                        Span::raw(" Quit  "),
+                        Span::styled("/", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                        Span::raw(" Search  "),
+                        Span::styled("t", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                        Span::raw(" Tags  "),
+                        Span::styled("r", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                        Span::raw(" Reload  "),
+                        Span::styled("?", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                        Span::raw(" Help"),
+                    ];
+                    if !app.aliases_search_query.is_empty() || app.active_tag_filter.is_some() {
+                        hints.push(Span::raw("  "));
+                        hints.push(Span::styled("Esc", Style::default().fg(theme::TEXT_HIGHLIGHT)));
+                        hints.push(Span::raw(" Clear"));
+                    }
+                    let left = Line::from(hints);
+                    let mut right_spans = vec![
+                        Span::styled(
+                            format!("{} aliases", alias_count),
                             Style::default().fg(theme::TEXT_SECONDARY),
                         ),
                     ];

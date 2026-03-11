@@ -5,16 +5,12 @@ use crate::app::{App, ActiveTab};
 use crate::ui::theme;
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
-    let (scripts_style, tools_style) = match app.active_tab {
-        ActiveTab::Scripts => (
-            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
-            Style::default().fg(theme::TEXT_MUTED),
-        ),
-        ActiveTab::Tools => (
-            Style::default().fg(theme::TEXT_MUTED),
-            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
-        ),
-    };
+    let active_style = Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD);
+    let inactive_style = Style::default().fg(theme::TEXT_MUTED);
+
+    let scripts_style = if app.active_tab == ActiveTab::Scripts { active_style } else { inactive_style };
+    let tools_style = if app.active_tab == ActiveTab::Tools { active_style } else { inactive_style };
+    let aliases_style = if app.active_tab == ActiveTab::Aliases { active_style } else { inactive_style };
 
     let line = Line::from(vec![
         Span::raw(" "),
@@ -23,6 +19,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(" | ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("[2]", Style::default().fg(theme::TEXT_HIGHLIGHT)),
         Span::styled(" Tools", tools_style),
+        Span::styled(" | ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("[3]", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+        Span::styled(" Aliases", aliases_style),
         Span::raw(" "),
     ]);
 

@@ -24,6 +24,7 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
         // Tab switching
         KeyCode::Char('1') => app.active_tab = ActiveTab::Scripts,
         KeyCode::Char('2') => app.active_tab = ActiveTab::Tools,
+        KeyCode::Char('3') => app.active_tab = ActiveTab::Aliases,
 
         // Help
         KeyCode::Char('?') => app.input_mode = InputMode::Help,
@@ -33,6 +34,7 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             match app.active_tab {
                 ActiveTab::Scripts => app.enter_search(),
                 ActiveTab::Tools => app.enter_tools_search(),
+                ActiveTab::Aliases => app.enter_aliases_search(),
             }
         }
 
@@ -44,6 +46,7 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             match app.active_tab {
                 ActiveTab::Scripts => app.clear_filter(),
                 ActiveTab::Tools => app.clear_tools_filter(),
+                ActiveTab::Aliases => app.clear_aliases_filter(),
             }
         }
 
@@ -52,6 +55,7 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             match app.active_tab {
                 ActiveTab::Scripts => app.reload_scripts(),
                 ActiveTab::Tools => app.reload_tools(),
+                ActiveTab::Aliases => app.reload_aliases(),
             }
         }
 
@@ -60,6 +64,7 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             match app.active_tab {
                 ActiveTab::Scripts => handle_normal_scripts(app, key),
                 ActiveTab::Tools => handle_normal_tools(app, key),
+                ActiveTab::Aliases => handle_normal_aliases(app, key),
             }
         }
     }
@@ -119,6 +124,16 @@ fn handle_normal_tools(app: &mut App, key: KeyEvent) {
     }
 }
 
+fn handle_normal_aliases(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => app.aliases_move_down(),
+        KeyCode::Char('k') | KeyCode::Up => app.aliases_move_up(),
+        KeyCode::Char('g') => app.aliases_move_top(),
+        KeyCode::Char('G') => app.aliases_move_bottom(),
+        _ => {}
+    }
+}
+
 fn handle_search(app: &mut App, key: KeyEvent) {
     match app.active_tab {
         ActiveTab::Scripts => {
@@ -136,6 +151,15 @@ fn handle_search(app: &mut App, key: KeyEvent) {
                 KeyCode::Enter => app.confirm_tools_search(),
                 KeyCode::Backspace => app.tools_search_backspace(),
                 KeyCode::Char(c) => app.tools_search_input(c),
+                _ => {}
+            }
+        }
+        ActiveTab::Aliases => {
+            match key.code {
+                KeyCode::Esc => app.exit_aliases_search(),
+                KeyCode::Enter => app.confirm_aliases_search(),
+                KeyCode::Backspace => app.aliases_search_backspace(),
+                KeyCode::Char(c) => app.aliases_search_input(c),
                 _ => {}
             }
         }

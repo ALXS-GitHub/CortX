@@ -883,6 +883,8 @@ pub struct ScriptExport {
     pub tools: Vec<Tool>,
     #[serde(default)]
     pub tag_definitions: Vec<TagDefinition>,
+    #[serde(default)]
+    pub aliases: Vec<ShellAlias>,
     pub exported_at: DateTime<Utc>,
 }
 
@@ -894,6 +896,60 @@ pub struct ImportResult {
     pub skipped: u32,
     pub tools_added: u32,
     pub tag_definitions_added: u32,
+    pub aliases_added: u32,
+}
+
+// ============================================================================
+// Shell Aliases
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellAlias {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub order: u32,
+}
+
+impl ShellAlias {
+    pub fn new(name: String, command: String) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name,
+            command,
+            description: None,
+            tags: Vec::new(),
+            created_at: now,
+            updated_at: now,
+            order: 0,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateShellAliasInput {
+    pub name: String,
+    pub command: String,
+    pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateShellAliasInput {
+    pub name: Option<String>,
+    pub command: Option<String>,
+    pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
 }
 
 // ============================================================================

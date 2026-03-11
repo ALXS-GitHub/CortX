@@ -33,6 +33,9 @@ import type {
   Tool,
   CreateToolInput,
   UpdateToolInput,
+  ShellAlias,
+  CreateShellAliasInput,
+  UpdateShellAliasInput,
 } from '@/types';
 import * as api from '@/lib/tauri';
 
@@ -141,6 +144,11 @@ interface AppState {
   tools: Tool[];
   selectedToolId: string | null;
   isLoadingTools: boolean;
+
+  // Aliases
+  aliases: ShellAlias[];
+  selectedAliasId: string | null;
+  isLoadingAliases: boolean;
 
   // Run Script Dialog
   runScriptDialogTarget: GlobalScript | null;
@@ -270,6 +278,14 @@ interface AppState {
   reorderTools: (toolIds: string[]) => Promise<void>;
   selectTool: (id: string | null) => void;
 
+  // Actions - Aliases
+  loadAliases: () => Promise<void>;
+  createAlias: (input: CreateShellAliasInput) => Promise<ShellAlias>;
+  updateAlias: (id: string, input: UpdateShellAliasInput) => Promise<ShellAlias>;
+  deleteAlias: (id: string) => Promise<void>;
+  reorderAliases: (aliasIds: string[]) => Promise<void>;
+  selectAlias: (id: string | null) => void;
+
   // Actions - Import / Export
   exportScriptsConfig: () => Promise<string>;
   importScriptsConfig: (json: string) => Promise<ImportResult>;
@@ -322,6 +338,10 @@ export const useAppStore = create<AppState>((set, _get) => ({
   tools: [],
   selectedToolId: null,
   isLoadingTools: false,
+
+  aliases: [],
+  selectedAliasId: null,
+  isLoadingAliases: false,
   runScriptDialogTarget: null,
   currentView: 'dashboard',
   terminalPanelOpen: false,
@@ -1420,6 +1440,57 @@ export const useAppStore = create<AppState>((set, _get) => ({
     set({ selectedToolId: id });
     if (id) {
       set({ currentView: 'tool-detail' });
+    }
+  },
+
+  // Alias actions
+  loadAliases: async () => {
+    set({ isLoadingAliases: true });
+    try {
+      const aliases = await api.getAllAliases();
+      set({ aliases, isLoadingAliases: false });
+    } catch (error) {
+      console.error('Failed to load aliases:', error);
+      set({ isLoadingAliases: false });
+    }
+  },
+
+  createAlias: async (input) => {
+    const alias = await api.createAlias(input);
+    set((state) => ({ aliases: [...state.aliases, alias] }));
+    return alias;
+  },
+
+  updateAlias: async (id, input) => {
+    const updated = await api.updateAlias(id, input);
+    set((state) => ({
+      aliases: state.aliases.map((a) => (a.id === id ? updated : a)),
+    }));
+    return updated;
+  },
+
+  deleteAlias: async (id) => {
+    await api.deleteAlias(id);
+    set((state) => ({
+      aliases: state.aliases.filter((a) => a.id !== id),
+      selectedAliasId: state.selectedAliasId === id ? null : state.selectedAliasId,
+    }));
+  },
+
+  reorderAliases: async (aliasIds) => {
+    await api.reorderAliases(aliasIds);
+    set((state) => {
+      const ordered = aliasIds
+        .map((id) => state.aliases.find((a) => a.id === id))
+        .filter(Boolean) as ShellAlias[];
+      return { aliases: ordered };
+    });
+  },
+
+  selectAlias: (id) => {
+    set({ selectedAliasId: id });
+    if (id) {
+      set({ currentView: 'alias-detail' });
     }
   },
 

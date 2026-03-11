@@ -5,5 +5,6 @@ pub mod help_parser;
 pub mod models;
 pub mod process_manager;
 pub mod script_discovery;
+pub mod shell_init;
 pub mod storage;
 pub mod tool_discovery;

@@ -531,3 +531,53 @@ pub struct UpdateSettingsParams {
     )]
     pub settings: serde_json::Value,
 }
+
+// ============================================================================
+// Shell Aliases
+// ============================================================================
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListAliasesParams {
+    #[schemars(description = "Filter aliases by tag name (case-insensitive match)")]
+    pub tag: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetAliasParams {
+    #[schemars(description = "Alias UUID. Provide either 'id' or 'name'.")]
+    pub id: Option<String>,
+    #[schemars(description = "Alias name (case-insensitive). Used when 'id' is not provided.")]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateAliasParams {
+    #[schemars(description = "Alias name — the shortcut you type in your shell (e.g. 'cc', 'gp'). Only alphanumeric, hyphens, underscores allowed. No spaces.")]
+    pub name: String,
+    #[schemars(description = "Command the alias expands to (e.g. 'claude --dangerously-skip-permissions', 'git push')")]
+    pub command: String,
+    #[schemars(description = "Human-readable description of what the alias does")]
+    pub description: Option<String>,
+    #[schemars(description = "Tags for categorization")]
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateAliasParams {
+    #[schemars(description = "Alias UUID to update")]
+    pub id: String,
+    #[schemars(description = "New alias name")]
+    pub name: Option<String>,
+    #[schemars(description = "New command")]
+    pub command: Option<String>,
+    #[schemars(description = "New description")]
+    pub description: Option<String>,
+    #[schemars(description = "Replace all tags")]
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteAliasParams {
+    #[schemars(description = "Alias UUID to delete")]
+    pub id: String,
+}

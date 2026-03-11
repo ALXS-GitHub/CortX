@@ -16,6 +16,7 @@ use crossterm::{
 use ratatui::prelude::*;
 
 use cortx_core::file_watcher;
+use cortx_core::models::ShellAlias;
 use cortx_core::process_manager::ProcessManager;
 use cortx_core::storage::Storage;
 
@@ -55,9 +56,40 @@ enum Command {
         #[arg(long)]
         scan: bool,
     },
+    /// Generate shell init script
+    Init {
+        /// Shell name: powershell, bash, zsh, fish
+        shell: String,
+    },
+    /// Manage shell aliases
+    Alias {
+        #[command(subcommand)]
+        command: AliasCommand,
+    },
     /// Fallback: bare `cortx <name>` still runs a script
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Subcommand)]
+enum AliasCommand {
+    /// List all aliases
+    List,
+    /// Add a new alias
+    Add {
+        /// Alias name (e.g. "cc")
+        name: String,
+        /// Command to alias (e.g. "claude --dangerously-skip-permissions")
+        command: String,
+        /// Optional description
+        #[arg(short, long)]
+        description: Option<String>,
+    },
+    /// Remove an alias by name
+    Remove {
+        /// Alias name to remove
+        name: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -71,6 +103,14 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(Command::Scripts) => cmd_list(&storage),
         Some(Command::Tools { scan }) => cmd_tools(&storage, scan),
+        Some(Command::Init { shell }) => cmd_init(&storage, &shell),
+        Some(Command::Alias { command }) => match command {
+            AliasCommand::List => cmd_alias_list(&storage),
+            AliasCommand::Add { name, command, description } => {
+                cmd_alias_add(&storage, &name, &command, description.as_deref())
+            }
+            AliasCommand::Remove { name } => cmd_alias_remove(&storage, &name),
+        },
         Some(Command::Run { script, args, preset }) => {
             cmd_run(&storage, &process_manager, &script, preset.as_deref(), &args)
         }
@@ -210,6 +250,86 @@ fn cmd_tools(storage: &Storage, scan: bool) -> anyhow::Result<()> {
         }
         println!("\n{} tool(s)", tools.len());
     }
+    Ok(())
+}
+
+/// Generate shell init script
+fn cmd_init(storage: &Storage, shell_name: &str) -> anyhow::Result<()> {
+    let shell = cortx_core::shell_init::Shell::from_str(shell_name)
+        .ok_or_else(|| anyhow::anyhow!(
+            "Unknown shell '{}'. Supported: powershell, pwsh, ps, bash, zsh, fish",
+            shell_name,
+        ))?;
+    let aliases = storage.get_all_aliases();
+    let script = cortx_core::shell_init::generate_init_script(&shell, &aliases);
+    print!("{}", script);
+    Ok(())
+}
+
+/// List all aliases
+fn cmd_alias_list(storage: &Storage) -> anyhow::Result<()> {
+    let aliases = storage.get_all_aliases();
+    if aliases.is_empty() {
+        println!("No aliases configured.");
+        return Ok(());
+    }
+
+    let tag_defs = storage.get_all_tag_definitions();
+
+    // Sort by primary tag then name
+    let mut sorted: Vec<&ShellAlias> = aliases.iter().collect();
+    sorted.sort_by(|a, b| {
+        let ta = a.tags.first().map(|s| s.to_lowercase()).unwrap_or_default();
+        let tb = b.tags.first().map(|s| s.to_lowercase()).unwrap_or_default();
+        ta.cmp(&tb)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    println!("{:<20} {:<40} {}", "NAME", "COMMAND", "TAGS");
+    println!("{}", "-".repeat(75));
+
+    for a in &sorted {
+        let tags_display = if a.tags.is_empty() {
+            String::from("-")
+        } else {
+            colorize_tags(&a.tags, &tag_defs)
+        };
+        println!("{:<20} {:<40} {}", a.name, a.command, tags_display);
+    }
+    println!("\n{} alias(es)", aliases.len());
+    Ok(())
+}
+
+/// Add a new alias
+fn cmd_alias_add(storage: &Storage, name: &str, command: &str, description: Option<&str>) -> anyhow::Result<()> {
+    // Validate name
+    cortx_core::shell_init::validate_alias_name(name)
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    // Check for builtin
+    if cortx_core::shell_init::is_shell_builtin(name) {
+        eprintln!("Warning: '{}' shadows a common shell builtin", name);
+    }
+
+    // Check for duplicate name
+    if storage.get_alias_by_name(name).is_some() {
+        return Err(anyhow::anyhow!("Alias '{}' already exists", name));
+    }
+
+    let mut alias = ShellAlias::new(name.to_string(), command.to_string());
+    alias.description = description.map(|s| s.to_string());
+
+    storage.create_alias(alias).map_err(|e| anyhow::anyhow!("{}", e))?;
+    println!("Alias '{}' added.", name);
+    Ok(())
+}
+
+/// Remove an alias by name
+fn cmd_alias_remove(storage: &Storage, name: &str) -> anyhow::Result<()> {
+    let alias = storage.get_alias_by_name(name)
+        .ok_or_else(|| anyhow::anyhow!("Alias '{}' not found", name))?;
+    storage.delete_alias(&alias.id).map_err(|e| anyhow::anyhow!("{}", e))?;
+    println!("Alias '{}' removed.", name);
     Ok(())
 }
 

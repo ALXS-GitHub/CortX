@@ -1,12 +1,12 @@
 use crate::models::{
     AddEnvFileInput, AppSettings, CreateGlobalScriptInput,
     CreateProjectInput, CreateScriptGroupInput, CreateScriptInput, CreateServiceInput,
-    CreateToolInput, CreateTagDefinitionInput, DiscoverEnvFilesInput, DiscoveredTool,
-    EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
+    CreateShellAliasInput, CreateToolInput, CreateTagDefinitionInput, DiscoverEnvFilesInput,
+    DiscoveredTool, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
     DiscoveredScript, ExecutionRecord, GlobalScript, ImportResult, LinkEnvToServiceInput, Project, Script,
-    ScriptGroup, ScriptParameter, ScriptsConfig, Service, TagDefinition, Tool,
+    ScriptGroup, ScriptParameter, ScriptsConfig, Service, ShellAlias, TagDefinition, Tool,
     UpdateTagDefinitionInput, UpdateGlobalScriptInput, UpdateProjectInput, UpdateScriptGroupInput,
-    UpdateScriptInput, UpdateServiceInput, UpdateToolInput,
+    UpdateScriptInput, UpdateServiceInput, UpdateShellAliasInput, UpdateToolInput,
 };
 use crate::process_manager::{ProcessEventEmitter, ProcessManager};
 use crate::storage::Storage;
@@ -2027,4 +2027,81 @@ pub fn update_execution_record(
         }
     }
     Ok(())
+}
+
+// ============================================================================
+// Alias commands
+// ============================================================================
+
+#[tauri::command]
+pub fn get_all_aliases(state: State<AppState>) -> Result<Vec<ShellAlias>, String> {
+    Ok(state.storage.get_all_aliases())
+}
+
+#[tauri::command]
+pub fn get_alias(state: State<AppState>, id: String) -> Result<ShellAlias, String> {
+    state
+        .storage
+        .get_alias(&id)
+        .ok_or_else(|| format!("Alias not found: {}", id))
+}
+
+#[tauri::command]
+pub fn create_alias(state: State<AppState>, input: CreateShellAliasInput) -> Result<ShellAlias, String> {
+    cortx_core::shell_init::validate_alias_name(&input.name).map_err(|e| e)?;
+
+    let mut alias = ShellAlias::new(input.name, input.command);
+    alias.description = input.description;
+    if let Some(tags) = input.tags {
+        alias.tags = tags;
+    }
+    let count = state.storage.get_all_aliases().len() as u32;
+    alias.order = count;
+
+    state.storage.create_alias(alias).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_alias(state: State<AppState>, id: String, input: UpdateShellAliasInput) -> Result<ShellAlias, String> {
+    if let Some(ref name) = input.name {
+        cortx_core::shell_init::validate_alias_name(name).map_err(|e| e)?;
+    }
+
+    state.storage.update_alias(&id, |alias| {
+        if let Some(name) = input.name {
+            alias.name = name;
+        }
+        if let Some(command) = input.command {
+            alias.command = command;
+        }
+        if let Some(description) = input.description {
+            alias.description = Some(description);
+        }
+        if let Some(tags) = input.tags {
+            alias.tags = tags;
+        }
+    }).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_alias(state: State<AppState>, id: String) -> Result<(), String> {
+    state.storage.delete_alias(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reorder_aliases(state: State<AppState>, alias_ids: Vec<String>) -> Result<(), String> {
+    for (i, id) in alias_ids.iter().enumerate() {
+        state.storage.update_alias(id, |alias| {
+            alias.order = i as u32;
+        }).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn generate_shell_init(state: State<AppState>, shell: String) -> Result<String, String> {
+    let shell_type = cortx_core::shell_init::Shell::from_str(&shell)
+        .ok_or_else(|| format!("Unknown shell: {}. Supported: powershell, bash, zsh, fish", shell))?;
+    let aliases = state.storage.get_all_aliases();
+    Ok(cortx_core::shell_init::generate_init_script(&shell_type, &aliases))
 }

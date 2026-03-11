@@ -13,6 +13,7 @@ pub enum DataFile {
     ScriptGroups,
     ExecutionHistory,
     Tools,
+    Aliases,
     Unknown(String),
 }
 
@@ -26,6 +27,7 @@ impl DataFile {
             "script_groups.json" => DataFile::ScriptGroups,
             "execution_history.json" => DataFile::ExecutionHistory,
             "tools.json" => DataFile::Tools,
+            "aliases.json" => DataFile::Aliases,
             other => DataFile::Unknown(other.to_string()),
         }
     }
