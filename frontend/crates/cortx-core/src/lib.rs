@@ -1,5 +1,6 @@
 pub mod command_builder;
 pub mod error;
+pub mod file_watcher;
 pub mod help_parser;
 pub mod models;
 pub mod process_manager;

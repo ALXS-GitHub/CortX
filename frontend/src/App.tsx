@@ -26,6 +26,7 @@ import {
   onGlobalScriptLog,
   onGlobalScriptStatus,
   onGlobalScriptExit,
+  onDataChanged,
   getRunningServices,
 } from '@/lib/tauri';
 import type { LogEntry } from '@/types';
@@ -104,6 +105,8 @@ function App() {
     let unlistenGlobalScriptLog: (() => void) | undefined;
     let unlistenGlobalScriptStatus: (() => void) | undefined;
     let unlistenGlobalScriptExit: (() => void) | undefined;
+    // Data change listener (file watcher)
+    let unlistenDataChanged: (() => void) | undefined;
     let isCancelled = false;
 
     const setupListeners = async () => {
@@ -180,6 +183,18 @@ function App() {
         setGlobalScriptExitResult(payload.scriptId, payload.exitCode, payload.success);
         updateExecutionRecordOnExit(payload.scriptId, payload.exitCode ?? null, payload.success);
       });
+
+      // File watcher: reload all data when external changes detected
+      unlistenDataChanged = await onDataChanged(() => {
+        if (isCancelled) return;
+        const store = useAppStore.getState();
+        store.loadProjects();
+        store.loadGlobalScripts();
+        store.loadTagDefinitions();
+        store.loadScriptGroups();
+        store.loadSettings();
+        store.loadTools();
+      });
     };
 
     setupListeners();
@@ -195,6 +210,7 @@ function App() {
       unlistenGlobalScriptLog?.();
       unlistenGlobalScriptStatus?.();
       unlistenGlobalScriptExit?.();
+      unlistenDataChanged?.();
       listenersSetUp.current = false;
     };
   }, []);

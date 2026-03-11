@@ -4,7 +4,8 @@ use fs2::FileExt;
 use parking_lot::RwLock;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write as IoWrite;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -40,6 +41,7 @@ pub struct Storage {
     script_groups: RwLock<Vec<ScriptGroup>>,
     execution_history: RwLock<Vec<ExecutionRecord>>,
     tools: RwLock<Vec<Tool>>,
+    suppress_watcher: AtomicBool,
 }
 
 // File locking helpers
@@ -85,6 +87,7 @@ impl Storage {
             script_groups: RwLock::new(Vec::new()),
             execution_history: RwLock::new(Vec::new()),
             tools: RwLock::new(Vec::new()),
+            suppress_watcher: AtomicBool::new(false),
         };
 
         // Load existing data
@@ -97,6 +100,24 @@ impl Storage {
         storage.load_tools()?;
 
         Ok(storage)
+    }
+
+    // Public accessors
+
+    pub fn app_dir(&self) -> &Path {
+        &self.app_dir
+    }
+
+    pub fn set_suppress_watcher(&self) {
+        self.suppress_watcher.store(true, Ordering::Relaxed);
+    }
+
+    pub fn clear_suppress_watcher(&self) {
+        self.suppress_watcher.store(false, Ordering::Relaxed);
+    }
+
+    pub fn is_watcher_suppressed(&self) -> bool {
+        self.suppress_watcher.load(Ordering::Relaxed)
     }
 
     // Path helpers
@@ -147,9 +168,10 @@ impl Storage {
     }
 
     fn save_projects(&self) -> Result<(), StorageError> {
-        let path = self.projects_path();
-        let projects = self.projects.read();
-        write_json_locked(&path, &*projects)
+        self.set_suppress_watcher();
+        let result = write_json_locked(&self.projects_path(), &*self.projects.read());
+        self.clear_suppress_watcher();
+        result
     }
 
     pub fn get_all_projects(&self) -> Vec<Project> {
@@ -378,9 +400,10 @@ impl Storage {
     }
 
     fn save_settings(&self) -> Result<(), StorageError> {
-        let path = self.settings_path();
-        let settings = self.settings.read();
-        write_json_locked(&path, &*settings)
+        self.set_suppress_watcher();
+        let result = write_json_locked(&self.settings_path(), &*self.settings.read());
+        self.clear_suppress_watcher();
+        result
     }
 
     pub fn get_settings(&self) -> AppSettings {
@@ -407,9 +430,10 @@ impl Storage {
     }
 
     fn save_global_scripts(&self) -> Result<(), StorageError> {
-        let path = self.global_scripts_path();
-        let scripts = self.global_scripts.read();
-        write_json_locked(&path, &*scripts)
+        self.set_suppress_watcher();
+        let result = write_json_locked(&self.global_scripts_path(), &*self.global_scripts.read());
+        self.clear_suppress_watcher();
+        result
     }
 
     pub fn get_all_global_scripts(&self) -> Vec<GlobalScript> {
@@ -483,9 +507,10 @@ impl Storage {
     }
 
     fn save_tag_definitions(&self) -> Result<(), StorageError> {
-        let path = self.tag_definitions_path();
-        let defs = self.tag_definitions.read();
-        write_json_locked(&path, &*defs)
+        self.set_suppress_watcher();
+        let result = write_json_locked(&self.tag_definitions_path(), &*self.tag_definitions.read());
+        self.clear_suppress_watcher();
+        result
     }
 
     pub fn get_all_tag_definitions(&self) -> Vec<TagDefinition> {
@@ -560,9 +585,10 @@ impl Storage {
     }
 
     fn save_script_groups(&self) -> Result<(), StorageError> {
-        let path = self.script_groups_path();
-        let groups = self.script_groups.read();
-        write_json_locked(&path, &*groups)
+        self.set_suppress_watcher();
+        let result = write_json_locked(&self.script_groups_path(), &*self.script_groups.read());
+        self.clear_suppress_watcher();
+        result
     }
 
     pub fn get_all_script_groups(&self) -> Vec<ScriptGroup> {
@@ -635,9 +661,10 @@ impl Storage {
     }
 
     fn save_execution_history(&self) -> Result<(), StorageError> {
-        let path = self.execution_history_path();
-        let history = self.execution_history.read();
-        write_json_locked(&path, &*history)
+        self.set_suppress_watcher();
+        let result = write_json_locked(&self.execution_history_path(), &*self.execution_history.read());
+        self.clear_suppress_watcher();
+        result
     }
 
     pub fn add_execution_record(
@@ -705,9 +732,10 @@ impl Storage {
     }
 
     fn save_tools(&self) -> Result<(), StorageError> {
-        let path = self.tools_path();
-        let tools = self.tools.read();
-        write_json_locked(&path, &*tools)
+        self.set_suppress_watcher();
+        let result = write_json_locked(&self.tools_path(), &*self.tools.read());
+        self.clear_suppress_watcher();
+        result
     }
 
     pub fn get_all_tools(&self) -> Vec<Tool> {

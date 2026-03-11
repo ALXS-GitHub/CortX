@@ -15,6 +15,7 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 
+use cortx_core::file_watcher;
 use cortx_core::process_manager::ProcessManager;
 use cortx_core::storage::Storage;
 
@@ -335,7 +336,19 @@ fn run_tui(storage: Arc<Storage>, process_manager: Arc<ProcessManager>) -> anyho
     let emitter = Arc::new(TuiEmitter::new(process_tx));
 
     // Create app
-    let mut app = App::new(storage, process_manager.clone(), emitter);
+    let mut app = App::new(storage.clone(), process_manager.clone(), emitter);
+
+    // Start file watcher
+    let watch_dir = storage.app_dir().to_path_buf();
+    let storage_for_watcher = storage.clone();
+    let event_tx_watcher = event_tx.clone();
+    let _watcher = file_watcher::start_watching(watch_dir, move |_changed| {
+        if storage_for_watcher.is_watcher_suppressed() {
+            return;
+        }
+        let _ = event_tx_watcher.send(event::Event::DataChanged);
+    })
+    .map_err(|e| anyhow::anyhow!("Failed to start file watcher: {}", e))?;
 
     // Start event loop thread
     let event_tx_clone = event_tx.clone();
@@ -407,6 +420,13 @@ fn handle_event(app: &mut App, ev: event::Event) {
     match ev {
         event::Event::Key(key) => input::handle_key(app, key),
         event::Event::Process(pe) => app.handle_process_event(pe),
+        event::Event::DataChanged => {
+            if let Err(e) = app.storage.reload_all() {
+                log::error!("File watcher reload failed: {}", e);
+                return;
+            }
+            app.refresh_data();
+        }
         event::Event::Tick => {}
     }
 }

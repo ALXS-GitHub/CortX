@@ -341,6 +341,32 @@ impl App {
         }
     }
 
+    /// Refresh data from storage without resetting UI state (search, tag filter, selection).
+    /// Called by the file watcher when external changes are detected.
+    pub fn refresh_data(&mut self) {
+        self.scripts = self.storage.get_all_global_scripts();
+        self.tag_definitions = self.storage.get_all_tag_definitions();
+        self.groups = self.storage.get_all_script_groups();
+        self.tools = self.storage.get_all_tools();
+
+        Self::sort_by_primary_tag(&mut self.scripts, &self.tag_definitions);
+        Self::sort_tools_by_primary_tag(&mut self.tools, &self.tag_definitions);
+
+        // Re-apply existing filters (preserves search query + tag filter)
+        self.apply_filter();
+        self.apply_tools_filter();
+
+        // Clamp selection indices to new bounds
+        if self.selected_index >= self.filtered_indices.len() && !self.filtered_indices.is_empty() {
+            self.selected_index = self.filtered_indices.len() - 1;
+        }
+        if self.tools_selected_index >= self.tools_filtered_indices.len()
+            && !self.tools_filtered_indices.is_empty()
+        {
+            self.tools_selected_index = self.tools_filtered_indices.len() - 1;
+        }
+    }
+
     pub fn reload_scripts(&mut self) {
         self.scripts = self.storage.get_all_global_scripts();
         self.tag_definitions = self.storage.get_all_tag_definitions();
