@@ -196,6 +196,14 @@ pub fn run() {
             commands::scan_installed_tools,
             // Execution history update
             commands::update_execution_record,
+            // Alias commands
+            commands::get_all_aliases,
+            commands::get_alias,
+            commands::create_alias,
+            commands::update_alias,
+            commands::delete_alias,
+            commands::reorder_aliases,
+            commands::generate_shell_init,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -25,6 +25,7 @@ pub fn render(f: &mut Frame, app: &App) {
     let query = match app.active_tab {
         ActiveTab::Scripts => &app.search_query,
         ActiveTab::Tools => &app.tools_search_query,
+        ActiveTab::Aliases => &app.aliases_search_query,
     };
     let input_text = format!("/{}", query);
 

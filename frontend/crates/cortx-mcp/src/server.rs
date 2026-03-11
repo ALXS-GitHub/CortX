@@ -1213,6 +1213,100 @@ impl CortxMcp {
             .map_err(|e| mcp_err(e.to_string()))?;
         ok_text(json)
     }
+
+    // ========================================================================
+    // Shell Aliases (5)
+    // ========================================================================
+
+    #[tool(description = "List all shell aliases. Aliases are shell shortcuts (e.g. 'cc' → 'claude --dangerously-skip-permissions') managed by CortX and activated via `cortx init <shell>`. Optionally filter by tag.", annotations(read_only_hint = true))]
+    fn list_aliases(
+        &self,
+        Parameters(p): Parameters<ListAliasesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        let mut aliases = self.storage.get_all_aliases();
+        if let Some(ref tag) = p.tag {
+            aliases.retain(|a| a.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)));
+        }
+        ok_json(&aliases)
+    }
+
+    #[tool(description = "Get details of a specific shell alias by ID or name.", annotations(read_only_hint = true))]
+    fn get_alias(
+        &self,
+        Parameters(p): Parameters<GetAliasParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        let alias = if let Some(ref id) = p.id {
+            self.storage.get_alias(id)
+        } else if let Some(ref name) = p.name {
+            self.storage.get_alias_by_name(name)
+        } else {
+            return Err(mcp_err("Provide either 'id' or 'name'".to_string()));
+        };
+        alias.map(|a| ok_json(&a)).unwrap_or_else(|| {
+            Err(mcp_err(format!(
+                "Alias not found: {}",
+                p.id.as_deref().or(p.name.as_deref()).unwrap_or("?")
+            )))
+        })
+    }
+
+    #[tool(description = "Create a new shell alias. The alias will be available in shells that source `cortx init <shell>` output.")]
+    fn create_alias(
+        &self,
+        Parameters(p): Parameters<CreateAliasParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        cortx_core::shell_init::validate_alias_name(&p.name)
+            .map_err(|e| mcp_err(e))?;
+        let mut alias = cortx_core::models::ShellAlias::new(p.name, p.command);
+        alias.description = p.description;
+        if let Some(tags) = p.tags {
+            alias.tags = tags;
+        }
+        let count = self.storage.get_all_aliases().len() as u32;
+        alias.order = count;
+        let created = self.storage.create_alias(alias).map_err(|e| mcp_err(e.to_string()))?;
+        ok_json(&created)
+    }
+
+    #[tool(description = "Update a shell alias. Only provided fields are changed.", annotations(idempotent_hint = true))]
+    fn update_alias(
+        &self,
+        Parameters(p): Parameters<UpdateAliasParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        if let Some(ref name) = p.name {
+            cortx_core::shell_init::validate_alias_name(name)
+                .map_err(|e| mcp_err(e))?;
+        }
+        let updated = self.storage.update_alias(&p.id, |a| {
+            if let Some(v) = p.name {
+                a.name = v;
+            }
+            if let Some(v) = p.command {
+                a.command = v;
+            }
+            if let Some(v) = p.description {
+                a.description = Some(v);
+            }
+            if let Some(v) = p.tags {
+                a.tags = v;
+            }
+        }).map_err(|e| mcp_err(e.to_string()))?;
+        ok_json(&updated)
+    }
+
+    #[tool(description = "Delete a shell alias.", annotations(destructive_hint = true, idempotent_hint = true))]
+    fn delete_alias(
+        &self,
+        Parameters(p): Parameters<DeleteAliasParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        self.storage.delete_alias(&p.id).map_err(|e| mcp_err(e.to_string()))?;
+        ok_text(format!("Deleted alias {}", p.id))
+    }
 }
 
 // ============================================================================

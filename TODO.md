@@ -3,8 +3,7 @@
 Don't forget to update PRD when adding features
 
 - [X] Faire un mcp pour l'app
-
-- [ ] File watcher : détecter les changements sur les fichiers JSON de données pour synchro temps réel entre MCP/GUI/TUI. Actuellement GUI→MCP fonctionne (reload_all), mais MCP→GUI et MCP→TUI ne se mettent pas à jour (cache mémoire stale). Ajouter un watcher (`notify`) dans Tauri et dans le TUI qui appelle reload_all() quand les fichiers changent.
+- [X] File watcher : détecter les changements sur les fichiers JSON de données pour synchro temps réel entre MCP/GUI/TUI. Actuellement GUI→MCP fonctionne (reload_all), mais MCP→GUI et MCP→TUI ne se mettent pas à jour (cache mémoire stale). Ajouter un watcher (`notify`) dans Tauri et dans le TUI qui appelle reload_all() quand les fichiers changent.
 
 - [ ] Idée : cortx devrait pouvoir gérer tous les alias / commandes custom. pour le moment toutes mes commandes custom étaient dans ma config powershell. Cortx devrait aussi pouvoir gérer les alias et commandes custom. C'est un peu comme la gestion des scripts en fait, on pourrait aussi les stocker dans les scripts ça revient quasi au même, mais peut-être la gestion des paramètres des commandes est un peu différente...
   en gros l'idée c'est à la place de stocker tous les alias dans la config powershell, c'est cortx qui gère ça et qui a une liste d'alias prédéfinis et qui sont automatiquement load quand on lance un terminal (par example on met un alias 'claude --dangerously-skip-persmissions' -> 'cc') et cortx gère ça autoamtiquement et on a toute notre config à l'intérieur de cortx -> à discuter (voir la vrai diff entre ça et les scripts et comment adapter à des commandes custom similaire à des scripts...)

@@ -1,4 +1,4 @@
-use cortx_core::models::{GlobalScript, Tool, TagDefinition, ScriptGroup, ScriptStatus, ScriptParamType, LogStream};
+use cortx_core::models::{GlobalScript, Tool, TagDefinition, ScriptGroup, ScriptStatus, ScriptParamType, LogStream, ShellAlias};
 use cortx_core::process_manager::ProcessManager;
 use cortx_core::storage::Storage;
 use std::collections::HashMap;
@@ -31,6 +31,7 @@ pub enum ActivePanel {
 pub enum ActiveTab {
     Scripts,
     Tools,
+    Aliases,
 }
 
 /// A log line for display
@@ -293,6 +294,12 @@ pub struct App {
     pub tools_selected_index: usize,
     pub tools_search_query: String,
 
+    // Aliases state
+    pub aliases: Vec<ShellAlias>,
+    pub aliases_filtered_indices: Vec<usize>,
+    pub aliases_selected_index: usize,
+    pub aliases_search_query: String,
+
     // Tag filter
     pub active_tag_filter: Option<String>,
     pub tag_filter_index: usize,
@@ -304,14 +311,17 @@ impl App {
         let tag_definitions = storage.get_all_tag_definitions();
         let groups = storage.get_all_script_groups();
         let mut tools = storage.get_all_tools();
+        let mut aliases = storage.get_all_aliases();
 
-        // Sort scripts and tools by primary tag (tag definition order, then alphabetically)
+        // Sort scripts, tools, and aliases by primary tag (tag definition order, then alphabetically)
         Self::sort_by_primary_tag(&mut scripts, &tag_definitions);
         Self::sort_tools_by_primary_tag(&mut tools, &tag_definitions);
+        Self::sort_aliases_by_primary_tag(&mut aliases, &tag_definitions);
 
         let script_count = scripts.len();
         let filtered_indices: Vec<usize> = (0..script_count).collect();
         let tools_filtered_indices: Vec<usize> = (0..tools.len()).collect();
+        let aliases_filtered_indices: Vec<usize> = (0..aliases.len()).collect();
 
         Self {
             storage,
@@ -336,6 +346,10 @@ impl App {
             tools_filtered_indices,
             tools_selected_index: 0,
             tools_search_query: String::new(),
+            aliases,
+            aliases_filtered_indices,
+            aliases_selected_index: 0,
+            aliases_search_query: String::new(),
             active_tag_filter: None,
             tag_filter_index: 0,
         }
@@ -348,13 +362,16 @@ impl App {
         self.tag_definitions = self.storage.get_all_tag_definitions();
         self.groups = self.storage.get_all_script_groups();
         self.tools = self.storage.get_all_tools();
+        self.aliases = self.storage.get_all_aliases();
 
         Self::sort_by_primary_tag(&mut self.scripts, &self.tag_definitions);
         Self::sort_tools_by_primary_tag(&mut self.tools, &self.tag_definitions);
+        Self::sort_aliases_by_primary_tag(&mut self.aliases, &self.tag_definitions);
 
         // Re-apply existing filters (preserves search query + tag filter)
         self.apply_filter();
         self.apply_tools_filter();
+        self.apply_aliases_filter();
 
         // Clamp selection indices to new bounds
         if self.selected_index >= self.filtered_indices.len() && !self.filtered_indices.is_empty() {
@@ -364,6 +381,11 @@ impl App {
             && !self.tools_filtered_indices.is_empty()
         {
             self.tools_selected_index = self.tools_filtered_indices.len() - 1;
+        }
+        if self.aliases_selected_index >= self.aliases_filtered_indices.len()
+            && !self.aliases_filtered_indices.is_empty()
+        {
+            self.aliases_selected_index = self.aliases_filtered_indices.len() - 1;
         }
     }
 
@@ -649,6 +671,142 @@ impl App {
         }
     }
 
+    // === Aliases methods ===
+
+    pub fn selected_alias(&self) -> Option<&ShellAlias> {
+        self.aliases_filtered_indices
+            .get(self.aliases_selected_index)
+            .and_then(|&idx| self.aliases.get(idx))
+    }
+
+    pub fn aliases_move_up(&mut self) {
+        if self.aliases_selected_index > 0 {
+            self.aliases_selected_index -= 1;
+        }
+    }
+
+    pub fn aliases_move_down(&mut self) {
+        if !self.aliases_filtered_indices.is_empty()
+            && self.aliases_selected_index < self.aliases_filtered_indices.len() - 1
+        {
+            self.aliases_selected_index += 1;
+        }
+    }
+
+    pub fn aliases_move_top(&mut self) {
+        self.aliases_selected_index = 0;
+    }
+
+    pub fn aliases_move_bottom(&mut self) {
+        if !self.aliases_filtered_indices.is_empty() {
+            self.aliases_selected_index = self.aliases_filtered_indices.len() - 1;
+        }
+    }
+
+    pub fn reload_aliases(&mut self) {
+        self.aliases = self.storage.get_all_aliases();
+        Self::sort_aliases_by_primary_tag(&mut self.aliases, &self.tag_definitions);
+        self.aliases_search_query.clear();
+        self.active_tag_filter = None;
+        self.apply_aliases_filter();
+    }
+
+    pub fn enter_aliases_search(&mut self) {
+        self.input_mode = InputMode::Search;
+        self.aliases_search_query.clear();
+    }
+
+    pub fn exit_aliases_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.aliases_search_query.clear();
+        self.apply_aliases_filter();
+    }
+
+    pub fn confirm_aliases_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
+    pub fn aliases_search_input(&mut self, c: char) {
+        self.aliases_search_query.push(c);
+        self.apply_aliases_filter();
+    }
+
+    pub fn aliases_search_backspace(&mut self) {
+        self.aliases_search_query.pop();
+        self.apply_aliases_filter();
+    }
+
+    pub fn clear_aliases_filter(&mut self) {
+        let changed = !self.aliases_search_query.is_empty() || self.active_tag_filter.is_some();
+        self.aliases_search_query.clear();
+        self.active_tag_filter = None;
+        if changed {
+            self.apply_aliases_filter();
+            self.apply_filter();
+        }
+    }
+
+    fn apply_aliases_filter(&mut self) {
+        let q = self.aliases_search_query.to_lowercase();
+        self.aliases_filtered_indices = self
+            .aliases
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| {
+                // Tag filter (from `t` key)
+                if let Some(ref tag) = self.active_tag_filter {
+                    if !a.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                        return false;
+                    }
+                }
+                // Search filter (name, description, command)
+                if !q.is_empty() {
+                    return a.name.to_lowercase().contains(&q)
+                        || a.description.as_deref().unwrap_or("").to_lowercase().contains(&q)
+                        || a.command.to_lowercase().contains(&q);
+                }
+                true
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if self.aliases_filtered_indices.is_empty() {
+            self.aliases_selected_index = 0;
+        } else if self.aliases_selected_index >= self.aliases_filtered_indices.len() {
+            self.aliases_selected_index = self.aliases_filtered_indices.len() - 1;
+        }
+    }
+
+    /// Sort aliases by primary tag, same logic as scripts
+    fn sort_aliases_by_primary_tag(aliases: &mut [ShellAlias], tag_defs: &[TagDefinition]) {
+        aliases.sort_by(|a, b| {
+            let ta = a.tags.first().and_then(|t| {
+                let tl = t.to_lowercase();
+                tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+            });
+            let tb = b.tags.first().and_then(|t| {
+                let tl = t.to_lowercase();
+                tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+            });
+            let tag_ord = match (a.tags.first(), b.tags.first()) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(at), Some(bt)) => {
+                    let ao = ta.and_then(|d| d.order);
+                    let bo = tb.and_then(|d| d.order);
+                    match (ao, bo) {
+                        (Some(ao), Some(bo)) => ao.cmp(&bo),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                    .then_with(|| at.to_lowercase().cmp(&bt.to_lowercase()))
+                }
+            };
+            tag_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+    }
+
     // === Tag filter methods ===
 
     pub fn sorted_tag_defs(&self) -> Vec<&TagDefinition> {
@@ -693,6 +851,7 @@ impl App {
         self.input_mode = InputMode::Normal;
         self.apply_filter();
         self.apply_tools_filter();
+        self.apply_aliases_filter();
     }
 
     pub fn tag_filter_move_up(&mut self) {
