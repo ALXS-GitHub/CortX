@@ -14,6 +14,8 @@ pub enum DataFile {
     ExecutionHistory,
     Tools,
     Aliases,
+    StatusDefinitions,
+    Apps,
     Unknown(String),
 }
 
@@ -28,6 +30,8 @@ impl DataFile {
             "execution_history.json" => DataFile::ExecutionHistory,
             "tools.json" => DataFile::Tools,
             "aliases.json" => DataFile::Aliases,
+            "status_definitions.json" => DataFile::StatusDefinitions,
+            "apps.json" => DataFile::Apps,
             other => DataFile::Unknown(other.to_string()),
         }
     }

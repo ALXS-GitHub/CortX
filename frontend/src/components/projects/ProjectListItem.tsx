@@ -2,6 +2,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useAppStore } from '@/stores/appStore';
 import type { Project } from '@/types';
 import { Play, FolderOpen, MoreVertical, Circle, Code } from 'lucide-react';
@@ -66,7 +67,10 @@ export function ProjectListItem({ project, onEdit, onDelete }: ProjectCardProps)
         <div className="flex items-center gap-4">
           {/* Left: name + description */}
           <div className="flex-shrink-0 w-56 min-w-0">
-            <h3 className="font-medium truncate">{project.name}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-medium truncate">{project.name}</h3>
+              <StatusBadge status={project.status} />
+            </div>
             {project.description && (
               <p className="text-sm text-muted-foreground line-clamp-1">
                 {project.description}

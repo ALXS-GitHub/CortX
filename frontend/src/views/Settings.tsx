@@ -13,9 +13,10 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags, Copy, Check, TerminalSquare, ChevronDown, ChevronUp } from 'lucide-react';
+import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags, Copy, Check, TerminalSquare, ChevronDown, ChevronUp, CircleDot } from 'lucide-react';
 import { toast } from 'sonner';
 import { TagDefinitionManager } from '@/components/global-scripts/TagDefinitionManager';
+import { StatusDefinitionManager } from '@/components/settings/StatusDefinitionManager';
 import { generateShellInit } from '@/lib/tauri';
 import type { AppSettings, TerminalPreset } from '@/types';
 
@@ -83,6 +84,7 @@ export function Settings() {
   const platform = getPlatform();
 
   const [showTagManager, setShowTagManager] = useState(false);
+  const [showStatusManager, setShowStatusManager] = useState(false);
   const [terminalPreset, setTerminalPreset] = useState<TerminalPreset>('windowsterminal');
   const [customPath, setCustomPath] = useState('');
   const [customArgs, setCustomArgs] = useState('');
@@ -161,7 +163,7 @@ export function Settings() {
         const { readTextFile } = await import('@tauri-apps/plugin-fs');
         const json = await readTextFile(selected);
         const result = await importScriptsConfig(json);
-        toast.success(`Imported: ${result.scriptsAdded} scripts, ${result.groupsAdded} groups, ${result.toolsAdded} tools, ${result.aliasesAdded} aliases, ${result.tagDefinitionsAdded} tags`);
+        toast.success(`Imported: ${result.scriptsAdded} scripts, ${result.groupsAdded} groups, ${result.toolsAdded} tools, ${result.aliasesAdded} aliases, ${result.appsAdded} apps, ${result.tagDefinitionsAdded} tags, ${result.statusDefinitionsAdded} statuses`);
       }
     } catch (error) {
       toast.error(`Failed to import: ${error}`);
@@ -376,6 +378,22 @@ export function Settings() {
         </CardContent>
       </Card>
 
+      {/* Statuses */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Statuses</CardTitle>
+          <CardDescription>
+            Manage status definitions shared across tools, scripts, projects, apps, and aliases. Statuses can have custom colors and display order.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={() => setShowStatusManager(true)}>
+            <CircleDot className="size-4 mr-2" />
+            Manage Statuses
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Shell Aliases Init */}
       <ShellSetupCard />
 
@@ -572,6 +590,12 @@ export function Settings() {
         open={showTagManager}
         onOpenChange={setShowTagManager}
       />
+
+      {/* Status Definition Manager Dialog */}
+      <StatusDefinitionManager
+        open={showStatusManager}
+        onOpenChange={setShowStatusManager}
+      />
     </div>
   );
 }
@@ -584,7 +608,7 @@ const SHELL_INIT_LINES: { shell: string; label: string; profileLine: string; pro
   {
     shell: 'powershell',
     label: 'PowerShell',
-    profileLine: 'Invoke-Expression (& cortx init powershell)',
+    profileLine: 'cortx init powershell | Out-String | Invoke-Expression',
     profileFile: '$PROFILE',
   },
   {

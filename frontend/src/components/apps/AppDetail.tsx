@@ -2,82 +2,92 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { StatusBadge } from '@/components/ui/StatusBadge';
 import {
-  ArrowLeft,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  ChevronLeft,
   Pencil,
-  Wrench,
+  AppWindow,
   FolderOpen,
-  Tag,
   ExternalLink,
   FileText,
   Globe,
   StickyNote,
-  Package,
-  MapPin,
-  Code,
+  Rocket,
+  Play,
+  Trash2,
+  Tag,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
-import { ToolForm } from './ToolForm';
+import { AppForm } from './AppForm';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { StatusBadge } from '@/components/ui/StatusBadge';
 import { toast } from 'sonner';
-import { openToolConfig, openToolLocation, openToolLocationVscode, openToolUrl, openInExplorer } from '@/lib/tauri';
-import type { UpdateToolInput } from '@/types';
+import { launchApp as launchAppApi, openAppConfig, openAppUrl, openInExplorer } from '@/lib/tauri';
+import type { UpdateAppInput } from '@/types';
 
-export function ToolDetail() {
+export function AppDetail() {
   const {
-    tools,
+    apps,
     tagDefinitions,
-    statusDefinitions,
     settings,
-    selectedToolId,
+    selectedAppId,
     setCurrentView,
-    updateTool,
-    selectTool,
+    updateAppItem,
+    deleteApp,
+    selectApp,
   } = useAppStore();
 
   const [showEditForm, setShowEditForm] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  const tool = useMemo(
-    () => tools.find((t) => t.id === selectedToolId),
-    [tools, selectedToolId]
+  const app = useMemo(
+    () => apps.find((a) => a.id === selectedAppId),
+    [apps, selectedAppId]
   );
 
-  const replacementTool = useMemo(
-    () => (tool?.replacedBy ? tools.find((t) => t.id === tool.replacedBy) : undefined),
-    [tool, tools]
-  );
+  const handleUpdate = async (data: UpdateAppInput) => {
+    if (!app) return;
+    await updateAppItem(app.id, data);
+    toast.success('App updated');
+  };
 
-  const handleUpdate = async (data: UpdateToolInput) => {
-    if (!tool) return;
-    await updateTool(tool.id, data);
-    toast.success('Tool updated');
+  const handleDelete = async () => {
+    if (!app) return;
+    try {
+      await deleteApp(app.id);
+      toast.success('App deleted');
+      setCurrentView('apps');
+    } catch (e) {
+      toast.error('Failed to delete app', { description: String(e) });
+    }
+    setShowDeleteDialog(false);
+  };
+
+  const handleLaunch = async () => {
+    if (!app) return;
+    try {
+      await launchAppApi(app.id);
+      toast.success(`Launched ${app.name}`);
+    } catch (e) {
+      toast.error('Failed to launch app', { description: String(e) });
+    }
   };
 
   const handleOpenConfig = async (index: number) => {
-    if (!tool) return;
+    if (!app) return;
     try {
-      await openToolConfig(tool.id, index);
+      await openAppConfig(app.id, index);
     } catch (e) {
       toast.error('Failed to open config', { description: String(e) });
-    }
-  };
-
-  const handleOpenLocation = async () => {
-    if (!tool) return;
-    try {
-      await openToolLocation(tool.id);
-    } catch (e) {
-      toast.error('Failed to open location', { description: String(e) });
-    }
-  };
-
-  const handleOpenLocationVscode = async () => {
-    if (!tool) return;
-    try {
-      await openToolLocationVscode(tool.id);
-    } catch (e) {
-      toast.error('Failed to open in VSCode', { description: String(e) });
     }
   };
 
@@ -91,20 +101,20 @@ export function ToolDetail() {
 
   const handleOpenUrl = async (url: string) => {
     try {
-      await openToolUrl(url);
+      await openAppUrl(url);
     } catch (e) {
       toast.error('Failed to open URL', { description: String(e) });
     }
   };
 
-  if (!tool) {
+  if (!app) {
     return (
       <div className="p-6">
-        <Button variant="ghost" onClick={() => setCurrentView('tools')}>
-          <ArrowLeft className="size-4 mr-2" />
-          Back to Tools
+        <Button variant="ghost" onClick={() => setCurrentView('apps')}>
+          <ChevronLeft className="size-4 mr-2" />
+          Back to Apps
         </Button>
-        <p className="text-muted-foreground mt-4">Tool not found.</p>
+        <p className="text-muted-foreground mt-4">App not found.</p>
       </div>
     );
   }
@@ -113,18 +123,18 @@ export function ToolDetail() {
     <div className="p-6 space-y-6">
       {/* Back + Header */}
       <div>
-        <Button variant="ghost" size="sm" onClick={() => setCurrentView('tools')} className="mb-4">
-          <ArrowLeft className="size-4 mr-2" />
-          Back to Tools
+        <Button variant="ghost" size="sm" onClick={() => setCurrentView('apps')} className="mb-4">
+          <ChevronLeft className="size-4 mr-2" />
+          Back to Apps
         </Button>
 
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <Wrench className="size-8" style={{ color: tool.color || '#6b7280' }} />
+            <AppWindow className="size-8" style={{ color: app.color || '#6b7280' }} />
             <div>
-              <h1 className="text-2xl font-bold">{tool.name}</h1>
-              {tool.description && (
-                <p className="text-sm text-muted-foreground mt-0.5">{tool.description}</p>
+              <h1 className="text-2xl font-bold">{app.name}</h1>
+              {app.description && (
+                <p className="text-sm text-muted-foreground mt-0.5">{app.description}</p>
               )}
             </div>
           </div>
@@ -135,114 +145,105 @@ export function ToolDetail() {
         </div>
       </div>
 
+      {/* Launch Card */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <Play className="size-4" />
+            Launch
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button onClick={handleLaunch} className="w-full" size="lg">
+            <Rocket className="size-5 mr-2" />
+            Launch {app.name}
+          </Button>
+          {app.executablePath && (
+            <div className="text-sm">
+              <span className="text-muted-foreground">Executable:</span>
+              <code className="ml-2 px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{app.executablePath}</code>
+            </div>
+          )}
+          {app.launchArgs && (
+            <div className="text-sm">
+              <span className="text-muted-foreground">Arguments:</span>
+              <code className="ml-2 px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{app.launchArgs}</code>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Info Card */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Package className="size-4" />
+            <AppWindow className="size-4" />
             Information
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground">Status:</span>
-            <StatusBadge status={tool.status} />
+            <StatusBadge status={app.status} />
           </div>
 
-          {tool.version && (
+          {app.version && (
             <div>
               <span className="text-muted-foreground">Version:</span>
-              <code className="ml-2 px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{tool.version}</code>
+              <code className="ml-2 px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{app.version}</code>
             </div>
           )}
 
-          {tool.installMethod && (
-            <div>
-              <span className="text-muted-foreground">Install method:</span>
-              <code className="ml-2 px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{tool.installMethod}</code>
-            </div>
-          )}
-
-          {tool.installLocation && (
-            <div className="flex items-center gap-2">
-              <MapPin className="size-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Location:</span>
-              <span className="font-mono text-xs truncate">{tool.installLocation}</span>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleOpenLocationVscode}>
-                <Code className="size-3 mr-1" />
-                VSCode
-              </Button>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleOpenLocation}>
-                <FolderOpen className="size-3 mr-1" />
-                Explorer
-              </Button>
-            </div>
-          )}
-
-          {tool.homepage && (
+          {app.homepage && (
             <div className="flex items-center gap-2">
               <Globe className="size-3.5 text-muted-foreground" />
               <span className="text-muted-foreground">Homepage:</span>
-              <span className="text-xs truncate">{tool.homepage}</span>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => handleOpenUrl(tool.homepage!)}>
+              <span className="text-xs truncate">{app.homepage}</span>
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => handleOpenUrl(app.homepage!)}>
                 <ExternalLink className="size-3 mr-1" />
                 Open
               </Button>
             </div>
           )}
 
-          {tool.toolboxUrl && (
+          {app.toolboxUrl && (
             <div className="flex items-center gap-2">
               <Globe className="size-3.5 text-muted-foreground" />
               <span className="text-muted-foreground">Toolbox:</span>
-              <span className="text-xs truncate">{resolveToolboxUrl(tool.toolboxUrl)}</span>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => handleOpenUrl(resolveToolboxUrl(tool.toolboxUrl!))}>
+              <span className="text-xs truncate">{resolveToolboxUrl(app.toolboxUrl)}</span>
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => handleOpenUrl(resolveToolboxUrl(app.toolboxUrl!))}>
                 <ExternalLink className="size-3 mr-1" />
                 Open
               </Button>
             </div>
           )}
 
-          {tool.tags.length > 0 && (
+          {app.tags.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
               <Tag className="size-3.5 text-muted-foreground" />
-              {tool.tags.map((tag) => (
+              {app.tags.map((tag) => (
                 <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
               ))}
-            </div>
-          )}
-
-          {replacementTool && (
-            <div className="flex items-center gap-2 mt-2 pt-2 border-t">
-              <span className="text-muted-foreground">Replaced by:</span>
-              <Button
-                variant="link"
-                size="sm"
-                className="h-auto p-0 text-sm"
-                onClick={() => selectTool(replacementTool.id)}
-              >
-                {replacementTool.name}
-              </Button>
             </div>
           )}
         </CardContent>
       </Card>
 
       {/* Configs Card */}
-      {tool.configPaths.length > 0 && (
+      {app.configPaths.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <FileText className="size-4" />
               Configuration Paths
               <Badge variant="secondary" className="ml-1.5 text-xs px-1.5 py-0">
-                {tool.configPaths.length}
+                {app.configPaths.length}
               </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {tool.configPaths.map((config, index) => (
+              {app.configPaths.map((config, index) => (
                 <div key={index} className="flex items-center justify-between p-2 rounded-md border">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -285,7 +286,7 @@ export function ToolDetail() {
       )}
 
       {/* Notes Card */}
-      {tool.notes && (
+      {app.notes && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -294,21 +295,53 @@ export function ToolDetail() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm whitespace-pre-wrap">{tool.notes}</p>
+            <p className="text-sm whitespace-pre-wrap">{app.notes}</p>
           </CardContent>
         </Card>
       )}
 
+      {/* Delete Section */}
+      <div className="border-t pt-6">
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => setShowDeleteDialog(true)}
+        >
+          <Trash2 className="size-4 mr-2" />
+          Delete App
+        </Button>
+      </div>
+
       {/* Edit Form */}
-      <ToolForm
+      <AppForm
         open={showEditForm}
         onOpenChange={setShowEditForm}
-        tool={tool}
-        tools={tools}
+        app={app}
+        apps={apps}
         tagDefinitions={tagDefinitions}
-        statusDefinitions={statusDefinitions}
         onSubmit={handleUpdate}
       />
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete App</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{app.name}"? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

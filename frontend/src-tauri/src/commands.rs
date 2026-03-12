@@ -1,12 +1,13 @@
 use crate::models::{
-    AddEnvFileInput, AppSettings, CreateGlobalScriptInput,
+    AddEnvFileInput, App, AppSettings, CreateAppInput, CreateGlobalScriptInput,
     CreateProjectInput, CreateScriptGroupInput, CreateScriptInput, CreateServiceInput,
-    CreateShellAliasInput, CreateToolInput, CreateTagDefinitionInput, DiscoverEnvFilesInput,
-    DiscoveredTool, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
+    CreateShellAliasInput, CreateStatusDefinitionInput, CreateToolInput, CreateTagDefinitionInput,
+    DiscoverEnvFilesInput, DiscoveredTool, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
     DiscoveredScript, ExecutionRecord, GlobalScript, ImportResult, LinkEnvToServiceInput, Project, Script,
-    ScriptGroup, ScriptParameter, ScriptsConfig, Service, ShellAlias, TagDefinition, Tool,
-    UpdateTagDefinitionInput, UpdateGlobalScriptInput, UpdateProjectInput, UpdateScriptGroupInput,
-    UpdateScriptInput, UpdateServiceInput, UpdateShellAliasInput, UpdateToolInput,
+    ScriptGroup, ScriptParameter, ScriptsConfig, Service, ShellAlias, StatusDefinition, TagDefinition, Tool,
+    UpdateAppInput, UpdateTagDefinitionInput, UpdateGlobalScriptInput, UpdateProjectInput,
+    UpdateScriptGroupInput, UpdateScriptInput, UpdateServiceInput, UpdateShellAliasInput,
+    UpdateStatusDefinitionInput, UpdateToolInput,
 };
 use crate::process_manager::{ProcessEventEmitter, ProcessManager};
 use crate::storage::Storage;
@@ -49,6 +50,8 @@ pub fn create_project(state: State<AppState>, input: CreateProjectInput) -> Resu
     project.description = input.description;
     project.image_path = input.image_path;
     project.tags = input.tags;
+    project.status = input.status;
+    project.toolbox_url = input.toolbox_url;
 
     state
         .storage
@@ -86,6 +89,12 @@ pub fn update_project(
             }
             if let Some(tags) = input.tags {
                 project.tags = tags;
+            }
+            if input.status.is_some() {
+                project.status = input.status;
+            }
+            if input.toolbox_url.is_some() {
+                project.toolbox_url = input.toolbox_url;
             }
         })
         .map_err(|e| e.to_string())
@@ -1369,6 +1378,7 @@ pub fn create_global_script(
     script.parameters = input.parameters.unwrap_or_default();
     script.parameter_presets = input.parameter_presets.unwrap_or_default();
     script.env_vars = input.env_vars;
+    script.status = input.status;
 
     // Set order to be last
     let all = state.storage.get_all_global_scripts();
@@ -1421,6 +1431,9 @@ pub fn update_global_script(
             }
             if input.env_vars.is_some() {
                 script.env_vars = input.env_vars;
+            }
+            if input.status.is_some() {
+                script.status = input.status;
             }
         })
         .map_err(|e| e.to_string())
@@ -2055,6 +2068,7 @@ pub fn create_alias(state: State<AppState>, input: CreateShellAliasInput) -> Res
     if let Some(tags) = input.tags {
         alias.tags = tags;
     }
+    alias.status = input.status;
     let count = state.storage.get_all_aliases().len() as u32;
     alias.order = count;
 
@@ -2080,6 +2094,9 @@ pub fn update_alias(state: State<AppState>, id: String, input: UpdateShellAliasI
         if let Some(tags) = input.tags {
             alias.tags = tags;
         }
+        if input.status.is_some() {
+            alias.status = input.status;
+        }
     }).map_err(|e| e.to_string())
 }
 
@@ -2104,4 +2121,222 @@ pub fn generate_shell_init(state: State<AppState>, shell: String) -> Result<Stri
         .ok_or_else(|| format!("Unknown shell: {}. Supported: powershell, bash, zsh, fish", shell))?;
     let aliases = state.storage.get_all_aliases();
     Ok(cortx_core::shell_init::generate_init_script(&shell_type, &aliases))
+}
+
+// ============================================================================
+// Status Definition commands
+// ============================================================================
+
+#[tauri::command]
+pub fn get_all_status_definitions(state: State<AppState>) -> Result<Vec<StatusDefinition>, String> {
+    Ok(state.storage.get_all_status_definitions())
+}
+
+#[tauri::command]
+pub fn create_status_definition(
+    state: State<AppState>,
+    input: CreateStatusDefinitionInput,
+) -> Result<StatusDefinition, String> {
+    let def = StatusDefinition {
+        name: input.name,
+        color: input.color,
+        order: input.order,
+    };
+    state
+        .storage
+        .create_status_definition(def)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_status_definition(
+    state: State<AppState>,
+    name: String,
+    input: UpdateStatusDefinitionInput,
+) -> Result<StatusDefinition, String> {
+    state
+        .storage
+        .update_status_definition(&name, |def| {
+            if let Some(new_name) = input.name {
+                def.name = new_name;
+            }
+            if input.color.is_some() {
+                def.color = input.color;
+            }
+            if input.order.is_some() {
+                def.order = input.order;
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_status_definition(state: State<AppState>, name: String) -> Result<(), String> {
+    state
+        .storage
+        .delete_status_definition(&name)
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// App commands
+// ============================================================================
+
+#[tauri::command]
+pub fn get_all_apps(state: State<AppState>) -> Result<Vec<App>, String> {
+    Ok(state.storage.get_all_apps())
+}
+
+#[tauri::command]
+pub fn get_app(state: State<AppState>, id: String) -> Result<App, String> {
+    state
+        .storage
+        .get_app(&id)
+        .ok_or_else(|| format!("App not found: {}", id))
+}
+
+#[tauri::command]
+pub fn create_app(state: State<AppState>, input: CreateAppInput) -> Result<App, String> {
+    let mut app = App::new(input.name);
+    app.description = input.description;
+    app.tags = input.tags.unwrap_or_default();
+    app.status = input.status;
+    app.version = input.version;
+    app.homepage = input.homepage;
+    app.executable_path = input.executable_path;
+    app.launch_args = input.launch_args;
+    app.config_paths = input.config_paths.unwrap_or_default();
+    app.toolbox_url = input.toolbox_url;
+    app.notes = input.notes;
+    app.color = input.color;
+
+    let count = state.storage.get_all_apps().len() as u32;
+    app.order = count;
+
+    state.storage.create_app(app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_app(
+    state: State<AppState>,
+    id: String,
+    input: UpdateAppInput,
+) -> Result<App, String> {
+    state
+        .storage
+        .update_app(&id, |app| {
+            if let Some(name) = input.name {
+                app.name = name;
+            }
+            if input.description.is_some() {
+                app.description = input.description;
+            }
+            if let Some(tags) = input.tags {
+                app.tags = tags;
+            }
+            if input.status.is_some() {
+                app.status = input.status;
+            }
+            if input.version.is_some() {
+                app.version = input.version;
+            }
+            if input.homepage.is_some() {
+                app.homepage = input.homepage;
+            }
+            if input.executable_path.is_some() {
+                app.executable_path = input.executable_path;
+            }
+            if input.launch_args.is_some() {
+                app.launch_args = input.launch_args;
+            }
+            if let Some(config_paths) = input.config_paths {
+                app.config_paths = config_paths;
+            }
+            if input.toolbox_url.is_some() {
+                app.toolbox_url = input.toolbox_url;
+            }
+            if input.notes.is_some() {
+                app.notes = input.notes;
+            }
+            if input.color.is_some() {
+                app.color = input.color;
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_app(state: State<AppState>, id: String) -> Result<(), String> {
+    state.storage.delete_app(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reorder_apps(state: State<AppState>, app_ids: Vec<String>) -> Result<(), String> {
+    for (i, id) in app_ids.iter().enumerate() {
+        state
+            .storage
+            .update_app(id, |app| {
+                app.order = i as u32;
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn launch_app(state: State<AppState>, app_id: String) -> Result<(), String> {
+    let app = state
+        .storage
+        .get_app(&app_id)
+        .ok_or_else(|| format!("App not found: {}", app_id))?;
+
+    let path = app
+        .executable_path
+        .ok_or_else(|| "No executable path set".to_string())?;
+
+    let mut cmd = std::process::Command::new("cmd");
+    cmd.args(["/C", "start", "", &path]);
+    if let Some(ref args) = app.launch_args {
+        for arg in args.split_whitespace() {
+            cmd.arg(arg);
+        }
+    }
+    cmd.spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_app_config(state: State<AppState>, app_id: String, config_index: usize) -> Result<(), String> {
+    let app = state
+        .storage
+        .get_app(&app_id)
+        .ok_or_else(|| format!("App not found: {}", app_id))?;
+
+    let config = app
+        .config_paths
+        .get(config_index)
+        .ok_or_else(|| "Config path not found".to_string())?;
+
+    let path = &config.path;
+    if config.is_directory {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    } else {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_app_url(url: String) -> Result<(), String> {
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", &url])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }

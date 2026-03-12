@@ -13,7 +13,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { X } from 'lucide-react';
 import { TagBadge } from '@/components/ui/TagBadge';
-import type { ShellAlias, TagDefinition, CreateShellAliasInput, UpdateShellAliasInput } from '@/types';
+import { ComboboxInput } from '@/components/ui/combobox-input';
+import type { ShellAlias, TagDefinition, StatusDefinition, CreateShellAliasInput, UpdateShellAliasInput } from '@/types';
 
 // Valid alias name: alphanumeric, hyphens, underscores, dots
 const ALIAS_NAME_REGEX = /^[a-zA-Z_][a-zA-Z0-9_\-\.]*$/;
@@ -24,13 +25,15 @@ interface AliasFormProps {
   alias?: ShellAlias;
   aliases: ShellAlias[];
   tagDefinitions: TagDefinition[];
+  statusDefinitions: StatusDefinition[];
   onSubmit: (data: CreateShellAliasInput | UpdateShellAliasInput) => Promise<void>;
 }
 
-export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, onSubmit }: AliasFormProps) {
+export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, statusDefinitions, onSubmit }: AliasFormProps) {
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
   const [description, setDescription] = useState('');
+  const [status, setStatus] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
@@ -65,12 +68,14 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
         setName(alias.name);
         setCommand(alias.command);
         setDescription(alias.description || '');
+        setStatus(alias.status || '');
         setTags([...alias.tags]);
         setTagInput('');
       } else {
         setName('');
         setCommand('');
         setDescription('');
+        setStatus('');
         setTags([]);
         setTagInput('');
       }
@@ -157,6 +162,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
         command: command.trim(),
         description: description.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
+        status: status.trim() || undefined,
       };
       await onSubmit(data);
       onOpenChange(false);
@@ -218,6 +224,17 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="What does this alias do?"
                 rows={2}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="alias-status">Status</Label>
+              <ComboboxInput
+                id="alias-status"
+                value={status}
+                onChange={setStatus}
+                options={statusDefinitions.map((d) => d.name)}
+                placeholder="e.g., Active, Archived"
               />
             </div>
 

@@ -1,4 +1,4 @@
-use cortx_core::models::{GlobalScript, Tool, TagDefinition, ScriptGroup, ScriptStatus, ScriptParamType, LogStream, ShellAlias};
+use cortx_core::models::{GlobalScript, Tool, TagDefinition, ScriptGroup, ScriptStatus, ScriptParamType, LogStream, ShellAlias, App as CoreApp, StatusDefinition, Project};
 use cortx_core::process_manager::ProcessManager;
 use cortx_core::storage::Storage;
 use std::collections::HashMap;
@@ -32,6 +32,8 @@ pub enum ActiveTab {
     Scripts,
     Tools,
     Aliases,
+    Apps,
+    Projects,
 }
 
 /// A log line for display
@@ -300,6 +302,19 @@ pub struct App {
     pub aliases_selected_index: usize,
     pub aliases_search_query: String,
 
+    // Apps state
+    pub apps: Vec<CoreApp>,
+    pub apps_filtered_indices: Vec<usize>,
+    pub apps_selected_index: usize,
+    pub apps_search_query: String,
+    pub status_definitions: Vec<StatusDefinition>,
+
+    // Projects state
+    pub projects: Vec<Project>,
+    pub projects_filtered_indices: Vec<usize>,
+    pub projects_selected_index: usize,
+    pub projects_search_query: String,
+
     // Tag filter
     pub active_tag_filter: Option<String>,
     pub tag_filter_index: usize,
@@ -312,16 +327,23 @@ impl App {
         let groups = storage.get_all_script_groups();
         let mut tools = storage.get_all_tools();
         let mut aliases = storage.get_all_aliases();
+        let mut apps = storage.get_all_apps();
+        let status_definitions = storage.get_all_status_definitions();
+        let mut projects = storage.get_all_projects();
 
-        // Sort scripts, tools, and aliases by primary tag (tag definition order, then alphabetically)
+        // Sort scripts, tools, aliases, apps, projects by primary tag (tag definition order, then alphabetically)
         Self::sort_by_primary_tag(&mut scripts, &tag_definitions);
         Self::sort_tools_by_primary_tag(&mut tools, &tag_definitions);
         Self::sort_aliases_by_primary_tag(&mut aliases, &tag_definitions);
+        Self::sort_apps_by_primary_tag(&mut apps, &tag_definitions);
+        Self::sort_projects_by_primary_tag(&mut projects, &tag_definitions);
 
         let script_count = scripts.len();
         let filtered_indices: Vec<usize> = (0..script_count).collect();
         let tools_filtered_indices: Vec<usize> = (0..tools.len()).collect();
         let aliases_filtered_indices: Vec<usize> = (0..aliases.len()).collect();
+        let apps_filtered_indices: Vec<usize> = (0..apps.len()).collect();
+        let projects_filtered_indices: Vec<usize> = (0..projects.len()).collect();
 
         Self {
             storage,
@@ -341,7 +363,7 @@ impl App {
             filtered_indices,
             active_script_id: None,
             param_form: None,
-            active_tab: ActiveTab::Scripts,
+            active_tab: ActiveTab::Projects,
             tools,
             tools_filtered_indices,
             tools_selected_index: 0,
@@ -350,6 +372,15 @@ impl App {
             aliases_filtered_indices,
             aliases_selected_index: 0,
             aliases_search_query: String::new(),
+            apps,
+            apps_filtered_indices,
+            apps_selected_index: 0,
+            apps_search_query: String::new(),
+            status_definitions,
+            projects,
+            projects_filtered_indices,
+            projects_selected_index: 0,
+            projects_search_query: String::new(),
             active_tag_filter: None,
             tag_filter_index: 0,
         }
@@ -363,15 +394,22 @@ impl App {
         self.groups = self.storage.get_all_script_groups();
         self.tools = self.storage.get_all_tools();
         self.aliases = self.storage.get_all_aliases();
+        self.apps = self.storage.get_all_apps();
+        self.status_definitions = self.storage.get_all_status_definitions();
+        self.projects = self.storage.get_all_projects();
 
         Self::sort_by_primary_tag(&mut self.scripts, &self.tag_definitions);
         Self::sort_tools_by_primary_tag(&mut self.tools, &self.tag_definitions);
         Self::sort_aliases_by_primary_tag(&mut self.aliases, &self.tag_definitions);
+        Self::sort_apps_by_primary_tag(&mut self.apps, &self.tag_definitions);
+        Self::sort_projects_by_primary_tag(&mut self.projects, &self.tag_definitions);
 
         // Re-apply existing filters (preserves search query + tag filter)
         self.apply_filter();
         self.apply_tools_filter();
         self.apply_aliases_filter();
+        self.apply_apps_filter();
+        self.apply_projects_filter();
 
         // Clamp selection indices to new bounds
         if self.selected_index >= self.filtered_indices.len() && !self.filtered_indices.is_empty() {
@@ -386,6 +424,16 @@ impl App {
             && !self.aliases_filtered_indices.is_empty()
         {
             self.aliases_selected_index = self.aliases_filtered_indices.len() - 1;
+        }
+        if self.apps_selected_index >= self.apps_filtered_indices.len()
+            && !self.apps_filtered_indices.is_empty()
+        {
+            self.apps_selected_index = self.apps_filtered_indices.len() - 1;
+        }
+        if self.projects_selected_index >= self.projects_filtered_indices.len()
+            && !self.projects_filtered_indices.is_empty()
+        {
+            self.projects_selected_index = self.projects_filtered_indices.len() - 1;
         }
     }
 
@@ -470,6 +518,278 @@ impl App {
         if changed {
             self.apply_filter();
             self.apply_tools_filter();
+        }
+    }
+
+    // === Apps methods ===
+
+    pub fn selected_app(&self) -> Option<&CoreApp> {
+        self.apps_filtered_indices
+            .get(self.apps_selected_index)
+            .and_then(|&idx| self.apps.get(idx))
+    }
+
+    pub fn apps_move_up(&mut self) {
+        if self.apps_selected_index > 0 {
+            self.apps_selected_index -= 1;
+        }
+    }
+
+    pub fn apps_move_down(&mut self) {
+        if !self.apps_filtered_indices.is_empty()
+            && self.apps_selected_index < self.apps_filtered_indices.len() - 1
+        {
+            self.apps_selected_index += 1;
+        }
+    }
+
+    pub fn apps_move_top(&mut self) {
+        self.apps_selected_index = 0;
+    }
+
+    pub fn apps_move_bottom(&mut self) {
+        if !self.apps_filtered_indices.is_empty() {
+            self.apps_selected_index = self.apps_filtered_indices.len() - 1;
+        }
+    }
+
+    pub fn reload_apps(&mut self) {
+        self.apps = self.storage.get_all_apps();
+        self.status_definitions = self.storage.get_all_status_definitions();
+        Self::sort_apps_by_primary_tag(&mut self.apps, &self.tag_definitions);
+        self.apps_search_query.clear();
+        self.active_tag_filter = None;
+        self.apply_apps_filter();
+    }
+
+    pub fn enter_apps_search(&mut self) {
+        self.input_mode = InputMode::Search;
+        self.apps_search_query.clear();
+    }
+
+    pub fn exit_apps_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.apps_search_query.clear();
+        self.apply_apps_filter();
+    }
+
+    pub fn confirm_apps_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
+    pub fn apps_search_input(&mut self, c: char) {
+        self.apps_search_query.push(c);
+        self.apply_apps_filter();
+    }
+
+    pub fn apps_search_backspace(&mut self) {
+        self.apps_search_query.pop();
+        self.apply_apps_filter();
+    }
+
+    pub fn clear_apps_filter(&mut self) {
+        let changed = !self.apps_search_query.is_empty() || self.active_tag_filter.is_some();
+        self.apps_search_query.clear();
+        self.active_tag_filter = None;
+        if changed {
+            self.apply_apps_filter();
+            self.apply_filter();
+        }
+    }
+
+    fn apply_apps_filter(&mut self) {
+        let q = self.apps_search_query.to_lowercase();
+        self.apps_filtered_indices = self
+            .apps
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| {
+                // Tag filter (from `t` key)
+                if let Some(ref tag) = self.active_tag_filter {
+                    if !a.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                        return false;
+                    }
+                }
+                // Search filter (name, description)
+                if !q.is_empty() {
+                    return a.name.to_lowercase().contains(&q)
+                        || a.description.as_deref().unwrap_or("").to_lowercase().contains(&q);
+                }
+                true
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if self.apps_filtered_indices.is_empty() {
+            self.apps_selected_index = 0;
+        } else if self.apps_selected_index >= self.apps_filtered_indices.len() {
+            self.apps_selected_index = self.apps_filtered_indices.len() - 1;
+        }
+    }
+
+    /// Sort apps by primary tag, same logic as scripts
+    fn sort_apps_by_primary_tag(apps: &mut [CoreApp], tag_defs: &[TagDefinition]) {
+        apps.sort_by(|a, b| {
+            let ta = a.tags.first().and_then(|t| {
+                let tl = t.to_lowercase();
+                tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+            });
+            let tb = b.tags.first().and_then(|t| {
+                let tl = t.to_lowercase();
+                tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+            });
+            let tag_ord = match (a.tags.first(), b.tags.first()) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(at), Some(bt)) => {
+                    let ao = ta.and_then(|d| d.order);
+                    let bo = tb.and_then(|d| d.order);
+                    match (ao, bo) {
+                        (Some(ao), Some(bo)) => ao.cmp(&bo),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                    .then_with(|| at.to_lowercase().cmp(&bt.to_lowercase()))
+                }
+            };
+            tag_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+    }
+
+    /// Sort projects by primary tag, same logic as scripts
+    fn sort_projects_by_primary_tag(projects: &mut [Project], tag_defs: &[TagDefinition]) {
+        projects.sort_by(|a, b| {
+            let ta = a.tags.first().and_then(|t| {
+                let tl = t.to_lowercase();
+                tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+            });
+            let tb = b.tags.first().and_then(|t| {
+                let tl = t.to_lowercase();
+                tag_defs.iter().find(|d| d.name.to_lowercase() == tl)
+            });
+            let tag_ord = match (a.tags.first(), b.tags.first()) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(at), Some(bt)) => {
+                    let ao = ta.and_then(|d| d.order);
+                    let bo = tb.and_then(|d| d.order);
+                    match (ao, bo) {
+                        (Some(ao), Some(bo)) => ao.cmp(&bo),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                    .then_with(|| at.to_lowercase().cmp(&bt.to_lowercase()))
+                }
+            };
+            tag_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+    }
+
+    // === Projects methods ===
+
+    pub fn selected_project(&self) -> Option<&Project> {
+        self.projects_filtered_indices
+            .get(self.projects_selected_index)
+            .and_then(|&idx| self.projects.get(idx))
+    }
+
+    pub fn projects_move_up(&mut self) {
+        if self.projects_selected_index > 0 {
+            self.projects_selected_index -= 1;
+        }
+    }
+
+    pub fn projects_move_down(&mut self) {
+        if !self.projects_filtered_indices.is_empty()
+            && self.projects_selected_index < self.projects_filtered_indices.len() - 1
+        {
+            self.projects_selected_index += 1;
+        }
+    }
+
+    pub fn projects_move_top(&mut self) {
+        self.projects_selected_index = 0;
+    }
+
+    pub fn projects_move_bottom(&mut self) {
+        if !self.projects_filtered_indices.is_empty() {
+            self.projects_selected_index = self.projects_filtered_indices.len() - 1;
+        }
+    }
+
+    pub fn reload_projects(&mut self) {
+        self.projects = self.storage.get_all_projects();
+        Self::sort_projects_by_primary_tag(&mut self.projects, &self.tag_definitions);
+        self.projects_search_query.clear();
+        self.active_tag_filter = None;
+        self.apply_projects_filter();
+    }
+
+    pub fn enter_projects_search(&mut self) {
+        self.input_mode = InputMode::Search;
+        self.projects_search_query.clear();
+    }
+
+    pub fn exit_projects_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.projects_search_query.clear();
+        self.apply_projects_filter();
+    }
+
+    pub fn confirm_projects_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
+    pub fn projects_search_input(&mut self, c: char) {
+        self.projects_search_query.push(c);
+        self.apply_projects_filter();
+    }
+
+    pub fn projects_search_backspace(&mut self) {
+        self.projects_search_query.pop();
+        self.apply_projects_filter();
+    }
+
+    pub fn clear_projects_filter(&mut self) {
+        let changed = !self.projects_search_query.is_empty() || self.active_tag_filter.is_some();
+        self.projects_search_query.clear();
+        self.active_tag_filter = None;
+        if changed {
+            self.apply_projects_filter();
+            self.apply_filter();
+        }
+    }
+
+    fn apply_projects_filter(&mut self) {
+        let q = self.projects_search_query.to_lowercase();
+        self.projects_filtered_indices = self
+            .projects
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| {
+                // Tag filter (from `t` key)
+                if let Some(ref tag) = self.active_tag_filter {
+                    if !p.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                        return false;
+                    }
+                }
+                // Search filter (name, description, root_path)
+                if !q.is_empty() {
+                    return p.name.to_lowercase().contains(&q)
+                        || p.description.as_deref().unwrap_or("").to_lowercase().contains(&q)
+                        || p.root_path.to_lowercase().contains(&q);
+                }
+                true
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if self.projects_filtered_indices.is_empty() {
+            self.projects_selected_index = 0;
+        } else if self.projects_selected_index >= self.projects_filtered_indices.len() {
+            self.projects_selected_index = self.projects_filtered_indices.len() - 1;
         }
     }
 
@@ -852,6 +1172,7 @@ impl App {
         self.apply_filter();
         self.apply_tools_filter();
         self.apply_aliases_filter();
+        self.apply_apps_filter();
     }
 
     pub fn tag_filter_move_up(&mut self) {

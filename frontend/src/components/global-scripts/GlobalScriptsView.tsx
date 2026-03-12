@@ -12,6 +12,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Plus, Search, ScanSearch, Check, Loader2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -37,6 +44,7 @@ export function GlobalScriptsView() {
   const {
     globalScripts,
     tagDefinitions,
+    statusDefinitions,
     globalScriptRuntimes,
     settings,
     createGlobalScript,
@@ -51,6 +59,7 @@ export function GlobalScriptsView() {
 
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [showScriptForm, setShowScriptForm] = useState(false);
   const [editingScript, setEditingScript] = useState<GlobalScript | undefined>(undefined);
   const [deletingScript, setDeletingScript] = useState<GlobalScript | null>(null);
@@ -79,6 +88,15 @@ export function GlobalScriptsView() {
     return globalScriptRuntimes.get(scriptId)?.status || 'idle';
   };
 
+  // Unique statuses from statusDefinitions + existing scripts
+  const allStatuses = useMemo(() => {
+    const set = new Set([
+      ...statusDefinitions.map((d) => d.name),
+      ...globalScripts.map((s) => s.status).filter(Boolean) as string[],
+    ]);
+    return Array.from(set);
+  }, [globalScripts, statusDefinitions]);
+
   const filteredScripts = useMemo(() => {
     let scripts = globalScripts;
 
@@ -87,6 +105,10 @@ export function GlobalScriptsView() {
       scripts = scripts.filter((s) =>
         s.tags.some((t) => selectedTags.has(t.toLowerCase()))
       );
+    }
+
+    if (selectedStatus) {
+      scripts = scripts.filter((s) => s.status === selectedStatus);
     }
 
     if (search.trim()) {
@@ -101,7 +123,7 @@ export function GlobalScriptsView() {
     }
 
     return scripts.slice().sort((a, b) => a.order - b.order);
-  }, [globalScripts, selectedTags, search]);
+  }, [globalScripts, selectedTags, selectedStatus, search]);
 
   const handleCreateScript = async (data: CreateGlobalScriptInput | UpdateGlobalScriptInput) => {
     await createGlobalScript(data as CreateGlobalScriptInput);
@@ -203,7 +225,6 @@ export function GlobalScriptsView() {
   };
 
   const scriptItemProps = (script: GlobalScript) => ({
-    key: script.id,
     script,
     status: getScriptStatus(script.id),
     onRun: () => handleRun(script),
@@ -218,20 +239,20 @@ export function GlobalScriptsView() {
     if (scriptsViewMode === 'card') {
       return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {scripts.map((script) => <GlobalScriptCardView {...scriptItemProps(script)} />)}
+          {scripts.map((script) => <GlobalScriptCardView key={script.id} {...scriptItemProps(script)} />)}
         </div>
       );
     }
     if (scriptsViewMode === 'compact') {
       return (
         <div className="space-y-1">
-          {scripts.map((script) => <GlobalScriptCompactItem {...scriptItemProps(script)} />)}
+          {scripts.map((script) => <GlobalScriptCompactItem key={script.id} {...scriptItemProps(script)} />)}
         </div>
       );
     }
     return (
       <div className="space-y-2">
-        {scripts.map((script) => <GlobalScriptCard {...scriptItemProps(script)} />)}
+        {scripts.map((script) => <GlobalScriptCard key={script.id} {...scriptItemProps(script)} />)}
       </div>
     );
   };
@@ -285,6 +306,22 @@ export function GlobalScriptsView() {
               className="pl-9"
             />
           </div>
+          {allStatuses.length > 0 && (
+            <Select
+              value={selectedStatus ?? '__all__'}
+              onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
+            >
+              <SelectTrigger size="sm" className="w-[140px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All statuses</SelectItem>
+                {allStatuses.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <ViewModeToggle value={scriptsViewMode} onChange={setScriptsViewMode} />
         </div>
 

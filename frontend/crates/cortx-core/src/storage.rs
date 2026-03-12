@@ -32,6 +32,10 @@ pub enum StorageError {
     ToolNotFound(String),
     #[error("Alias not found: {0}")]
     AliasNotFound(String),
+    #[error("Status definition not found: {0}")]
+    StatusDefinitionNotFound(String),
+    #[error("App not found: {0}")]
+    AppNotFound(String),
 }
 
 pub struct Storage {
@@ -44,6 +48,8 @@ pub struct Storage {
     execution_history: RwLock<Vec<ExecutionRecord>>,
     tools: RwLock<Vec<Tool>>,
     aliases: RwLock<Vec<ShellAlias>>,
+    status_definitions: RwLock<Vec<StatusDefinition>>,
+    apps: RwLock<Vec<App>>,
     suppress_watcher: AtomicBool,
 }
 
@@ -91,6 +97,8 @@ impl Storage {
             execution_history: RwLock::new(Vec::new()),
             tools: RwLock::new(Vec::new()),
             aliases: RwLock::new(Vec::new()),
+            status_definitions: RwLock::new(Vec::new()),
+            apps: RwLock::new(Vec::new()),
             suppress_watcher: AtomicBool::new(false),
         };
 
@@ -103,6 +111,8 @@ impl Storage {
         storage.load_execution_history()?;
         storage.load_tools()?;
         storage.load_aliases()?;
+        storage.load_status_definitions()?;
+        storage.load_apps()?;
 
         Ok(storage)
     }
@@ -161,6 +171,14 @@ impl Storage {
 
     fn aliases_path(&self) -> PathBuf {
         self.app_dir.join("aliases.json")
+    }
+
+    fn status_definitions_path(&self) -> PathBuf {
+        self.app_dir.join("status_definitions.json")
+    }
+
+    fn apps_path(&self) -> PathBuf {
+        self.app_dir.join("apps.json")
     }
 
     // ========================================================================
@@ -898,6 +916,182 @@ impl Storage {
     }
 
     // ========================================================================
+    // Status Definitions
+    // ========================================================================
+
+    fn load_status_definitions(&self) -> Result<(), StorageError> {
+        let path = self.status_definitions_path();
+        if path.exists() {
+            let defs: Vec<StatusDefinition> = read_json_locked(&path)?;
+            *self.status_definitions.write() = defs;
+        } else {
+            // Create default status definitions
+            let defaults = vec![
+                StatusDefinition {
+                    name: "Active".to_string(),
+                    color: Some("#22c55e".to_string()),
+                    order: Some(0),
+                },
+                StatusDefinition {
+                    name: "WIP".to_string(),
+                    color: Some("#eab308".to_string()),
+                    order: Some(1),
+                },
+                StatusDefinition {
+                    name: "Deprecated".to_string(),
+                    color: Some("#f97316".to_string()),
+                    order: Some(2),
+                },
+                StatusDefinition {
+                    name: "Archived".to_string(),
+                    color: Some("#6b7280".to_string()),
+                    order: Some(3),
+                },
+            ];
+            *self.status_definitions.write() = defaults;
+            self.save_status_definitions()?;
+        }
+        Ok(())
+    }
+
+    fn save_status_definitions(&self) -> Result<(), StorageError> {
+        self.set_suppress_watcher();
+        let result = write_json_locked(
+            &self.status_definitions_path(),
+            &*self.status_definitions.read(),
+        );
+        self.clear_suppress_watcher();
+        result
+    }
+
+    pub fn get_all_status_definitions(&self) -> Vec<StatusDefinition> {
+        self.status_definitions.read().clone()
+    }
+
+    pub fn create_status_definition(
+        &self,
+        def: StatusDefinition,
+    ) -> Result<StatusDefinition, StorageError> {
+        {
+            let mut defs = self.status_definitions.write();
+            let name_lower = def.name.to_lowercase();
+            if defs.iter().any(|d| d.name.to_lowercase() == name_lower) {
+                return Err(StorageError::Io(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("Status definition '{}' already exists", def.name),
+                )));
+            }
+            defs.push(def.clone());
+        }
+        self.save_status_definitions()?;
+        Ok(def)
+    }
+
+    pub fn update_status_definition(
+        &self,
+        name: &str,
+        updater: impl FnOnce(&mut StatusDefinition),
+    ) -> Result<StatusDefinition, StorageError> {
+        let def = {
+            let mut defs = self.status_definitions.write();
+            let name_lower = name.to_lowercase();
+            let def = defs
+                .iter_mut()
+                .find(|d| d.name.to_lowercase() == name_lower)
+                .ok_or_else(|| StorageError::StatusDefinitionNotFound(name.to_string()))?;
+
+            updater(def);
+            def.clone()
+        };
+        self.save_status_definitions()?;
+        Ok(def)
+    }
+
+    pub fn delete_status_definition(&self, name: &str) -> Result<(), StorageError> {
+        {
+            let mut defs = self.status_definitions.write();
+            let name_lower = name.to_lowercase();
+            let initial_len = defs.len();
+            defs.retain(|d| d.name.to_lowercase() != name_lower);
+            if defs.len() == initial_len {
+                return Err(StorageError::StatusDefinitionNotFound(name.to_string()));
+            }
+        }
+        self.save_status_definitions()?;
+        Ok(())
+    }
+
+    // ========================================================================
+    // Apps
+    // ========================================================================
+
+    fn load_apps(&self) -> Result<(), StorageError> {
+        let path = self.apps_path();
+        if path.exists() {
+            let apps: Vec<App> = read_json_locked(&path)?;
+            *self.apps.write() = apps;
+        }
+        Ok(())
+    }
+
+    fn save_apps(&self) -> Result<(), StorageError> {
+        self.set_suppress_watcher();
+        let result = write_json_locked(&self.apps_path(), &*self.apps.read());
+        self.clear_suppress_watcher();
+        result
+    }
+
+    pub fn get_all_apps(&self) -> Vec<App> {
+        self.apps.read().clone()
+    }
+
+    pub fn get_app(&self, id: &str) -> Option<App> {
+        self.apps.read().iter().find(|a| a.id == id).cloned()
+    }
+
+    pub fn create_app(&self, app: App) -> Result<App, StorageError> {
+        {
+            let mut apps = self.apps.write();
+            apps.push(app.clone());
+        }
+        self.save_apps()?;
+        Ok(app)
+    }
+
+    pub fn update_app(
+        &self,
+        id: &str,
+        updater: impl FnOnce(&mut App),
+    ) -> Result<App, StorageError> {
+        let app = {
+            let mut apps = self.apps.write();
+            let app = apps
+                .iter_mut()
+                .find(|a| a.id == id)
+                .ok_or_else(|| StorageError::AppNotFound(id.to_string()))?;
+
+            updater(app);
+            app.updated_at = chrono::Utc::now();
+            app.clone()
+        };
+        self.save_apps()?;
+        Ok(app)
+    }
+
+    pub fn delete_app(&self, id: &str) -> Result<(), StorageError> {
+        {
+            let mut apps = self.apps.write();
+            let initial_len = apps.len();
+            apps.retain(|a| a.id != id);
+            if apps.len() == initial_len {
+                return Err(StorageError::AppNotFound(id.to_string()));
+            }
+        }
+        self.save_apps()?;
+        Ok(())
+    }
+
+    // ========================================================================
     // Reload (for MCP concurrent access)
     // ========================================================================
 
@@ -913,6 +1107,8 @@ impl Storage {
         self.load_execution_history()?;
         self.load_tools()?;
         self.load_aliases()?;
+        self.load_status_definitions()?;
+        self.load_apps()?;
         Ok(())
     }
 
@@ -923,12 +1119,14 @@ impl Storage {
     /// Export all scripts, tag definitions, groups, and tools as a ScriptExport JSON string
     pub fn export_scripts_config(&self) -> Result<String, StorageError> {
         let export = ScriptExport {
-            version: "3.0".to_string(),
+            version: "4.0".to_string(),
             scripts: self.get_all_global_scripts(),
             groups: self.get_all_script_groups(),
             tools: self.get_all_tools(),
             tag_definitions: self.get_all_tag_definitions(),
             aliases: self.get_all_aliases(),
+            apps: self.get_all_apps(),
+            status_definitions: self.get_all_status_definitions(),
             exported_at: chrono::Utc::now(),
         };
         serde_json::to_string_pretty(&export).map_err(StorageError::Json)
@@ -1036,6 +1234,52 @@ impl Storage {
             self.save_aliases()?;
         }
 
+        // Import apps
+        let mut apps_added = 0u32;
+        let existing_apps = self.get_all_apps();
+        for app in import.apps {
+            if existing_apps.iter().any(|a| a.id == app.id) {
+                skipped += 1;
+                continue;
+            }
+            {
+                let mut apps = self.apps.write();
+                apps.push(app);
+            }
+            apps_added += 1;
+        }
+        if apps_added > 0 {
+            self.save_apps()?;
+        }
+
+        // Import status definitions
+        let mut status_definitions_added = 0u32;
+        let existing_status_defs = self.get_all_status_definitions();
+        for def in import.status_definitions {
+            if existing_status_defs
+                .iter()
+                .any(|d| d.name.to_lowercase() == def.name.to_lowercase())
+            {
+                skipped += 1;
+                continue;
+            }
+            {
+                let mut defs = self.status_definitions.write();
+                if defs
+                    .iter()
+                    .any(|d| d.name.to_lowercase() == def.name.to_lowercase())
+                {
+                    skipped += 1;
+                    continue;
+                }
+                defs.push(def);
+            }
+            status_definitions_added += 1;
+        }
+        if status_definitions_added > 0 {
+            self.save_status_definitions()?;
+        }
+
         Ok(ImportResult {
             scripts_added,
             groups_added,
@@ -1043,6 +1287,8 @@ impl Storage {
             tools_added,
             tag_definitions_added,
             aliases_added,
+            apps_added,
+            status_definitions_added,
         })
     }
 }

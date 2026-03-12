@@ -62,6 +62,8 @@ pub struct CreateGlobalScriptParams {
         description = "Environment variables injected at runtime (e.g. {\"NODE_ENV\": \"production\"})"
     )]
     pub env_vars: Option<HashMap<String, String>>,
+    #[schemars(description = "Status label (e.g. 'Active', 'WIP', 'Deprecated')")]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -86,6 +88,8 @@ pub struct UpdateGlobalScriptParams {
     pub default_preset_id: Option<String>,
     #[schemars(description = "Replace environment variables")]
     pub env_vars: Option<HashMap<String, String>>,
+    #[schemars(description = "New status label")]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -152,6 +156,10 @@ pub struct CreateProjectParams {
     pub image_path: Option<String>,
     #[schemars(description = "Tags for categorization")]
     pub tags: Option<Vec<String>>,
+    #[schemars(description = "Status label (e.g. 'Active', 'WIP', 'Deprecated')")]
+    pub status: Option<String>,
+    #[schemars(description = "Toolbox documentation page URL")]
+    pub toolbox_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -164,6 +172,10 @@ pub struct UpdateProjectParams {
     pub image_path: Option<String>,
     #[schemars(description = "Replace all tags")]
     pub tags: Option<Vec<String>>,
+    #[schemars(description = "New status label")]
+    pub status: Option<String>,
+    #[schemars(description = "New toolbox documentation URL")]
+    pub toolbox_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -560,6 +572,8 @@ pub struct CreateAliasParams {
     pub description: Option<String>,
     #[schemars(description = "Tags for categorization")]
     pub tags: Option<Vec<String>>,
+    #[schemars(description = "Status label (e.g. 'Active', 'WIP', 'Deprecated')")]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -574,10 +588,118 @@ pub struct UpdateAliasParams {
     pub description: Option<String>,
     #[schemars(description = "Replace all tags")]
     pub tags: Option<Vec<String>>,
+    #[schemars(description = "New status label")]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DeleteAliasParams {
     #[schemars(description = "Alias UUID to delete")]
+    pub id: String,
+}
+
+// ============================================================================
+// Status Definitions
+// ============================================================================
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateStatusDefinitionParams {
+    #[schemars(description = "Status name — must be unique (case-insensitive). E.g. 'Active', 'WIP', 'Deprecated'")]
+    pub name: String,
+    #[schemars(description = "Display color as hex string (e.g. '#22c55e')")]
+    pub color: Option<String>,
+    #[schemars(description = "Sort order — lower values appear first")]
+    pub order: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateStatusDefinitionParams {
+    #[schemars(description = "Current status name to look up")]
+    pub name: String,
+    #[schemars(description = "New status name (renames the status)")]
+    pub new_name: Option<String>,
+    #[schemars(description = "New display color as hex string")]
+    pub color: Option<String>,
+    #[schemars(description = "New sort order")]
+    pub order: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteStatusDefinitionParams {
+    #[schemars(description = "Status name to delete (case-insensitive)")]
+    pub name: String,
+}
+
+// ============================================================================
+// Apps (GUI Applications)
+// ============================================================================
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListAppsParams {
+    #[schemars(description = "Filter by tag name (case-insensitive)")]
+    pub tag: Option<String>,
+    #[schemars(description = "Filter by status string")]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetAppParams {
+    #[schemars(description = "App UUID")]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateAppParams {
+    #[schemars(description = "App name (e.g. 'Blender', 'OBS Studio')")]
+    pub name: String,
+    #[schemars(description = "What the app does")]
+    pub description: Option<String>,
+    #[schemars(description = "Tags for categorization")]
+    pub tags: Option<Vec<String>>,
+    #[schemars(description = "Status label (e.g. 'Active', 'WIP')")]
+    pub status: Option<String>,
+    #[schemars(description = "Installed version string")]
+    pub version: Option<String>,
+    #[schemars(description = "Homepage or documentation URL")]
+    pub homepage: Option<String>,
+    #[schemars(description = "Absolute path to the application executable")]
+    pub executable_path: Option<String>,
+    #[schemars(description = "Command-line arguments to pass when launching")]
+    pub launch_args: Option<String>,
+    #[schemars(description = "Toolbox documentation page URL")]
+    pub toolbox_url: Option<String>,
+    #[schemars(description = "Free-form notes")]
+    pub notes: Option<String>,
+    #[schemars(description = "Display color as hex string")]
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateAppParams {
+    #[schemars(description = "App UUID to update")]
+    pub id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    #[schemars(description = "Replace all tags")]
+    pub tags: Option<Vec<String>>,
+    pub status: Option<String>,
+    pub version: Option<String>,
+    pub homepage: Option<String>,
+    pub executable_path: Option<String>,
+    pub launch_args: Option<String>,
+    pub toolbox_url: Option<String>,
+    pub notes: Option<String>,
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteAppParams {
+    #[schemars(description = "App UUID to delete")]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LaunchAppParams {
+    #[schemars(description = "App UUID to launch")]
     pub id: String,
 }

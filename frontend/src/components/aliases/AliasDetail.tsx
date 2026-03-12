@@ -12,6 +12,7 @@ import {
 import { useAppStore } from '@/stores/appStore';
 import { AliasForm } from './AliasForm';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { StatusBadge } from '@/components/ui/StatusBadge';
 import { toast } from 'sonner';
 import type { UpdateShellAliasInput } from '@/types';
 
@@ -19,6 +20,7 @@ export function AliasDetail() {
   const {
     aliases,
     tagDefinitions,
+    statusDefinitions,
     selectedAliasId,
     setCurrentView,
     updateAlias,
@@ -75,7 +77,10 @@ export function AliasDetail() {
           <div className="flex items-center gap-3">
             <SquareTerminal className="size-8 text-muted-foreground" />
             <div>
-              <h1 className="text-2xl font-bold font-mono">{alias.name}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold font-mono">{alias.name}</h1>
+                <StatusBadge status={alias.status} />
+              </div>
               {alias.description && (
                 <p className="text-sm text-muted-foreground mt-0.5">{alias.description}</p>
               )}
@@ -143,6 +148,7 @@ export function AliasDetail() {
         alias={alias}
         aliases={aliases}
         tagDefinitions={tagDefinitions}
+        statusDefinitions={statusDefinitions}
         onSubmit={handleUpdate}
       />
     </div>

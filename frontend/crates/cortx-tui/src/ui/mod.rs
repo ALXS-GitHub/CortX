@@ -12,6 +12,10 @@ mod tool_info;
 mod tag_filter;
 mod aliases_list;
 mod alias_info;
+mod apps_list;
+mod app_info;
+mod projects_list;
+mod project_info;
 
 use ratatui::prelude::*;
 
@@ -80,6 +84,26 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
             aliases_list::render(f, h_chunks[0], app);
             alias_info::render(f, h_chunks[1], app);
+        }
+        ActiveTab::Apps => {
+            // Body: left panel (apps list) | right panel (app info, full height)
+            let h_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+                .split(body);
+
+            apps_list::render(f, h_chunks[0], app);
+            app_info::render(f, h_chunks[1], app);
+        }
+        ActiveTab::Projects => {
+            // Body: left panel (projects list) | right panel (project info, full height)
+            let h_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+                .split(body);
+
+            projects_list::render(f, h_chunks[0], app);
+            project_info::render(f, h_chunks[1], app);
         }
     }
 

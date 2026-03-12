@@ -36,6 +36,12 @@ import type {
   ShellAlias,
   CreateShellAliasInput,
   UpdateShellAliasInput,
+  StatusDefinition,
+  CreateStatusDefinitionInput,
+  UpdateStatusDefinitionInput,
+  App,
+  CreateAppInput,
+  UpdateAppInput,
 } from '@/types';
 import * as api from '@/lib/tauri';
 
@@ -149,6 +155,14 @@ interface AppState {
   aliases: ShellAlias[];
   selectedAliasId: string | null;
   isLoadingAliases: boolean;
+
+  // Status Definitions
+  statusDefinitions: StatusDefinition[];
+
+  // Apps
+  apps: App[];
+  selectedAppId: string | null;
+  isLoadingApps: boolean;
 
   // Run Script Dialog
   runScriptDialogTarget: GlobalScript | null;
@@ -286,6 +300,21 @@ interface AppState {
   reorderAliases: (aliasIds: string[]) => Promise<void>;
   selectAlias: (id: string | null) => void;
 
+  // Status Definition actions
+  loadStatusDefinitions: () => Promise<void>;
+  createStatusDefinition: (input: CreateStatusDefinitionInput) => Promise<StatusDefinition>;
+  updateStatusDefinition: (name: string, input: UpdateStatusDefinitionInput) => Promise<StatusDefinition>;
+  deleteStatusDefinition: (name: string) => Promise<void>;
+
+  // App actions
+  loadApps: () => Promise<void>;
+  createApp: (input: CreateAppInput) => Promise<App>;
+  updateAppItem: (id: string, input: UpdateAppInput) => Promise<App>;
+  deleteApp: (id: string) => Promise<void>;
+  reorderApps: (appIds: string[]) => Promise<void>;
+  selectApp: (id: string | null) => void;
+  launchApp: (appId: string) => Promise<void>;
+
   // Actions - Import / Export
   exportScriptsConfig: () => Promise<string>;
   importScriptsConfig: (json: string) => Promise<ImportResult>;
@@ -342,6 +371,10 @@ export const useAppStore = create<AppState>((set, _get) => ({
   aliases: [],
   selectedAliasId: null,
   isLoadingAliases: false,
+  statusDefinitions: [],
+  apps: [],
+  selectedAppId: null,
+  isLoadingApps: false,
   runScriptDialogTarget: null,
   currentView: 'dashboard',
   terminalPanelOpen: false,
@@ -1492,6 +1525,96 @@ export const useAppStore = create<AppState>((set, _get) => ({
     if (id) {
       set({ currentView: 'alias-detail' });
     }
+  },
+
+  // Status Definition actions
+  loadStatusDefinitions: async () => {
+    try {
+      const statusDefinitions = await api.getAllStatusDefinitions();
+      set({ statusDefinitions });
+    } catch (error) {
+      console.error('Failed to load status definitions:', error);
+    }
+  },
+
+  createStatusDefinition: async (input) => {
+    const def = await api.createStatusDefinition(input);
+    set((state) => ({ statusDefinitions: [...state.statusDefinitions, def] }));
+    return def;
+  },
+
+  updateStatusDefinition: async (name, input) => {
+    const updated = await api.updateStatusDefinition(name, input);
+    set((state) => ({
+      statusDefinitions: state.statusDefinitions.map((d) =>
+        d.name.toLowerCase() === name.toLowerCase() ? updated : d
+      ),
+    }));
+    return updated;
+  },
+
+  deleteStatusDefinition: async (name) => {
+    await api.deleteStatusDefinition(name);
+    set((state) => ({
+      statusDefinitions: state.statusDefinitions.filter(
+        (d) => d.name.toLowerCase() !== name.toLowerCase()
+      ),
+    }));
+  },
+
+  // App actions
+  loadApps: async () => {
+    set({ isLoadingApps: true });
+    try {
+      const apps = await api.getAllApps();
+      set({ apps, isLoadingApps: false });
+    } catch (error) {
+      console.error('Failed to load apps:', error);
+      set({ isLoadingApps: false });
+    }
+  },
+
+  createApp: async (input) => {
+    const app = await api.createApp(input);
+    set((state) => ({ apps: [...state.apps, app] }));
+    return app;
+  },
+
+  updateAppItem: async (id, input) => {
+    const updated = await api.updateApp(id, input);
+    set((state) => ({
+      apps: state.apps.map((a) => (a.id === id ? updated : a)),
+    }));
+    return updated;
+  },
+
+  deleteApp: async (id) => {
+    await api.deleteApp(id);
+    set((state) => ({
+      apps: state.apps.filter((a) => a.id !== id),
+      selectedAppId: state.selectedAppId === id ? null : state.selectedAppId,
+    }));
+  },
+
+  reorderApps: async (appIds) => {
+    await api.reorderApps(appIds);
+    set((state) => {
+      const ordered = appIds
+        .map((id) => state.apps.find((a) => a.id === id))
+        .filter(Boolean) as App[];
+      return { apps: ordered };
+    });
+  },
+
+  selectApp: (id) => {
+    set({ selectedAppId: id });
+    if (id) {
+      set({ currentView: 'app-detail' });
+    }
+  },
+
+  launchApp: async (appId) => {
+    await api.launchApp(appId);
   },
 
   // Execution History Update actions

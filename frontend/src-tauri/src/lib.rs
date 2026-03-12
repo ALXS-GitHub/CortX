@@ -204,6 +204,21 @@ pub fn run() {
             commands::delete_alias,
             commands::reorder_aliases,
             commands::generate_shell_init,
+            // Status definition commands
+            commands::get_all_status_definitions,
+            commands::create_status_definition,
+            commands::update_status_definition,
+            commands::delete_status_definition,
+            // App commands
+            commands::get_all_apps,
+            commands::get_app,
+            commands::create_app,
+            commands::update_app,
+            commands::delete_app,
+            commands::reorder_apps,
+            commands::launch_app,
+            commands::open_app_config,
+            commands::open_app_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

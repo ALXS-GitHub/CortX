@@ -44,6 +44,12 @@ import type {
   ShellAlias,
   CreateShellAliasInput,
   UpdateShellAliasInput,
+  StatusDefinition,
+  CreateStatusDefinitionInput,
+  UpdateStatusDefinitionInput,
+  App,
+  CreateAppInput,
+  UpdateAppInput,
 } from '@/types';
 
 // Project commands
@@ -469,6 +475,60 @@ export async function reorderAliases(aliasIds: string[]): Promise<void> {
 
 export async function generateShellInit(shell: string): Promise<string> {
   return invoke('generate_shell_init', { shell });
+}
+
+// Status definition commands
+export async function getAllStatusDefinitions(): Promise<StatusDefinition[]> {
+  return invoke('get_all_status_definitions');
+}
+
+export async function createStatusDefinition(input: CreateStatusDefinitionInput): Promise<StatusDefinition> {
+  return invoke('create_status_definition', { input });
+}
+
+export async function updateStatusDefinition(name: string, input: UpdateStatusDefinitionInput): Promise<StatusDefinition> {
+  return invoke('update_status_definition', { name, input });
+}
+
+export async function deleteStatusDefinition(name: string): Promise<void> {
+  return invoke('delete_status_definition', { name });
+}
+
+// App commands
+export async function getAllApps(): Promise<App[]> {
+  return invoke('get_all_apps');
+}
+
+export async function getApp(id: string): Promise<App> {
+  return invoke('get_app', { id });
+}
+
+export async function createApp(input: CreateAppInput): Promise<App> {
+  return invoke('create_app', { input });
+}
+
+export async function updateApp(id: string, input: UpdateAppInput): Promise<App> {
+  return invoke('update_app', { id, input });
+}
+
+export async function deleteApp(id: string): Promise<void> {
+  return invoke('delete_app', { id });
+}
+
+export async function reorderApps(appIds: string[]): Promise<void> {
+  return invoke('reorder_apps', { appIds });
+}
+
+export async function launchApp(appId: string): Promise<void> {
+  return invoke('launch_app', { appId });
+}
+
+export async function openAppConfig(appId: string, configIndex: number): Promise<void> {
+  return invoke('open_app_config', { appId, configIndex });
+}
+
+export async function openAppUrl(url: string): Promise<void> {
+  return invoke('open_app_url', { url });
 }
 
 // Data change listener (file watcher)

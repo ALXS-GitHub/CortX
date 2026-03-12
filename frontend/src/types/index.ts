@@ -40,6 +40,8 @@ export interface Project {
   envFiles: EnvFile[];
   envFilesDiscovered: boolean;
   tags: string[];
+  status?: string;
+  toolboxUrl?: string;
 }
 
 // Environment file types
@@ -178,6 +180,8 @@ export interface CreateProjectInput {
   description?: string;
   imagePath?: string;
   tags?: string[];
+  status?: string;
+  toolboxUrl?: string;
 }
 
 export interface UpdateProjectInput {
@@ -186,6 +190,8 @@ export interface UpdateProjectInput {
   description?: string;
   imagePath?: string;
   tags?: string[];
+  status?: string;
+  toolboxUrl?: string;
 }
 
 export interface CreateServiceInput {
@@ -293,6 +299,7 @@ export interface GlobalScript {
   updatedAt: string;
   order: number;
   autoDiscovered: boolean;
+  status?: string;
 }
 
 export interface TagDefinition {
@@ -423,6 +430,7 @@ export interface CreateGlobalScriptInput {
   parameters?: ScriptParameter[];
   parameterPresets?: ParameterPreset[];
   envVars?: Record<string, string>;
+  status?: string;
 }
 
 export interface UpdateGlobalScriptInput {
@@ -437,6 +445,7 @@ export interface UpdateGlobalScriptInput {
   parameterPresets?: ParameterPreset[];
   defaultPresetId?: string;
   envVars?: Record<string, string>;
+  status?: string;
 }
 
 export interface CreateTagDefinitionInput {
@@ -477,10 +486,81 @@ export interface ImportResult {
   toolsAdded: number;
   tagDefinitionsAdded: number;
   aliasesAdded: number;
+  appsAdded: number;
+  statusDefinitionsAdded: number;
 }
 
 // View types
-export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail' | 'tools' | 'tool-detail' | 'aliases' | 'alias-detail';
+export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail' | 'tools' | 'tool-detail' | 'aliases' | 'alias-detail' | 'apps' | 'app-detail';
+
+// Status Definition types
+export interface StatusDefinition {
+  name: string;
+  color?: string;
+  order?: number;
+}
+
+export interface CreateStatusDefinitionInput {
+  name: string;
+  color?: string;
+  order?: number;
+}
+
+export interface UpdateStatusDefinitionInput {
+  name?: string;
+  color?: string;
+  order?: number;
+}
+
+// App types (GUI Applications)
+export interface App {
+  id: string;
+  name: string;
+  description?: string;
+  tags: string[];
+  status?: string;
+  version?: string;
+  homepage?: string;
+  executablePath?: string;
+  launchArgs?: string;
+  configPaths: ToolConfigPath[];
+  toolboxUrl?: string;
+  notes?: string;
+  color?: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateAppInput {
+  name: string;
+  description?: string;
+  tags?: string[];
+  status?: string;
+  version?: string;
+  homepage?: string;
+  executablePath?: string;
+  launchArgs?: string;
+  configPaths?: ToolConfigPath[];
+  toolboxUrl?: string;
+  notes?: string;
+  color?: string;
+}
+
+export interface UpdateAppInput {
+  name?: string;
+  description?: string;
+  tags?: string[];
+  status?: string;
+  version?: string;
+  homepage?: string;
+  executablePath?: string;
+  launchArgs?: string;
+  configPaths?: ToolConfigPath[];
+  toolboxUrl?: string;
+  notes?: string;
+  color?: string;
+}
 
 export type ListViewMode = 'card' | 'list' | 'compact';
 
@@ -494,6 +574,7 @@ export interface ShellAlias {
   createdAt: string;
   updatedAt: string;
   order: number;
+  status?: string;
 }
 
 export interface CreateShellAliasInput {
@@ -501,6 +582,7 @@ export interface CreateShellAliasInput {
   command: string;
   description?: string;
   tags?: string[];
+  status?: string;
 }
 
 export interface UpdateShellAliasInput {
@@ -508,4 +590,5 @@ export interface UpdateShellAliasInput {
   command?: string;
   description?: string;
   tags?: string[];
+  status?: string;
 }

@@ -110,6 +110,10 @@ pub struct Project {
     pub env_files_discovered: bool,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toolbox_url: Option<String>,
 }
 
 impl Project {
@@ -129,6 +133,8 @@ impl Project {
             env_files: Vec::new(),
             env_files_discovered: false,
             tags: Vec::new(),
+            status: None,
+            toolbox_url: None,
         }
     }
 }
@@ -327,6 +333,8 @@ pub struct CreateProjectInput {
     pub image_path: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    pub status: Option<String>,
+    pub toolbox_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -337,6 +345,8 @@ pub struct UpdateProjectInput {
     pub description: Option<String>,
     pub image_path: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub status: Option<String>,
+    pub toolbox_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -591,6 +601,8 @@ pub struct GlobalScript {
     pub order: u32,
     #[serde(default)]
     pub auto_discovered: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 impl GlobalScript {
@@ -613,6 +625,7 @@ impl GlobalScript {
             updated_at: now,
             order: 0,
             auto_discovered: false,
+            status: None,
         }
     }
 }
@@ -815,6 +828,7 @@ pub struct CreateGlobalScriptInput {
     pub parameters: Option<Vec<ScriptParameter>>,
     pub parameter_presets: Option<Vec<ParameterPreset>>,
     pub env_vars: Option<HashMap<String, String>>,
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -831,6 +845,7 @@ pub struct UpdateGlobalScriptInput {
     pub parameter_presets: Option<Vec<ParameterPreset>>,
     pub default_preset_id: Option<String>,
     pub env_vars: Option<HashMap<String, String>>,
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -885,6 +900,10 @@ pub struct ScriptExport {
     pub tag_definitions: Vec<TagDefinition>,
     #[serde(default)]
     pub aliases: Vec<ShellAlias>,
+    #[serde(default)]
+    pub apps: Vec<App>,
+    #[serde(default)]
+    pub status_definitions: Vec<StatusDefinition>,
     pub exported_at: DateTime<Utc>,
 }
 
@@ -897,6 +916,8 @@ pub struct ImportResult {
     pub tools_added: u32,
     pub tag_definitions_added: u32,
     pub aliases_added: u32,
+    pub apps_added: u32,
+    pub status_definitions_added: u32,
 }
 
 // ============================================================================
@@ -916,6 +937,8 @@ pub struct ShellAlias {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub order: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 impl ShellAlias {
@@ -930,6 +953,7 @@ impl ShellAlias {
             created_at: now,
             updated_at: now,
             order: 0,
+            status: None,
         }
     }
 }
@@ -941,6 +965,7 @@ pub struct CreateShellAliasInput {
     pub command: String,
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -950,6 +975,7 @@ pub struct UpdateShellAliasInput {
     pub command: Option<String>,
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub status: Option<String>,
 }
 
 // ============================================================================
@@ -1053,6 +1079,130 @@ pub struct UpdateToolInput {
     pub install_location: Option<String>,
     pub version: Option<String>,
     pub homepage: Option<String>,
+    pub config_paths: Option<Vec<ToolConfigPath>>,
+    pub toolbox_url: Option<String>,
+    pub notes: Option<String>,
+    pub color: Option<String>,
+}
+
+// ============================================================================
+// Status Definitions
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusDefinition {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateStatusDefinitionInput {
+    pub name: String,
+    pub color: Option<String>,
+    pub order: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStatusDefinitionInput {
+    pub name: Option<String>,
+    pub color: Option<String>,
+    pub order: Option<u32>,
+}
+
+// ============================================================================
+// Apps (GUI Applications)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct App {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub homepage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executable_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launch_args: Option<String>,
+    #[serde(default)]
+    pub config_paths: Vec<ToolConfigPath>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toolbox_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    pub order: u32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl App {
+    pub fn new(name: String) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name,
+            description: None,
+            tags: Vec::new(),
+            status: None,
+            version: None,
+            homepage: None,
+            executable_path: None,
+            launch_args: None,
+            config_paths: Vec::new(),
+            toolbox_url: None,
+            notes: None,
+            color: None,
+            order: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAppInput {
+    pub name: String,
+    pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub status: Option<String>,
+    pub version: Option<String>,
+    pub homepage: Option<String>,
+    pub executable_path: Option<String>,
+    pub launch_args: Option<String>,
+    pub config_paths: Option<Vec<ToolConfigPath>>,
+    pub toolbox_url: Option<String>,
+    pub notes: Option<String>,
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAppInput {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub status: Option<String>,
+    pub version: Option<String>,
+    pub homepage: Option<String>,
+    pub executable_path: Option<String>,
+    pub launch_args: Option<String>,
     pub config_paths: Option<Vec<ToolConfigPath>>,
     pub toolbox_url: Option<String>,
     pub notes: Option<String>,

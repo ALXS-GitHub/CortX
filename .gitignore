@@ -174,3 +174,6 @@ tauri-signing-key*
 *.local
 
 nul
+
+# Audit reports
+AUDIT*.md
