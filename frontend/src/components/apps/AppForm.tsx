@@ -11,74 +11,66 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { ComboboxInput } from '@/components/ui/combobox-input';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { Plus, Trash2, FolderSearch, X } from 'lucide-react';
 import { TagBadge } from '@/components/ui/TagBadge';
-import type { Tool, TagDefinition, StatusDefinition, CreateToolInput, UpdateToolInput, ToolConfigPath } from '@/types';
+import type { App, TagDefinition, StatusDefinition, CreateAppInput, UpdateAppInput, ToolConfigPath } from '@/types';
 
-const TOOL_COLORS = [
+const APP_COLORS = [
   '#8b5cf6', '#06b6d4', '#f97316', '#22c55e',
   '#ec4899', '#eab308', '#3b82f6', '#ef4444',
 ];
 
-interface ToolFormProps {
+interface AppFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  tool?: Tool;
-  tools: Tool[];
+  app?: App;
+  apps: App[];
   tagDefinitions: TagDefinition[];
   statusDefinitions?: StatusDefinition[];
-  onSubmit: (data: CreateToolInput | UpdateToolInput) => Promise<void>;
+  onSubmit: (data: CreateAppInput | UpdateAppInput) => Promise<void>;
 }
 
-export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, statusDefinitions = [], onSubmit }: ToolFormProps) {
+export function AppForm({ open, onOpenChange, app, apps, tagDefinitions, statusDefinitions = [], onSubmit }: AppFormProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState('');
-  const [replacedBy, setReplacedBy] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
-  const [installMethod, setInstallMethod] = useState('');
-  const [installLocation, setInstallLocation] = useState('');
   const [version, setVersion] = useState('');
   const [homepage, setHomepage] = useState('');
+  const [executablePath, setExecutablePath] = useState('');
+  const [launchArgs, setLaunchArgs] = useState('');
   const [configPaths, setConfigPaths] = useState<ToolConfigPath[]>([]);
   const [toolboxUrl, setToolboxUrl] = useState('');
   const [notes, setNotes] = useState('');
-  const [color, setColor] = useState(TOOL_COLORS[0]);
+  const [color, setColor] = useState(APP_COLORS[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
-  const isEditing = !!tool;
+  const isEditing = !!app;
 
-  // Gather existing statuses from definitions + tools
+  // Gather existing statuses from definitions + apps
   const existingStatuses = Array.from(
     new Set([
       ...statusDefinitions.map(d => d.name),
-      ...tools.map(t => t.status).filter(Boolean),
+      ...apps.map((a) => a.status).filter(Boolean) as string[],
     ])
   );
 
-  // All known tag names for autocomplete (from definitions + existing tools)
+  // All known tag names for autocomplete (from definitions + existing apps)
   const allKnownTags = useMemo(() => {
     const set = new Set<string>();
     for (const td of tagDefinitions) set.add(td.name);
-    for (const t of tools) {
-      for (const tag of t.tags) set.add(tag);
+    for (const a of apps) {
+      for (const tag of a.tags) set.add(tag);
     }
     return Array.from(set).sort();
-  }, [tagDefinitions, tools]);
+  }, [tagDefinitions, apps]);
 
   // Filtered suggestions based on current input
   const tagSuggestions = useMemo(() => {
@@ -91,41 +83,39 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
 
   useEffect(() => {
     if (open) {
-      if (tool) {
-        setName(tool.name);
-        setDescription(tool.description || '');
-        setStatus(tool.status || '');
-        setReplacedBy(tool.replacedBy || '');
-        setTags([...tool.tags]);
+      if (app) {
+        setName(app.name);
+        setDescription(app.description || '');
+        setStatus(app.status || '');
+        setTags([...app.tags]);
         setTagInput('');
-        setInstallMethod(tool.installMethod || '');
-        setInstallLocation(tool.installLocation || '');
-        setVersion(tool.version || '');
-        setHomepage(tool.homepage || '');
-        setConfigPaths(tool.configPaths.map(cp => ({ ...cp })));
-        setToolboxUrl(tool.toolboxUrl || '');
-        setNotes(tool.notes || '');
-        setColor(tool.color || TOOL_COLORS[0]);
+        setVersion(app.version || '');
+        setHomepage(app.homepage || '');
+        setExecutablePath(app.executablePath || '');
+        setLaunchArgs(app.launchArgs || '');
+        setConfigPaths(app.configPaths.map((cp) => ({ ...cp })));
+        setToolboxUrl(app.toolboxUrl || '');
+        setNotes(app.notes || '');
+        setColor(app.color || APP_COLORS[0]);
       } else {
         setName('');
         setDescription('');
         setStatus('');
-        setReplacedBy('');
         setTags([]);
         setTagInput('');
-        setInstallMethod('');
-        setInstallLocation('');
         setVersion('');
         setHomepage('');
+        setExecutablePath('');
+        setLaunchArgs('');
         setConfigPaths([]);
         setToolboxUrl('');
         setNotes('');
-        setColor(TOOL_COLORS[Math.floor(Math.random() * TOOL_COLORS.length)]);
+        setColor(APP_COLORS[Math.floor(Math.random() * APP_COLORS.length)]);
       }
       setError(null);
       setShowTagSuggestions(false);
     }
-  }, [open, tool]);
+  }, [open, app]);
 
   // Close suggestions on outside click
   useEffect(() => {
@@ -170,11 +160,18 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
     }
   };
 
-  const handleBrowseInstallLocation = async () => {
+  const handleBrowseExecutable = async () => {
     try {
-      const selected = await openDialog({ directory: true, multiple: false, title: 'Select Install Location' });
+      const selected = await openDialog({
+        multiple: false,
+        title: 'Select Executable',
+        filters: [
+          { name: 'Executables', extensions: ['exe', 'bat', 'cmd', 'ps1', 'sh'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
       if (selected && typeof selected === 'string') {
-        setInstallLocation(selected);
+        setExecutablePath(selected);
       }
     } catch (e) {
       console.error('Failed to open dialog:', e);
@@ -190,7 +187,7 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
   };
 
   const updateConfigPath = (index: number, field: keyof ToolConfigPath, value: string | boolean) => {
-    setConfigPaths(configPaths.map((cp, i) => i === index ? { ...cp, [field]: value } : cp));
+    setConfigPaths(configPaths.map((cp, i) => (i === index ? { ...cp, [field]: value } : cp)));
   };
 
   const browseConfigPath = async (index: number) => {
@@ -214,24 +211,23 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
     setError(null);
 
     if (!name.trim()) {
-      setError('Tool name is required');
+      setError('App name is required');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const validConfigs = configPaths.filter(cp => cp.path.trim());
+      const validConfigs = configPaths.filter((cp) => cp.path.trim());
 
-      const data: CreateToolInput | UpdateToolInput = {
+      const data: CreateAppInput | UpdateAppInput = {
         name: name.trim(),
         description: description.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
         status: status.trim() || undefined,
-        replacedBy: replacedBy.trim() || undefined,
-        installMethod: installMethod.trim() || undefined,
-        installLocation: installLocation.trim() || undefined,
         version: version.trim() || undefined,
         homepage: homepage.trim() || undefined,
+        executablePath: executablePath.trim() || undefined,
+        launchArgs: launchArgs.trim() || undefined,
         configPaths: validConfigs.length > 0 ? validConfigs : undefined,
         toolboxUrl: toolboxUrl.trim() || undefined,
         notes: notes.trim() || undefined,
@@ -251,11 +247,11 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
       <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
         <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
           <DialogHeader className="flex-shrink-0">
-            <DialogTitle>{isEditing ? 'Edit Tool' : 'Add New Tool'}</DialogTitle>
+            <DialogTitle>{isEditing ? 'Edit App' : 'Add New App'}</DialogTitle>
             <DialogDescription>
               {isEditing
-                ? 'Update the tool configuration.'
-                : 'Register a tool, CLI utility, or any dev environment component.'}
+                ? 'Update the app configuration.'
+                : 'Register a GUI application to track and launch it quickly.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -263,53 +259,36 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
             {/* Main Section */}
             <div className="grid gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="tool-name">Name *</Label>
+                <Label htmlFor="app-name">Name *</Label>
                 <Input
-                  id="tool-name"
+                  id="app-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g., starship, wezterm, fzf"
+                  placeholder="e.g., Firefox, Figma, Obsidian"
                 />
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="tool-description">Description</Label>
+                <Label htmlFor="app-description">Description</Label>
                 <Textarea
-                  id="tool-description"
+                  id="app-description"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="What is this tool?"
+                  placeholder="What is this app?"
                   rows={2}
                 />
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="tool-status">Status</Label>
+                <Label htmlFor="app-status">Status</Label>
                 <ComboboxInput
-                  id="tool-status"
+                  id="app-status"
                   value={status}
                   onChange={setStatus}
                   options={existingStatuses}
                   placeholder="e.g., Active, To Test"
                 />
               </div>
-
-              {status.toLowerCase() === 'replaced' && (
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-replaced-by">Replaced By</Label>
-                  <Select value={replacedBy || '__none__'} onValueChange={(v) => setReplacedBy(v === '__none__' ? '' : v)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select replacement tool" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">None</SelectItem>
-                      {tools.filter(t => t.id !== tool?.id).map((t) => (
-                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
 
               <div className="grid gap-2">
                 <Label>Tags</Label>
@@ -370,7 +349,7 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
               <div className="grid gap-2">
                 <Label>Color</Label>
                 <div className="flex gap-2 items-center h-9">
-                  {TOOL_COLORS.map((c) => (
+                  {APP_COLORS.map((c) => (
                     <button
                       key={c}
                       type="button"
@@ -385,55 +364,55 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
               </div>
             </div>
 
-            {/* Installation Section */}
+            {/* Launch Section */}
             <div className="border-t pt-4">
-              <h4 className="text-sm font-medium mb-3">Installation</h4>
+              <h4 className="text-sm font-medium mb-3">Launch</h4>
               <div className="grid gap-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="tool-install-method">Install Method</Label>
-                    <Input
-                      id="tool-install-method"
-                      value={installMethod}
-                      onChange={(e) => setInstallMethod(e.target.value)}
-                      placeholder="e.g., scoop, cargo, winget"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="tool-version">Version</Label>
-                    <Input
-                      id="tool-version"
-                      value={version}
-                      onChange={(e) => setVersion(e.target.value)}
-                      placeholder="e.g., 1.16.0"
-                    />
-                  </div>
-                </div>
-
                 <div className="grid gap-2">
-                  <Label htmlFor="tool-install-location">Install Location</Label>
+                  <Label htmlFor="app-executable-path">Executable Path</Label>
                   <div className="flex gap-2">
                     <Input
-                      id="tool-install-location"
-                      value={installLocation}
-                      onChange={(e) => setInstallLocation(e.target.value)}
-                      placeholder="Path to installation directory"
+                      id="app-executable-path"
+                      value={executablePath}
+                      onChange={(e) => setExecutablePath(e.target.value)}
+                      placeholder="Path to executable"
                       className="flex-1"
                     />
-                    <Button type="button" variant="outline" onClick={handleBrowseInstallLocation} title="Browse">
+                    <Button type="button" variant="outline" onClick={handleBrowseExecutable} title="Browse">
                       <FolderSearch className="size-4" />
                     </Button>
                   </div>
                 </div>
 
                 <div className="grid gap-2">
-                  <Label htmlFor="tool-homepage">Homepage URL</Label>
+                  <Label htmlFor="app-launch-args">Launch Arguments</Label>
                   <Input
-                    id="tool-homepage"
-                    value={homepage}
-                    onChange={(e) => setHomepage(e.target.value)}
-                    placeholder="https://..."
+                    id="app-launch-args"
+                    value={launchArgs}
+                    onChange={(e) => setLaunchArgs(e.target.value)}
+                    placeholder="e.g., --profile default"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="app-version">Version</Label>
+                    <Input
+                      id="app-version"
+                      value={version}
+                      onChange={(e) => setVersion(e.target.value)}
+                      placeholder="e.g., 1.16.0"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="app-homepage">Homepage URL</Label>
+                    <Input
+                      id="app-homepage"
+                      value={homepage}
+                      onChange={(e) => setHomepage(e.target.value)}
+                      placeholder="https://..."
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -505,21 +484,21 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
               <h4 className="text-sm font-medium mb-3">Documentation</h4>
               <div className="grid gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="tool-toolbox-url">Toolbox URL</Label>
+                  <Label htmlFor="app-toolbox-url">Toolbox URL</Label>
                   <Input
-                    id="tool-toolbox-url"
+                    id="app-toolbox-url"
                     value={toolboxUrl}
                     onChange={(e) => setToolboxUrl(e.target.value)}
-                    placeholder="https://toolbox.example.com/tools/..."
+                    placeholder="https://toolbox.example.com/apps/..."
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="tool-notes">Notes</Label>
+                  <Label htmlFor="app-notes">Notes</Label>
                   <Textarea
-                    id="tool-notes"
+                    id="app-notes"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Any additional notes about this tool..."
+                    placeholder="Any additional notes about this app..."
                     rows={3}
                   />
                 </div>
@@ -534,7 +513,7 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Add Tool'}
+              {isSubmitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Add App'}
             </Button>
           </DialogFooter>
         </form>

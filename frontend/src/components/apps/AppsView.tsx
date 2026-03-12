@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,33 +22,35 @@ import {
 import { Plus, Search } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
-import { AliasCard } from './AliasCard';
-import { AliasCardView } from './AliasCardView';
-import { AliasCompactItem } from './AliasCompactItem';
-import { AliasForm } from './AliasForm';
+import { AppCard } from './AppCard';
+import { AppCardView } from './AppCardView';
+import { AppCompactItem } from './AppCompactItem';
+import { AppForm } from './AppForm';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { toast } from 'sonner';
-import type { ShellAlias, CreateShellAliasInput, UpdateShellAliasInput } from '@/types';
+import type { App, CreateAppInput, UpdateAppInput } from '@/types';
 
-export function AliasesView() {
+const DEFAULT_STATUSES = ['Active', 'Inactive', 'To Test', 'Archived', 'Replaced'];
+
+export function AppsView() {
   const {
-    aliases,
+    apps,
     tagDefinitions,
     statusDefinitions,
-    createAlias,
-    updateAlias,
-    deleteAlias,
-    selectAlias,
+    createApp,
+    updateAppItem,
+    deleteApp,
+    selectApp,
   } = useAppStore();
-  const { aliasesViewMode, setAliasesViewMode } = useViewPrefsStore();
+  const { appsViewMode, setAppsViewMode } = useViewPrefsStore();
 
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
-  const [showAliasForm, setShowAliasForm] = useState(false);
-  const [editingAlias, setEditingAlias] = useState<ShellAlias | undefined>(undefined);
-  const [deletingAlias, setDeletingAlias] = useState<ShellAlias | null>(null);
+  const [showAppForm, setShowAppForm] = useState(false);
+  const [editingApp, setEditingApp] = useState<App | undefined>(undefined);
+  const [deletingApp, setDeletingApp] = useState<App | null>(null);
 
   const toggleTag = (tag: string) => {
     setSelectedTags((prev) => {
@@ -58,11 +61,11 @@ export function AliasesView() {
     });
   };
 
-  // All unique tags
+  // All unique tags from apps + tag definitions
   const allTags = useMemo(() => {
     const set = new Set<string>();
     for (const td of tagDefinitions) set.add(td.name);
-    for (const a of aliases) {
+    for (const a of apps) {
       for (const tag of a.tags) set.add(tag);
     }
     return Array.from(set).sort((a, b) => {
@@ -73,20 +76,22 @@ export function AliasesView() {
       if (aOrder !== bOrder) return aOrder - bOrder;
       return a.localeCompare(b);
     });
-  }, [aliases, tagDefinitions]);
+  }, [apps, tagDefinitions]);
 
-  // Unique statuses from statusDefinitions + existing aliases
+  // Unique statuses from statusDefinitions + existing apps
   const allStatuses = useMemo(() => {
     const set = new Set([
+      ...DEFAULT_STATUSES,
       ...statusDefinitions.map((d) => d.name),
-      ...aliases.map((a) => a.status).filter(Boolean) as string[],
+      ...apps.map((a) => a.status).filter(Boolean) as string[],
     ]);
     return Array.from(set);
-  }, [aliases, statusDefinitions]);
+  }, [apps, statusDefinitions]);
 
-  const filteredAliases = useMemo(() => {
-    let result = aliases;
+  const filteredApps = useMemo(() => {
+    let result = apps;
 
+    // Tag filter (OR semantics): show apps that have at least one selected tag
     if (selectedTags.size > 0) {
       result = result.filter((a) => a.tags.some((tag) => selectedTags.has(tag)));
     }
@@ -100,64 +105,63 @@ export function AliasesView() {
       result = result.filter(
         (a) =>
           a.name.toLowerCase().includes(q) ||
-          a.command.toLowerCase().includes(q) ||
           a.description?.toLowerCase().includes(q) ||
           a.tags.some((tag) => tag.toLowerCase().includes(q))
       );
     }
 
     return result.slice().sort((a, b) => a.order - b.order);
-  }, [aliases, selectedTags, selectedStatus, search]);
+  }, [apps, selectedTags, selectedStatus, search]);
 
-  const handleCreateAlias = async (data: CreateShellAliasInput | UpdateShellAliasInput) => {
-    await createAlias(data as CreateShellAliasInput);
-    toast.success('Alias created');
+  const handleCreateApp = async (data: CreateAppInput | UpdateAppInput) => {
+    await createApp(data as CreateAppInput);
+    toast.success('App created');
   };
 
-  const handleUpdateAlias = async (data: CreateShellAliasInput | UpdateShellAliasInput) => {
-    if (!editingAlias) return;
-    await updateAlias(editingAlias.id, data as UpdateShellAliasInput);
-    toast.success('Alias updated');
+  const handleUpdateApp = async (data: CreateAppInput | UpdateAppInput) => {
+    if (!editingApp) return;
+    await updateAppItem(editingApp.id, data as UpdateAppInput);
+    toast.success('App updated');
   };
 
-  const handleDeleteAlias = async () => {
-    if (!deletingAlias) return;
+  const handleDeleteApp = async () => {
+    if (!deletingApp) return;
     try {
-      await deleteAlias(deletingAlias.id);
-      toast.success('Alias deleted');
+      await deleteApp(deletingApp.id);
+      toast.success('App deleted');
     } catch (e) {
-      toast.error('Failed to delete alias', { description: String(e) });
+      toast.error('Failed to delete app', { description: String(e) });
     }
-    setDeletingAlias(null);
+    setDeletingApp(null);
   };
 
-  const aliasItemProps = (alias: ShellAlias) => ({
-    alias,
+  const appItemProps = (app: App) => ({
+    app,
     tagDefinitions,
-    onEdit: () => { setEditingAlias(alias); setShowAliasForm(true); },
-    onDelete: () => setDeletingAlias(alias),
-    onClick: () => selectAlias(alias.id),
+    onEdit: () => { setEditingApp(app); setShowAppForm(true); },
+    onDelete: () => setDeletingApp(app),
+    onClick: () => selectApp(app.id),
   });
 
-  const renderAliasList = (aliasList: ShellAlias[]) => {
-    if (aliasList.length === 0) return null;
-    if (aliasesViewMode === 'card') {
+  const renderAppList = (appList: App[]) => {
+    if (appList.length === 0) return null;
+    if (appsViewMode === 'card') {
       return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {aliasList.map((alias) => <AliasCardView key={alias.id} {...aliasItemProps(alias)} />)}
+          {appList.map((app) => <AppCardView key={app.id} {...appItemProps(app)} />)}
         </div>
       );
     }
-    if (aliasesViewMode === 'compact') {
+    if (appsViewMode === 'compact') {
       return (
         <div className="space-y-1">
-          {aliasList.map((alias) => <AliasCompactItem key={alias.id} {...aliasItemProps(alias)} />)}
+          {appList.map((app) => <AppCompactItem key={app.id} {...appItemProps(app)} />)}
         </div>
       );
     }
     return (
       <div className="space-y-2">
-        {aliasList.map((alias) => <AliasCard key={alias.id} {...aliasItemProps(alias)} />)}
+        {appList.map((app) => <AppCard key={app.id} {...appItemProps(app)} />)}
       </div>
     );
   };
@@ -167,21 +171,21 @@ export function AliasesView() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Aliases</h1>
+          <h1 className="text-2xl font-bold">Apps</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage shell aliases and generate init scripts for your terminal
+            Track your GUI applications and launch them quickly
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button
             size="sm"
             onClick={() => {
-              setEditingAlias(undefined);
-              setShowAliasForm(true);
+              setEditingApp(undefined);
+              setShowAppForm(true);
             }}
           >
             <Plus className="size-4 mr-2" />
-            Add Alias
+            Add App
           </Button>
         </div>
       </div>
@@ -191,31 +195,29 @@ export function AliasesView() {
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input
-            placeholder="Search aliases..."
+            placeholder="Search apps..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
           />
         </div>
 
-        {allStatuses.length > 0 && (
-          <Select
-            value={selectedStatus ?? '__all__'}
-            onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
-          >
-            <SelectTrigger size="sm" className="w-[140px]">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All statuses</SelectItem>
-              {allStatuses.map((s) => (
-                <SelectItem key={s} value={s}>{s}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+        <Select
+          value={selectedStatus ?? '__all__'}
+          onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
+        >
+          <SelectTrigger size="sm" className="w-[140px]">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All statuses</SelectItem>
+            {allStatuses.map((s) => (
+              <SelectItem key={s} value={s}>{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        <ViewModeToggle value={aliasesViewMode} onChange={setAliasesViewMode} />
+        <ViewModeToggle value={appsViewMode} onChange={setAppsViewMode} />
       </div>
 
       {/* Tag filter pills */}
@@ -250,53 +252,78 @@ export function AliasesView() {
         </div>
       )}
 
-      {/* Aliases list */}
-      {filteredAliases.length === 0 ? (
+      {/* Status filter pills */}
+      <div className="flex gap-2 flex-wrap">
+        <Badge
+          variant={selectedStatus === null ? 'default' : 'outline'}
+          className="cursor-pointer"
+          onClick={() => setSelectedStatus(null)}
+        >
+          All ({apps.length})
+        </Badge>
+        {allStatuses.map((status) => {
+          const count = apps.filter((a) => a.status === status).length;
+          if (count === 0) return null;
+          return (
+            <Badge
+              key={status}
+              variant={selectedStatus === status ? 'default' : 'outline'}
+              className="cursor-pointer"
+              onClick={() => setSelectedStatus(selectedStatus === status ? null : status)}
+            >
+              {status} ({count})
+            </Badge>
+          );
+        })}
+      </div>
+
+      {/* Apps list */}
+      {filteredApps.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <p className="text-lg font-medium">No aliases yet</p>
-          <p className="text-sm mt-1">Create your first shell alias to get started</p>
+          <p className="text-lg font-medium">No apps yet</p>
+          <p className="text-sm mt-1">Register your first app to get started</p>
           <Button
             className="mt-4"
             onClick={() => {
-              setEditingAlias(undefined);
-              setShowAliasForm(true);
+              setEditingApp(undefined);
+              setShowAppForm(true);
             }}
           >
             <Plus className="size-4 mr-2" />
-            Add Alias
+            Add App
           </Button>
         </div>
       ) : (
-        renderAliasList(filteredAliases)
+        renderAppList(filteredApps)
       )}
 
-      {/* Alias Form */}
-      <AliasForm
-        open={showAliasForm}
+      {/* App Form */}
+      <AppForm
+        open={showAppForm}
         onOpenChange={(open) => {
-          setShowAliasForm(open);
-          if (!open) setEditingAlias(undefined);
+          setShowAppForm(open);
+          if (!open) setEditingApp(undefined);
         }}
-        alias={editingAlias}
-        aliases={aliases}
+        app={editingApp}
+        apps={apps}
         tagDefinitions={tagDefinitions}
         statusDefinitions={statusDefinitions}
-        onSubmit={editingAlias ? handleUpdateAlias : handleCreateAlias}
+        onSubmit={editingApp ? handleUpdateApp : handleCreateApp}
       />
 
-      {/* Delete Alias Confirmation */}
-      <AlertDialog open={!!deletingAlias} onOpenChange={(open) => !open && setDeletingAlias(null)}>
+      {/* Delete App Confirmation */}
+      <AlertDialog open={!!deletingApp} onOpenChange={(open) => !open && setDeletingApp(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Alias</AlertDialogTitle>
+            <AlertDialogTitle>Delete App</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete the alias "{deletingAlias?.name}"? This cannot be undone.
+              Are you sure you want to delete "{deletingApp?.name}"? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleDeleteAlias}
+              onClick={handleDeleteApp}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete

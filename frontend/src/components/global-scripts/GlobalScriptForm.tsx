@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { ComboboxInput } from '@/components/ui/combobox-input';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { FileSearch, X } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
@@ -30,13 +31,14 @@ interface GlobalScriptFormProps {
 }
 
 export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: GlobalScriptFormProps) {
-  const { tagDefinitions } = useAppStore();
+  const { tagDefinitions, statusDefinitions } = useAppStore();
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [command, setCommand] = useState('');
   const [scriptPath, setScriptPath] = useState('');
   const [workingDir, setWorkingDir] = useState('');
+  const [status, setStatus] = useState('');
   const [color, setColor] = useState(SCRIPT_COLORS[0]);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
@@ -88,6 +90,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
         setCommand(script.command);
         setScriptPath(script.scriptPath || '');
         setWorkingDir(script.workingDir || '');
+        setStatus(script.status || '');
         setColor(script.color || SCRIPT_COLORS[0]);
         setTags([...script.tags]);
       } else {
@@ -96,6 +99,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
         setCommand('');
         setScriptPath('');
         setWorkingDir('');
+        setStatus('');
         setColor(SCRIPT_COLORS[Math.floor(Math.random() * SCRIPT_COLORS.length)]);
         setTags([]);
       }
@@ -165,6 +169,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
         workingDir: workingDir.trim() || undefined,
         color,
         tags: tags.length > 0 ? tags : undefined,
+        status: status.trim() || undefined,
       };
       await onSubmit(data);
       onOpenChange(false);
@@ -321,6 +326,17 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
               <p className="text-xs text-muted-foreground">
                 Press Enter or comma to add a tag. Type to see suggestions.
               </p>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="gs-status">Status</Label>
+              <ComboboxInput
+                id="gs-status"
+                value={status}
+                onChange={setStatus}
+                options={statusDefinitions.map((d) => d.name)}
+                placeholder="e.g., Active, Archived"
+              />
             </div>
 
             <div className="grid gap-2">

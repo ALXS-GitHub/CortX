@@ -44,7 +44,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { openInExplorer, openInVscode } from '@/lib/tauri';
+import { StatusBadge } from '@/components/ui/StatusBadge';
+import { openInExplorer, openInVscode, openToolUrl } from '@/lib/tauri';
 import type { Service, CreateServiceInput, UpdateServiceInput, UpdateProjectInput } from '@/types';
 import { toast } from 'sonner';
 
@@ -54,6 +55,7 @@ export function ProjectView() {
     selectedProjectId,
     selectProject,
     setCurrentView,
+    settings,
     addService,
     updateService,
     deleteService,
@@ -204,13 +206,29 @@ export function ProjectView() {
             <ArrowLeft className="size-5" />
           </Button>
           <div>
-            <h1 className="text-2xl font-bold">{project.name}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold">{project.name}</h1>
+              <StatusBadge status={project.status} />
+            </div>
             {project.description && (
               <p className="text-muted-foreground mt-1">{project.description}</p>
             )}
             <p className="text-sm text-muted-foreground font-mono mt-2">
               {project.rootPath}
             </p>
+            {project.toolboxUrl && (
+              <button
+                className="text-xs text-primary hover:underline mt-1 cursor-pointer"
+                onClick={() => {
+                  const url = project.toolboxUrl!.startsWith('/') && settings?.toolboxBaseUrl
+                    ? `${settings.toolboxBaseUrl.replace(/\/+$/, '')}${project.toolboxUrl}`
+                    : project.toolboxUrl!;
+                  openToolUrl(url).catch((e) => toast.error('Failed to open URL', { description: String(e) }));
+                }}
+              >
+                {project.toolboxUrl}
+              </button>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">

@@ -16,7 +16,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { useAppStore } from '@/stores/appStore';
-import { FolderKanban, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode, ScrollText, Wrench, SquareTerminal } from 'lucide-react';
+import { FolderKanban, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode, ScrollText, Wrench, SquareTerminal, AppWindow } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { View, ServiceStatus, ScriptStatus } from '@/types';
 import { getVersion } from '@tauri-apps/api/app';
@@ -251,6 +251,16 @@ export function AppSidebar() {
                 >
                   <Wrench className="size-4" />
                   <span>Tools</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={currentView === 'apps' || currentView === 'app-detail'}
+                  onClick={() => handleNavigate('apps')}
+                  tooltip="Apps"
+                >
+                  <AppWindow className="size-4" />
+                  <span>Apps</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

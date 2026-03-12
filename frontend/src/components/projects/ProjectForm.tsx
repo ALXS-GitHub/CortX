@@ -15,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAppStore } from '@/stores/appStore';
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@/types';
 import { open } from '@tauri-apps/plugin-dialog';
+import { ComboboxInput } from '@/components/ui/combobox-input';
 import { FolderOpen, X } from 'lucide-react';
 
 interface ProjectFormProps {
@@ -25,11 +26,13 @@ interface ProjectFormProps {
 }
 
 export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: ProjectFormProps) {
-  const { tagDefinitions } = useAppStore();
+  const { tagDefinitions, statusDefinitions } = useAppStore();
 
   const [name, setName] = useState(project?.name || '');
   const [rootPath, setRootPath] = useState(project?.rootPath || '');
   const [description, setDescription] = useState(project?.description || '');
+  const [status, setStatus] = useState(project?.status || '');
+  const [toolboxUrl, setToolboxUrl] = useState(project?.toolboxUrl || '');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
@@ -44,6 +47,8 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
       setName(project?.name || '');
       setRootPath(project?.rootPath || '');
       setDescription(project?.description || '');
+      setStatus(project?.status || '');
+      setToolboxUrl(project?.toolboxUrl || '');
       setTags(project?.tags || []);
       setTagInput('');
       setShowTagSuggestions(false);
@@ -132,12 +137,16 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
             name: name.trim(),
             description: description.trim() || undefined,
             tags,
+            status: status.trim() || undefined,
+            toolboxUrl: toolboxUrl.trim() || undefined,
           }
         : {
             name: name.trim(),
             rootPath: rootPath.trim(),
             description: description.trim() || undefined,
             tags,
+            status: status.trim() || undefined,
+            toolboxUrl: toolboxUrl.trim() || undefined,
           };
       await onSubmit(data);
       onOpenChange(false);
@@ -202,6 +211,27 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="A brief description of your project..."
                 rows={3}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="proj-status">Status</Label>
+              <ComboboxInput
+                id="proj-status"
+                value={status}
+                onChange={setStatus}
+                options={statusDefinitions.map((d) => d.name)}
+                placeholder="e.g., Active, In Progress"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="proj-toolbox-url">Toolbox URL</Label>
+              <Input
+                id="proj-toolbox-url"
+                value={toolboxUrl}
+                onChange={(e) => setToolboxUrl(e.target.value)}
+                placeholder="https://toolbox.example.com/projects/..."
               />
             </div>
 

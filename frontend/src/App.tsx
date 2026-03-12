@@ -16,6 +16,8 @@ import { ToolsView } from '@/components/tools/ToolsView';
 import { ToolDetail } from '@/components/tools/ToolDetail';
 import { AliasesView } from '@/components/aliases/AliasesView';
 import { AliasDetail } from '@/components/aliases/AliasDetail';
+import { AppsView } from '@/components/apps/AppsView';
+import { AppDetail } from '@/components/apps/AppDetail';
 import { RunScriptDialog } from '@/components/global-scripts/RunScriptDialog';
 import { useAppStore } from '@/stores/appStore';
 import {
@@ -65,7 +67,7 @@ function RunScriptDialogGlobal() {
 }
 
 function App() {
-  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools, loadAliases } = useAppStore();
+  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools, loadAliases, loadStatusDefinitions, loadApps } = useAppStore();
 
   // Keep track of whether listeners are set up
   const listenersSetUp = useRef(false);
@@ -80,6 +82,8 @@ function App() {
     loadScriptsConfig();
     loadTools();
     loadAliases();
+    loadStatusDefinitions();
+    loadApps();
 
     // Check for running services on startup
     getRunningServices().then((serviceIds) => {
@@ -88,7 +92,7 @@ function App() {
         updateServiceStatus(serviceId, 'running');
       });
     });
-  }, [loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools, loadAliases]);
+  }, [loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools, loadAliases, loadStatusDefinitions, loadApps]);
 
   // Set up event listeners - only once
   useEffect(() => {
@@ -198,6 +202,8 @@ function App() {
         store.loadSettings();
         store.loadTools();
         store.loadAliases();
+        store.loadStatusDefinitions();
+        store.loadApps();
       });
     };
 
@@ -257,6 +263,10 @@ function App() {
         return <AliasesView />;
       case 'alias-detail':
         return <AliasDetail />;
+      case 'apps':
+        return <AppsView />;
+      case 'app-detail':
+        return <AppDetail />;
       case 'dashboard':
       default:
         return <Dashboard />;
@@ -283,6 +293,8 @@ function App() {
                   {currentView === 'tool-detail' && 'Tool Detail'}
                   {currentView === 'aliases' && 'Aliases'}
                   {currentView === 'alias-detail' && 'Alias Detail'}
+                  {currentView === 'apps' && 'Apps'}
+                  {currentView === 'app-detail' && 'App Detail'}
                 </div>
               </header>
               <MainContent>{renderView()}</MainContent>

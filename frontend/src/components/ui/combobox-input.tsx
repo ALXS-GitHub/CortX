@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from 'react';
-import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { Check } from 'lucide-react';
@@ -24,11 +23,28 @@ export function ComboboxInput({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Sync internal search with external value
   useEffect(() => {
     setSearch(value);
   }, [value]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node) &&
+        inputRef.current &&
+        !inputRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
 
   const filtered = options.filter((opt) =>
     opt.toLowerCase().includes(search.toLowerCase())
@@ -48,31 +64,22 @@ export function ComboboxInput({
   };
 
   return (
-    <Popover open={open && filtered.length > 0} onOpenChange={setOpen}>
-      <PopoverAnchor asChild>
-        <Input
-          ref={inputRef}
-          id={id}
-          value={search}
-          onChange={(e) => handleInputChange(e.target.value)}
-          onFocus={() => setOpen(true)}
-          onBlur={() => {
-            // Small delay to allow click on option
-            setTimeout(() => setOpen(false), 150);
-          }}
-          placeholder={placeholder}
-          className={className}
-          autoComplete="off"
-        />
-      </PopoverAnchor>
-      <PopoverContent
-        className="p-1 w-[var(--radix-popover-trigger-width)]"
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        side="bottom"
-        align="start"
-        sideOffset={4}
-      >
-        <div className="max-h-[200px] overflow-y-auto">
+    <div className="relative">
+      <Input
+        ref={inputRef}
+        id={id}
+        value={search}
+        onChange={(e) => handleInputChange(e.target.value)}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        className={className}
+        autoComplete="off"
+      />
+      {open && filtered.length > 0 && (
+        <div
+          ref={dropdownRef}
+          className="absolute top-full left-0 z-50 mt-1 w-full max-h-[200px] overflow-y-auto bg-popover border rounded-md shadow-md p-1"
+        >
           {filtered.map((opt) => (
             <button
               key={opt}
@@ -97,7 +104,7 @@ export function ComboboxInput({
             </button>
           ))}
         </div>
-      </PopoverContent>
-    </Popover>
+      )}
+    </div>
   );
 }

@@ -22,9 +22,11 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
         }
 
         // Tab switching
-        KeyCode::Char('1') => app.active_tab = ActiveTab::Scripts,
-        KeyCode::Char('2') => app.active_tab = ActiveTab::Tools,
-        KeyCode::Char('3') => app.active_tab = ActiveTab::Aliases,
+        KeyCode::Char('1') => app.active_tab = ActiveTab::Projects,
+        KeyCode::Char('2') => app.active_tab = ActiveTab::Scripts,
+        KeyCode::Char('3') => app.active_tab = ActiveTab::Tools,
+        KeyCode::Char('4') => app.active_tab = ActiveTab::Aliases,
+        KeyCode::Char('5') => app.active_tab = ActiveTab::Apps,
 
         // Help
         KeyCode::Char('?') => app.input_mode = InputMode::Help,
@@ -35,6 +37,8 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
                 ActiveTab::Scripts => app.enter_search(),
                 ActiveTab::Tools => app.enter_tools_search(),
                 ActiveTab::Aliases => app.enter_aliases_search(),
+                ActiveTab::Apps => app.enter_apps_search(),
+                ActiveTab::Projects => app.enter_projects_search(),
             }
         }
 
@@ -47,6 +51,8 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
                 ActiveTab::Scripts => app.clear_filter(),
                 ActiveTab::Tools => app.clear_tools_filter(),
                 ActiveTab::Aliases => app.clear_aliases_filter(),
+                ActiveTab::Apps => app.clear_apps_filter(),
+                ActiveTab::Projects => app.clear_projects_filter(),
             }
         }
 
@@ -56,6 +62,8 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
                 ActiveTab::Scripts => app.reload_scripts(),
                 ActiveTab::Tools => app.reload_tools(),
                 ActiveTab::Aliases => app.reload_aliases(),
+                ActiveTab::Apps => app.reload_apps(),
+                ActiveTab::Projects => app.reload_projects(),
             }
         }
 
@@ -65,6 +73,8 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
                 ActiveTab::Scripts => handle_normal_scripts(app, key),
                 ActiveTab::Tools => handle_normal_tools(app, key),
                 ActiveTab::Aliases => handle_normal_aliases(app, key),
+                ActiveTab::Apps => handle_normal_apps(app, key),
+                ActiveTab::Projects => handle_normal_projects(app, key),
             }
         }
     }
@@ -134,6 +144,26 @@ fn handle_normal_aliases(app: &mut App, key: KeyEvent) {
     }
 }
 
+fn handle_normal_apps(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => app.apps_move_down(),
+        KeyCode::Char('k') | KeyCode::Up => app.apps_move_up(),
+        KeyCode::Char('g') => app.apps_move_top(),
+        KeyCode::Char('G') => app.apps_move_bottom(),
+        _ => {}
+    }
+}
+
+fn handle_normal_projects(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => app.projects_move_down(),
+        KeyCode::Char('k') | KeyCode::Up => app.projects_move_up(),
+        KeyCode::Char('g') => app.projects_move_top(),
+        KeyCode::Char('G') => app.projects_move_bottom(),
+        _ => {}
+    }
+}
+
 fn handle_search(app: &mut App, key: KeyEvent) {
     match app.active_tab {
         ActiveTab::Scripts => {
@@ -160,6 +190,24 @@ fn handle_search(app: &mut App, key: KeyEvent) {
                 KeyCode::Enter => app.confirm_aliases_search(),
                 KeyCode::Backspace => app.aliases_search_backspace(),
                 KeyCode::Char(c) => app.aliases_search_input(c),
+                _ => {}
+            }
+        }
+        ActiveTab::Apps => {
+            match key.code {
+                KeyCode::Esc => app.exit_apps_search(),
+                KeyCode::Enter => app.confirm_apps_search(),
+                KeyCode::Backspace => app.apps_search_backspace(),
+                KeyCode::Char(c) => app.apps_search_input(c),
+                _ => {}
+            }
+        }
+        ActiveTab::Projects => {
+            match key.code {
+                KeyCode::Esc => app.exit_projects_search(),
+                KeyCode::Enter => app.confirm_projects_search(),
+                KeyCode::Backspace => app.projects_search_backspace(),
+                KeyCode::Char(c) => app.projects_search_input(c),
                 _ => {}
             }
         }

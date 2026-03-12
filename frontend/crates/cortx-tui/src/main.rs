@@ -16,7 +16,7 @@ use crossterm::{
 use ratatui::prelude::*;
 
 use cortx_core::file_watcher;
-use cortx_core::models::ShellAlias;
+use cortx_core::models::{ShellAlias, App as CoreApp};
 use cortx_core::process_manager::ProcessManager;
 use cortx_core::storage::Storage;
 
@@ -66,9 +66,25 @@ enum Command {
         #[command(subcommand)]
         command: AliasCommand,
     },
+    /// Manage GUI applications
+    App {
+        #[command(subcommand)]
+        action: AppAction,
+    },
     /// Fallback: bare `cortx <name>` still runs a script
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Subcommand)]
+enum AppAction {
+    /// List all apps
+    List,
+    /// Launch an app by name
+    Launch {
+        /// App name (case-insensitive partial match)
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -110,6 +126,10 @@ fn main() -> anyhow::Result<()> {
                 cmd_alias_add(&storage, &name, &command, description.as_deref())
             }
             AliasCommand::Remove { name } => cmd_alias_remove(&storage, &name),
+        },
+        Some(Command::App { action }) => match action {
+            AppAction::List => cmd_app_list(&storage),
+            AppAction::Launch { name } => cmd_app_launch(&storage, &name),
         },
         Some(Command::Run { script, args, preset }) => {
             cmd_run(&storage, &process_manager, &script, preset.as_deref(), &args)
@@ -330,6 +350,90 @@ fn cmd_alias_remove(storage: &Storage, name: &str) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Alias '{}' not found", name))?;
     storage.delete_alias(&alias.id).map_err(|e| anyhow::anyhow!("{}", e))?;
     println!("Alias '{}' removed.", name);
+    Ok(())
+}
+
+/// List all apps
+fn cmd_app_list(storage: &Storage) -> anyhow::Result<()> {
+    let apps = storage.get_all_apps();
+    if apps.is_empty() {
+        println!("No apps configured.");
+        return Ok(());
+    }
+
+    let tag_defs = storage.get_all_tag_definitions();
+    let _status_defs = storage.get_all_status_definitions();
+
+    let mut sorted: Vec<&CoreApp> = apps.iter().collect();
+    sorted.sort_by(|a, b| {
+        let ta = a.tags.first().map(|s| s.to_lowercase()).unwrap_or_default();
+        let tb = b.tags.first().map(|s| s.to_lowercase()).unwrap_or_default();
+        ta.cmp(&tb)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    println!("{:<30} {:<15} {:<15} {}", "NAME", "STATUS", "TAGS", "PATH");
+    println!("{}", "-".repeat(80));
+
+    for a in &sorted {
+        let status_display = a.status.as_deref().unwrap_or("-");
+        let tags_display = if a.tags.is_empty() {
+            String::from("-")
+        } else {
+            colorize_tags(&a.tags, &tag_defs)
+        };
+        let tags_visible = if a.tags.is_empty() {
+            1
+        } else {
+            a.tags.join(", ").len()
+        };
+        let tags_pad = if tags_visible < 15 { 15 - tags_visible } else { 1 };
+        let path_display = a.executable_path.as_deref().unwrap_or("-");
+        println!(
+            "{:<30} {:<15} {}{:tags_pad$} {}",
+            a.name,
+            status_display,
+            tags_display,
+            "",
+            path_display,
+            tags_pad = tags_pad,
+        );
+    }
+    println!("\n{} app(s)", apps.len());
+    Ok(())
+}
+
+/// Launch an app by name (case-insensitive partial match)
+fn cmd_app_launch(storage: &Storage, name: &str) -> anyhow::Result<()> {
+    let apps = storage.get_all_apps();
+    let name_lower = name.to_lowercase();
+
+    // Try exact match first, then partial
+    let app = apps
+        .iter()
+        .find(|a| a.name.to_lowercase() == name_lower)
+        .or_else(|| apps.iter().find(|a| a.name.to_lowercase().contains(&name_lower)))
+        .ok_or_else(|| anyhow::anyhow!("App '{}' not found", name))?;
+
+    let exe = app.executable_path.as_deref()
+        .ok_or_else(|| anyhow::anyhow!("App '{}' has no executable path set", app.name))?;
+
+    println!("Launching: {} ({})", app.name, exe);
+
+    let mut cmd = std::process::Command::new("cmd");
+    cmd.args(["/C", "start", "", exe]);
+
+    if let Some(ref args) = app.launch_args {
+        if !args.is_empty() {
+            for arg in args.split_whitespace() {
+                cmd.arg(arg);
+            }
+        }
+    }
+
+    cmd.spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to launch '{}': {}", app.name, e))?;
+
     Ok(())
 }
 

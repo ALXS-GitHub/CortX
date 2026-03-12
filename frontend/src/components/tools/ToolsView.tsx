@@ -41,12 +41,11 @@ import { scanInstalledTools } from '@/lib/tauri';
 import { toast } from 'sonner';
 import type { Tool, CreateToolInput, UpdateToolInput, DiscoveredTool } from '@/types';
 
-const DEFAULT_STATUSES = ['Active', 'Inactive', 'To Test', 'Archived', 'Replaced'];
-
 export function ToolsView() {
   const {
     tools,
     tagDefinitions,
+    statusDefinitions,
     createTool,
     updateTool,
     deleteTool,
@@ -94,11 +93,14 @@ export function ToolsView() {
     });
   }, [tools, tagDefinitions]);
 
-  // Unique statuses from existing tools
+  // Unique statuses from statusDefinitions + existing tools
   const allStatuses = useMemo(() => {
-    const set = new Set([...DEFAULT_STATUSES, ...tools.map(t => t.status)]);
+    const set = new Set([
+      ...statusDefinitions.map((d) => d.name),
+      ...tools.map(t => t.status),
+    ]);
     return Array.from(set);
-  }, [tools]);
+  }, [tools, statusDefinitions]);
 
   const filteredTools = useMemo(() => {
     let result = tools;
@@ -201,7 +203,6 @@ export function ToolsView() {
   };
 
   const toolItemProps = (tool: Tool) => ({
-    key: tool.id,
     tool,
     tagDefinitions,
     onEdit: () => { setEditingTool(tool); setShowToolForm(true); },
@@ -214,20 +215,20 @@ export function ToolsView() {
     if (toolsViewMode === 'card') {
       return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {toolList.map((tool) => <ToolCardView {...toolItemProps(tool)} />)}
+          {toolList.map((tool) => <ToolCardView key={tool.id} {...toolItemProps(tool)} />)}
         </div>
       );
     }
     if (toolsViewMode === 'compact') {
       return (
         <div className="space-y-1">
-          {toolList.map((tool) => <ToolCompactItem {...toolItemProps(tool)} />)}
+          {toolList.map((tool) => <ToolCompactItem key={tool.id} {...toolItemProps(tool)} />)}
         </div>
       );
     }
     return (
       <div className="space-y-2">
-        {toolList.map((tool) => <ToolCard {...toolItemProps(tool)} />)}
+        {toolList.map((tool) => <ToolCard key={tool.id} {...toolItemProps(tool)} />)}
       </div>
     );
   };
@@ -377,6 +378,7 @@ export function ToolsView() {
         tool={editingTool}
         tools={tools}
         tagDefinitions={tagDefinitions}
+        statusDefinitions={statusDefinitions}
         onSubmit={editingTool ? handleUpdateTool : handleCreateTool}
       />
 

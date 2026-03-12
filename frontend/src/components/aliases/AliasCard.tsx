@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { SquareTerminal, MoreVertical, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { StatusBadge } from '@/components/ui/StatusBadge';
 import type { ShellAlias, TagDefinition } from '@/types';
 
 interface AliasCardProps {
@@ -31,6 +32,7 @@ export function AliasCard({ alias, tagDefinitions, onEdit, onDelete, onClick }: 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="font-medium font-mono truncate">{alias.name}</h3>
+              <StatusBadge status={alias.status} />
             </div>
             <p className="text-sm text-muted-foreground mt-0.5 line-clamp-1 font-mono">
               {alias.command}

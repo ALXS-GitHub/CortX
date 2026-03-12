@@ -137,6 +137,7 @@ impl CortxMcp {
         script.color = p.color;
         script.tags = p.tags.unwrap_or_default();
         script.env_vars = p.env_vars;
+        script.status = p.status;
         // Set order to end of list
         let count = self.storage.get_all_global_scripts().len() as u32;
         script.order = count;
@@ -182,6 +183,9 @@ impl CortxMcp {
                 }
                 if let Some(v) = p.env_vars {
                     s.env_vars = Some(v);
+                }
+                if let Some(v) = p.status {
+                    s.status = Some(v);
                 }
             })
             .map_err(|e| mcp_err(e.to_string()))?;
@@ -327,6 +331,8 @@ impl CortxMcp {
         project.description = p.description;
         project.image_path = p.image_path;
         project.tags = p.tags.unwrap_or_default();
+        project.status = p.status;
+        project.toolbox_url = p.toolbox_url;
         let created = self
             .storage
             .create_project(project)
@@ -357,6 +363,12 @@ impl CortxMcp {
                 }
                 if let Some(v) = p.tags {
                     proj.tags = v;
+                }
+                if let Some(v) = p.status {
+                    proj.status = Some(v);
+                }
+                if let Some(v) = p.toolbox_url {
+                    proj.toolbox_url = Some(v);
                 }
             })
             .map_err(|e| mcp_err(e.to_string()))?;
@@ -1265,6 +1277,7 @@ impl CortxMcp {
         if let Some(tags) = p.tags {
             alias.tags = tags;
         }
+        alias.status = p.status;
         let count = self.storage.get_all_aliases().len() as u32;
         alias.order = count;
         let created = self.storage.create_alias(alias).map_err(|e| mcp_err(e.to_string()))?;
@@ -1294,6 +1307,9 @@ impl CortxMcp {
             if let Some(v) = p.tags {
                 a.tags = v;
             }
+            if let Some(v) = p.status {
+                a.status = Some(v);
+            }
         }).map_err(|e| mcp_err(e.to_string()))?;
         ok_json(&updated)
     }
@@ -1306,6 +1322,219 @@ impl CortxMcp {
         self.reload()?;
         self.storage.delete_alias(&p.id).map_err(|e| mcp_err(e.to_string()))?;
         ok_text(format!("Deleted alias {}", p.id))
+    }
+
+    // ========================================================================
+    // Status Definitions (4)
+    // ========================================================================
+
+    #[tool(description = "List all status definitions with their display colors and sort order. Status definitions provide metadata (color, order) for status labels used on scripts, projects, aliases, and apps.", annotations(read_only_hint = true))]
+    fn list_status_definitions(&self) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        let defs = self.storage.get_all_status_definitions();
+        ok_json(&defs)
+    }
+
+    #[tool(description = "Create a status definition with optional color and sort order. Status names must be unique (case-insensitive).")]
+    fn create_status_definition(
+        &self,
+        Parameters(p): Parameters<CreateStatusDefinitionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        let def = StatusDefinition {
+            name: p.name,
+            color: p.color,
+            order: p.order,
+        };
+        let created = self
+            .storage
+            .create_status_definition(def)
+            .map_err(|e| mcp_err(e.to_string()))?;
+        ok_json(&created)
+    }
+
+    #[tool(description = "Update a status definition's name, color, or sort order. Looked up by current 'name'.", annotations(idempotent_hint = true))]
+    fn update_status_definition(
+        &self,
+        Parameters(p): Parameters<UpdateStatusDefinitionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        let updated = self
+            .storage
+            .update_status_definition(&p.name, |d| {
+                if let Some(v) = p.new_name {
+                    d.name = v;
+                }
+                if let Some(v) = p.color {
+                    d.color = Some(v);
+                }
+                if let Some(v) = p.order {
+                    d.order = Some(v);
+                }
+            })
+            .map_err(|e| mcp_err(e.to_string()))?;
+        ok_json(&updated)
+    }
+
+    #[tool(description = "Delete a status definition permanently. Items referencing this status keep their status string but lose color/order metadata.", annotations(destructive_hint = true, idempotent_hint = true))]
+    fn delete_status_definition(
+        &self,
+        Parameters(p): Parameters<DeleteStatusDefinitionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        self.storage
+            .delete_status_definition(&p.name)
+            .map_err(|e| mcp_err(e.to_string()))?;
+        ok_text(format!("Deleted status definition '{}'", p.name))
+    }
+
+    // ========================================================================
+    // Apps (6)
+    // ========================================================================
+
+    #[tool(description = "List all registered apps (GUI applications), optionally filtered by tag or status.", annotations(read_only_hint = true))]
+    fn list_apps(
+        &self,
+        Parameters(p): Parameters<ListAppsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        let mut apps = self.storage.get_all_apps();
+        if let Some(tag) = p.tag {
+            apps.retain(|a| a.tags.iter().any(|t| t.eq_ignore_ascii_case(&tag)));
+        }
+        if let Some(status) = p.status {
+            apps.retain(|a| {
+                a.status
+                    .as_deref()
+                    .map(|s| s.eq_ignore_ascii_case(&status))
+                    .unwrap_or(false)
+            });
+        }
+        ok_json(&apps)
+    }
+
+    #[tool(description = "Get detailed info about an app by its ID, including version, executable path, launch args, and notes.", annotations(read_only_hint = true))]
+    fn get_app_info(
+        &self,
+        Parameters(p): Parameters<GetAppParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        match self.storage.get_app(&p.id) {
+            Some(app) => ok_json(&app),
+            None => Err(mcp_err("App not found")),
+        }
+    }
+
+    #[tool(description = "Register a new app in the registry.")]
+    fn create_app(
+        &self,
+        Parameters(p): Parameters<CreateAppParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        let mut app = App::new(p.name);
+        app.description = p.description;
+        app.tags = p.tags.unwrap_or_default();
+        app.status = p.status;
+        app.version = p.version;
+        app.homepage = p.homepage;
+        app.executable_path = p.executable_path;
+        app.launch_args = p.launch_args;
+        app.toolbox_url = p.toolbox_url;
+        app.notes = p.notes;
+        app.color = p.color;
+        let count = self.storage.get_all_apps().len() as u32;
+        app.order = count;
+        let created = self
+            .storage
+            .create_app(app)
+            .map_err(|e| mcp_err(e.to_string()))?;
+        ok_json(&created)
+    }
+
+    #[tool(description = "Update an app entry. Only provided fields are changed.", annotations(idempotent_hint = true))]
+    fn update_app(
+        &self,
+        Parameters(p): Parameters<UpdateAppParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        let updated = self
+            .storage
+            .update_app(&p.id, |a| {
+                if let Some(v) = p.name {
+                    a.name = v;
+                }
+                if let Some(v) = p.description {
+                    a.description = Some(v);
+                }
+                if let Some(v) = p.tags {
+                    a.tags = v;
+                }
+                if let Some(v) = p.status {
+                    a.status = Some(v);
+                }
+                if let Some(v) = p.version {
+                    a.version = Some(v);
+                }
+                if let Some(v) = p.homepage {
+                    a.homepage = Some(v);
+                }
+                if let Some(v) = p.executable_path {
+                    a.executable_path = Some(v);
+                }
+                if let Some(v) = p.launch_args {
+                    a.launch_args = Some(v);
+                }
+                if let Some(v) = p.toolbox_url {
+                    a.toolbox_url = Some(v);
+                }
+                if let Some(v) = p.notes {
+                    a.notes = Some(v);
+                }
+                if let Some(v) = p.color {
+                    a.color = Some(v);
+                }
+            })
+            .map_err(|e| mcp_err(e.to_string()))?;
+        ok_json(&updated)
+    }
+
+    #[tool(description = "Delete an app from the registry permanently.", annotations(destructive_hint = true, idempotent_hint = true))]
+    fn delete_app(
+        &self,
+        Parameters(p): Parameters<DeleteAppParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        self.storage
+            .delete_app(&p.id)
+            .map_err(|e| mcp_err(e.to_string()))?;
+        ok_text(format!("Deleted app {}", p.id))
+    }
+
+    #[tool(
+        description = "EXECUTES: Launch an app's executable. Opens the application using the configured executable_path and optional launch_args. The app must have an executable_path set.",
+        annotations(open_world_hint = true)
+    )]
+    fn launch_app(
+        &self,
+        Parameters(p): Parameters<LaunchAppParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.reload()?;
+        let app = self
+            .storage
+            .get_app(&p.id)
+            .ok_or_else(|| mcp_err("App not found"))?;
+        let path = app
+            .executable_path
+            .ok_or_else(|| mcp_err("App has no executable_path configured"))?;
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", &path]);
+        if let Some(ref args) = app.launch_args {
+            for arg in args.split_whitespace() {
+                cmd.arg(arg);
+            }
+        }
+        cmd.spawn().map_err(|e| mcp_err(format!("Failed to launch app: {}", e)))?;
+        ok_text(format!("Launched app '{}' ({})", app.name, path))
     }
 }
 

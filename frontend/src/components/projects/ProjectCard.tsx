@@ -2,6 +2,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useAppStore } from '@/stores/appStore';
 import type { Project } from '@/types';
 import { Play, FolderOpen, MoreVertical, Circle, Code } from 'lucide-react';
@@ -65,7 +66,10 @@ export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
-            <CardTitle className="text-base truncate">{project.name}</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base truncate">{project.name}</CardTitle>
+              <StatusBadge status={project.status} />
+            </div>
             {project.description && (
               <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                 {project.description}
