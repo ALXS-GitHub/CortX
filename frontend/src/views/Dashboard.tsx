@@ -29,10 +29,10 @@ import {
 import { Plus, Search, LayoutGrid } from 'lucide-react';
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@/types';
 
-type SortOption = 'recent' | 'name' | 'created';
+type SortOption = 'recent' | 'name' | 'created' | 'status';
 
 export function Dashboard() {
-  const { projects, tagDefinitions, createProject, updateProject, deleteProject, isLoadingProjects } = useAppStore();
+  const { projects, tagDefinitions, statusDefinitions, createProject, updateProject, deleteProject, isLoadingProjects } = useAppStore();
   const { projectsViewMode, setProjectsViewMode } = useViewPrefsStore();
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
@@ -80,6 +80,15 @@ export function Dashboard() {
           return a.name.localeCompare(b.name);
         case 'created':
           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case 'status': {
+          const statusOrder = (s?: string) => {
+            if (!s) return Infinity;
+            const def = statusDefinitions.find((d) => d.name === s);
+            return def?.order ?? Infinity;
+          };
+          const diff = statusOrder(a.status) - statusOrder(b.status);
+          return diff !== 0 ? diff : a.name.localeCompare(b.name);
+        }
         case 'recent':
         default: {
           const aDate = a.lastOpenedAt || a.createdAt;
@@ -88,7 +97,7 @@ export function Dashboard() {
         }
       }
     });
-  }, [projects, selectedTags, search, sort]);
+  }, [projects, selectedTags, search, sort, statusDefinitions]);
 
   const handleAddProject = async (data: CreateProjectInput | UpdateProjectInput) => {
     await createProject(data as CreateProjectInput);
@@ -151,6 +160,7 @@ export function Dashboard() {
             <SelectItem value="recent">Recently Used</SelectItem>
             <SelectItem value="name">Name</SelectItem>
             <SelectItem value="created">Date Created</SelectItem>
+            <SelectItem value="status">Status</SelectItem>
           </SelectContent>
         </Select>
         <ViewModeToggle value={projectsViewMode} onChange={setProjectsViewMode} />
