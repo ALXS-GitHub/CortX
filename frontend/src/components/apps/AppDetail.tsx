@@ -43,7 +43,6 @@ export function AppDetail() {
     setCurrentView,
     updateAppItem,
     deleteApp,
-    selectApp,
   } = useAppStore();
 
   const [showEditForm, setShowEditForm] = useState(false);
