@@ -17,6 +17,32 @@ pub enum ExecutionMode {
 }
 
 // ============================================================================
+// Shared types
+// ============================================================================
+
+/// A configuration file or directory path associated with a tool or app.
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct ConfigPath {
+    #[schemars(description = "Display label (e.g. 'config', 'profile', 'data dir')")]
+    pub label: String,
+    #[schemars(description = "Absolute path to the file or directory")]
+    pub path: String,
+    #[schemars(description = "True if this path is a directory, false if it's a file (default: false)")]
+    #[serde(default)]
+    pub is_directory: bool,
+}
+
+impl From<ConfigPath> for cortx_core::models::ToolConfigPath {
+    fn from(cp: ConfigPath) -> Self {
+        cortx_core::models::ToolConfigPath {
+            label: cp.label,
+            path: cp.path,
+            is_directory: cp.is_directory,
+        }
+    }
+}
+
+// ============================================================================
 // Global Scripts
 // ============================================================================
 
@@ -414,7 +440,7 @@ pub struct ListToolsParams {
     #[schemars(description = "Filter by tag name (case-insensitive)")]
     pub tag: Option<String>,
     #[schemars(
-        description = "Filter by status string (e.g. 'active', 'deprecated', 'replaced')"
+        description = "Filter by status string (e.g. 'Active', 'Deprecated', 'Replaced')"
     )]
     pub status: Option<String>,
 }
@@ -434,7 +460,7 @@ pub struct CreateToolParams {
     #[schemars(description = "Tags for categorization (e.g. ['cli', 'search'])")]
     pub tags: Option<Vec<String>>,
     #[schemars(
-        description = "Current status (default: 'active'). Common values: 'active', 'deprecated', 'replaced', 'evaluating'"
+        description = "Current status (default: 'Active'). Common values: 'Active', 'Deprecated', 'Replaced', 'Evaluating'"
     )]
     pub status: Option<String>,
     #[schemars(description = "Name of the replacement tool if status is 'replaced'")]
@@ -447,6 +473,8 @@ pub struct CreateToolParams {
     pub version: Option<String>,
     #[schemars(description = "Homepage or documentation URL")]
     pub homepage: Option<String>,
+    #[schemars(description = "Configuration file/directory paths (e.g. config files, data dirs)")]
+    pub config_paths: Option<Vec<ConfigPath>>,
     #[schemars(description = "Toolbox documentation page URL")]
     pub toolbox_url: Option<String>,
     #[schemars(description = "Free-form notes")]
@@ -469,6 +497,8 @@ pub struct UpdateToolParams {
     pub install_location: Option<String>,
     pub version: Option<String>,
     pub homepage: Option<String>,
+    #[schemars(description = "Replace configuration file/directory paths")]
+    pub config_paths: Option<Vec<ConfigPath>>,
     pub toolbox_url: Option<String>,
     pub notes: Option<String>,
     pub color: Option<String>,
@@ -682,6 +712,8 @@ pub struct CreateAppParams {
     pub executable_path: Option<String>,
     #[schemars(description = "Command-line arguments to pass when launching")]
     pub launch_args: Option<String>,
+    #[schemars(description = "Configuration file/directory paths")]
+    pub config_paths: Option<Vec<ConfigPath>>,
     #[schemars(description = "Toolbox documentation page URL")]
     pub toolbox_url: Option<String>,
     #[schemars(description = "Free-form notes")]
@@ -703,6 +735,8 @@ pub struct UpdateAppParams {
     pub homepage: Option<String>,
     pub executable_path: Option<String>,
     pub launch_args: Option<String>,
+    #[schemars(description = "Replace configuration file/directory paths")]
+    pub config_paths: Option<Vec<ConfigPath>>,
     pub toolbox_url: Option<String>,
     pub notes: Option<String>,
     pub color: Option<String>,

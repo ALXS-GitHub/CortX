@@ -249,11 +249,11 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
       <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
         <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
           <DialogHeader className="flex-shrink-0">
-            <DialogTitle>{isEditing ? 'Edit Alias' : 'Create Alias'}</DialogTitle>
+            <DialogTitle>{isEditing ? 'Edit Shell Config' : 'Create Shell Config'}</DialogTitle>
             <DialogDescription>
               {isEditing
-                ? 'Update the shell alias.'
-                : 'Define a shell alias that will be available in your terminal.'}
+                ? 'Update the shell config entry.'
+                : 'Define a shell function, init script, or raw script for your terminal.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -487,7 +487,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Create Alias'}
+              {isSubmitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Create'}
             </Button>
           </DialogFooter>
         </form>

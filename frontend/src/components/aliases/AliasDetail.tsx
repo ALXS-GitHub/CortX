@@ -7,12 +7,23 @@ import {
   ArrowLeft,
   Pencil,
   SquareTerminal,
+  FileCode,
+  Zap,
   Tag,
   Copy,
   Check,
   Wrench,
   Settings,
 } from 'lucide-react';
+import type { AliasType } from '@/types';
+
+const aliasTypeIcon = (type: AliasType, size = 'size-8') => {
+  switch (type) {
+    case 'script': return <FileCode className={`${size} text-muted-foreground`} />;
+    case 'init': return <Zap className={`${size} text-muted-foreground`} />;
+    default: return <SquareTerminal className={`${size} text-muted-foreground`} />;
+  }
+};
 import { useAppStore } from '@/stores/appStore';
 import { AliasForm } from './AliasForm';
 import { TagBadge } from '@/components/ui/TagBadge';
@@ -76,7 +87,7 @@ export function AliasDetail() {
       <div className="p-6">
         <Button variant="ghost" onClick={() => setCurrentView('aliases')}>
           <ArrowLeft className="size-4 mr-2" />
-          Back to Aliases
+          Back to Shell Config
         </Button>
         <p className="text-muted-foreground mt-4">Alias not found.</p>
       </div>
@@ -93,12 +104,12 @@ export function AliasDetail() {
       <div>
         <Button variant="ghost" size="sm" onClick={() => setCurrentView('aliases')} className="mb-4">
           <ArrowLeft className="size-4 mr-2" />
-          Back to Aliases
+          Back to Shell Config
         </Button>
 
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <SquareTerminal className="size-8 text-muted-foreground" />
+            {aliasTypeIcon(aliasType as AliasType)}
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-bold font-mono">{alias.name}</h1>

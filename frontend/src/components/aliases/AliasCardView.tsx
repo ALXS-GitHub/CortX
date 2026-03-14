@@ -3,7 +3,16 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { SquareTerminal, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { SquareTerminal, FileCode, Zap, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import type { AliasType } from '@/types';
+
+const aliasTypeIcon = (type: AliasType) => {
+  switch (type) {
+    case 'script': return <FileCode className="size-5 flex-shrink-0 text-muted-foreground" />;
+    case 'init': return <Zap className="size-5 flex-shrink-0 text-muted-foreground" />;
+    default: return <SquareTerminal className="size-5 flex-shrink-0 text-muted-foreground" />;
+  }
+};
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
 import type { ShellAlias, TagDefinition } from '@/types';
@@ -22,7 +31,7 @@ export function AliasCardView({ alias, tagDefinitions, onEdit, onDelete, onClick
       <CardHeader className="pb-2 px-4 pt-4">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <SquareTerminal className="size-5 flex-shrink-0 text-muted-foreground" />
+            {aliasTypeIcon(alias.aliasType || 'function')}
             <h3 className="font-medium font-mono truncate">{alias.name}</h3>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">

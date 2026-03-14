@@ -41,6 +41,8 @@ import { scanInstalledTools } from '@/lib/tauri';
 import { toast } from 'sonner';
 import type { Tool, CreateToolInput, UpdateToolInput, DiscoveredTool } from '@/types';
 
+type SortOption = 'name' | 'created';
+
 export function ToolsView() {
   const {
     tools,
@@ -56,6 +58,7 @@ export function ToolsView() {
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortOption>('name');
   const [showToolForm, setShowToolForm] = useState(false);
   const [editingTool, setEditingTool] = useState<Tool | undefined>(undefined);
   const [deletingTool, setDeletingTool] = useState<Tool | null>(null);
@@ -124,8 +127,13 @@ export function ToolsView() {
       );
     }
 
-    return result.slice().sort((a, b) => a.order - b.order);
-  }, [tools, selectedTags, selectedStatus, search]);
+    return result.slice().sort((a, b) => {
+      switch (sort) {
+        case 'created': return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        default: return a.name.localeCompare(b.name);
+      }
+    });
+  }, [tools, selectedTags, selectedStatus, search, sort]);
 
   const handleCreateTool = async (data: CreateToolInput | UpdateToolInput) => {
     await createTool(data as CreateToolInput);
@@ -288,6 +296,16 @@ export function ToolsView() {
           </SelectContent>
         </Select>
 
+        <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+          <SelectTrigger size="sm" className="w-[140px]">
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">Name</SelectItem>
+            <SelectItem value="created">Date Created</SelectItem>
+          </SelectContent>
+        </Select>
+
         <ViewModeToggle value={toolsViewMode} onChange={setToolsViewMode} />
       </div>
 
@@ -322,31 +340,6 @@ export function ToolsView() {
           )}
         </div>
       )}
-
-      {/* Status filter pills */}
-      <div className="flex gap-2 flex-wrap">
-        <Badge
-          variant={selectedStatus === null ? 'default' : 'outline'}
-          className="cursor-pointer"
-          onClick={() => setSelectedStatus(null)}
-        >
-          All ({tools.length})
-        </Badge>
-        {allStatuses.map(status => {
-          const count = tools.filter(t => t.status === status).length;
-          if (count === 0) return null;
-          return (
-            <Badge
-              key={status}
-              variant={selectedStatus === status ? 'default' : 'outline'}
-              className="cursor-pointer"
-              onClick={() => setSelectedStatus(selectedStatus === status ? null : status)}
-            >
-              {status} ({count})
-            </Badge>
-          );
-        })}
-      </div>
 
       {/* Tools list */}
       {filteredTools.length === 0 ? (

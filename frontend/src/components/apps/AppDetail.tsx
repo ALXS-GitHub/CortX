@@ -3,16 +3,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
   ChevronLeft,
   Pencil,
   AppWindow,
@@ -23,7 +13,6 @@ import {
   StickyNote,
   Rocket,
   Play,
-  Trash2,
   Tag,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
@@ -42,11 +31,9 @@ export function AppDetail() {
     selectedAppId,
     setCurrentView,
     updateAppItem,
-    deleteApp,
   } = useAppStore();
 
   const [showEditForm, setShowEditForm] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const app = useMemo(
     () => apps.find((a) => a.id === selectedAppId),
@@ -57,18 +44,6 @@ export function AppDetail() {
     if (!app) return;
     await updateAppItem(app.id, data);
     toast.success('App updated');
-  };
-
-  const handleDelete = async () => {
-    if (!app) return;
-    try {
-      await deleteApp(app.id);
-      toast.success('App deleted');
-      setCurrentView('apps');
-    } catch (e) {
-      toast.error('Failed to delete app', { description: String(e) });
-    }
-    setShowDeleteDialog(false);
   };
 
   const handleLaunch = async () => {
@@ -299,18 +274,6 @@ export function AppDetail() {
         </Card>
       )}
 
-      {/* Delete Section */}
-      <div className="border-t pt-6">
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setShowDeleteDialog(true)}
-        >
-          <Trash2 className="size-4 mr-2" />
-          Delete App
-        </Button>
-      </div>
-
       {/* Edit Form */}
       <AppForm
         open={showEditForm}
@@ -321,26 +284,6 @@ export function AppDetail() {
         onSubmit={handleUpdate}
       />
 
-      {/* Delete Confirmation */}
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete App</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete "{app.name}"? This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

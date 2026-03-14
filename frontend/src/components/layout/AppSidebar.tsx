@@ -267,10 +267,10 @@ export function AppSidebar() {
                 <SidebarMenuButton
                   isActive={currentView === 'aliases' || currentView === 'alias-detail'}
                   onClick={() => handleNavigate('aliases')}
-                  tooltip="Aliases"
+                  tooltip="Shell Config"
                 >
                   <SquareTerminal className="size-4" />
-                  <span>Aliases</span>
+                  <span>Shell Config</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

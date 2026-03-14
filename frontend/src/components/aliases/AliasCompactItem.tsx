@@ -2,7 +2,16 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { SquareTerminal, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { SquareTerminal, FileCode, Zap, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import type { AliasType } from '@/types';
+
+const aliasTypeIcon = (type: AliasType) => {
+  switch (type) {
+    case 'script': return <FileCode className="size-3.5 flex-shrink-0 mr-2 text-muted-foreground" />;
+    case 'init': return <Zap className="size-3.5 flex-shrink-0 mr-2 text-muted-foreground" />;
+    default: return <SquareTerminal className="size-3.5 flex-shrink-0 mr-2 text-muted-foreground" />;
+  }
+};
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
 import type { ShellAlias, TagDefinition } from '@/types';
@@ -21,7 +30,7 @@ export function AliasCompactItem({ alias, tagDefinitions, onEdit, onDelete, onCl
       className="group flex items-center h-9 border rounded-md px-3 py-1.5 cursor-pointer hover:bg-muted/50 transition-colors overflow-hidden"
       onClick={onClick}
     >
-      <SquareTerminal className="size-3.5 flex-shrink-0 mr-2 text-muted-foreground" />
+      {aliasTypeIcon(alias.aliasType || 'function')}
       <span className="font-medium text-sm font-mono truncate mr-2">{alias.name}</span>
       <span className="text-xs text-muted-foreground font-mono truncate mr-2 hidden sm:inline">
         {alias.command}

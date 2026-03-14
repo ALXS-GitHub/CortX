@@ -6,7 +6,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { SquareTerminal, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { SquareTerminal, FileCode, Zap, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import type { AliasType } from '@/types';
+
+const aliasTypeIcon = (type: AliasType) => {
+  switch (type) {
+    case 'script': return <FileCode className="size-5 text-muted-foreground" />;
+    case 'init': return <Zap className="size-5 text-muted-foreground" />;
+    default: return <SquareTerminal className="size-5 text-muted-foreground" />;
+  }
+};
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -26,7 +35,7 @@ export function AliasCard({ alias, tagDefinitions, onEdit, onDelete, onClick }: 
       <CardContent className="p-4">
         <div className="flex items-start gap-4">
           <div className="mt-1 flex-shrink-0">
-            <SquareTerminal className="size-5 text-muted-foreground" />
+            {aliasTypeIcon(alias.aliasType || 'function')}
           </div>
 
           <div className="flex-1 min-w-0">
