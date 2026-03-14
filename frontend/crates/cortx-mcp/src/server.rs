@@ -902,7 +902,7 @@ impl CortxMcp {
         Parameters(p): Parameters<CreateToolParams>,
     ) -> Result<CallToolResult, McpError> {
         self.reload()?;
-        let mut tool = Tool::new(p.name, p.status.unwrap_or_else(|| "active".to_string()));
+        let mut tool = Tool::new(p.name, p.status.unwrap_or_else(|| "Active".to_string()));
         tool.description = p.description;
         tool.tags = p.tags.unwrap_or_default();
         tool.replaced_by = p.replaced_by;
@@ -910,6 +910,9 @@ impl CortxMcp {
         tool.install_location = p.install_location;
         tool.version = p.version;
         tool.homepage = p.homepage;
+        if let Some(cp) = p.config_paths {
+            tool.config_paths = cp.into_iter().map(|c| c.into()).collect();
+        }
         tool.toolbox_url = p.toolbox_url;
         tool.notes = p.notes;
         tool.color = p.color;
@@ -957,6 +960,9 @@ impl CortxMcp {
                 }
                 if let Some(v) = p.homepage {
                     t.homepage = Some(v);
+                }
+                if let Some(v) = p.config_paths {
+                    t.config_paths = v.into_iter().map(|c| c.into()).collect();
                 }
                 if let Some(v) = p.toolbox_url {
                     t.toolbox_url = Some(v);
@@ -1465,6 +1471,9 @@ impl CortxMcp {
         app.homepage = p.homepage;
         app.executable_path = p.executable_path;
         app.launch_args = p.launch_args;
+        if let Some(cp) = p.config_paths {
+            app.config_paths = cp.into_iter().map(|c| c.into()).collect();
+        }
         app.toolbox_url = p.toolbox_url;
         app.notes = p.notes;
         app.color = p.color;
@@ -1509,6 +1518,9 @@ impl CortxMcp {
                 }
                 if let Some(v) = p.launch_args {
                     a.launch_args = Some(v);
+                }
+                if let Some(v) = p.config_paths {
+                    a.config_paths = v.into_iter().map(|c| c.into()).collect();
                 }
                 if let Some(v) = p.toolbox_url {
                     a.toolbox_url = Some(v);

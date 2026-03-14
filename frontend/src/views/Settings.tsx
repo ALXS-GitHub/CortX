@@ -143,7 +143,7 @@ export function Settings() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'cortx-scripts-export.json';
+      a.download = 'cortx-export.json';
       a.click();
       URL.revokeObjectURL(url);
       toast.success('Scripts config exported');
@@ -163,7 +163,7 @@ export function Settings() {
         const { readTextFile } = await import('@tauri-apps/plugin-fs');
         const json = await readTextFile(selected);
         const result = await importScriptsConfig(json);
-        toast.success(`Imported: ${result.scriptsAdded} scripts, ${result.groupsAdded} groups, ${result.toolsAdded} tools, ${result.aliasesAdded} aliases, ${result.appsAdded} apps, ${result.tagDefinitionsAdded} tags, ${result.statusDefinitionsAdded} statuses`);
+        toast.success(`Imported: ${result.scriptsAdded} scripts, ${result.toolsAdded} tools, ${result.appsAdded} apps, ${result.aliasesAdded} shell config, ${result.tagDefinitionsAdded} tags, ${result.statusDefinitionsAdded} statuses`);
       }
     } catch (error) {
       toast.error(`Failed to import: ${error}`);
@@ -568,7 +568,7 @@ export function Settings() {
         <CardHeader>
           <CardTitle>Import / Export</CardTitle>
           <CardDescription>
-            Export or import your global scripts, tags, tools, aliases, and groups configuration
+            Export or import your scripts, tools, apps, shell config, tags, and statuses
           </CardDescription>
         </CardHeader>
         <CardContent>

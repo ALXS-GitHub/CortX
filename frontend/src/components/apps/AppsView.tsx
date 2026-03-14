@@ -1,7 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,6 +30,8 @@ import { TagBadge } from '@/components/ui/TagBadge';
 import { toast } from 'sonner';
 import type { App, CreateAppInput, UpdateAppInput } from '@/types';
 
+type SortOption = 'name' | 'created';
+
 const DEFAULT_STATUSES = ['Active', 'Inactive', 'To Test', 'Archived', 'Replaced'];
 
 export function AppsView() {
@@ -48,6 +49,7 @@ export function AppsView() {
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortOption>('name');
   const [showAppForm, setShowAppForm] = useState(false);
   const [editingApp, setEditingApp] = useState<App | undefined>(undefined);
   const [deletingApp, setDeletingApp] = useState<App | null>(null);
@@ -110,8 +112,13 @@ export function AppsView() {
       );
     }
 
-    return result.slice().sort((a, b) => a.order - b.order);
-  }, [apps, selectedTags, selectedStatus, search]);
+    return result.slice().sort((a, b) => {
+      switch (sort) {
+        case 'created': return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        default: return a.name.localeCompare(b.name);
+      }
+    });
+  }, [apps, selectedTags, selectedStatus, search, sort]);
 
   const handleCreateApp = async (data: CreateAppInput | UpdateAppInput) => {
     await createApp(data as CreateAppInput);
@@ -217,6 +224,16 @@ export function AppsView() {
           </SelectContent>
         </Select>
 
+        <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+          <SelectTrigger size="sm" className="w-[140px]">
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">Name</SelectItem>
+            <SelectItem value="created">Date Created</SelectItem>
+          </SelectContent>
+        </Select>
+
         <ViewModeToggle value={appsViewMode} onChange={setAppsViewMode} />
       </div>
 
@@ -251,31 +268,6 @@ export function AppsView() {
           )}
         </div>
       )}
-
-      {/* Status filter pills */}
-      <div className="flex gap-2 flex-wrap">
-        <Badge
-          variant={selectedStatus === null ? 'default' : 'outline'}
-          className="cursor-pointer"
-          onClick={() => setSelectedStatus(null)}
-        >
-          All ({apps.length})
-        </Badge>
-        {allStatuses.map((status) => {
-          const count = apps.filter((a) => a.status === status).length;
-          if (count === 0) return null;
-          return (
-            <Badge
-              key={status}
-              variant={selectedStatus === status ? 'default' : 'outline'}
-              className="cursor-pointer"
-              onClick={() => setSelectedStatus(selectedStatus === status ? null : status)}
-            >
-              {status} ({count})
-            </Badge>
-          );
-        })}
-      </div>
 
       {/* Apps list */}
       {filteredApps.length === 0 ? (

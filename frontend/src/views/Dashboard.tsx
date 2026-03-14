@@ -37,6 +37,7 @@ export function Dashboard() {
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortOption>('recent');
+  const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
@@ -55,6 +56,14 @@ export function Dashboard() {
     });
   };
 
+  const allStatuses = useMemo(() => {
+    const set = new Set([
+      ...statusDefinitions.map((d) => d.name),
+      ...projects.map((p) => p.status).filter(Boolean) as string[],
+    ]);
+    return Array.from(set);
+  }, [projects, statusDefinitions]);
+
   const filteredProjects = useMemo(() => {
     let result = projects;
 
@@ -63,6 +72,10 @@ export function Dashboard() {
       result = result.filter((p) =>
         p.tags.some((t) => selectedTags.has(t.toLowerCase()))
       );
+    }
+
+    if (selectedStatus) {
+      result = result.filter((p) => p.status === selectedStatus);
     }
 
     if (search.trim()) {
@@ -97,7 +110,7 @@ export function Dashboard() {
         }
       }
     });
-  }, [projects, selectedTags, search, sort, statusDefinitions]);
+  }, [projects, selectedTags, selectedStatus, search, sort, statusDefinitions]);
 
   const handleAddProject = async (data: CreateProjectInput | UpdateProjectInput) => {
     await createProject(data as CreateProjectInput);
@@ -152,6 +165,22 @@ export function Dashboard() {
             className="pl-9"
           />
         </div>
+        {allStatuses.length > 0 && (
+          <Select
+            value={selectedStatus ?? '__all__'}
+            onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
+          >
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All statuses</SelectItem>
+              {allStatuses.map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Sort by" />

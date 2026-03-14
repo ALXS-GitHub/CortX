@@ -291,8 +291,8 @@ function App() {
                   {currentView === 'script-detail' && 'Script Detail'}
                   {currentView === 'tools' && 'Tools'}
                   {currentView === 'tool-detail' && 'Tool Detail'}
-                  {currentView === 'aliases' && 'Aliases'}
-                  {currentView === 'alias-detail' && 'Alias Detail'}
+                  {currentView === 'aliases' && 'Shell Config'}
+                  {currentView === 'alias-detail' && 'Shell Config Detail'}
                   {currentView === 'apps' && 'Apps'}
                   {currentView === 'app-detail' && 'App Detail'}
                 </div>

@@ -30,6 +30,8 @@ import { TagBadge } from '@/components/ui/TagBadge';
 import { toast } from 'sonner';
 import type { ShellAlias, CreateShellAliasInput, UpdateShellAliasInput } from '@/types';
 
+type SortOption = 'name' | 'created';
+
 export function AliasesView() {
   const {
     aliases,
@@ -46,6 +48,7 @@ export function AliasesView() {
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortOption>('name');
   const [showAliasForm, setShowAliasForm] = useState(false);
   const [editingAlias, setEditingAlias] = useState<ShellAlias | undefined>(undefined);
   const [deletingAlias, setDeletingAlias] = useState<ShellAlias | null>(null);
@@ -107,8 +110,13 @@ export function AliasesView() {
       );
     }
 
-    return result.slice().sort((a, b) => a.order - b.order);
-  }, [aliases, selectedTags, selectedStatus, search]);
+    return result.slice().sort((a, b) => {
+      switch (sort) {
+        case 'created': return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        default: return a.name.localeCompare(b.name);
+      }
+    });
+  }, [aliases, selectedTags, selectedStatus, search, sort]);
 
   const handleCreateAlias = async (data: CreateShellAliasInput | UpdateShellAliasInput) => {
     await createAlias(data as CreateShellAliasInput);
@@ -168,9 +176,9 @@ export function AliasesView() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Aliases</h1>
+          <h1 className="text-2xl font-bold">Shell Config</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage shell aliases and generate init scripts for your terminal
+            Manage shell functions, init scripts, and aliases for your terminal
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -192,7 +200,7 @@ export function AliasesView() {
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input
-            placeholder="Search aliases..."
+            placeholder="Search shell config..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -215,6 +223,16 @@ export function AliasesView() {
             </SelectContent>
           </Select>
         )}
+
+        <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+          <SelectTrigger size="sm" className="w-[140px]">
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">Name</SelectItem>
+            <SelectItem value="created">Date Created</SelectItem>
+          </SelectContent>
+        </Select>
 
         <ViewModeToggle value={aliasesViewMode} onChange={setAliasesViewMode} />
       </div>
@@ -254,8 +272,8 @@ export function AliasesView() {
       {/* Aliases list */}
       {filteredAliases.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <p className="text-lg font-medium">No aliases yet</p>
-          <p className="text-sm mt-1">Create your first shell alias to get started</p>
+          <p className="text-lg font-medium">No shell config yet</p>
+          <p className="text-sm mt-1">Create your first shell function, init, or script to get started</p>
           <Button
             className="mt-4"
             onClick={() => {
@@ -290,9 +308,9 @@ export function AliasesView() {
       <AlertDialog open={!!deletingAlias} onOpenChange={(open) => !open && setDeletingAlias(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Alias</AlertDialogTitle>
+            <AlertDialogTitle>Delete Shell Config</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete the alias "{deletingAlias?.name}"? This cannot be undone.
+              Are you sure you want to delete "{deletingAlias?.name}"? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

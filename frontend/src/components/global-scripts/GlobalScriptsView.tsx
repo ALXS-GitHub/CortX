@@ -40,6 +40,8 @@ import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
 import { toast } from 'sonner';
 import type { GlobalScript, ScriptStatus, CreateGlobalScriptInput, UpdateGlobalScriptInput, DiscoveredScript } from '@/types';
 
+type SortOption = 'name' | 'created';
+
 export function GlobalScriptsView() {
   const {
     globalScripts,
@@ -60,6 +62,7 @@ export function GlobalScriptsView() {
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortOption>('name');
   const [showScriptForm, setShowScriptForm] = useState(false);
   const [editingScript, setEditingScript] = useState<GlobalScript | undefined>(undefined);
   const [deletingScript, setDeletingScript] = useState<GlobalScript | null>(null);
@@ -122,8 +125,13 @@ export function GlobalScriptsView() {
       );
     }
 
-    return scripts.slice().sort((a, b) => a.order - b.order);
-  }, [globalScripts, selectedTags, selectedStatus, search]);
+    return scripts.slice().sort((a, b) => {
+      switch (sort) {
+        case 'created': return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        default: return a.name.localeCompare(b.name);
+      }
+    });
+  }, [globalScripts, selectedTags, selectedStatus, search, sort]);
 
   const handleCreateScript = async (data: CreateGlobalScriptInput | UpdateGlobalScriptInput) => {
     await createGlobalScript(data as CreateGlobalScriptInput);
@@ -322,6 +330,15 @@ export function GlobalScriptsView() {
               </SelectContent>
             </Select>
           )}
+          <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+            <SelectTrigger size="sm" className="w-[140px]">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="created">Date Created</SelectItem>
+            </SelectContent>
+          </Select>
           <ViewModeToggle value={scriptsViewMode} onChange={setScriptsViewMode} />
         </div>
 
