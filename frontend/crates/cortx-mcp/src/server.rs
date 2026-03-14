@@ -1272,12 +1272,22 @@ impl CortxMcp {
         self.reload()?;
         cortx_core::shell_init::validate_alias_name(&p.name)
             .map_err(|e| mcp_err(e))?;
+        if let Some(ref at) = p.alias_type {
+            cortx_core::shell_init::validate_alias_type(at)
+                .map_err(|e| mcp_err(e))?;
+        }
         let mut alias = cortx_core::models::ShellAlias::new(p.name, p.command);
         alias.description = p.description;
         if let Some(tags) = p.tags {
             alias.tags = tags;
         }
         alias.status = p.status;
+        if let Some(at) = p.alias_type {
+            alias.alias_type = at;
+        }
+        alias.setup = p.setup;
+        alias.script = p.script;
+        alias.tool_id = p.tool_id;
         let count = self.storage.get_all_aliases().len() as u32;
         alias.order = count;
         let created = self.storage.create_alias(alias).map_err(|e| mcp_err(e.to_string()))?;
@@ -1292,6 +1302,10 @@ impl CortxMcp {
         self.reload()?;
         if let Some(ref name) = p.name {
             cortx_core::shell_init::validate_alias_name(name)
+                .map_err(|e| mcp_err(e))?;
+        }
+        if let Some(ref at) = p.alias_type {
+            cortx_core::shell_init::validate_alias_type(at)
                 .map_err(|e| mcp_err(e))?;
         }
         let updated = self.storage.update_alias(&p.id, |a| {
@@ -1309,6 +1323,18 @@ impl CortxMcp {
             }
             if let Some(v) = p.status {
                 a.status = Some(v);
+            }
+            if let Some(v) = p.alias_type {
+                a.alias_type = v;
+            }
+            if let Some(v) = p.setup {
+                a.setup = Some(v);
+            }
+            if let Some(v) = p.script {
+                a.script = Some(v);
+            }
+            if let Some(v) = p.tool_id {
+                a.tool_id = if v.is_empty() { None } else { Some(v) };
             }
         }).map_err(|e| mcp_err(e.to_string()))?;
         ok_json(&updated)

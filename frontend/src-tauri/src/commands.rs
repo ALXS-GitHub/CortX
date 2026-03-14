@@ -2062,6 +2062,9 @@ pub fn get_alias(state: State<AppState>, id: String) -> Result<ShellAlias, Strin
 #[tauri::command]
 pub fn create_alias(state: State<AppState>, input: CreateShellAliasInput) -> Result<ShellAlias, String> {
     cortx_core::shell_init::validate_alias_name(&input.name).map_err(|e| e)?;
+    if let Some(ref at) = input.alias_type {
+        cortx_core::shell_init::validate_alias_type(at).map_err(|e| e)?;
+    }
 
     let mut alias = ShellAlias::new(input.name, input.command);
     alias.description = input.description;
@@ -2069,6 +2072,12 @@ pub fn create_alias(state: State<AppState>, input: CreateShellAliasInput) -> Res
         alias.tags = tags;
     }
     alias.status = input.status;
+    if let Some(at) = input.alias_type {
+        alias.alias_type = at;
+    }
+    alias.setup = input.setup;
+    alias.script = input.script;
+    alias.tool_id = input.tool_id;
     let count = state.storage.get_all_aliases().len() as u32;
     alias.order = count;
 
@@ -2079,6 +2088,9 @@ pub fn create_alias(state: State<AppState>, input: CreateShellAliasInput) -> Res
 pub fn update_alias(state: State<AppState>, id: String, input: UpdateShellAliasInput) -> Result<ShellAlias, String> {
     if let Some(ref name) = input.name {
         cortx_core::shell_init::validate_alias_name(name).map_err(|e| e)?;
+    }
+    if let Some(ref at) = input.alias_type {
+        cortx_core::shell_init::validate_alias_type(at).map_err(|e| e)?;
     }
 
     state.storage.update_alias(&id, |alias| {
@@ -2096,6 +2108,18 @@ pub fn update_alias(state: State<AppState>, id: String, input: UpdateShellAliasI
         }
         if input.status.is_some() {
             alias.status = input.status;
+        }
+        if let Some(at) = input.alias_type {
+            alias.alias_type = at;
+        }
+        if let Some(setup) = input.setup {
+            alias.setup = Some(setup);
+        }
+        if let Some(script) = input.script {
+            alias.script = Some(script);
+        }
+        if let Some(tool_id) = input.tool_id {
+            alias.tool_id = if tool_id.is_empty() { None } else { Some(tool_id) };
         }
     }).map_err(|e| e.to_string())
 }

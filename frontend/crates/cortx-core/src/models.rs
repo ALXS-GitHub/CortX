@@ -939,6 +939,22 @@ pub struct ShellAlias {
     pub order: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// Alias type: "function" (default), "script", or "init"
+    #[serde(default = "default_alias_type")]
+    pub alias_type: String,
+    /// Per-shell setup code (runs before alias definition)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<HashMap<String, String>>,
+    /// Per-shell script/init content (used for "script" and "init" types)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<HashMap<String, String>>,
+    /// Link to a Tool entry
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_id: Option<String>,
+}
+
+fn default_alias_type() -> String {
+    "function".to_string()
 }
 
 impl ShellAlias {
@@ -954,6 +970,10 @@ impl ShellAlias {
             updated_at: now,
             order: 0,
             status: None,
+            alias_type: default_alias_type(),
+            setup: None,
+            script: None,
+            tool_id: None,
         }
     }
 }
@@ -966,6 +986,10 @@ pub struct CreateShellAliasInput {
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
     pub status: Option<String>,
+    pub alias_type: Option<String>,
+    pub setup: Option<HashMap<String, String>>,
+    pub script: Option<HashMap<String, String>>,
+    pub tool_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -976,6 +1000,10 @@ pub struct UpdateShellAliasInput {
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
     pub status: Option<String>,
+    pub alias_type: Option<String>,
+    pub setup: Option<HashMap<String, String>>,
+    pub script: Option<HashMap<String, String>>,
+    pub tool_id: Option<String>,
 }
 
 // ============================================================================

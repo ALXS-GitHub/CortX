@@ -18,7 +18,7 @@ interface AliasCardViewProps {
 
 export function AliasCardView({ alias, tagDefinitions, onEdit, onDelete, onClick }: AliasCardViewProps) {
   return (
-    <Card className="group cursor-pointer hover:border-primary/50 transition-colors h-full flex flex-col" onClick={onClick}>
+    <Card className="group cursor-pointer hover:border-primary/50 transition-colors h-full flex flex-col overflow-hidden" onClick={onClick}>
       <CardHeader className="pb-2 px-4 pt-4">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -50,7 +50,7 @@ export function AliasCardView({ alias, tagDefinitions, onEdit, onDelete, onClick
         </div>
       </CardHeader>
       <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col">
-        <p className="text-sm text-muted-foreground font-mono line-clamp-2">{alias.command}</p>
+        <p className="text-sm text-muted-foreground font-mono line-clamp-2 break-all">{alias.command}</p>
         {alias.description && (
           <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{alias.description}</p>
         )}

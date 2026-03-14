@@ -18,7 +18,7 @@ interface AliasCompactItemProps {
 export function AliasCompactItem({ alias, tagDefinitions, onEdit, onDelete, onClick }: AliasCompactItemProps) {
   return (
     <div
-      className="group flex items-center h-9 border rounded-md px-3 py-1.5 cursor-pointer hover:bg-muted/50 transition-colors"
+      className="group flex items-center h-9 border rounded-md px-3 py-1.5 cursor-pointer hover:bg-muted/50 transition-colors overflow-hidden"
       onClick={onClick}
     >
       <SquareTerminal className="size-3.5 flex-shrink-0 mr-2 text-muted-foreground" />

@@ -33,6 +33,7 @@ import type { ShellAlias, CreateShellAliasInput, UpdateShellAliasInput } from '@
 export function AliasesView() {
   const {
     aliases,
+    tools,
     tagDefinitions,
     statusDefinitions,
     createAlias,
@@ -279,6 +280,7 @@ export function AliasesView() {
         }}
         alias={editingAlias}
         aliases={aliases}
+        tools={tools}
         tagDefinitions={tagDefinitions}
         statusDefinitions={statusDefinitions}
         onSubmit={editingAlias ? handleUpdateAlias : handleCreateAlias}
