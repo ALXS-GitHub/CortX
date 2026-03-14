@@ -11,25 +11,31 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { X } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { X, ChevronDown } from 'lucide-react';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { ComboboxInput } from '@/components/ui/combobox-input';
-import type { ShellAlias, TagDefinition, StatusDefinition, CreateShellAliasInput, UpdateShellAliasInput } from '@/types';
+import type { ShellAlias, Tool, TagDefinition, StatusDefinition, AliasType, CreateShellAliasInput, UpdateShellAliasInput } from '@/types';
 
 // Valid alias name: alphanumeric, hyphens, underscores, dots
 const ALIAS_NAME_REGEX = /^[a-zA-Z_][a-zA-Z0-9_\-\.]*$/;
+
+const SHELLS = ['powershell', 'bash', 'zsh', 'fish'] as const;
 
 interface AliasFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   alias?: ShellAlias;
   aliases: ShellAlias[];
+  tools: Tool[];
   tagDefinitions: TagDefinition[];
   statusDefinitions: StatusDefinition[];
   onSubmit: (data: CreateShellAliasInput | UpdateShellAliasInput) => Promise<void>;
+  defaultToolId?: string;
 }
 
-export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, statusDefinitions, onSubmit }: AliasFormProps) {
+export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefinitions, statusDefinitions, onSubmit, defaultToolId }: AliasFormProps) {
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
   const [description, setDescription] = useState('');
@@ -41,6 +47,13 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
   const [error, setError] = useState<string | null>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  // New fields
+  const [aliasType, setAliasType] = useState<AliasType>('function');
+  const [setup, setSetup] = useState<Record<string, string>>({});
+  const [script, setScript] = useState<Record<string, string>>({});
+  const [toolId, setToolId] = useState('');
+  const [setupOpen, setSetupOpen] = useState(false);
 
   const isEditing = !!alias;
 
@@ -62,6 +75,14 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
     );
   }, [tagInput, allKnownTags, tags]);
 
+  const toolOptions = useMemo(() => tools.map((t) => t.name), [tools]);
+
+  const selectedToolName = useMemo(() => {
+    if (!toolId) return '';
+    const t = tools.find((t) => t.id === toolId);
+    return t?.name || '';
+  }, [toolId, tools]);
+
   useEffect(() => {
     if (open) {
       if (alias) {
@@ -71,6 +92,11 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
         setStatus(alias.status || '');
         setTags([...alias.tags]);
         setTagInput('');
+        setAliasType(alias.aliasType || 'function');
+        setSetup(alias.setup ? { ...alias.setup } : {});
+        setScript(alias.script ? { ...alias.script } : {});
+        setToolId(alias.toolId || '');
+        setSetupOpen(!!alias.setup && Object.values(alias.setup).some((v) => v.trim()));
       } else {
         setName('');
         setCommand('');
@@ -78,11 +104,16 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
         setStatus('');
         setTags([]);
         setTagInput('');
+        setAliasType('function');
+        setSetup({});
+        setScript({});
+        setToolId(defaultToolId || '');
+        setSetupOpen(false);
       }
       setError(null);
       setShowTagSuggestions(false);
     }
-  }, [open, alias]);
+  }, [open, alias, defaultToolId]);
 
   // Close suggestions on outside click
   useEffect(() => {
@@ -127,6 +158,23 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
     }
   };
 
+  const updateSetup = (shell: string, value: string) => {
+    setSetup((prev) => ({ ...prev, [shell]: value }));
+  };
+
+  const updateScript = (shell: string, value: string) => {
+    setScript((prev) => ({ ...prev, [shell]: value }));
+  };
+
+  const handleToolChange = (toolName: string) => {
+    if (!toolName) {
+      setToolId('');
+      return;
+    }
+    const t = tools.find((t) => t.name === toolName);
+    setToolId(t?.id || '');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -141,9 +189,19 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
       return;
     }
 
-    if (!command.trim()) {
-      setError('Command is required');
-      return;
+    // Validate based on type
+    if (aliasType === 'function') {
+      if (!command.trim()) {
+        setError('Command is required for function aliases');
+        return;
+      }
+    } else {
+      // script or init: require at least one shell script
+      const hasScript = SHELLS.some((s) => script[s]?.trim());
+      if (!hasScript) {
+        setError(`At least one shell ${aliasType === 'init' ? 'init command' : 'script'} is required`);
+        return;
+      }
     }
 
     // Check for duplicate name (excluding current alias if editing)
@@ -157,12 +215,25 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
 
     setIsSubmitting(true);
     try {
+      // Clean up empty entries from setup/script maps
+      const cleanMap = (m: Record<string, string>) => {
+        const cleaned: Record<string, string> = {};
+        for (const [k, v] of Object.entries(m)) {
+          if (v.trim()) cleaned[k] = v;
+        }
+        return Object.keys(cleaned).length > 0 ? cleaned : undefined;
+      };
+
       const data: CreateShellAliasInput | UpdateShellAliasInput = {
         name: name.trim(),
         command: command.trim(),
         description: description.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
         status: status.trim() || undefined,
+        aliasType: aliasType,
+        setup: cleanMap(setup),
+        script: aliasType !== 'function' ? cleanMap(script) : undefined,
+        toolId: toolId || undefined,
       };
       await onSubmit(data);
       onOpenChange(false);
@@ -175,7 +246,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
         <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
           <DialogHeader className="flex-shrink-0">
             <DialogTitle>{isEditing ? 'Edit Alias' : 'Create Alias'}</DialogTitle>
@@ -187,6 +258,29 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
           </DialogHeader>
 
           <div className="grid gap-4 py-4 overflow-y-auto flex-1 px-1">
+            {/* Type selector */}
+            <div className="grid gap-2">
+              <Label>Type</Label>
+              <div className="flex gap-2">
+                {(['function', 'script', 'init'] as AliasType[]).map((t) => (
+                  <Button
+                    key={t}
+                    type="button"
+                    variant={aliasType === t ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setAliasType(t)}
+                  >
+                    {t === 'function' ? 'Function' : t === 'script' ? 'Script' : 'Init'}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {aliasType === 'function' && 'Wraps a command as a shell function — arguments are passed through automatically'}
+                {aliasType === 'script' && 'Raw per-shell code injected as-is — full control over function definition'}
+                {aliasType === 'init' && 'Evaluates command output (like `zoxide init`, `starship init`) — wrapped in eval/Invoke-Expression'}
+              </p>
+            </div>
+
             <div className="grid gap-2">
               <Label htmlFor="alias-name">Name *</Label>
               <Input
@@ -201,20 +295,96 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
               </p>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="alias-command">Command *</Label>
-              <Textarea
-                id="alias-command"
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                placeholder="e.g., git status"
-                rows={2}
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                The command that will be executed when the alias is invoked
-              </p>
-            </div>
+            {/* Command field — only for function type */}
+            {aliasType === 'function' && (
+              <div className="grid gap-2">
+                <Label htmlFor="alias-command">Command *</Label>
+                <Textarea
+                  id="alias-command"
+                  value={command}
+                  onChange={(e) => setCommand(e.target.value)}
+                  placeholder="e.g., git status"
+                  rows={2}
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  The command that will be executed when the alias is invoked
+                </p>
+              </div>
+            )}
+
+            {/* Per-shell script/init content — for script and init types */}
+            {aliasType !== 'function' && (
+              <div className="grid gap-2">
+                <Label>{aliasType === 'init' ? 'Init Command *' : 'Script *'}</Label>
+                <Tabs defaultValue="powershell">
+                  <TabsList className="h-8">
+                    {SHELLS.map((s) => (
+                      <TabsTrigger key={s} value={s} className="text-xs px-3">
+                        {s === 'powershell' ? 'PowerShell' : s === 'bash' ? 'Bash' : s === 'zsh' ? 'Zsh' : 'Fish'}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  {SHELLS.map((s) => (
+                    <TabsContent key={s} value={s}>
+                      <Textarea
+                        value={script[s] || ''}
+                        onChange={(e) => updateScript(s, e.target.value)}
+                        placeholder={
+                          aliasType === 'init'
+                            ? `e.g., ${s === 'powershell' ? 'zoxide init powershell' : s === 'fish' ? 'zoxide init fish' : `zoxide init ${s}`}`
+                            : `${s === 'powershell' ? 'PowerShell' : s.charAt(0).toUpperCase() + s.slice(1)} script code...`
+                        }
+                        rows={4}
+                        className="font-mono text-sm"
+                      />
+                    </TabsContent>
+                  ))}
+                </Tabs>
+                <p className="text-xs text-muted-foreground">
+                  {aliasType === 'init'
+                    ? 'Command whose output will be evaluated (e.g., zoxide init, starship init)'
+                    : 'Raw shell code injected per shell — define functions, aliases, etc.'}
+                </p>
+              </div>
+            )}
+
+            {/* Setup section — collapsible, always available */}
+            <Collapsible open={setupOpen} onOpenChange={setSetupOpen}>
+              <CollapsibleTrigger asChild>
+                <Button type="button" variant="ghost" size="sm" className="flex items-center gap-1 w-full justify-start px-0 text-muted-foreground hover:text-foreground">
+                  <ChevronDown className={`size-4 transition-transform ${setupOpen ? '' : '-rotate-90'}`} />
+                  Setup Code (optional)
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="grid gap-2 pt-2">
+                  <Tabs defaultValue="powershell">
+                    <TabsList className="h-8">
+                      {SHELLS.map((s) => (
+                        <TabsTrigger key={s} value={s} className="text-xs px-3">
+                          {s === 'powershell' ? 'PowerShell' : s === 'bash' ? 'Bash' : s === 'zsh' ? 'Zsh' : 'Fish'}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                    {SHELLS.map((s) => (
+                      <TabsContent key={s} value={s}>
+                        <Textarea
+                          value={setup[s] || ''}
+                          onChange={(e) => updateSetup(s, e.target.value)}
+                          placeholder={`Setup code for ${s === 'powershell' ? 'PowerShell' : s}...`}
+                          rows={3}
+                          className="font-mono text-sm"
+                        />
+                      </TabsContent>
+                    ))}
+                  </Tabs>
+                  <p className="text-xs text-muted-foreground">
+                    Code that runs before the alias definition (e.g., removing built-in aliases)
+                  </p>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
 
             <div className="grid gap-2">
               <Label htmlFor="alias-description">Description</Label>
@@ -225,6 +395,21 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tagDefinitions, 
                 placeholder="What does this alias do?"
                 rows={2}
               />
+            </div>
+
+            {/* Tool selector */}
+            <div className="grid gap-2">
+              <Label htmlFor="alias-tool">Linked Tool</Label>
+              <ComboboxInput
+                id="alias-tool"
+                value={selectedToolName}
+                onChange={handleToolChange}
+                options={toolOptions}
+                placeholder="Select a tool..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Link this alias to a tool — it will appear in the tool's detail page
+              </p>
             </div>
 
             <div className="grid gap-2">

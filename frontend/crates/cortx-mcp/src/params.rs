@@ -566,7 +566,7 @@ pub struct GetAliasParams {
 pub struct CreateAliasParams {
     #[schemars(description = "Alias name — the shortcut you type in your shell (e.g. 'cc', 'gp'). Only alphanumeric, hyphens, underscores allowed. No spaces.")]
     pub name: String,
-    #[schemars(description = "Command the alias expands to (e.g. 'claude --dangerously-skip-permissions', 'git push')")]
+    #[schemars(description = "Command the alias expands to (e.g. 'claude --dangerously-skip-permissions', 'git push'). Required for 'function' type, ignored for 'script'/'init'.")]
     pub command: String,
     #[schemars(description = "Human-readable description of what the alias does")]
     pub description: Option<String>,
@@ -574,6 +574,14 @@ pub struct CreateAliasParams {
     pub tags: Option<Vec<String>>,
     #[schemars(description = "Status label (e.g. 'Active', 'WIP', 'Deprecated')")]
     pub status: Option<String>,
+    #[schemars(description = "Alias type: 'function' (default, wraps command as shell function), 'script' (raw per-shell code), 'init' (eval command output, e.g. zoxide init)")]
+    pub alias_type: Option<String>,
+    #[schemars(description = "Per-shell setup code that runs before the alias definition. Keys: 'powershell', 'bash', 'zsh', 'fish'. Example: {\"powershell\": \"Remove-Alias ls -Force -ErrorAction SilentlyContinue\"}")]
+    pub setup: Option<HashMap<String, String>>,
+    #[schemars(description = "Per-shell script/init content. For 'script' type: raw code injected as-is. For 'init' type: command whose output is eval'd. Keys: 'powershell', 'bash', 'zsh', 'fish'.")]
+    pub script: Option<HashMap<String, String>>,
+    #[schemars(description = "UUID of a Tool entry to link this alias to")]
+    pub tool_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -590,6 +598,14 @@ pub struct UpdateAliasParams {
     pub tags: Option<Vec<String>>,
     #[schemars(description = "New status label")]
     pub status: Option<String>,
+    #[schemars(description = "New alias type: 'function', 'script', or 'init'")]
+    pub alias_type: Option<String>,
+    #[schemars(description = "Replace per-shell setup code. Keys: 'powershell', 'bash', 'zsh', 'fish'.")]
+    pub setup: Option<HashMap<String, String>>,
+    #[schemars(description = "Replace per-shell script/init content. Keys: 'powershell', 'bash', 'zsh', 'fish'.")]
+    pub script: Option<HashMap<String, String>>,
+    #[schemars(description = "UUID of a Tool entry to link (empty string to unlink)")]
+    pub tool_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

@@ -22,7 +22,7 @@ interface AliasCardProps {
 
 export function AliasCard({ alias, tagDefinitions, onEdit, onDelete, onClick }: AliasCardProps) {
   return (
-    <Card className="group cursor-pointer hover:border-primary/50 transition-colors" onClick={onClick}>
+    <Card className="group cursor-pointer hover:border-primary/50 transition-colors overflow-hidden" onClick={onClick}>
       <CardContent className="p-4">
         <div className="flex items-start gap-4">
           <div className="mt-1 flex-shrink-0">
@@ -34,7 +34,7 @@ export function AliasCard({ alias, tagDefinitions, onEdit, onDelete, onClick }: 
               <h3 className="font-medium font-mono truncate">{alias.name}</h3>
               <StatusBadge status={alias.status} />
             </div>
-            <p className="text-sm text-muted-foreground mt-0.5 line-clamp-1 font-mono">
+            <p className="text-sm text-muted-foreground mt-0.5 font-mono truncate">
               {alias.command}
             </p>
             {alias.description && (

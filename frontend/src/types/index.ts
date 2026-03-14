@@ -565,6 +565,8 @@ export interface UpdateAppInput {
 export type ListViewMode = 'card' | 'list' | 'compact';
 
 // Shell Alias types
+export type AliasType = 'function' | 'script' | 'init';
+
 export interface ShellAlias {
   id: string;
   name: string;
@@ -575,6 +577,10 @@ export interface ShellAlias {
   updatedAt: string;
   order: number;
   status?: string;
+  aliasType: AliasType;
+  setup?: Record<string, string>;
+  script?: Record<string, string>;
+  toolId?: string;
 }
 
 export interface CreateShellAliasInput {
@@ -583,6 +589,10 @@ export interface CreateShellAliasInput {
   description?: string;
   tags?: string[];
   status?: string;
+  aliasType?: AliasType;
+  setup?: Record<string, string>;
+  script?: Record<string, string>;
+  toolId?: string;
 }
 
 export interface UpdateShellAliasInput {
@@ -591,4 +601,8 @@ export interface UpdateShellAliasInput {
   description?: string;
   tags?: string[];
   status?: string;
+  aliasType?: AliasType;
+  setup?: Record<string, string>;
+  script?: Record<string, string>;
+  toolId?: string;
 }

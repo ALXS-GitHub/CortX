@@ -16,27 +16,36 @@ import {
   Package,
   MapPin,
   Code,
+  SquareTerminal,
+  Plus,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { ToolForm } from './ToolForm';
+import { AliasForm } from '@/components/aliases/AliasForm';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { toast } from 'sonner';
 import { openToolConfig, openToolLocation, openToolLocationVscode, openToolUrl, openInExplorer } from '@/lib/tauri';
-import type { UpdateToolInput } from '@/types';
+import type { UpdateToolInput, CreateShellAliasInput, UpdateShellAliasInput, ShellAlias } from '@/types';
 
 export function ToolDetail() {
   const {
     tools,
+    aliases,
     tagDefinitions,
     statusDefinitions,
     settings,
     selectedToolId,
     setCurrentView,
     updateTool,
+    createAlias,
+    updateAlias,
     selectTool,
+    selectAlias,
   } = useAppStore();
 
   const [showEditForm, setShowEditForm] = useState(false);
+  const [showAliasForm, setShowAliasForm] = useState(false);
+  const [editingAlias, setEditingAlias] = useState<ShellAlias | undefined>(undefined);
 
   const tool = useMemo(
     () => tools.find((t) => t.id === selectedToolId),
@@ -47,6 +56,22 @@ export function ToolDetail() {
     () => (tool?.replacedBy ? tools.find((t) => t.id === tool.replacedBy) : undefined),
     [tool, tools]
   );
+
+  const linkedAliases = useMemo(
+    () => aliases.filter((a) => a.toolId === tool?.id).sort((a, b) => a.order - b.order),
+    [aliases, tool]
+  );
+
+  const handleCreateLinkedAlias = async (data: CreateShellAliasInput | UpdateShellAliasInput) => {
+    await createAlias(data as CreateShellAliasInput);
+    toast.success('Alias created');
+  };
+
+  const handleUpdateLinkedAlias = async (data: CreateShellAliasInput | UpdateShellAliasInput) => {
+    if (!editingAlias) return;
+    await updateAlias(editingAlias.id, data as UpdateShellAliasInput);
+    toast.success('Alias updated');
+  };
 
   const handleUpdate = async (data: UpdateToolInput) => {
     if (!tool) return;
@@ -283,6 +308,103 @@ export function ToolDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* Shell Init Card */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <SquareTerminal className="size-4" />
+            Shell Init
+            {linkedAliases.length > 0 && (
+              <Badge variant="secondary" className="ml-1.5 text-xs px-1.5 py-0">
+                {linkedAliases.length}
+              </Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {linkedAliases.length === 0 ? (
+            <div className="text-center py-4">
+              <p className="text-sm text-muted-foreground mb-3">No shell aliases configured for this tool</p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setEditingAlias(undefined);
+                  setShowAliasForm(true);
+                }}
+              >
+                <Plus className="size-4 mr-2" />
+                Add Alias
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {linkedAliases.map((a) => (
+                <div key={a.id} className="border rounded-md p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="font-mono font-medium text-sm hover:underline cursor-pointer"
+                        onClick={() => selectAlias(a.id)}
+                      >
+                        {a.name}
+                      </button>
+                      <Badge variant="outline" className="text-xs">{a.aliasType || 'function'}</Badge>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => {
+                        setEditingAlias(a);
+                        setShowAliasForm(true);
+                      }}
+                    >
+                      <Pencil className="size-3 mr-1" />
+                      Edit
+                    </Button>
+                  </div>
+                  <pre className="bg-muted p-3 rounded text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+                    {(a.aliasType || 'function') === 'function'
+                      ? `function ${a.name} { ${a.command} @args }`
+                      : a.script?.powershell || a.script?.bash || a.command || '(no code)'}
+                  </pre>
+                </div>
+              ))}
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setEditingAlias(undefined);
+                    setShowAliasForm(true);
+                  }}
+                >
+                  <Plus className="size-4 mr-2" />
+                  Add Alias
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Alias Form for this tool */}
+      <AliasForm
+        open={showAliasForm}
+        onOpenChange={(open) => {
+          setShowAliasForm(open);
+          if (!open) setEditingAlias(undefined);
+        }}
+        alias={editingAlias}
+        aliases={aliases}
+        tools={tools}
+        tagDefinitions={tagDefinitions}
+        statusDefinitions={statusDefinitions}
+        onSubmit={editingAlias ? handleUpdateLinkedAlias : handleCreateLinkedAlias}
+        defaultToolId={tool.id}
+      />
 
       {/* Notes Card */}
       {tool.notes && (

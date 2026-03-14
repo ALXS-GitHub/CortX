@@ -100,6 +100,18 @@ enum AliasCommand {
         /// Optional description
         #[arg(short, long)]
         description: Option<String>,
+        /// Alias type: function (default), script, init
+        #[arg(short = 't', long = "type")]
+        alias_type: Option<String>,
+        /// Per-shell setup code as shell=code (e.g. "powershell=Remove-Alias ls -Force")
+        #[arg(long)]
+        setup: Option<Vec<String>>,
+        /// Per-shell script content as shell=code (for script/init types)
+        #[arg(long)]
+        script: Option<Vec<String>>,
+        /// Tool UUID to link
+        #[arg(long)]
+        tool_id: Option<String>,
     },
     /// Remove an alias by name
     Remove {
@@ -122,8 +134,8 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Init { shell }) => cmd_init(&storage, &shell),
         Some(Command::Alias { command }) => match command {
             AliasCommand::List => cmd_alias_list(&storage),
-            AliasCommand::Add { name, command, description } => {
-                cmd_alias_add(&storage, &name, &command, description.as_deref())
+            AliasCommand::Add { name, command, description, alias_type, setup, script, tool_id } => {
+                cmd_alias_add(&storage, &name, &command, description.as_deref(), alias_type.as_deref(), setup, script, tool_id)
             }
             AliasCommand::Remove { name } => cmd_alias_remove(&storage, &name),
         },
@@ -305,8 +317,8 @@ fn cmd_alias_list(storage: &Storage) -> anyhow::Result<()> {
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
-    println!("{:<20} {:<40} {}", "NAME", "COMMAND", "TAGS");
-    println!("{}", "-".repeat(75));
+    println!("{:<20} {:<10} {:<40} {}", "NAME", "TYPE", "COMMAND", "TAGS");
+    println!("{}", "-".repeat(85));
 
     for a in &sorted {
         let tags_display = if a.tags.is_empty() {
@@ -314,17 +326,58 @@ fn cmd_alias_list(storage: &Storage) -> anyhow::Result<()> {
         } else {
             colorize_tags(&a.tags, &tag_defs)
         };
-        println!("{:<20} {:<40} {}", a.name, a.command, tags_display);
+        let alias_type = a.alias_type.as_str();
+        let cmd_display = if alias_type == "function" {
+            a.command.clone()
+        } else {
+            // For script/init, show first non-empty shell entry or "-"
+            a.script.as_ref()
+                .and_then(|m| m.values().find(|v| !v.trim().is_empty()))
+                .map(|v| {
+                    let trimmed = v.trim();
+                    if trimmed.len() > 37 { format!("{}...", &trimmed[..37]) } else { trimmed.to_string() }
+                })
+                .unwrap_or_else(|| "-".to_string())
+        };
+        println!("{:<20} {:<10} {:<40} {}", a.name, alias_type, cmd_display, tags_display);
     }
     println!("\n{} alias(es)", aliases.len());
     Ok(())
 }
 
 /// Add a new alias
-fn cmd_alias_add(storage: &Storage, name: &str, command: &str, description: Option<&str>) -> anyhow::Result<()> {
+/// Parse "shell=code" pairs into a HashMap
+fn parse_shell_map(entries: &[String]) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    for entry in entries {
+        if let Some(pos) = entry.find('=') {
+            let key = entry[..pos].to_string();
+            let val = entry[pos + 1..].to_string();
+            map.insert(key, val);
+        }
+    }
+    map
+}
+
+fn cmd_alias_add(
+    storage: &Storage,
+    name: &str,
+    command: &str,
+    description: Option<&str>,
+    alias_type: Option<&str>,
+    setup: Option<Vec<String>>,
+    script: Option<Vec<String>>,
+    tool_id: Option<String>,
+) -> anyhow::Result<()> {
     // Validate name
     cortx_core::shell_init::validate_alias_name(name)
         .map_err(|e| anyhow::anyhow!(e))?;
+
+    // Validate alias type
+    if let Some(at) = alias_type {
+        cortx_core::shell_init::validate_alias_type(at)
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
 
     // Check for builtin
     if cortx_core::shell_init::is_shell_builtin(name) {
@@ -338,6 +391,22 @@ fn cmd_alias_add(storage: &Storage, name: &str, command: &str, description: Opti
 
     let mut alias = ShellAlias::new(name.to_string(), command.to_string());
     alias.description = description.map(|s| s.to_string());
+    if let Some(at) = alias_type {
+        alias.alias_type = at.to_string();
+    }
+    if let Some(entries) = setup {
+        let map = parse_shell_map(&entries);
+        if !map.is_empty() {
+            alias.setup = Some(map);
+        }
+    }
+    if let Some(entries) = script {
+        let map = parse_shell_map(&entries);
+        if !map.is_empty() {
+            alias.script = Some(map);
+        }
+    }
+    alias.tool_id = tool_id;
 
     storage.create_alias(alias).map_err(|e| anyhow::anyhow!("{}", e))?;
     println!("Alias '{}' added.", name);
