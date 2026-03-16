@@ -3,7 +3,8 @@ use crate::models::{
     CreateProjectInput, CreateScriptGroupInput, CreateScriptInput, CreateServiceInput,
     CreateShellAliasInput, CreateStatusDefinitionInput, CreateToolInput, CreateTagDefinitionInput,
     DiscoverEnvFilesInput, DiscoveredTool, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
-    DiscoveredScript, ExecutionRecord, GlobalScript, ImportResult, LinkEnvToServiceInput, Project, Script,
+    DiscoveredScript, ExecutionRecord, ExportSummary, GlobalScript, ImportOptions, ImportResult,
+    LinkEnvToServiceInput, Project, Script,
     ScriptGroup, ScriptParameter, ScriptsConfig, Service, ShellAlias, StatusDefinition, TagDefinition, Tool,
     UpdateAppInput, UpdateTagDefinitionInput, UpdateGlobalScriptInput, UpdateProjectInput,
     UpdateScriptGroupInput, UpdateScriptInput, UpdateServiceInput, UpdateShellAliasInput,
@@ -2000,13 +2001,31 @@ pub fn export_scripts_config(state: State<AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn preview_import(json: String) -> Result<ExportSummary, String> {
+    Storage::preview_import(&json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn import_scripts_config(
     state: State<AppState>,
     json: String,
+    options: ImportOptions,
 ) -> Result<ImportResult, String> {
     state
         .storage
-        .import_scripts_config(&json)
+        .import_scripts_config(&json, &options)
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Git Backup
+// ============================================================================
+
+#[tauri::command]
+pub fn backup_to_git(state: State<AppState>) -> Result<String, String> {
+    state
+        .storage
+        .backup_to_git()
         .map_err(|e| e.to_string())
 }
 

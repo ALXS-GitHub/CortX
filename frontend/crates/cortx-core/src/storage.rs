@@ -1116,10 +1116,10 @@ impl Storage {
     // Import / Export
     // ========================================================================
 
-    /// Export all scripts, tag definitions, groups, and tools as a ScriptExport JSON string
+    /// Export all data (scripts, tags, groups, tools, projects, settings) as a ScriptExport JSON string
     pub fn export_scripts_config(&self) -> Result<String, StorageError> {
         let export = ScriptExport {
-            version: "4.0".to_string(),
+            version: "5.0".to_string(),
             scripts: self.get_all_global_scripts(),
             groups: self.get_all_script_groups(),
             tools: self.get_all_tools(),
@@ -1127,14 +1127,35 @@ impl Storage {
             aliases: self.get_all_aliases(),
             apps: self.get_all_apps(),
             status_definitions: self.get_all_status_definitions(),
+            projects: self.get_all_projects(),
+            settings: Some(self.get_settings()),
             exported_at: chrono::Utc::now(),
         };
         serde_json::to_string_pretty(&export).map_err(StorageError::Json)
     }
 
-    /// Import scripts, tag definitions, groups, and tools from a ScriptExport JSON string.
+    /// Preview an import file and return counts per category without side effects
+    pub fn preview_import(json: &str) -> Result<ExportSummary, StorageError> {
+        let import: ScriptExport =
+            serde_json::from_str(json).map_err(StorageError::Json)?;
+        Ok(ExportSummary {
+            version: import.version,
+            exported_at: import.exported_at,
+            projects_count: import.projects.len(),
+            scripts_count: import.scripts.len(),
+            groups_count: import.groups.len(),
+            tools_count: import.tools.len(),
+            apps_count: import.apps.len(),
+            aliases_count: import.aliases.len(),
+            tag_definitions_count: import.tag_definitions.len(),
+            status_definitions_count: import.status_definitions.len(),
+            has_settings: import.settings.is_some(),
+        })
+    }
+
+    /// Import data from a ScriptExport JSON string with selective categories.
     /// Merges with existing data (skips items with duplicate IDs/names).
-    pub fn import_scripts_config(&self, json: &str) -> Result<ImportResult, StorageError> {
+    pub fn import_scripts_config(&self, json: &str, options: &ImportOptions) -> Result<ImportResult, StorageError> {
         let import: ScriptExport =
             serde_json::from_str(json).map_err(StorageError::Json)?;
 
@@ -1143,141 +1164,180 @@ impl Storage {
         let mut skipped = 0u32;
         let mut tools_added = 0u32;
         let mut tag_definitions_added = 0u32;
+        let mut aliases_added = 0u32;
+        let mut apps_added = 0u32;
+        let mut status_definitions_added = 0u32;
+        let mut projects_added = 0u32;
+        let mut settings_imported = false;
 
         // Import tag definitions
-        let existing_defs = self.get_all_tag_definitions();
-        for def in import.tag_definitions {
-            if existing_defs.iter().any(|d| d.name.to_lowercase() == def.name.to_lowercase()) {
-                skipped += 1;
-                continue;
-            }
-            {
-                let mut defs = self.tag_definitions.write();
-                if defs.iter().any(|d| d.name.to_lowercase() == def.name.to_lowercase()) {
+        if options.tags_and_statuses {
+            let existing_defs = self.get_all_tag_definitions();
+            for def in import.tag_definitions {
+                if existing_defs.iter().any(|d| d.name.to_lowercase() == def.name.to_lowercase()) {
                     skipped += 1;
                     continue;
                 }
-                defs.push(def);
+                {
+                    let mut defs = self.tag_definitions.write();
+                    if defs.iter().any(|d| d.name.to_lowercase() == def.name.to_lowercase()) {
+                        skipped += 1;
+                        continue;
+                    }
+                    defs.push(def);
+                }
+                tag_definitions_added += 1;
             }
-            tag_definitions_added += 1;
-        }
-        if tag_definitions_added > 0 {
-            self.save_tag_definitions()?;
-        }
+            if tag_definitions_added > 0 {
+                self.save_tag_definitions()?;
+            }
 
-        // Import scripts
-        let existing_scripts = self.get_all_global_scripts();
-        for script in import.scripts {
-            if existing_scripts.iter().any(|s| s.id == script.id) {
-                skipped += 1;
-                continue;
-            }
-            {
-                let mut scripts = self.global_scripts.write();
-                scripts.push(script);
-            }
-            scripts_added += 1;
-        }
-        if scripts_added > 0 {
-            self.save_global_scripts()?;
-        }
-
-        // Import groups
-        let existing_groups = self.get_all_script_groups();
-        for group in import.groups {
-            if existing_groups.iter().any(|g| g.id == group.id) {
-                skipped += 1;
-                continue;
-            }
-            {
-                let mut groups = self.script_groups.write();
-                groups.push(group);
-            }
-            groups_added += 1;
-        }
-        if groups_added > 0 {
-            self.save_script_groups()?;
-        }
-
-        // Import tools
-        let existing_tools = self.get_all_tools();
-        for tool in import.tools {
-            if existing_tools.iter().any(|t| t.id == tool.id) {
-                skipped += 1;
-                continue;
-            }
-            {
-                let mut tools = self.tools.write();
-                tools.push(tool);
-            }
-            tools_added += 1;
-        }
-        if tools_added > 0 {
-            self.save_tools()?;
-        }
-
-        // Import aliases
-        let mut aliases_added = 0u32;
-        let existing_aliases = self.get_all_aliases();
-        for alias in import.aliases {
-            if existing_aliases.iter().any(|a| a.id == alias.id || a.name.to_lowercase() == alias.name.to_lowercase()) {
-                skipped += 1;
-                continue;
-            }
-            {
-                let mut aliases = self.aliases.write();
-                aliases.push(alias);
-            }
-            aliases_added += 1;
-        }
-        if aliases_added > 0 {
-            self.save_aliases()?;
-        }
-
-        // Import apps
-        let mut apps_added = 0u32;
-        let existing_apps = self.get_all_apps();
-        for app in import.apps {
-            if existing_apps.iter().any(|a| a.id == app.id) {
-                skipped += 1;
-                continue;
-            }
-            {
-                let mut apps = self.apps.write();
-                apps.push(app);
-            }
-            apps_added += 1;
-        }
-        if apps_added > 0 {
-            self.save_apps()?;
-        }
-
-        // Import status definitions
-        let mut status_definitions_added = 0u32;
-        let existing_status_defs = self.get_all_status_definitions();
-        for def in import.status_definitions {
-            if existing_status_defs
-                .iter()
-                .any(|d| d.name.to_lowercase() == def.name.to_lowercase())
-            {
-                skipped += 1;
-                continue;
-            }
-            {
-                let mut defs = self.status_definitions.write();
-                if defs
+            // Import status definitions
+            let existing_status_defs = self.get_all_status_definitions();
+            for def in import.status_definitions {
+                if existing_status_defs
                     .iter()
                     .any(|d| d.name.to_lowercase() == def.name.to_lowercase())
                 {
                     skipped += 1;
                     continue;
                 }
-                defs.push(def);
+                {
+                    let mut defs = self.status_definitions.write();
+                    if defs
+                        .iter()
+                        .any(|d| d.name.to_lowercase() == def.name.to_lowercase())
+                    {
+                        skipped += 1;
+                        continue;
+                    }
+                    defs.push(def);
+                }
+                status_definitions_added += 1;
             }
-            status_definitions_added += 1;
+            if status_definitions_added > 0 {
+                self.save_status_definitions()?;
+            }
         }
-        if status_definitions_added > 0 {
-            self.save_status_definitions()?;
+
+        // Import scripts and groups
+        if options.scripts {
+            let existing_scripts = self.get_all_global_scripts();
+            for script in import.scripts {
+                if existing_scripts.iter().any(|s| s.id == script.id) {
+                    skipped += 1;
+                    continue;
+                }
+                {
+                    let mut scripts = self.global_scripts.write();
+                    scripts.push(script);
+                }
+                scripts_added += 1;
+            }
+            if scripts_added > 0 {
+                self.save_global_scripts()?;
+            }
+
+            let existing_groups = self.get_all_script_groups();
+            for group in import.groups {
+                if existing_groups.iter().any(|g| g.id == group.id) {
+                    skipped += 1;
+                    continue;
+                }
+                {
+                    let mut groups = self.script_groups.write();
+                    groups.push(group);
+                }
+                groups_added += 1;
+            }
+            if groups_added > 0 {
+                self.save_script_groups()?;
+            }
+        }
+
+        // Import tools
+        if options.tools {
+            let existing_tools = self.get_all_tools();
+            for tool in import.tools {
+                if existing_tools.iter().any(|t| t.id == tool.id) {
+                    skipped += 1;
+                    continue;
+                }
+                {
+                    let mut tools = self.tools.write();
+                    tools.push(tool);
+                }
+                tools_added += 1;
+            }
+            if tools_added > 0 {
+                self.save_tools()?;
+            }
+        }
+
+        // Import aliases (shell config)
+        if options.shell_config {
+            let existing_aliases = self.get_all_aliases();
+            for alias in import.aliases {
+                if existing_aliases.iter().any(|a| a.id == alias.id || a.name.to_lowercase() == alias.name.to_lowercase()) {
+                    skipped += 1;
+                    continue;
+                }
+                {
+                    let mut aliases = self.aliases.write();
+                    aliases.push(alias);
+                }
+                aliases_added += 1;
+            }
+            if aliases_added > 0 {
+                self.save_aliases()?;
+            }
+        }
+
+        // Import apps
+        if options.apps {
+            let existing_apps = self.get_all_apps();
+            for app in import.apps {
+                if existing_apps.iter().any(|a| a.id == app.id) {
+                    skipped += 1;
+                    continue;
+                }
+                {
+                    let mut apps = self.apps.write();
+                    apps.push(app);
+                }
+                apps_added += 1;
+            }
+            if apps_added > 0 {
+                self.save_apps()?;
+            }
+        }
+
+        // Import projects
+        if options.projects {
+            let existing_projects = self.get_all_projects();
+            for project in import.projects {
+                if existing_projects.iter().any(|p| p.id == project.id) {
+                    skipped += 1;
+                    continue;
+                }
+                {
+                    let mut projects = self.projects.write();
+                    projects.push(project);
+                }
+                projects_added += 1;
+            }
+            if projects_added > 0 {
+                self.save_projects()?;
+            }
+        }
+
+        // Import settings (replaces current)
+        if options.settings {
+            if let Some(imported_settings) = import.settings {
+                *self.settings.write() = imported_settings;
+                self.save_settings()?;
+                settings_imported = true;
+            }
         }
 
         Ok(ImportResult {
@@ -1289,6 +1349,112 @@ impl Storage {
             aliases_added,
             apps_added,
             status_definitions_added,
+            projects_added,
+            settings_imported,
         })
+    }
+
+    // ========================================================================
+    // Git Backup
+    // ========================================================================
+
+    /// Data files to include in git backup (excludes execution_history)
+    const BACKUP_FILES: &'static [&'static str] = &[
+        "projects.json",
+        "global_scripts.json",
+        "script_groups.json",
+        "tools.json",
+        "aliases.json",
+        "apps.json",
+        "tag_definitions.json",
+        "status_definitions.json",
+        "settings.json",
+    ];
+
+    /// Back up all CortX data JSON files to the configured git repo and push.
+    pub fn backup_to_git(&self) -> Result<String, StorageError> {
+        let settings = self.get_settings();
+        let repo_path = settings
+            .backup_repo_path
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "No backup repo path configured in settings",
+            )))?;
+
+        let repo = Path::new(repo_path);
+        if !repo.join(".git").exists() {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Not a git repository: {}", repo_path),
+            )));
+        }
+
+        // Copy each data file to the repo
+        let mut copied = 0usize;
+        for filename in Self::BACKUP_FILES {
+            let src = self.app_dir.join(filename);
+            if src.exists() {
+                fs::copy(&src, repo.join(filename))?;
+                copied += 1;
+            }
+        }
+
+        if copied == 0 {
+            return Ok("No data files to backup".to_string());
+        }
+
+        // git add .
+        let add = std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo)
+            .output()?;
+        if !add.status.success() {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("git add failed: {}", String::from_utf8_lossy(&add.stderr)),
+            )));
+        }
+
+        // Check if there are staged changes
+        let diff = std::process::Command::new("git")
+            .args(["diff", "--cached", "--quiet"])
+            .current_dir(repo)
+            .status()?;
+
+        if diff.success() {
+            return Ok("Already up to date — no changes to commit".to_string());
+        }
+
+        // git commit
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+        let msg = format!("CortX backup {}", timestamp);
+        let commit = std::process::Command::new("git")
+            .args(["commit", "-m", &msg])
+            .current_dir(repo)
+            .output()?;
+        if !commit.status.success() {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("git commit failed: {}", String::from_utf8_lossy(&commit.stderr)),
+            )));
+        }
+
+        // git push
+        let push = std::process::Command::new("git")
+            .args(["push"])
+            .current_dir(repo)
+            .output()?;
+        if !push.status.success() {
+            // Commit succeeded but push failed — still useful info
+            return Ok(format!(
+                "Committed {} files but push failed: {}",
+                copied,
+                String::from_utf8_lossy(&push.stderr).trim()
+            ));
+        }
+
+        Ok(format!("Backed up and pushed {} files", copied))
     }
 }

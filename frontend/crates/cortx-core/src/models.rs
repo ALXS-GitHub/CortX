@@ -320,6 +320,9 @@ pub struct AppSettings {
     /// Base URL for toolbox documentation links
     #[serde(default)]
     pub toolbox_base_url: String,
+    /// Path to a local git repo for backing up CortX data
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_repo_path: Option<String>,
 }
 
 // Input types for commands
@@ -904,6 +907,10 @@ pub struct ScriptExport {
     pub apps: Vec<App>,
     #[serde(default)]
     pub status_definitions: Vec<StatusDefinition>,
+    #[serde(default)]
+    pub projects: Vec<Project>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<AppSettings>,
     pub exported_at: DateTime<Utc>,
 }
 
@@ -918,6 +925,61 @@ pub struct ImportResult {
     pub aliases_added: u32,
     pub apps_added: u32,
     pub status_definitions_added: u32,
+    pub projects_added: u32,
+    pub settings_imported: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportOptions {
+    #[serde(default = "default_true")]
+    pub projects: bool,
+    #[serde(default = "default_true")]
+    pub scripts: bool,
+    #[serde(default = "default_true")]
+    pub tools: bool,
+    #[serde(default = "default_true")]
+    pub apps: bool,
+    #[serde(default = "default_true")]
+    pub shell_config: bool,
+    #[serde(default = "default_true")]
+    pub tags_and_statuses: bool,
+    #[serde(default = "default_true")]
+    pub settings: bool,
+}
+
+impl Default for ImportOptions {
+    fn default() -> Self {
+        Self {
+            projects: true,
+            scripts: true,
+            tools: true,
+            apps: true,
+            shell_config: true,
+            tags_and_statuses: true,
+            settings: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportSummary {
+    pub version: String,
+    pub exported_at: DateTime<Utc>,
+    pub projects_count: usize,
+    pub scripts_count: usize,
+    pub groups_count: usize,
+    pub tools_count: usize,
+    pub apps_count: usize,
+    pub aliases_count: usize,
+    pub tag_definitions_count: usize,
+    pub status_definitions_count: usize,
+    pub has_settings: bool,
 }
 
 // ============================================================================

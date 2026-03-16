@@ -112,6 +112,7 @@ export interface AppSettings {
   defaults: DefaultsConfig;
   scriptsConfig: ScriptsConfig;
   toolboxBaseUrl: string;
+  backupRepoPath?: string;
 }
 
 export type ServiceStatus = 'stopped' | 'starting' | 'running' | 'error';
@@ -488,6 +489,32 @@ export interface ImportResult {
   aliasesAdded: number;
   appsAdded: number;
   statusDefinitionsAdded: number;
+  projectsAdded: number;
+  settingsImported: boolean;
+}
+
+export interface ImportOptions {
+  projects: boolean;
+  scripts: boolean;
+  tools: boolean;
+  apps: boolean;
+  shellConfig: boolean;
+  tagsAndStatuses: boolean;
+  settings: boolean;
+}
+
+export interface ExportSummary {
+  version: string;
+  exportedAt: string;
+  projectsCount: number;
+  scriptsCount: number;
+  groupsCount: number;
+  toolsCount: number;
+  appsCount: number;
+  aliasesCount: number;
+  tagDefinitionsCount: number;
+  statusDefinitionsCount: number;
+  hasSettings: boolean;
 }
 
 // View types
