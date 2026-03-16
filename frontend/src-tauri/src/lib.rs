@@ -178,9 +178,11 @@ pub fn run() {
             commands::auto_detect_script_params,
             // Script group execution
             commands::run_script_group,
-            // Import / Export
+            // Import / Export / Backup
             commands::export_scripts_config,
+            commands::preview_import,
             commands::import_scripts_config,
+            commands::backup_to_git,
             // Tool commands
             commands::get_all_tools,
             commands::get_tool,

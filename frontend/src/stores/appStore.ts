@@ -28,7 +28,9 @@ import type {
   UpdateScriptGroupInput,
   ScriptsConfig,
   ScriptParameter,
+  ImportOptions,
   ImportResult,
+  ExportSummary,
   DiscoveredScript,
   Tool,
   CreateToolInput,
@@ -315,9 +317,11 @@ interface AppState {
   selectApp: (id: string | null) => void;
   launchApp: (appId: string) => Promise<void>;
 
-  // Actions - Import / Export
+  // Actions - Import / Export / Backup
   exportScriptsConfig: () => Promise<string>;
-  importScriptsConfig: (json: string) => Promise<ImportResult>;
+  previewImport: (json: string) => Promise<ExportSummary>;
+  importScriptsConfig: (json: string, options: ImportOptions) => Promise<ImportResult>;
+  backupToGit: () => Promise<string>;
 
   // Actions - Execution History Update
   updateExecutionRecordOnExit: (scriptId: string, exitCode: number | null, success: boolean) => Promise<void>;
@@ -1415,15 +1419,30 @@ export const useAppStore = create<AppState>((set, _get) => ({
     return api.exportScriptsConfig();
   },
 
-  importScriptsConfig: async (json) => {
-    const result = await api.importScriptsConfig(json);
-    // Reload all data after import
-    const globalScripts = await api.getAllGlobalScripts();
-    const tagDefinitions = await api.getAllTagDefinitions();
-    const scriptGroups = await api.getAllScriptGroups();
-    const tools = await api.getAllTools();
-    set({ globalScripts, tagDefinitions, scriptGroups, tools });
+  previewImport: async (json) => {
+    return api.previewImport(json);
+  },
+
+  importScriptsConfig: async (json, options) => {
+    const result = await api.importScriptsConfig(json, options);
+    // Reload all affected data after import
+    const [globalScripts, tagDefinitions, scriptGroups, tools, aliases, apps, statusDefinitions, projects, settings] = await Promise.all([
+      api.getAllGlobalScripts(),
+      api.getAllTagDefinitions(),
+      api.getAllScriptGroups(),
+      api.getAllTools(),
+      api.getAllAliases(),
+      api.getAllApps(),
+      api.getAllStatusDefinitions(),
+      api.getAllProjects(),
+      api.getSettings(),
+    ]);
+    set({ globalScripts, tagDefinitions, scriptGroups, tools, aliases, apps, statusDefinitions, projects, settings });
     return result;
+  },
+
+  backupToGit: async () => {
+    return api.backupToGit();
   },
 
   // Tool actions

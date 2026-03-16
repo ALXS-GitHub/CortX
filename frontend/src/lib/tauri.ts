@@ -35,7 +35,9 @@ import type {
   ExecutionRecord,
   ScriptsConfig,
   ScriptParameter,
+  ImportOptions,
   ImportResult,
+  ExportSummary,
   DiscoveredScript,
   Tool,
   CreateToolInput,
@@ -390,8 +392,16 @@ export async function exportScriptsConfig(): Promise<string> {
   return invoke('export_scripts_config');
 }
 
-export async function importScriptsConfig(json: string): Promise<ImportResult> {
-  return invoke('import_scripts_config', { json });
+export async function previewImport(json: string): Promise<ExportSummary> {
+  return invoke('preview_import', { json });
+}
+
+export async function importScriptsConfig(json: string, options: ImportOptions): Promise<ImportResult> {
+  return invoke('import_scripts_config', { json, options });
+}
+
+export async function backupToGit(): Promise<string> {
+  return invoke('backup_to_git');
 }
 
 // Execution history update
