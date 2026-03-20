@@ -608,6 +608,7 @@ export interface ShellAlias {
   setup?: Record<string, string>;
   script?: Record<string, string>;
   toolId?: string;
+  executionOrder?: number;
 }
 
 export interface CreateShellAliasInput {
@@ -620,6 +621,7 @@ export interface CreateShellAliasInput {
   setup?: Record<string, string>;
   script?: Record<string, string>;
   toolId?: string;
+  executionOrder?: number;
 }
 
 export interface UpdateShellAliasInput {
@@ -632,4 +634,5 @@ export interface UpdateShellAliasInput {
   setup?: Record<string, string>;
   script?: Record<string, string>;
   toolId?: string;
+  executionOrder?: number;
 }

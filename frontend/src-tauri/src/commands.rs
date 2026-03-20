@@ -2097,6 +2097,7 @@ pub fn create_alias(state: State<AppState>, input: CreateShellAliasInput) -> Res
     alias.setup = input.setup;
     alias.script = input.script;
     alias.tool_id = input.tool_id;
+    alias.execution_order = input.execution_order;
     let count = state.storage.get_all_aliases().len() as u32;
     alias.order = count;
 
@@ -2139,6 +2140,9 @@ pub fn update_alias(state: State<AppState>, id: String, input: UpdateShellAliasI
         }
         if let Some(tool_id) = input.tool_id {
             alias.tool_id = if tool_id.is_empty() { None } else { Some(tool_id) };
+        }
+        if input.execution_order.is_some() {
+            alias.execution_order = input.execution_order;
         }
     }).map_err(|e| e.to_string())
 }

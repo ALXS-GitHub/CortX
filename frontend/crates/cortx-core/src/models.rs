@@ -1013,6 +1013,9 @@ pub struct ShellAlias {
     /// Link to a Tool entry
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_id: Option<String>,
+    /// Execution order for `cortx init` output. Aliases with this set appear first (sorted ascending). Those without appear after.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_order: Option<u32>,
 }
 
 fn default_alias_type() -> String {
@@ -1036,6 +1039,7 @@ impl ShellAlias {
             setup: None,
             script: None,
             tool_id: None,
+            execution_order: None,
         }
     }
 }
@@ -1052,6 +1056,7 @@ pub struct CreateShellAliasInput {
     pub setup: Option<HashMap<String, String>>,
     pub script: Option<HashMap<String, String>>,
     pub tool_id: Option<String>,
+    pub execution_order: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1066,6 +1071,7 @@ pub struct UpdateShellAliasInput {
     pub setup: Option<HashMap<String, String>>,
     pub script: Option<HashMap<String, String>>,
     pub tool_id: Option<String>,
+    pub execution_order: Option<u32>,
 }
 
 // ============================================================================

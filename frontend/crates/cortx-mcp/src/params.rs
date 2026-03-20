@@ -612,6 +612,8 @@ pub struct CreateAliasParams {
     pub script: Option<HashMap<String, String>>,
     #[schemars(description = "UUID of a Tool entry to link this alias to")]
     pub tool_id: Option<String>,
+    #[schemars(description = "Execution order for `cortx init` output. Aliases with this set appear first (sorted ascending). Leave null to appear after ordered ones.")]
+    pub execution_order: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -636,6 +638,8 @@ pub struct UpdateAliasParams {
     pub script: Option<HashMap<String, String>>,
     #[schemars(description = "UUID of a Tool entry to link (empty string to unlink)")]
     pub tool_id: Option<String>,
+    #[schemars(description = "Execution order for `cortx init` output. Aliases with this set appear first (sorted ascending). Set to null to remove.")]
+    pub execution_order: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

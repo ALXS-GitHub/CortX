@@ -53,6 +53,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
   const [setup, setSetup] = useState<Record<string, string>>({});
   const [script, setScript] = useState<Record<string, string>>({});
   const [toolId, setToolId] = useState('');
+  const [executionOrder, setExecutionOrder] = useState<string>('');
   const [setupOpen, setSetupOpen] = useState(false);
 
   const isEditing = !!alias;
@@ -96,6 +97,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
         setSetup(alias.setup ? { ...alias.setup } : {});
         setScript(alias.script ? { ...alias.script } : {});
         setToolId(alias.toolId || '');
+        setExecutionOrder(alias.executionOrder != null ? String(alias.executionOrder) : '');
         setSetupOpen(!!alias.setup && Object.values(alias.setup).some((v) => v.trim()));
       } else {
         setName('');
@@ -108,6 +110,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
         setSetup({});
         setScript({});
         setToolId(defaultToolId || '');
+        setExecutionOrder('');
         setSetupOpen(false);
       }
       setError(null);
@@ -234,6 +237,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
         setup: cleanMap(setup),
         script: aliasType !== 'function' ? cleanMap(script) : undefined,
         toolId: toolId || undefined,
+        executionOrder: executionOrder !== '' ? parseInt(executionOrder, 10) : undefined,
       };
       await onSubmit(data);
       onOpenChange(false);
@@ -409,6 +413,23 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
               />
               <p className="text-xs text-muted-foreground">
                 Link this alias to a tool — it will appear in the tool's detail page
+              </p>
+            </div>
+
+            {/* Execution Order */}
+            <div className="grid gap-2">
+              <Label htmlFor="alias-exec-order">Execution Order</Label>
+              <Input
+                id="alias-exec-order"
+                type="number"
+                min="0"
+                value={executionOrder}
+                onChange={(e) => setExecutionOrder(e.target.value)}
+                placeholder="None (default)"
+                className="w-32"
+              />
+              <p className="text-xs text-muted-foreground">
+                Controls position in <code className="bg-muted px-1 rounded">cortx init</code> output. Lower numbers run first. Leave empty to run after ordered aliases.
               </p>
             </div>
 
