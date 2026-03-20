@@ -2,13 +2,16 @@
 
 Don't forget to update PRD when adding features
 
-- [ ] Faire la fonctionnalité export all (pour vraiment tout export de l'app) et idem pour import
+- [ ] Faire un sort par primary tag (aussi possibilité de filter par primary tag seulement (mais aussi garder le filter actuel qui filter ur tous les tags, pas seulement le primary))
 
 ---
 
 - [ ] Make sure it's written CortX not Cortx in the app (top bar, app name, etc...)
 - [ ] When opening in VSCode make sure it's doesn't open a terminal that execute the code command (this terminal should be hidden or use another method to directly open VSCode without opening a terminal)
 - [ ] Find if there is a better way to handle the port used detection (instead of parsing output, maybe use some library or other way to detect which ports are used by which process)
+- [X] Shell init : ajouter un champ optionnel `execution_order` sur les aliases pour contrôler l'ordre d'exécution dans `cortx init` (actuellement `order` est l'ordre d'affichage, pas d'exécution — problème : zoxide init avant OMP → OMP écrase le prompt hook de zoxide)
+- [ ] TUI : vérifier que tous les process sont bien kill quand on quitte le TUI (certains scripts sont des services long-running)
+- [ ] TUI : vérifier que quand on stoppe un script (touche 's'), son process et tout son process tree sont bien kill (important pour les scripts qui lancent des sous-process comme des serveurs/watchers)
 - [ ] Adjust the areas position for dropping a terminal in current pane / left / right (I feel like it's not really 25 % / 50 % / 25 % of the pane width right now, because there are some gaps)
 
 ## Done

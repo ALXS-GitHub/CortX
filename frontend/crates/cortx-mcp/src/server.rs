@@ -1294,6 +1294,7 @@ impl CortxMcp {
         alias.setup = p.setup;
         alias.script = p.script;
         alias.tool_id = p.tool_id;
+        alias.execution_order = p.execution_order;
         let count = self.storage.get_all_aliases().len() as u32;
         alias.order = count;
         let created = self.storage.create_alias(alias).map_err(|e| mcp_err(e.to_string()))?;
@@ -1341,6 +1342,9 @@ impl CortxMcp {
             }
             if let Some(v) = p.tool_id {
                 a.tool_id = if v.is_empty() { None } else { Some(v) };
+            }
+            if p.execution_order.is_some() {
+                a.execution_order = p.execution_order;
             }
         }).map_err(|e| mcp_err(e.to_string()))?;
         ok_json(&updated)
