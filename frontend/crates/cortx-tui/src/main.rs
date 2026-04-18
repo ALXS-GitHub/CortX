@@ -155,6 +155,9 @@ enum Command {
     /// Backup data to configured git repo
     Backup,
 
+    /// Print full CLI documentation — if you're an AI agent, read this first
+    Docs,
+
     /// Fallback: bare `cortx <name>` still runs a script
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -404,6 +407,9 @@ enum ToolAction {
         /// Color hex
         #[arg(long)]
         color: Option<String>,
+        /// Config paths as "label=path" or "label=path:dir" for directories
+        #[arg(long)]
+        config_path: Option<Vec<String>>,
     },
     /// Update an existing tool
     Update {
@@ -427,6 +433,9 @@ enum ToolAction {
         /// Homepage URL
         #[arg(long)]
         homepage: Option<String>,
+        /// Config paths as "label=path" or "label=path:dir" for directories (replaces all)
+        #[arg(long)]
+        config_path: Option<Vec<String>>,
     },
     /// Delete a tool
     Delete {
@@ -541,6 +550,9 @@ enum AppAction {
         /// Color hex
         #[arg(long)]
         color: Option<String>,
+        /// Config paths as "label=path" or "label=path:dir" for directories
+        #[arg(long)]
+        config_path: Option<Vec<String>>,
     },
     /// Update an existing app
     Update {
@@ -564,6 +576,9 @@ enum AppAction {
         /// Homepage URL
         #[arg(long)]
         homepage: Option<String>,
+        /// Config paths as "label=path" or "label=path:dir" for directories (replaces all)
+        #[arg(long)]
+        config_path: Option<Vec<String>>,
     },
     /// Delete an app
     Delete {
@@ -771,6 +786,26 @@ fn resolve_by_name_or_id<'a, T>(
 // Delete confirmation
 // ============================================================================
 
+/// Parse config path entries from CLI: "label=path" or "label=path:dir"
+fn parse_config_paths(entries: &[String]) -> Vec<cortx_core::models::ToolConfigPath> {
+    entries.iter().filter_map(|entry| {
+        let (main_part, is_dir) = if entry.ends_with(":dir") {
+            (&entry[..entry.len() - 4], true)
+        } else {
+            (entry.as_str(), false)
+        };
+        if let Some(pos) = main_part.find('=') {
+            Some(cortx_core::models::ToolConfigPath {
+                label: main_part[..pos].to_string(),
+                path: main_part[pos + 1..].to_string(),
+                is_directory: is_dir,
+            })
+        } else {
+            None
+        }
+    }).collect()
+}
+
 fn confirm_delete(entity: &str, name: &str, skip: bool) -> bool {
     if skip {
         return true;
@@ -851,11 +886,11 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Tool { action }) => match action {
             ToolAction::List { tag, scan } => cmd_tool_list(&storage, tag.as_deref(), scan, json),
             ToolAction::Get { name_or_id } => cmd_tool_get(&storage, &name_or_id, json),
-            ToolAction::Create { name, description, tag, status, install_method, install_location, version, homepage, color } => {
-                cmd_tool_create(&storage, &name, description.as_deref(), tag, status.as_deref(), install_method.as_deref(), install_location.as_deref(), version.as_deref(), homepage.as_deref(), color.as_deref(), json)
+            ToolAction::Create { name, description, tag, status, install_method, install_location, version, homepage, color, config_path } => {
+                cmd_tool_create(&storage, &name, description.as_deref(), tag, status.as_deref(), install_method.as_deref(), install_location.as_deref(), version.as_deref(), homepage.as_deref(), color.as_deref(), config_path, json)
             }
-            ToolAction::Update { name_or_id, name, description, tag, status, version, homepage } => {
-                cmd_tool_update(&storage, &name_or_id, name, description, tag, status, version, homepage, json)
+            ToolAction::Update { name_or_id, name, description, tag, status, version, homepage, config_path } => {
+                cmd_tool_update(&storage, &name_or_id, name, description, tag, status, version, homepage, config_path, json)
             }
             ToolAction::Delete { name_or_id, yes } => cmd_tool_delete(&storage, &name_or_id, yes),
         },
@@ -877,11 +912,11 @@ fn main() -> anyhow::Result<()> {
         Some(Command::App { action }) => match action {
             AppAction::List => cmd_app_list(&storage, json),
             AppAction::Get { name_or_id } => cmd_app_get(&storage, &name_or_id, json),
-            AppAction::Create { name, description, executable, tag, status, homepage, launch_args, color } => {
-                cmd_app_create(&storage, &name, description.as_deref(), executable.as_deref(), tag, status.as_deref(), homepage.as_deref(), launch_args.as_deref(), color.as_deref(), json)
+            AppAction::Create { name, description, executable, tag, status, homepage, launch_args, color, config_path } => {
+                cmd_app_create(&storage, &name, description.as_deref(), executable.as_deref(), tag, status.as_deref(), homepage.as_deref(), launch_args.as_deref(), color.as_deref(), config_path, json)
             }
-            AppAction::Update { name_or_id, name, description, executable, tag, status, homepage } => {
-                cmd_app_update(&storage, &name_or_id, name, description, executable, tag, status, homepage, json)
+            AppAction::Update { name_or_id, name, description, executable, tag, status, homepage, config_path } => {
+                cmd_app_update(&storage, &name_or_id, name, description, executable, tag, status, homepage, config_path, json)
             }
             AppAction::Delete { name_or_id, yes } => cmd_app_delete(&storage, &name_or_id, yes),
             AppAction::Launch { name } => cmd_app_launch(&storage, &name),
@@ -927,6 +962,7 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Export { file }) => cmd_export(&storage, file.as_deref()),
         Some(Command::Import { file, all }) => cmd_import(&storage, &file, all),
         Some(Command::Backup) => cmd_backup(&storage),
+        Some(Command::Docs) => cmd_docs(),
 
         // Run shortcuts
         Some(Command::Run { script, args, preset }) => {
@@ -1541,6 +1577,7 @@ fn cmd_tool_create(
     version: Option<&str>,
     homepage: Option<&str>,
     color: Option<&str>,
+    config_path: Option<Vec<String>>,
     json: bool,
 ) -> anyhow::Result<()> {
     let mut tool = Tool::new(name.to_string(), status.unwrap_or("Active").to_string());
@@ -1553,6 +1590,9 @@ fn cmd_tool_create(
     tool.version = version.map(|s| s.to_string());
     tool.homepage = homepage.map(|s| s.to_string());
     tool.color = color.map(|s| s.to_string());
+    if let Some(entries) = config_path {
+        tool.config_paths = parse_config_paths(&entries);
+    }
 
     let created = storage.create_tool(tool).map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -1573,6 +1613,7 @@ fn cmd_tool_update(
     status: Option<String>,
     version: Option<String>,
     homepage: Option<String>,
+    config_path: Option<Vec<String>>,
     json: bool,
 ) -> anyhow::Result<()> {
     let tools = storage.get_all_tools();
@@ -1580,6 +1621,7 @@ fn cmd_tool_update(
         .map_err(|e| anyhow::anyhow!("Tool {}", e))?;
     let id = existing.id.clone();
 
+    let parsed_configs = config_path.map(|entries| parse_config_paths(&entries));
     let updated = storage.update_tool(&id, |t| {
         if let Some(ref n) = name { t.name = n.clone(); }
         if let Some(ref d) = description { t.description = Some(d.clone()); }
@@ -1587,6 +1629,7 @@ fn cmd_tool_update(
         if let Some(ref s) = status { t.status = s.clone(); }
         if let Some(ref v) = version { t.version = Some(v.clone()); }
         if let Some(ref h) = homepage { t.homepage = Some(h.clone()); }
+        if let Some(ref cp) = parsed_configs { t.config_paths = cp.clone(); }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -1930,6 +1973,7 @@ fn cmd_app_create(
     homepage: Option<&str>,
     launch_args: Option<&str>,
     color: Option<&str>,
+    config_path: Option<Vec<String>>,
     json: bool,
 ) -> anyhow::Result<()> {
     let mut app = CoreApp::new(name.to_string());
@@ -1942,6 +1986,9 @@ fn cmd_app_create(
     app.homepage = homepage.map(|s| s.to_string());
     app.launch_args = launch_args.map(|s| s.to_string());
     app.color = color.map(|s| s.to_string());
+    if let Some(entries) = config_path {
+        app.config_paths = parse_config_paths(&entries);
+    }
 
     let created = storage.create_app(app).map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -1962,6 +2009,7 @@ fn cmd_app_update(
     tags: Option<Vec<String>>,
     status: Option<String>,
     homepage: Option<String>,
+    config_path: Option<Vec<String>>,
     json: bool,
 ) -> anyhow::Result<()> {
     let apps = storage.get_all_apps();
@@ -1969,6 +2017,7 @@ fn cmd_app_update(
         .map_err(|e| anyhow::anyhow!("App {}", e))?;
     let id = existing.id.clone();
 
+    let parsed_configs = config_path.map(|entries| parse_config_paths(&entries));
     let updated = storage.update_app(&id, |a| {
         if let Some(ref n) = name { a.name = n.clone(); }
         if let Some(ref d) = description { a.description = Some(d.clone()); }
@@ -1976,6 +2025,7 @@ fn cmd_app_update(
         if let Some(ref t) = tags { a.tags = t.clone(); }
         if let Some(ref s) = status { a.status = Some(s.clone()); }
         if let Some(ref h) = homepage { a.homepage = Some(h.clone()); }
+        if let Some(ref cp) = parsed_configs { a.config_paths = cp.clone(); }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -2596,6 +2646,12 @@ fn cmd_import(storage: &Storage, file: &str, all: bool) -> anyhow::Result<()> {
 fn cmd_backup(storage: &Storage) -> anyhow::Result<()> {
     let result = storage.backup_to_git().map_err(|e| anyhow::anyhow!("{}", e))?;
     println!("{}", result);
+    Ok(())
+}
+
+/// Print full CLI documentation — intended to be read by AI agents first
+fn cmd_docs() -> anyhow::Result<()> {
+    print!("{}", include_str!("docs.md"));
     Ok(())
 }
 
