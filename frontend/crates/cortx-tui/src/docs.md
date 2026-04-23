@@ -38,6 +38,16 @@ CortX manages eleven types of entities:
 - **Statuses**: Same pattern as tags. `StatusDefinition` enriches status strings.
 - **`execution_order` on aliases**: Controls ordering inside `cortx init <shell>` output. Aliases with `execution_order` set run first (sorted ascending); others run after by insertion order. Used to force, e.g., `oh-my-posh init` before `zoxide init` so zoxide can hook the prompt AFTER oh-my-posh sets it.
 
+### Choosing the right entity type
+
+| Kind of command | Put it in | Why |
+|---|---|---|
+| One-shot script that produces logs (build, test, deploy, batch) | `Script` / `GlobalScript` | Process manager captures stdout/stderr line-by-line for display in GUI/TUI |
+| Long-running process tied to a project (dev server, watcher) | `Service` | Process manager + project attachment + modes/port |
+| Interactive / TUI app (lazygit, btop, yazi, speedtype…) | **`ShellAlias`** | Runs in the user's real terminal via `cortx init <shell>` — full TTY, stdin/raw mode, ANSI sequences all work |
+
+**Never register a TUI app as a Script.** CortX's process manager pipes stdout/stderr and sets `CREATE_NO_WINDOW` on Windows, which breaks any app that needs a real terminal (no PTY attached, line-buffered output, no stdin). Use an alias instead — the shell executes the binary directly so the TTY is preserved.
+
 ## CLI conventions
 
 - **Global flag `--json`**: Available on every command. Outputs structured JSON to stdout instead of human-readable tables. Use for scripting or LLM piping.
