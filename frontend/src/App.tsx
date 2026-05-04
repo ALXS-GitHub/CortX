@@ -276,11 +276,11 @@ function App() {
 
   return (
     <TooltipProvider>
+      <MacosTrafficLights />
       <div className="flex flex-col h-screen overflow-hidden">
         <TitleBar />
         <div className="flex-1 flex overflow-hidden">
           <SidebarProvider>
-            <MacosTrafficLights />
             <AppSidebar />
             <SidebarInset>
               <header className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
