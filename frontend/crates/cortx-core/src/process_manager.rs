@@ -10,6 +10,22 @@ use std::thread;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+/// Apply platform-specific spawn config that must be set on every spawned process:
+/// - Windows: hide the console window (CREATE_NO_WINDOW).
+/// - Unix:   put the child in its own process group so `kill -PGID` reaches the
+///           whole tree (the shell wrapper from `parse_command` and any descendants).
+fn apply_spawn_flags(cmd: &mut Command) {
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+}
+
 /// Trait for emitting process events.
 /// Implemented by TauriEmitter (GUI) and TuiEmitter (TUI).
 pub trait ProcessEventEmitter: Send + Sync {
@@ -116,9 +132,7 @@ impl ProcessManager {
             }
         }
 
-        // On Windows, prevent console window from appearing
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        apply_spawn_flags(&mut cmd);
 
         // Spawn the process
         let mut child = cmd
@@ -329,8 +343,7 @@ impl ProcessManager {
             cmd.env("PYTHONIOENCODING", "utf-8");
         }
 
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        apply_spawn_flags(&mut cmd);
 
         let mut child = cmd
             .spawn()
@@ -517,8 +530,7 @@ impl ProcessManager {
             }
         }
 
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        apply_spawn_flags(&mut cmd);
 
         let mut child = cmd
             .spawn()
