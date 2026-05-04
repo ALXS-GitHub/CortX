@@ -2068,19 +2068,55 @@ fn cmd_app_launch(storage: &Storage, name: &str) -> anyhow::Result<()> {
 
     println!("Launching: {} ({})", app.name, exe);
 
-    let mut cmd = std::process::Command::new("cmd");
-    cmd.args(["/C", "start", "", exe]);
+    let extra_args: Vec<String> = app
+        .launch_args
+        .as_deref()
+        .map(|s| s.split_whitespace().map(String::from).collect())
+        .unwrap_or_default();
 
-    if let Some(ref args) = app.launch_args {
-        if !args.is_empty() {
-            for arg in args.split_whitespace() {
+    #[cfg(target_os = "windows")]
+    {
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", exe]);
+        for arg in &extra_args {
+            cmd.arg(arg);
+        }
+        cmd.spawn()
+            .map_err(|e| anyhow::anyhow!("Failed to launch '{}': {}", app.name, e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if exe.ends_with(".app") || exe.contains(".app/") {
+            let mut cmd = std::process::Command::new("open");
+            cmd.args(["-n", "-a", exe]);
+            if !extra_args.is_empty() {
+                cmd.arg("--args");
+                for arg in &extra_args {
+                    cmd.arg(arg);
+                }
+            }
+            cmd.spawn()
+                .map_err(|e| anyhow::anyhow!("Failed to launch '{}': {}", app.name, e))?;
+        } else {
+            let mut cmd = std::process::Command::new(exe);
+            for arg in &extra_args {
                 cmd.arg(arg);
             }
+            cmd.spawn()
+                .map_err(|e| anyhow::anyhow!("Failed to launch '{}': {}", app.name, e))?;
         }
     }
 
-    cmd.spawn()
-        .map_err(|e| anyhow::anyhow!("Failed to launch '{}': {}", app.name, e))?;
+    #[cfg(target_os = "linux")]
+    {
+        let mut cmd = std::process::Command::new(exe);
+        for arg in &extra_args {
+            cmd.arg(arg);
+        }
+        cmd.spawn()
+            .map_err(|e| anyhow::anyhow!("Failed to launch '{}': {}", app.name, e))?;
+    }
 
     Ok(())
 }
