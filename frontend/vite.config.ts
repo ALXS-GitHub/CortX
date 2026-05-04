@@ -4,13 +4,18 @@ import path from "path"
 import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     react({
       babel: {
-        plugins: [
-          ['babel-plugin-react-compiler', {}],
-        ],
+        // babel-plugin-react-compiler is a Babel transform that runs on every
+        // changed file. In dev (HMR) it noticeably slows down each save and
+        // initial cold-start, especially on macOS WebKit. Its only purpose is
+        // to add memoization, which doesn't change correctness — so we run it
+        // only for production builds.
+        plugins: command === 'build'
+          ? [['babel-plugin-react-compiler', {}]]
+          : [],
       },
     }),
     tailwindcss(),
@@ -23,4 +28,4 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-})
+}))
