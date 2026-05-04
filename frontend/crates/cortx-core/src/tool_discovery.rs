@@ -1,12 +1,13 @@
 use crate::models::DiscoveredTool;
 
+#[allow(dead_code)]
 fn home_dir() -> Option<std::path::PathBuf> {
     directories::UserDirs::new().map(|u| u.home_dir().to_path_buf())
 }
 
 /// Scan installed package managers (Scoop, Chocolatey) and return discovered tools.
 pub fn scan_installed_tools() -> Vec<DiscoveredTool> {
-    let mut tools = Vec::new();
+    let mut tools: Vec<DiscoveredTool> = Vec::new();
 
     #[cfg(target_os = "windows")]
     {
@@ -94,6 +95,7 @@ fn scan_chocolatey() -> Vec<DiscoveredTool> {
     parse_choco_list(&output)
 }
 
+#[allow(dead_code)]
 fn parse_scoop_export(json: &str) -> Vec<DiscoveredTool> {
     #[derive(serde::Deserialize)]
     struct ScoopApp {
@@ -180,6 +182,7 @@ fn parse_scoop_export(json: &str) -> Vec<DiscoveredTool> {
         .collect()
 }
 
+#[allow(dead_code)]
 fn parse_choco_list(output: &str) -> Vec<DiscoveredTool> {
     output
         .lines()
