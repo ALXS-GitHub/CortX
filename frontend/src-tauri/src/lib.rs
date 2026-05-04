@@ -237,8 +237,6 @@ pub fn run() {
             commands::launch_app,
             commands::open_app_config,
             commands::open_app_url,
-            // macOS traffic-light positioning (no-op on other platforms)
-            commands::set_macos_traffic_lights_position,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
