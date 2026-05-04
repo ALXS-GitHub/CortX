@@ -19,7 +19,13 @@ Modern development often involves running multiple services simultaneously, a fr
 
 ## Platforms
 
-CortX is built with [Tauri](https://tauri.app/), making it lightweight and secure. It currently supports Windows only, with plans for macOS and Linux in future releases.
+CortX is built with [Tauri](https://tauri.app/), making it lightweight and secure. Builds are produced for:
+
+- **Windows** (x86_64) — `.msi` and `.exe` (NSIS) installers
+- **macOS** (Apple Silicon and Intel) — `.dmg`
+- **Linux** (x86_64) — `.deb` and `.AppImage`
+
+Pre-built artifacts for all three platforms are attached to each [release](https://github.com/ALXS-GitHub/CortX/releases).
 
 ## Features
 

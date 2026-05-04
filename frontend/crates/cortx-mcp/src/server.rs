@@ -1568,14 +1568,53 @@ impl CortxMcp {
         let path = app
             .executable_path
             .ok_or_else(|| mcp_err("App has no executable_path configured"))?;
-        let mut cmd = std::process::Command::new("cmd");
-        cmd.args(["/C", "start", "", &path]);
-        if let Some(ref args) = app.launch_args {
-            for arg in args.split_whitespace() {
+
+        let extra_args: Vec<String> = app
+            .launch_args
+            .as_deref()
+            .map(|s| s.split_whitespace().map(String::from).collect())
+            .unwrap_or_default();
+
+        #[cfg(target_os = "windows")]
+        {
+            let mut cmd = std::process::Command::new("cmd");
+            cmd.args(["/C", "start", "", &path]);
+            for arg in &extra_args {
                 cmd.arg(arg);
             }
+            cmd.spawn().map_err(|e| mcp_err(format!("Failed to launch app: {}", e)))?;
         }
-        cmd.spawn().map_err(|e| mcp_err(format!("Failed to launch app: {}", e)))?;
+
+        #[cfg(target_os = "macos")]
+        {
+            if path.ends_with(".app") || path.contains(".app/") {
+                let mut cmd = std::process::Command::new("open");
+                cmd.args(["-n", "-a", &path]);
+                if !extra_args.is_empty() {
+                    cmd.arg("--args");
+                    for arg in &extra_args {
+                        cmd.arg(arg);
+                    }
+                }
+                cmd.spawn().map_err(|e| mcp_err(format!("Failed to launch app: {}", e)))?;
+            } else {
+                let mut cmd = std::process::Command::new(&path);
+                for arg in &extra_args {
+                    cmd.arg(arg);
+                }
+                cmd.spawn().map_err(|e| mcp_err(format!("Failed to launch app: {}", e)))?;
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let mut cmd = std::process::Command::new(&path);
+            for arg in &extra_args {
+                cmd.arg(arg);
+            }
+            cmd.spawn().map_err(|e| mcp_err(format!("Failed to launch app: {}", e)))?;
+        }
+
         ok_text(format!("Launched app '{}' ({})", app.name, path))
     }
 }
