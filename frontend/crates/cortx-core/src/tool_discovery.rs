@@ -5,7 +5,7 @@ fn home_dir() -> Option<std::path::PathBuf> {
     directories::UserDirs::new().map(|u| u.home_dir().to_path_buf())
 }
 
-/// Scan installed package managers (Scoop, Chocolatey) and return discovered tools.
+/// Scan installed package managers (Scoop, Chocolatey, Homebrew) and return discovered tools.
 pub fn scan_installed_tools() -> Vec<DiscoveredTool> {
     let mut tools: Vec<DiscoveredTool> = Vec::new();
 
@@ -13,6 +13,11 @@ pub fn scan_installed_tools() -> Vec<DiscoveredTool> {
     {
         tools.extend(scan_scoop());
         tools.extend(scan_chocolatey());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        tools.extend(scan_homebrew());
     }
 
     tools.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -182,6 +187,113 @@ fn parse_scoop_export(json: &str) -> Vec<DiscoveredTool> {
         .collect()
 }
 
+// ============================================================================
+// macOS — Homebrew
+// ============================================================================
+
+#[cfg(target_os = "macos")]
+fn brew_prefix() -> Option<String> {
+    let output = std::process::Command::new("brew")
+        .arg("--prefix")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn scan_homebrew() -> Vec<DiscoveredTool> {
+    let prefix = match brew_prefix() {
+        Some(p) => p,
+        None => return Vec::new(), // brew not installed / not in PATH
+    };
+
+    let mut tools = Vec::new();
+
+    // Formulae
+    if let Ok(out) = std::process::Command::new("brew")
+        .args(["list", "--formula", "--versions"])
+        .output()
+    {
+        if out.status.success() {
+            tools.extend(parse_brew_versions(
+                &String::from_utf8_lossy(&out.stdout),
+                "homebrew",
+                Some(&prefix),
+                false,
+            ));
+        }
+    }
+
+    // Casks (GUI apps installed via brew)
+    if let Ok(out) = std::process::Command::new("brew")
+        .args(["list", "--cask", "--versions"])
+        .output()
+    {
+        if out.status.success() {
+            tools.extend(parse_brew_versions(
+                &String::from_utf8_lossy(&out.stdout),
+                "homebrew-cask",
+                Some(&prefix),
+                true,
+            ));
+        }
+    }
+
+    tools
+}
+
+/// Parse the output of `brew list --versions` (formulae) or
+/// `brew list --cask --versions` (casks). Each line looks like:
+///   `name 1.2.3` or `name 1.2.3 1.2.4` (multiple installed versions)
+/// We only keep the latest token as the version.
+#[allow(dead_code)]
+fn parse_brew_versions(
+    output: &str,
+    source: &str,
+    prefix: Option<&str>,
+    is_cask: bool,
+) -> Vec<DiscoveredTool> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            let mut parts = line.split_whitespace();
+            let name = parts.next()?.to_string();
+            // Take the last whitespace-separated token as the version
+            // (handles both single-version and multi-version output).
+            let version = parts.last().map(|s| s.to_string());
+
+            let install_location = prefix.map(|p| {
+                if is_cask {
+                    format!("{}/Caskroom/{}", p, name)
+                } else {
+                    format!("{}/opt/{}", p, name)
+                }
+            });
+
+            Some(DiscoveredTool {
+                name,
+                version,
+                source: source.to_string(),
+                description: None,
+                install_location,
+                homepage: None,
+            })
+        })
+        .collect()
+}
+
 #[allow(dead_code)]
 fn parse_choco_list(output: &str) -> Vec<DiscoveredTool> {
     output
@@ -274,5 +386,48 @@ mod tests {
         let output = "git|2.43.0\n\nnodejs|21.5.0\n";
         let tools = parse_choco_list(output);
         assert_eq!(tools.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_brew_versions_simple() {
+        let output = "git 2.43.0\nnode 21.5.0\nzsh 5.9\n";
+        let tools = parse_brew_versions(output, "homebrew", Some("/opt/homebrew"), false);
+        assert_eq!(tools.len(), 3);
+        assert_eq!(tools[0].name, "git");
+        assert_eq!(tools[0].version.as_deref(), Some("2.43.0"));
+        assert_eq!(tools[0].source, "homebrew");
+        assert_eq!(
+            tools[0].install_location.as_deref(),
+            Some("/opt/homebrew/opt/git"),
+        );
+    }
+
+    #[test]
+    fn test_parse_brew_versions_multi() {
+        // brew can list several versions for one formula; we keep the last one.
+        let output = "python@3.12 3.12.1 3.12.2\n";
+        let tools = parse_brew_versions(output, "homebrew", None, false);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "python@3.12");
+        assert_eq!(tools[0].version.as_deref(), Some("3.12.2"));
+        assert!(tools[0].install_location.is_none());
+    }
+
+    #[test]
+    fn test_parse_brew_versions_cask() {
+        let output = "firefox 120.0\nvisual-studio-code 1.85.0\n";
+        let tools = parse_brew_versions(output, "homebrew-cask", Some("/opt/homebrew"), true);
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].source, "homebrew-cask");
+        assert_eq!(
+            tools[0].install_location.as_deref(),
+            Some("/opt/homebrew/Caskroom/firefox"),
+        );
+    }
+
+    #[test]
+    fn test_parse_brew_versions_empty() {
+        let tools = parse_brew_versions("", "homebrew", None, false);
+        assert!(tools.is_empty());
     }
 }
