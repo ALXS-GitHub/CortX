@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { TitleBar } from '@/components/layout/TitleBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { TerminalPanel } from '@/components/layout/TerminalPanel';
+import { MacosTrafficLights } from '@/components/layout/MacosTrafficLights';
 import { UpdateChecker } from '@/components/UpdateChecker';
 import { ClosingModal } from '@/components/ClosingModal';
 import { Dashboard } from '@/views/Dashboard';
@@ -279,6 +280,7 @@ function App() {
         <TitleBar />
         <div className="flex-1 flex overflow-hidden">
           <SidebarProvider>
+            <MacosTrafficLights />
             <AppSidebar />
             <SidebarInset>
               <header className="flex h-10 shrink-0 items-center gap-2 border-b px-4">

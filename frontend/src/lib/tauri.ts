@@ -164,6 +164,12 @@ export async function openInExplorer(path: string): Promise<void> {
   return invoke('open_in_explorer', { path });
 }
 
+// macOS-only: reposition the native traffic-light buttons. No-op on
+// Windows/Linux (the Rust command short-circuits).
+export async function setMacosTrafficLightsPosition(x: number, y: number): Promise<void> {
+  return invoke('set_macos_traffic_lights_position', { x, y });
+}
+
 export async function openInVscode(path: string): Promise<void> {
   return invoke('open_in_vscode', { path });
 }

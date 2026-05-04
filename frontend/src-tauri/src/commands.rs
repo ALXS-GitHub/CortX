@@ -17,7 +17,7 @@ use chrono::Utc;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use walkdir::WalkDir;
 
 pub struct AppState {
@@ -2470,4 +2470,90 @@ pub fn open_app_url(url: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+// ============================================================================
+// macOS — Traffic-light position
+// ============================================================================
+//
+// The native traffic-light buttons on macOS sit at a fixed offset from the
+// window's top-left corner. With our custom title bar layout we want the
+// buttons to follow the sidebar collapse/expand state, which Tauri's static
+// `trafficLightPosition` config can not express. This command lets the
+// frontend nudge them whenever sidebar state changes.
+//
+// The implementation mirrors what tao does internally for the same purpose
+// (see tao::platform_impl::macos::view::inset_traffic_lights): resize the
+// title-bar container view so it can fit the buttons at the requested top
+// inset, then move each of the three buttons horizontally to the requested
+// origin, preserving the system spacing between them.
+//
+// On Windows/Linux the command is a no-op.
+
+#[tauri::command]
+pub fn set_macos_traffic_lights_position(
+    _app: tauri::AppHandle,
+    _x: f64,
+    _y: f64,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let app_clone = _app.clone();
+        _app.run_on_main_thread(move || {
+            if let Some(window) = app_clone.get_webview_window("main") {
+                if let Ok(ns_window_ptr) = window.ns_window() {
+                    if !ns_window_ptr.is_null() {
+                        unsafe {
+                            let ns_window: &objc2_app_kit::NSWindow =
+                                &*(ns_window_ptr as *mut objc2_app_kit::NSWindow);
+                            inset_traffic_lights_impl(ns_window, _x, _y);
+                        }
+                    }
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn inset_traffic_lights_impl(window: &objc2_app_kit::NSWindow, x: f64, y: f64) {
+    use objc2::msg_send;
+    use objc2_app_kit::{NSView, NSWindowButton};
+
+    let close = match window.standardWindowButton(NSWindowButton::CloseButton) {
+        Some(b) => b,
+        None => return,
+    };
+    let miniaturize = match window.standardWindowButton(NSWindowButton::MiniaturizeButton) {
+        Some(b) => b,
+        None => return,
+    };
+    let zoom = match window.standardWindowButton(NSWindowButton::ZoomButton) {
+        Some(b) => b,
+        None => return,
+    };
+
+    let title_bar_container_view = match close.superview().and_then(|s| s.superview()) {
+        Some(v) => v,
+        None => return,
+    };
+
+    let close_rect = NSView::frame(&*close);
+    let title_bar_frame_height = close_rect.size.height + y;
+    let mut title_bar_rect = NSView::frame(&*title_bar_container_view);
+    title_bar_rect.size.height = title_bar_frame_height;
+    title_bar_rect.origin.y = window.frame().size.height - title_bar_frame_height;
+    let _: () = msg_send![&*title_bar_container_view, setFrame: title_bar_rect];
+
+    let space_between = NSView::frame(&*miniaturize).origin.x - close_rect.origin.x;
+    let buttons = [close, miniaturize, zoom];
+
+    for (i, button) in buttons.iter().enumerate() {
+        let mut rect = NSView::frame(&**button);
+        rect.origin.x = x + (i as f64 * space_between);
+        button.setFrameOrigin(rect.origin);
+    }
 }

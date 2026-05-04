@@ -50,15 +50,11 @@ export function TitleBar() {
       data-tauri-drag-region
       className="h-9 flex items-center justify-between bg-sidebar border-b border-sidebar-border select-none"
     >
-      {/* Left side - App branding.
-          On Windows/Linux pl-14 accounts for the collapsed sidebar (~3rem + padding).
-          On macOS we shift further right (pl-20) to clear the traffic-light buttons. */}
+      {/* Left side - App branding. The traffic-lights live in the row BELOW
+          on macOS (see MacosTrafficLights), so the same pl-14 works on every OS. */}
       <div
         data-tauri-drag-region
-        className={cn(
-          'flex items-center gap-2 pr-3 h-full min-w-0',
-          isMac ? 'pl-20' : 'pl-14',
-        )}
+        className="flex items-center gap-2 pl-14 pr-3 h-full min-w-0"
       >
         <span
           data-tauri-drag-region
