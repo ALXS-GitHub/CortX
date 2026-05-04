@@ -46,6 +46,22 @@ pub fn run() {
                 )?;
             }
 
+            // Window chrome is platform-specific and can't be expressed in
+            // tauri.conf.json directly. The config sets:
+            //   - decorations: true        (required for macOS Overlay style)
+            //   - titleBarStyle: Overlay   (hides macOS title bar but keeps traffic lights)
+            //   - visible: false           (we show after fixing Win/Linux below)
+            // On Windows/Linux we don't want native chrome at all because we
+            // ship a custom TitleBar component, so we drop decorations here
+            // before showing the window.
+            if let Some(main) = app.get_webview_window("main") {
+                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                {
+                    let _ = main.set_decorations(false);
+                }
+                let _ = main.show();
+            }
+
             // Start file watcher for cross-process data sync
             let app_handle = app.handle().clone();
             let state: tauri::State<AppState> = app.state();

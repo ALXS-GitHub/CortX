@@ -6,6 +6,12 @@ import { cn } from '@/lib/utils';
 
 const appWindow = getCurrentWindow();
 
+// macOS draws its own traffic-light buttons on the left; we hide our custom
+// minimize/maximize/close UI there and reserve enough left padding so the
+// app branding does not collide with them.
+const isMac = typeof navigator !== 'undefined'
+  && /mac/i.test(navigator.platform || (navigator as unknown as { userAgentData?: { platform?: string } }).userAgentData?.platform || '');
+
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
@@ -44,7 +50,8 @@ export function TitleBar() {
       data-tauri-drag-region
       className="h-9 flex items-center justify-between bg-sidebar border-b border-sidebar-border select-none"
     >
-      {/* Left side - App branding (pl-14 accounts for collapsed sidebar width ~3rem + padding) */}
+      {/* Left side - App branding. The traffic-lights live in the row BELOW
+          on macOS (see MacosTrafficLights), so the same pl-14 works on every OS. */}
       <div
         data-tauri-drag-region
         className="flex items-center gap-2 pl-14 pr-3 h-full min-w-0"
@@ -62,46 +69,49 @@ export function TitleBar() {
         </span>
       </div>
 
-      {/* Right side - Window controls */}
-      <div className="flex items-center h-full">
-        <button
-          onClick={handleMinimize}
-          className={cn(
-            'h-full px-4 flex items-center justify-center',
-            'hover:bg-sidebar-accent transition-colors',
-            'focus:outline-none'
-          )}
-          aria-label="Minimize"
-        >
-          <Minus className="size-4 text-sidebar-foreground" />
-        </button>
-        <button
-          onClick={handleMaximize}
-          className={cn(
-            'h-full px-4 flex items-center justify-center',
-            'hover:bg-sidebar-accent transition-colors',
-            'focus:outline-none'
-          )}
-          aria-label={isMaximized ? 'Restore' : 'Maximize'}
-        >
-          {isMaximized ? (
-            <Copy className="size-3.5 text-sidebar-foreground" />
-          ) : (
-            <Square className="size-3.5 text-sidebar-foreground" />
-          )}
-        </button>
-        <button
-          onClick={handleClose}
-          className={cn(
-            'h-full px-4 flex items-center justify-center',
-            'hover:bg-destructive hover:text-white transition-colors',
-            'focus:outline-none'
-          )}
-          aria-label="Close"
-        >
-          <X className="size-4" />
-        </button>
-      </div>
+      {/* Right side - Window controls. Hidden on macOS, where the native
+          traffic-light buttons handle minimize/maximize/close. */}
+      {!isMac && (
+        <div className="flex items-center h-full">
+          <button
+            onClick={handleMinimize}
+            className={cn(
+              'h-full px-4 flex items-center justify-center',
+              'hover:bg-sidebar-accent transition-colors',
+              'focus:outline-none'
+            )}
+            aria-label="Minimize"
+          >
+            <Minus className="size-4 text-sidebar-foreground" />
+          </button>
+          <button
+            onClick={handleMaximize}
+            className={cn(
+              'h-full px-4 flex items-center justify-center',
+              'hover:bg-sidebar-accent transition-colors',
+              'focus:outline-none'
+            )}
+            aria-label={isMaximized ? 'Restore' : 'Maximize'}
+          >
+            {isMaximized ? (
+              <Copy className="size-3.5 text-sidebar-foreground" />
+            ) : (
+              <Square className="size-3.5 text-sidebar-foreground" />
+            )}
+          </button>
+          <button
+            onClick={handleClose}
+            className={cn(
+              'h-full px-4 flex items-center justify-center',
+              'hover:bg-destructive hover:text-white transition-colors',
+              'focus:outline-none'
+            )}
+            aria-label="Close"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

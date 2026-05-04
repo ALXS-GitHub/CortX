@@ -610,6 +610,7 @@ pub async fn launch_external_terminal(
 }
 
 /// Simple URL encoding for the path
+#[cfg(target_os = "windows")]
 fn urlencoding(s: &str) -> String {
     s.chars()
         .map(|c| match c {
@@ -2341,14 +2342,55 @@ pub fn launch_app(state: State<AppState>, app_id: String) -> Result<(), String> 
         .executable_path
         .ok_or_else(|| "No executable path set".to_string())?;
 
-    let mut cmd = std::process::Command::new("cmd");
-    cmd.args(["/C", "start", "", &path]);
-    if let Some(ref args) = app.launch_args {
-        for arg in args.split_whitespace() {
+    let extra_args: Vec<String> = app
+        .launch_args
+        .as_deref()
+        .map(|s| s.split_whitespace().map(String::from).collect())
+        .unwrap_or_default();
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", &path]);
+        for arg in &extra_args {
             cmd.arg(arg);
         }
+        cmd.spawn().map_err(|e| e.to_string())?;
     }
-    cmd.spawn().map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        // .app bundles must be launched via `open -a`; raw executables can be
+        // spawned directly so they get their own process and inherit the GUI session.
+        if path.ends_with(".app") || path.contains(".app/") {
+            let mut cmd = std::process::Command::new("open");
+            // -n: open a new instance even if already running
+            cmd.args(["-n", "-a", &path]);
+            if !extra_args.is_empty() {
+                cmd.arg("--args");
+                for arg in &extra_args {
+                    cmd.arg(arg);
+                }
+            }
+            cmd.spawn().map_err(|e| e.to_string())?;
+        } else {
+            let mut cmd = std::process::Command::new(&path);
+            for arg in &extra_args {
+                cmd.arg(arg);
+            }
+            cmd.spawn().map_err(|e| e.to_string())?;
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let mut cmd = std::process::Command::new(&path);
+        for arg in &extra_args {
+            cmd.arg(arg);
+        }
+        cmd.spawn().map_err(|e| e.to_string())?;
+    }
+
     Ok(())
 }
 
@@ -2365,25 +2407,68 @@ pub fn open_app_config(state: State<AppState>, app_id: String, config_index: usi
         .ok_or_else(|| "Config path not found".to_string())?;
 
     let path = &config.path;
-    if config.is_directory {
-        std::process::Command::new("explorer")
+
+    #[cfg(target_os = "windows")]
+    {
+        if config.is_directory {
+            std::process::Command::new("explorer")
+                .arg(path)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", path])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // `open` handles both directories (Finder) and files (default app)
+        std::process::Command::new("open")
             .arg(path)
             .spawn()
             .map_err(|e| e.to_string())?;
-    } else {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", path])
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
+
     Ok(())
 }
 
 #[tauri::command]
 pub fn open_app_url(url: String) -> Result<(), String> {
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", &url])
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
     Ok(())
 }
+
