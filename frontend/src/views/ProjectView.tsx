@@ -234,7 +234,7 @@ export function ProjectView() {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
+        <div className="flex items-center gap-2 flex-wrap justify-end max-w-[50%] lg:max-w-none">
           <Button variant="outline" size="sm" onClick={handleOpenInVscode}>
             <Code className="size-4 mr-2" />
             Open in VSCode
