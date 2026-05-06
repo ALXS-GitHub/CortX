@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import { openInExplorer, openInVscode, openToolUrl } from '@/lib/tauri';
 import type { Service, CreateServiceInput, UpdateServiceInput, UpdateProjectInput } from '@/types';
 import { toast } from 'sonner';
@@ -200,25 +201,27 @@ export function ProjectView() {
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-start gap-4">
-          <Button variant="ghost" size="icon" onClick={handleBack}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-4 min-w-0 flex-1">
+          <Button variant="ghost" size="icon" onClick={handleBack} className="flex-shrink-0">
             <ArrowLeft className="size-5" />
           </Button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold">{project.name}</h1>
-              <StatusBadge status={project.status} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <TruncatedText as="h1" className="text-2xl font-bold min-w-0">{project.name}</TruncatedText>
+              <div className="flex-shrink-0">
+                <StatusBadge status={project.status} />
+              </div>
             </div>
             {project.description && (
-              <p className="text-muted-foreground mt-1">{project.description}</p>
+              <p className="text-muted-foreground mt-1 break-words">{project.description}</p>
             )}
-            <p className="text-sm text-muted-foreground font-mono mt-2">
+            <TruncatedText className="text-sm text-muted-foreground font-mono mt-2 block">
               {project.rootPath}
-            </p>
+            </TruncatedText>
             {project.toolboxUrl && (
               <button
-                className="text-xs text-primary hover:underline mt-1 cursor-pointer"
+                className="text-xs text-primary hover:underline mt-1 cursor-pointer block max-w-full truncate text-left"
                 onClick={() => {
                   const url = project.toolboxUrl!.startsWith('/') && settings?.toolboxBaseUrl
                     ? `${settings.toolboxBaseUrl.replace(/\/+$/, '')}${project.toolboxUrl}`
@@ -231,7 +234,7 @@ export function ProjectView() {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <Button variant="outline" size="sm" onClick={handleOpenInVscode}>
             <Code className="size-4 mr-2" />
             Open in VSCode
