@@ -645,45 +645,6 @@ pub struct TagDefinition {
     pub order: Option<u32>,
 }
 
-// Script Groups
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum GroupExecutionMode {
-    Parallel,
-    Sequential,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptGroup {
-    pub id: String,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub script_ids: Vec<String>,
-    pub execution_mode: GroupExecutionMode,
-    pub stop_on_failure: bool,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    pub order: u32,
-}
-
-impl ScriptGroup {
-    pub fn new(name: String, execution_mode: GroupExecutionMode) -> Self {
-        Self {
-            id: Uuid::new_v4().to_string(),
-            name,
-            description: None,
-            script_ids: Vec::new(),
-            execution_mode,
-            stop_on_failure: true,
-            tags: Vec::new(),
-            order: 0,
-        }
-    }
-}
-
 // Execution History
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -884,28 +845,6 @@ pub struct UpdateTagDefinitionInput {
     pub order: Option<u32>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateScriptGroupInput {
-    pub name: String,
-    pub description: Option<String>,
-    pub script_ids: Vec<String>,
-    pub execution_mode: GroupExecutionMode,
-    pub stop_on_failure: Option<bool>,
-    pub tags: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateScriptGroupInput {
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub script_ids: Option<Vec<String>>,
-    pub execution_mode: Option<GroupExecutionMode>,
-    pub stop_on_failure: Option<bool>,
-    pub tags: Option<Vec<String>>,
-}
-
 // Script export/import
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -913,7 +852,10 @@ pub struct UpdateScriptGroupInput {
 pub struct ScriptExport {
     pub version: String,
     pub scripts: Vec<GlobalScript>,
-    pub groups: Vec<ScriptGroup>,
+    /// Legacy field from v <= 4.x exports — kept so old export files still
+    /// deserialize, but ignored on import. Never written by current code.
+    #[serde(default, skip_serializing)]
+    pub groups: Vec<serde_json::Value>,
     #[serde(default)]
     pub tools: Vec<Tool>,
     #[serde(default)]
@@ -935,7 +877,6 @@ pub struct ScriptExport {
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub scripts_added: u32,
-    pub groups_added: u32,
     pub skipped: u32,
     pub tools_added: u32,
     pub tag_definitions_added: u32,
@@ -990,7 +931,6 @@ pub struct ExportSummary {
     pub exported_at: DateTime<Utc>,
     pub projects_count: usize,
     pub scripts_count: usize,
-    pub groups_count: usize,
     pub tools_count: usize,
     pub apps_count: usize,
     pub aliases_count: usize,

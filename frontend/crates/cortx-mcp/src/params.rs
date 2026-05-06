@@ -3,20 +3,6 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 // ============================================================================
-// Shared enums
-// ============================================================================
-
-/// Execution mode for script groups
-#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ExecutionMode {
-    /// Launch all scripts at the same time
-    Parallel,
-    /// Launch scripts one by one, waiting for each to finish
-    Sequential,
-}
-
-// ============================================================================
 // Shared types
 // ============================================================================
 
@@ -347,56 +333,6 @@ pub struct RunProjectScriptParams {
 pub struct StopProjectScriptParams {
     #[schemars(description = "Script UUID of the running script to stop")]
     pub script_id: String,
-}
-
-// ============================================================================
-// Script Groups
-// ============================================================================
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CreateScriptGroupParams {
-    #[schemars(description = "Group display name")]
-    pub name: String,
-    #[schemars(
-        description = "How to run the scripts: 'parallel' launches all at once, 'sequential' runs one after another"
-    )]
-    pub execution_mode: ExecutionMode,
-    #[schemars(description = "Human-readable description")]
-    pub description: Option<String>,
-    #[schemars(description = "Ordered list of global script UUIDs to include in the group")]
-    pub script_ids: Vec<String>,
-    #[schemars(
-        description = "In sequential mode, stop executing remaining scripts if one fails (default: true)"
-    )]
-    pub stop_on_failure: Option<bool>,
-    #[schemars(description = "Tags for categorization")]
-    pub tags: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct UpdateScriptGroupParams {
-    #[schemars(description = "Group UUID to update")]
-    pub id: String,
-    pub name: Option<String>,
-    pub execution_mode: Option<ExecutionMode>,
-    pub description: Option<String>,
-    #[schemars(description = "Replace the script list")]
-    pub script_ids: Option<Vec<String>>,
-    pub stop_on_failure: Option<bool>,
-    #[schemars(description = "Replace all tags")]
-    pub tags: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct DeleteScriptGroupParams {
-    #[schemars(description = "Group UUID to delete")]
-    pub id: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct RunScriptGroupParams {
-    #[schemars(description = "Group UUID to run. Use list_script_groups to see available groups.")]
-    pub id: String,
 }
 
 // ============================================================================

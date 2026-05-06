@@ -1,4 +1,4 @@
-use cortx_core::models::{GlobalScript, Tool, TagDefinition, ScriptGroup, ScriptStatus, ScriptParamType, LogStream, ShellAlias, App as CoreApp, StatusDefinition, Project};
+use cortx_core::models::{GlobalScript, Tool, TagDefinition, ScriptStatus, ScriptParamType, LogStream, ShellAlias, App as CoreApp, StatusDefinition, Project};
 use cortx_core::process_manager::ProcessManager;
 use cortx_core::storage::Storage;
 use std::collections::HashMap;
@@ -266,7 +266,6 @@ pub struct App {
     // Data
     pub scripts: Vec<GlobalScript>,
     pub tag_definitions: Vec<TagDefinition>,
-    pub groups: Vec<ScriptGroup>,
     pub runtimes: HashMap<String, ScriptRuntime>,
 
     // UI state
@@ -324,7 +323,6 @@ impl App {
     pub fn new(storage: Arc<Storage>, process_manager: Arc<ProcessManager>, emitter: Arc<TuiEmitter>) -> Self {
         let mut scripts = storage.get_all_global_scripts();
         let tag_definitions = storage.get_all_tag_definitions();
-        let groups = storage.get_all_script_groups();
         let mut tools = storage.get_all_tools();
         let mut aliases = storage.get_all_aliases();
         let mut apps = storage.get_all_apps();
@@ -351,7 +349,6 @@ impl App {
             emitter,
             scripts,
             tag_definitions,
-            groups,
             runtimes: HashMap::new(),
             input_mode: InputMode::Normal,
             active_panel: ActivePanel::ScriptList,
@@ -391,7 +388,6 @@ impl App {
     pub fn refresh_data(&mut self) {
         self.scripts = self.storage.get_all_global_scripts();
         self.tag_definitions = self.storage.get_all_tag_definitions();
-        self.groups = self.storage.get_all_script_groups();
         self.tools = self.storage.get_all_tools();
         self.aliases = self.storage.get_all_aliases();
         self.apps = self.storage.get_all_apps();
@@ -440,7 +436,6 @@ impl App {
     pub fn reload_scripts(&mut self) {
         self.scripts = self.storage.get_all_global_scripts();
         self.tag_definitions = self.storage.get_all_tag_definitions();
-        self.groups = self.storage.get_all_script_groups();
         Self::sort_by_primary_tag(&mut self.scripts, &self.tag_definitions);
         self.search_query.clear();
         self.active_tag_filter = None;

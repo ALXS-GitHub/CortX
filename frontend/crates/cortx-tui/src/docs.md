@@ -15,7 +15,7 @@ All four read/write the same JSON files in the user's app data dir. Changes made
 
 ## Data model
 
-CortX manages eleven types of entities:
+CortX manages ten types of entities:
 
 | Domain | What it is |
 |---|---|
@@ -23,7 +23,6 @@ CortX manages eleven types of entities:
 | **Service** | Long-running process (server, watcher) attached to a project. Has a command, working dir, modes, env vars, port. |
 | **Script** (project-scoped) | One-shot command attached to a project (build, test, deploy). Can be linked to a service. |
 | **GlobalScript** | Standalone script, not attached to any project. Has parameters, presets, env vars. The "scripts" domain in the CLI refers to these. |
-| **ScriptGroup** | Bundle of GlobalScripts run together. Mode: `parallel` or `sequential`. |
 | **Tool** | Registry entry for an installed CLI utility (git, ripgrep, etc.). Metadata: version, install method, config paths. |
 | **App** | GUI application registry (VS Code, Discord, etc.). Has executable path and launch args. |
 | **ShellAlias** | Shell shortcut synced into `cortx init <shell>`. Types: `function`, `script`, `init`. |
@@ -160,17 +159,6 @@ Use `--execution-order N` to force ordering in `cortx init` output. Lower number
 ### `cortx status` — status definitions
 
 Same shape as tag. `create/update/delete` with `--color` and `--order`.
-
-### `cortx group` — script groups
-
-| Command | Args / Flags |
-|---|---|
-| `group list` | |
-| `group get <name_or_id>` | |
-| `group create <name>` | `--mode parallel|sequential --scripts id1,id2,... [--description X] [--stop-on-failure] [--tag X...]` |
-| `group update <name_or_id>` | `[--name X] [--mode X] [--scripts id1,id2,...]` |
-| `group delete <name_or_id>` | `[--yes]` — does NOT delete the underlying scripts |
-| `group run <name_or_id>` | Executes all scripts in the group per its mode |
 
 ### `cortx settings` — app settings
 

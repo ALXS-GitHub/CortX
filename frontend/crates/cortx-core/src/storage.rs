@@ -26,8 +26,6 @@ pub enum StorageError {
     GlobalScriptNotFound(String),
     #[error("Folder not found: {0}")]
     FolderNotFound(String),
-    #[error("Script group not found: {0}")]
-    ScriptGroupNotFound(String),
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
     #[error("Alias not found: {0}")]
@@ -44,7 +42,6 @@ pub struct Storage {
     settings: RwLock<AppSettings>,
     global_scripts: RwLock<Vec<GlobalScript>>,
     tag_definitions: RwLock<Vec<TagDefinition>>,
-    script_groups: RwLock<Vec<ScriptGroup>>,
     execution_history: RwLock<Vec<ExecutionRecord>>,
     tools: RwLock<Vec<Tool>>,
     aliases: RwLock<Vec<ShellAlias>>,
@@ -93,7 +90,6 @@ impl Storage {
             settings: RwLock::new(AppSettings::default()),
             global_scripts: RwLock::new(Vec::new()),
             tag_definitions: RwLock::new(Vec::new()),
-            script_groups: RwLock::new(Vec::new()),
             execution_history: RwLock::new(Vec::new()),
             tools: RwLock::new(Vec::new()),
             aliases: RwLock::new(Vec::new()),
@@ -107,7 +103,6 @@ impl Storage {
         storage.load_settings()?;
         storage.load_global_scripts()?;
         storage.load_tag_definitions()?;
-        storage.load_script_groups()?;
         storage.load_execution_history()?;
         storage.load_tools()?;
         storage.load_aliases()?;
@@ -155,10 +150,6 @@ impl Storage {
 
     fn tag_definitions_path(&self) -> PathBuf {
         self.app_dir.join("tag_definitions.json")
-    }
-
-    fn script_groups_path(&self) -> PathBuf {
-        self.app_dir.join("script_groups.json")
     }
 
     fn execution_history_path(&self) -> PathBuf {
@@ -599,82 +590,6 @@ impl Storage {
     }
 
     // ========================================================================
-    // Script Groups
-    // ========================================================================
-
-    fn load_script_groups(&self) -> Result<(), StorageError> {
-        let path = self.script_groups_path();
-        if path.exists() {
-            let groups: Vec<ScriptGroup> = read_json_locked(&path)?;
-            *self.script_groups.write() = groups;
-        }
-        Ok(())
-    }
-
-    fn save_script_groups(&self) -> Result<(), StorageError> {
-        self.set_suppress_watcher();
-        let result = write_json_locked(&self.script_groups_path(), &*self.script_groups.read());
-        self.clear_suppress_watcher();
-        result
-    }
-
-    pub fn get_all_script_groups(&self) -> Vec<ScriptGroup> {
-        self.script_groups.read().clone()
-    }
-
-    pub fn get_script_group(&self, id: &str) -> Option<ScriptGroup> {
-        self.script_groups
-            .read()
-            .iter()
-            .find(|g| g.id == id)
-            .cloned()
-    }
-
-    pub fn create_script_group(
-        &self,
-        group: ScriptGroup,
-    ) -> Result<ScriptGroup, StorageError> {
-        {
-            let mut groups = self.script_groups.write();
-            groups.push(group.clone());
-        }
-        self.save_script_groups()?;
-        Ok(group)
-    }
-
-    pub fn update_script_group(
-        &self,
-        id: &str,
-        updater: impl FnOnce(&mut ScriptGroup),
-    ) -> Result<ScriptGroup, StorageError> {
-        let group = {
-            let mut groups = self.script_groups.write();
-            let group = groups
-                .iter_mut()
-                .find(|g| g.id == id)
-                .ok_or_else(|| StorageError::ScriptGroupNotFound(id.to_string()))?;
-
-            updater(group);
-            group.clone()
-        };
-        self.save_script_groups()?;
-        Ok(group)
-    }
-
-    pub fn delete_script_group(&self, id: &str) -> Result<(), StorageError> {
-        {
-            let mut groups = self.script_groups.write();
-            let initial_len = groups.len();
-            groups.retain(|g| g.id != id);
-            if groups.len() == initial_len {
-                return Err(StorageError::ScriptGroupNotFound(id.to_string()));
-            }
-        }
-        self.save_script_groups()?;
-        Ok(())
-    }
-
-    // ========================================================================
     // Execution History
     // ========================================================================
 
@@ -1103,7 +1018,6 @@ impl Storage {
         self.load_settings()?;
         self.load_global_scripts()?;
         self.load_tag_definitions()?;
-        self.load_script_groups()?;
         self.load_execution_history()?;
         self.load_tools()?;
         self.load_aliases()?;
@@ -1116,12 +1030,12 @@ impl Storage {
     // Import / Export
     // ========================================================================
 
-    /// Export all data (scripts, tags, groups, tools, projects, settings) as a ScriptExport JSON string
+    /// Export all data (scripts, tags, tools, projects, settings) as a ScriptExport JSON string
     pub fn export_scripts_config(&self) -> Result<String, StorageError> {
         let export = ScriptExport {
-            version: "5.0".to_string(),
+            version: "6.0".to_string(),
             scripts: self.get_all_global_scripts(),
-            groups: self.get_all_script_groups(),
+            groups: Vec::new(),
             tools: self.get_all_tools(),
             tag_definitions: self.get_all_tag_definitions(),
             aliases: self.get_all_aliases(),
@@ -1143,7 +1057,6 @@ impl Storage {
             exported_at: import.exported_at,
             projects_count: import.projects.len(),
             scripts_count: import.scripts.len(),
-            groups_count: import.groups.len(),
             tools_count: import.tools.len(),
             apps_count: import.apps.len(),
             aliases_count: import.aliases.len(),
@@ -1160,7 +1073,6 @@ impl Storage {
             serde_json::from_str(json).map_err(StorageError::Json)?;
 
         let mut scripts_added = 0u32;
-        let mut groups_added = 0u32;
         let mut skipped = 0u32;
         let mut tools_added = 0u32;
         let mut tag_definitions_added = 0u32;
@@ -1220,7 +1132,7 @@ impl Storage {
             }
         }
 
-        // Import scripts and groups
+        // Import scripts (legacy import.groups is ignored — feature removed)
         if options.scripts {
             let existing_scripts = self.get_all_global_scripts();
             for script in import.scripts {
@@ -1236,22 +1148,6 @@ impl Storage {
             }
             if scripts_added > 0 {
                 self.save_global_scripts()?;
-            }
-
-            let existing_groups = self.get_all_script_groups();
-            for group in import.groups {
-                if existing_groups.iter().any(|g| g.id == group.id) {
-                    skipped += 1;
-                    continue;
-                }
-                {
-                    let mut groups = self.script_groups.write();
-                    groups.push(group);
-                }
-                groups_added += 1;
-            }
-            if groups_added > 0 {
-                self.save_script_groups()?;
             }
         }
 
@@ -1342,7 +1238,6 @@ impl Storage {
 
         Ok(ImportResult {
             scripts_added,
-            groups_added,
             skipped,
             tools_added,
             tag_definitions_added,
@@ -1362,7 +1257,6 @@ impl Storage {
     const BACKUP_FILES: &'static [&'static str] = &[
         "projects.json",
         "global_scripts.json",
-        "script_groups.json",
         "tools.json",
         "aliases.json",
         "apps.json",

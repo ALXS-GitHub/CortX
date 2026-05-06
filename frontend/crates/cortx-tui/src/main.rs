@@ -17,7 +17,7 @@ use ratatui::prelude::*;
 
 use cortx_core::file_watcher;
 use cortx_core::models::{
-    App as CoreApp, GlobalScript, GroupExecutionMode, ImportOptions, Project, ScriptGroup,
+    App as CoreApp, GlobalScript, ImportOptions, Project,
     Service, ShellAlias, StatusDefinition, TagDefinition, Tool,
 };
 use cortx_core::process_manager::ProcessManager;
@@ -122,12 +122,6 @@ enum Command {
     Status {
         #[command(subcommand)]
         action: StatusAction,
-    },
-
-    /// Manage script groups
-    Group {
-        #[command(subcommand)]
-        action: GroupAction,
     },
 
     /// Manage settings
@@ -682,66 +676,6 @@ enum StatusAction {
 }
 
 // ---------------------------------------------------------------------------
-// Group subcommands
-// ---------------------------------------------------------------------------
-
-#[derive(Subcommand)]
-enum GroupAction {
-    /// List all script groups
-    List,
-    /// Show details for a script group
-    Get {
-        /// Group name or ID
-        name_or_id: String,
-    },
-    /// Create a new script group
-    Create {
-        /// Group name
-        name: String,
-        /// Execution mode: parallel or sequential
-        #[arg(long)]
-        mode: String,
-        /// Comma-separated script IDs
-        #[arg(long)]
-        scripts: String,
-        /// Description
-        #[arg(long)]
-        description: Option<String>,
-        /// Stop group execution on first failure (sequential mode)
-        #[arg(long)]
-        stop_on_failure: bool,
-        /// Tags
-        #[arg(long)]
-        tag: Option<Vec<String>>,
-    },
-    /// Update an existing script group
-    Update {
-        /// Group name or ID
-        name_or_id: String,
-        /// New name
-        #[arg(long)]
-        name: Option<String>,
-        /// Execution mode
-        #[arg(long)]
-        mode: Option<String>,
-        /// Comma-separated script IDs (replaces all)
-        #[arg(long)]
-        scripts: Option<String>,
-    },
-    /// Delete a script group
-    Delete {
-        /// Group name or ID
-        name_or_id: String,
-        /// Skip confirmation prompt
-        #[arg(long)]
-        yes: bool,
-    },
-    /// Run all scripts in a group
-    Run {
-        /// Group name or ID
-        name_or_id: String,
-    },
-}
 
 // ---------------------------------------------------------------------------
 // Settings subcommands
@@ -936,20 +870,6 @@ fn main() -> anyhow::Result<()> {
             StatusAction::Create { name, color, order } => cmd_status_create(&storage, &name, color.as_deref(), order, json),
             StatusAction::Update { name, new_name, color, order } => cmd_status_update(&storage, &name, new_name, color, order, json),
             StatusAction::Delete { name, yes } => cmd_status_delete(&storage, &name, yes),
-        },
-
-        // Group group
-        Some(Command::Group { action }) => match action {
-            GroupAction::List => cmd_group_list(&storage, json),
-            GroupAction::Get { name_or_id } => cmd_group_get(&storage, &name_or_id, json),
-            GroupAction::Create { name, mode, scripts, description, stop_on_failure, tag } => {
-                cmd_group_create(&storage, &name, &mode, &scripts, description.as_deref(), stop_on_failure, tag, json)
-            }
-            GroupAction::Update { name_or_id, name, mode, scripts } => {
-                cmd_group_update(&storage, &name_or_id, name, mode, scripts, json)
-            }
-            GroupAction::Delete { name_or_id, yes } => cmd_group_delete(&storage, &name_or_id, yes),
-            GroupAction::Run { name_or_id } => cmd_group_run(&storage, &process_manager, &name_or_id),
         },
 
         // Settings
@@ -2304,242 +2224,6 @@ fn cmd_status_delete(storage: &Storage, name: &str, yes: bool) -> anyhow::Result
 }
 
 // ============================================================================
-// Group commands
-// ============================================================================
-
-fn cmd_group_list(storage: &Storage, json: bool) -> anyhow::Result<()> {
-    let groups = storage.get_all_script_groups();
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&groups)?);
-        return Ok(());
-    }
-
-    if groups.is_empty() {
-        println!("No script groups configured.");
-        return Ok(());
-    }
-
-    println!("{:<30} {:<12} {:<8} {}", "NAME", "MODE", "SCRIPTS", "DESCRIPTION");
-    println!("{}", "-".repeat(75));
-
-    for g in &groups {
-        let mode = match g.execution_mode {
-            GroupExecutionMode::Parallel => "parallel",
-            GroupExecutionMode::Sequential => "sequential",
-        };
-        let desc = g.description.as_deref().unwrap_or("-");
-        let desc_display = if desc.len() > 25 { format!("{}...", &desc[..25]) } else { desc.to_string() };
-        println!("{:<30} {:<12} {:<8} {}", g.name, mode, g.script_ids.len(), desc_display);
-    }
-    println!("\n{} group(s)", groups.len());
-    Ok(())
-}
-
-fn cmd_group_get(storage: &Storage, name_or_id: &str, json: bool) -> anyhow::Result<()> {
-    let groups = storage.get_all_script_groups();
-    let group = resolve_by_name_or_id(&groups, name_or_id, |g| &g.id, |g| &g.name)
-        .map_err(|e| anyhow::anyhow!("Group {}", e))?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(group)?);
-        return Ok(());
-    }
-
-    let mode = match group.execution_mode {
-        GroupExecutionMode::Parallel => "parallel",
-        GroupExecutionMode::Sequential => "sequential",
-    };
-
-    println!("Name:             {}", group.name);
-    println!("ID:               {}", group.id);
-    println!("Execution mode:   {}", mode);
-    println!("Stop on failure:  {}", group.stop_on_failure);
-    if let Some(ref desc) = group.description {
-        println!("Description:      {}", desc);
-    }
-    if !group.tags.is_empty() {
-        println!("Tags:             {}", group.tags.join(", "));
-    }
-
-    // Resolve script names
-    let scripts = storage.get_all_global_scripts();
-    println!("Scripts ({}):", group.script_ids.len());
-    for sid in &group.script_ids {
-        let script_name = scripts.iter()
-            .find(|s| s.id == *sid)
-            .map(|s| s.name.as_str())
-            .unwrap_or("(unknown)");
-        println!("  - {} ({})", script_name, sid);
-    }
-    Ok(())
-}
-
-fn cmd_group_create(
-    storage: &Storage,
-    name: &str,
-    mode: &str,
-    scripts_csv: &str,
-    description: Option<&str>,
-    stop_on_failure: bool,
-    tags: Option<Vec<String>>,
-    json: bool,
-) -> anyhow::Result<()> {
-    let exec_mode = match mode.to_lowercase().as_str() {
-        "parallel" => GroupExecutionMode::Parallel,
-        "sequential" => GroupExecutionMode::Sequential,
-        _ => return Err(anyhow::anyhow!("Invalid mode '{}'. Use 'parallel' or 'sequential'.", mode)),
-    };
-
-    let script_ids: Vec<String> = scripts_csv.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-
-    let mut group = ScriptGroup::new(name.to_string(), exec_mode);
-    group.description = description.map(|s| s.to_string());
-    group.script_ids = script_ids;
-    group.stop_on_failure = stop_on_failure;
-    if let Some(tags) = tags {
-        group.tags = tags;
-    }
-
-    let created = storage.create_script_group(group).map_err(|e| anyhow::anyhow!("{}", e))?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&created)?);
-    } else {
-        println!("Group '{}' created (ID: {}).", created.name, created.id);
-    }
-    Ok(())
-}
-
-fn cmd_group_update(
-    storage: &Storage,
-    name_or_id: &str,
-    name: Option<String>,
-    mode: Option<String>,
-    scripts: Option<String>,
-    json: bool,
-) -> anyhow::Result<()> {
-    let groups = storage.get_all_script_groups();
-    let existing = resolve_by_name_or_id(&groups, name_or_id, |g| &g.id, |g| &g.name)
-        .map_err(|e| anyhow::anyhow!("Group {}", e))?;
-    let id = existing.id.clone();
-
-    let updated = storage.update_script_group(&id, |g| {
-        if let Some(ref n) = name { g.name = n.clone(); }
-        if let Some(ref m) = mode {
-            match m.to_lowercase().as_str() {
-                "parallel" => g.execution_mode = GroupExecutionMode::Parallel,
-                "sequential" => g.execution_mode = GroupExecutionMode::Sequential,
-                _ => {} // ignore invalid
-            }
-        }
-        if let Some(ref s) = scripts {
-            g.script_ids = s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
-        }
-    }).map_err(|e| anyhow::anyhow!("{}", e))?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&updated)?);
-    } else {
-        println!("Group '{}' updated.", updated.name);
-    }
-    Ok(())
-}
-
-fn cmd_group_delete(storage: &Storage, name_or_id: &str, yes: bool) -> anyhow::Result<()> {
-    let groups = storage.get_all_script_groups();
-    let group = resolve_by_name_or_id(&groups, name_or_id, |g| &g.id, |g| &g.name)
-        .map_err(|e| anyhow::anyhow!("Group {}", e))?;
-
-    if !confirm_delete("group", &group.name, yes) {
-        println!("Cancelled.");
-        return Ok(());
-    }
-
-    storage.delete_script_group(&group.id).map_err(|e| anyhow::anyhow!("{}", e))?;
-    println!("Group '{}' deleted.", group.name);
-    Ok(())
-}
-
-fn cmd_group_run(storage: &Storage, process_manager: &ProcessManager, name_or_id: &str) -> anyhow::Result<()> {
-    let groups = storage.get_all_script_groups();
-    let group = resolve_by_name_or_id(&groups, name_or_id, |g| &g.id, |g| &g.name)
-        .map_err(|e| anyhow::anyhow!("Group {}", e))?;
-
-    let scripts = storage.get_all_global_scripts();
-    let mode = match group.execution_mode {
-        GroupExecutionMode::Parallel => "parallel",
-        GroupExecutionMode::Sequential => "sequential",
-    };
-
-    println!("Running group '{}' ({}, {} scripts)", group.name, mode, group.script_ids.len());
-    println!("{}", "-".repeat(50));
-
-    for script_id in &group.script_ids {
-        let script = scripts.iter()
-            .find(|s| s.id == *script_id)
-            .ok_or_else(|| anyhow::anyhow!("Script ID '{}' not found in group", script_id))?;
-
-        println!("\n>>> Running: {}", script.name);
-
-        let (program, args) = cortx_core::command_builder::build_command(script, &std::collections::HashMap::new(), &[])
-            .ok_or_else(|| anyhow::anyhow!("Empty command for script '{}'", script.name))?;
-
-        let (tx, rx) = mpsc::channel::<ProcessEvent>();
-        let emitter = Arc::new(TuiEmitter::new(tx));
-
-        let working_dir = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| ".".to_string());
-
-        let _pid = process_manager
-            .run_global_script(
-                emitter,
-                script.id.clone(),
-                working_dir,
-                program,
-                args,
-                script.env_vars.clone(),
-            )
-            .map_err(|e| anyhow::anyhow!(e))?;
-
-        let mut success = true;
-        loop {
-            match rx.recv() {
-                Ok(ProcessEvent::Log { content, stream, .. }) => {
-                    match stream {
-                        cortx_core::models::LogStream::Stdout => println!("{}", content),
-                        cortx_core::models::LogStream::Stderr => eprintln!("{}", content),
-                    }
-                }
-                Ok(ProcessEvent::Exit { exit_code, success: s, .. }) => {
-                    success = s;
-                    if s {
-                        println!("<<< {} completed (exit: {})", script.name, exit_code.unwrap_or(0));
-                    } else {
-                        println!("<<< {} failed (exit: {})", script.name, exit_code.unwrap_or(-1));
-                    }
-                    break;
-                }
-                Ok(ProcessEvent::Status { .. }) => {}
-                Err(_) => break,
-            }
-        }
-
-        if !success && group.stop_on_failure && group.execution_mode == GroupExecutionMode::Sequential {
-            println!("\nStopping group: stop_on_failure is set and a script failed.");
-            process_manager.stop_all();
-            return Ok(());
-        }
-    }
-
-    process_manager.stop_all();
-    println!("\n{}", "-".repeat(50));
-    println!("Group '{}' finished.", group.name);
-    Ok(())
-}
-
-// ============================================================================
 // Settings commands
 // ============================================================================
 
@@ -2642,7 +2326,6 @@ fn cmd_import(storage: &Storage, file: &str, all: bool) -> anyhow::Result<()> {
     println!("Import preview (v{}, exported {}):", summary.version, summary.exported_at.format("%Y-%m-%d %H:%M:%S"));
     println!("  Projects:           {}", summary.projects_count);
     println!("  Scripts:            {}", summary.scripts_count);
-    println!("  Groups:             {}", summary.groups_count);
     println!("  Tools:              {}", summary.tools_count);
     println!("  Apps:               {}", summary.apps_count);
     println!("  Aliases:            {}", summary.aliases_count);
@@ -2668,7 +2351,6 @@ fn cmd_import(storage: &Storage, file: &str, all: bool) -> anyhow::Result<()> {
     println!("\nImport results:");
     println!("  Projects added:           {}", result.projects_added);
     println!("  Scripts added:            {}", result.scripts_added);
-    println!("  Groups added:             {}", result.groups_added);
     println!("  Tools added:              {}", result.tools_added);
     println!("  Apps added:               {}", result.apps_added);
     println!("  Aliases added:            {}", result.aliases_added);

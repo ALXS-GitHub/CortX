@@ -192,7 +192,7 @@ export function Settings() {
         setImportSummary(summary);
         setImportOptions({
           projects: summary.projectsCount > 0,
-          scripts: summary.scriptsCount > 0 || summary.groupsCount > 0,
+          scripts: summary.scriptsCount > 0,
           tools: summary.toolsCount > 0,
           apps: summary.appsCount > 0,
           shellConfig: summary.aliasesCount > 0,
@@ -214,7 +214,6 @@ export function Settings() {
       const parts: string[] = [];
       if (result.projectsAdded > 0) parts.push(`${result.projectsAdded} projects`);
       if (result.scriptsAdded > 0) parts.push(`${result.scriptsAdded} scripts`);
-      if (result.groupsAdded > 0) parts.push(`${result.groupsAdded} groups`);
       if (result.toolsAdded > 0) parts.push(`${result.toolsAdded} tools`);
       if (result.appsAdded > 0) parts.push(`${result.appsAdded} apps`);
       if (result.aliasesAdded > 0) parts.push(`${result.aliasesAdded} shell config`);
@@ -756,9 +755,8 @@ export function Settings() {
                 id="scripts"
                 label="Scripts"
                 count={importSummary.scriptsCount}
-                extra={importSummary.groupsCount > 0 ? `${importSummary.groupsCount} groups` : undefined}
                 checked={importOptions.scripts}
-                disabled={importSummary.scriptsCount === 0 && importSummary.groupsCount === 0}
+                disabled={importSummary.scriptsCount === 0}
                 onCheckedChange={(v) => setImportOptions((o) => ({ ...o, scripts: !!v }))}
               />
               <ImportCheckboxRow

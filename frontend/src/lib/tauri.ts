@@ -29,9 +29,6 @@ import type {
   TagDefinition,
   CreateTagDefinitionInput,
   UpdateTagDefinitionInput,
-  ScriptGroup,
-  CreateScriptGroupInput,
-  UpdateScriptGroupInput,
   ExecutionRecord,
   ScriptsConfig,
   ScriptParameter,
@@ -335,23 +332,6 @@ export async function deleteTagDefinition(name: string): Promise<void> {
   return invoke('delete_tag_definition', { name });
 }
 
-// Script group commands
-export async function getAllScriptGroups(): Promise<ScriptGroup[]> {
-  return invoke('get_all_script_groups');
-}
-
-export async function createScriptGroup(input: CreateScriptGroupInput): Promise<ScriptGroup> {
-  return invoke('create_script_group', { input });
-}
-
-export async function updateScriptGroup(id: string, input: UpdateScriptGroupInput): Promise<ScriptGroup> {
-  return invoke('update_script_group', { id, input });
-}
-
-export async function deleteScriptGroup(id: string): Promise<void> {
-  return invoke('delete_script_group', { id });
-}
-
 // Execution history commands
 export async function getExecutionHistory(
   scriptId: string,
@@ -380,11 +360,6 @@ export async function scanScriptsFolder(folder: string): Promise<DiscoveredScrip
 // Help parser / auto-detect parameters
 export async function autoDetectScriptParams(command: string, scriptPath?: string): Promise<ScriptParameter[]> {
   return invoke('auto_detect_script_params', { command, scriptPath });
-}
-
-// Script group execution
-export async function runScriptGroup(groupId: string): Promise<[string, { Ok: number } | { Err: string }][]> {
-  return invoke('run_script_group', { groupId });
 }
 
 // Import / Export

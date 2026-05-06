@@ -309,19 +309,6 @@ export interface TagDefinition {
   order?: number;
 }
 
-export type GroupExecutionMode = 'parallel' | 'sequential';
-
-export interface ScriptGroup {
-  id: string;
-  name: string;
-  description?: string;
-  scriptIds: string[];
-  executionMode: GroupExecutionMode;
-  stopOnFailure: boolean;
-  tags: string[];
-  order: number;
-}
-
 export interface ExecutionRecord {
   id: string;
   scriptId: string;
@@ -461,28 +448,9 @@ export interface UpdateTagDefinitionInput {
   order?: number;
 }
 
-export interface CreateScriptGroupInput {
-  name: string;
-  description?: string;
-  scriptIds: string[];
-  executionMode: GroupExecutionMode;
-  stopOnFailure?: boolean;
-  tags?: string[];
-}
-
-export interface UpdateScriptGroupInput {
-  name?: string;
-  description?: string;
-  scriptIds?: string[];
-  executionMode?: GroupExecutionMode;
-  stopOnFailure?: boolean;
-  tags?: string[];
-}
-
 // Import/Export result
 export interface ImportResult {
   scriptsAdded: number;
-  groupsAdded: number;
   skipped: number;
   toolsAdded: number;
   tagDefinitionsAdded: number;
@@ -508,7 +476,6 @@ export interface ExportSummary {
   exportedAt: string;
   projectsCount: number;
   scriptsCount: number;
-  groupsCount: number;
   toolsCount: number;
   appsCount: number;
   aliasesCount: number;

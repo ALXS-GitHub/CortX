@@ -23,9 +23,6 @@ import type {
   TagDefinition,
   CreateTagDefinitionInput,
   UpdateTagDefinitionInput,
-  ScriptGroup,
-  CreateScriptGroupInput,
-  UpdateScriptGroupInput,
   ScriptsConfig,
   ScriptParameter,
   ImportOptions,
@@ -142,7 +139,6 @@ interface AppState {
   // Global scripts
   globalScripts: GlobalScript[];
   tagDefinitions: TagDefinition[];
-  scriptGroups: ScriptGroup[];
   globalScriptRuntimes: Map<string, ScriptRuntime>;
   scriptsConfig: ScriptsConfig | null;
   selectedGlobalScriptId: string | null;
@@ -269,12 +265,6 @@ interface AppState {
   updateTagDefinition: (name: string, input: UpdateTagDefinitionInput) => Promise<void>;
   deleteTagDefinition: (name: string) => Promise<void>;
 
-  // Actions - Script Groups
-  loadScriptGroups: () => Promise<void>;
-  createScriptGroup: (input: CreateScriptGroupInput) => Promise<ScriptGroup>;
-  updateScriptGroup: (id: string, input: UpdateScriptGroupInput) => Promise<void>;
-  deleteScriptGroup: (id: string) => Promise<void>;
-
   // Actions - Scripts Config
   loadScriptsConfig: () => Promise<void>;
   updateScriptsConfig: (config: ScriptsConfig) => Promise<void>;
@@ -282,9 +272,6 @@ interface AppState {
 
   // Actions - Help Parser
   autoDetectScriptParams: (command: string, scriptPath?: string) => Promise<ScriptParameter[]>;
-
-  // Actions - Script Group Execution
-  runScriptGroup: (groupId: string) => Promise<void>;
 
   // Actions - Tools
   loadTools: () => Promise<void>;
@@ -363,7 +350,6 @@ export const useAppStore = create<AppState>((set, _get) => ({
   envFileComparisons: new Map(),
   globalScripts: [],
   tagDefinitions: [],
-  scriptGroups: [],
   globalScriptRuntimes: new Map(),
   scriptsConfig: null,
   selectedGlobalScriptId: null,
@@ -1355,36 +1341,6 @@ export const useAppStore = create<AppState>((set, _get) => ({
     }));
   },
 
-  // Script Groups actions
-  loadScriptGroups: async () => {
-    try {
-      const scriptGroups = await api.getAllScriptGroups();
-      set({ scriptGroups });
-    } catch (error) {
-      console.error('Failed to load script groups:', error);
-    }
-  },
-
-  createScriptGroup: async (input) => {
-    const group = await api.createScriptGroup(input);
-    set((state) => ({ scriptGroups: [...state.scriptGroups, group] }));
-    return group;
-  },
-
-  updateScriptGroup: async (id, input) => {
-    const updated = await api.updateScriptGroup(id, input);
-    set((state) => ({
-      scriptGroups: state.scriptGroups.map((g) => (g.id === id ? updated : g)),
-    }));
-  },
-
-  deleteScriptGroup: async (id) => {
-    await api.deleteScriptGroup(id);
-    set((state) => ({
-      scriptGroups: state.scriptGroups.filter((g) => g.id !== id),
-    }));
-  },
-
   // Scripts Config actions
   loadScriptsConfig: async () => {
     try {
@@ -1409,11 +1365,6 @@ export const useAppStore = create<AppState>((set, _get) => ({
     return api.autoDetectScriptParams(command, scriptPath);
   },
 
-  // Script Group Execution actions
-  runScriptGroup: async (groupId) => {
-    await api.runScriptGroup(groupId);
-  },
-
   // Import / Export actions
   exportScriptsConfig: async () => {
     return api.exportScriptsConfig();
@@ -1426,10 +1377,9 @@ export const useAppStore = create<AppState>((set, _get) => ({
   importScriptsConfig: async (json, options) => {
     const result = await api.importScriptsConfig(json, options);
     // Reload all affected data after import
-    const [globalScripts, tagDefinitions, scriptGroups, tools, aliases, apps, statusDefinitions, projects, settings] = await Promise.all([
+    const [globalScripts, tagDefinitions, tools, aliases, apps, statusDefinitions, projects, settings] = await Promise.all([
       api.getAllGlobalScripts(),
       api.getAllTagDefinitions(),
-      api.getAllScriptGroups(),
       api.getAllTools(),
       api.getAllAliases(),
       api.getAllApps(),
@@ -1437,7 +1387,7 @@ export const useAppStore = create<AppState>((set, _get) => ({
       api.getAllProjects(),
       api.getSettings(),
     ]);
-    set({ globalScripts, tagDefinitions, scriptGroups, tools, aliases, apps, statusDefinitions, projects, settings });
+    set({ globalScripts, tagDefinitions, tools, aliases, apps, statusDefinitions, projects, settings });
     return result;
   },
 

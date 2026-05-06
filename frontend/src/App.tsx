@@ -67,7 +67,7 @@ function RunScriptDialogGlobal() {
 }
 
 function App() {
-  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools, loadAliases, loadStatusDefinitions, loadApps } = useAppStore();
+  const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptsConfig, loadTools, loadAliases, loadStatusDefinitions, loadApps } = useAppStore();
 
   // Keep track of whether listeners are set up
   const listenersSetUp = useRef(false);
@@ -78,7 +78,6 @@ function App() {
     loadSettings();
     loadGlobalScripts();
     loadTagDefinitions();
-    loadScriptGroups();
     loadScriptsConfig();
     loadTools();
     loadAliases();
@@ -92,7 +91,7 @@ function App() {
         updateServiceStatus(serviceId, 'running');
       });
     });
-  }, [loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptGroups, loadScriptsConfig, loadTools, loadAliases, loadStatusDefinitions, loadApps]);
+  }, [loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptsConfig, loadTools, loadAliases, loadStatusDefinitions, loadApps]);
 
   // Set up event listeners - only once
   useEffect(() => {
@@ -198,7 +197,6 @@ function App() {
         store.loadProjects();
         store.loadGlobalScripts();
         store.loadTagDefinitions();
-        store.loadScriptGroups();
         store.loadSettings();
         store.loadTools();
         store.loadAliases();

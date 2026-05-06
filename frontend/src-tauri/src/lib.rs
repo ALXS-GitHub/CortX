@@ -178,11 +178,6 @@ pub fn run() {
             commands::create_tag_definition,
             commands::update_tag_definition,
             commands::delete_tag_definition,
-            // Script group commands
-            commands::get_all_script_groups,
-            commands::create_script_group,
-            commands::update_script_group,
-            commands::delete_script_group,
             // Execution history commands
             commands::get_execution_history,
             commands::clear_execution_history,
@@ -192,8 +187,6 @@ pub fn run() {
             commands::scan_scripts_folder,
             // Help parser commands
             commands::auto_detect_script_params,
-            // Script group execution
-            commands::run_script_group,
             // Import / Export / Backup
             commands::export_scripts_config,
             commands::preview_import,

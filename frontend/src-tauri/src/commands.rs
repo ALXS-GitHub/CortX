@@ -1,13 +1,13 @@
 use crate::models::{
     AddEnvFileInput, App, AppSettings, CreateAppInput, CreateGlobalScriptInput,
-    CreateProjectInput, CreateScriptGroupInput, CreateScriptInput, CreateServiceInput,
+    CreateProjectInput, CreateScriptInput, CreateServiceInput,
     CreateShellAliasInput, CreateStatusDefinitionInput, CreateToolInput, CreateTagDefinitionInput,
     DiscoverEnvFilesInput, DiscoveredTool, EnvComparison, EnvFile, EnvFileVariant, EnvVariable,
     DiscoveredScript, ExecutionRecord, ExportSummary, GlobalScript, ImportOptions, ImportResult,
     LinkEnvToServiceInput, Project, Script,
-    ScriptGroup, ScriptParameter, ScriptsConfig, Service, ShellAlias, StatusDefinition, TagDefinition, Tool,
+    ScriptParameter, ScriptsConfig, Service, ShellAlias, StatusDefinition, TagDefinition, Tool,
     UpdateAppInput, UpdateTagDefinitionInput, UpdateGlobalScriptInput, UpdateProjectInput,
-    UpdateScriptGroupInput, UpdateScriptInput, UpdateServiceInput, UpdateShellAliasInput,
+    UpdateScriptInput, UpdateServiceInput, UpdateShellAliasInput,
     UpdateStatusDefinitionInput, UpdateToolInput,
 };
 use crate::process_manager::{ProcessEventEmitter, ProcessManager};
@@ -1594,74 +1594,6 @@ pub fn delete_tag_definition(state: State<AppState>, name: String) -> Result<(),
 }
 
 // ============================================================================
-// Script Group commands
-// ============================================================================
-
-#[tauri::command]
-pub fn get_all_script_groups(state: State<AppState>) -> Vec<ScriptGroup> {
-    state.storage.get_all_script_groups()
-}
-
-#[tauri::command]
-pub fn create_script_group(
-    state: State<AppState>,
-    input: CreateScriptGroupInput,
-) -> Result<ScriptGroup, String> {
-    let mut group = ScriptGroup::new(input.name, input.execution_mode);
-    group.description = input.description;
-    group.script_ids = input.script_ids;
-    group.stop_on_failure = input.stop_on_failure.unwrap_or(true);
-    group.tags = input.tags.unwrap_or_default();
-
-    let all = state.storage.get_all_script_groups();
-    group.order = all.len() as u32;
-
-    state
-        .storage
-        .create_script_group(group)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn update_script_group(
-    state: State<AppState>,
-    id: String,
-    input: UpdateScriptGroupInput,
-) -> Result<ScriptGroup, String> {
-    state
-        .storage
-        .update_script_group(&id, |group| {
-            if let Some(name) = input.name {
-                group.name = name;
-            }
-            if input.description.is_some() {
-                group.description = input.description;
-            }
-            if let Some(script_ids) = input.script_ids {
-                group.script_ids = script_ids;
-            }
-            if let Some(mode) = input.execution_mode {
-                group.execution_mode = mode;
-            }
-            if let Some(stop) = input.stop_on_failure {
-                group.stop_on_failure = stop;
-            }
-            if let Some(tags) = input.tags {
-                group.tags = tags;
-            }
-        })
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn delete_script_group(state: State<AppState>, id: String) -> Result<(), String> {
-    state
-        .storage
-        .delete_script_group(&id)
-        .map_err(|e| e.to_string())
-}
-
-// ============================================================================
 // Execution History commands
 // ============================================================================
 
@@ -1748,57 +1680,6 @@ pub fn auto_detect_script_params(command: String, script_path: Option<String>) -
         command
     };
     cortx_core::help_parser::detect_parameters(&resolved)
-}
-
-// ============================================================================
-// Script Group Execution
-// ============================================================================
-
-#[tauri::command]
-pub fn run_script_group(
-    app_handle: AppHandle,
-    state: State<AppState>,
-    group_id: String,
-) -> Result<Vec<(String, Result<u32, String>)>, String> {
-    let group = state
-        .storage
-        .get_all_script_groups()
-        .into_iter()
-        .find(|g| g.id == group_id)
-        .ok_or_else(|| format!("Script group not found: {}", group_id))?;
-
-    let scripts = state.storage.get_all_global_scripts();
-
-    let script_data: Vec<(String, String, String, Vec<String>, Option<std::collections::HashMap<String, String>>)> = group
-        .script_ids
-        .iter()
-        .filter_map(|sid| {
-            scripts.iter().find(|s| s.id == *sid).and_then(|s| {
-                let (program, args) = cortx_core::command_builder::build_command(
-                    s,
-                    &std::collections::HashMap::new(),
-                    &[],
-                )?;
-                Some((
-                    s.id.clone(),
-                    s.working_dir.clone().unwrap_or_else(|| ".".to_string()),
-                    program,
-                    args,
-                    s.env_vars.clone(),
-                ))
-            })
-        })
-        .collect();
-
-    let sequential = group.execution_mode == crate::models::GroupExecutionMode::Sequential;
-    let emitter: Arc<dyn ProcessEventEmitter> = Arc::new(TauriEmitter::new(app_handle));
-
-    Ok(state.process_manager.run_script_group(
-        emitter,
-        script_data,
-        sequential,
-        group.stop_on_failure,
-    ))
 }
 
 // ============================================================================
