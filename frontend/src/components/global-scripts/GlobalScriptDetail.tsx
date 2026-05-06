@@ -22,6 +22,7 @@ import { ParameterEditor } from './ParameterEditor';
 import { PresetEditor } from './PresetEditor';
 import { ExecutionHistory } from './ExecutionHistory';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import { toast } from 'sonner';
 import type { ScriptStatus, UpdateGlobalScriptInput } from '@/types';
 import { formatCommandDisplay } from '@/lib/utils';
@@ -92,17 +93,17 @@ export function GlobalScriptDetail() {
           Back to Scripts
         </Button>
 
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <FileCode className="size-8" style={{ color: script.color || '#6b7280' }} />
-            <div>
-              <h1 className="text-2xl font-bold">{script.name}</h1>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <FileCode className="size-8 flex-shrink-0" style={{ color: script.color || '#6b7280' }} />
+            <div className="min-w-0 flex-1">
+              <TruncatedText as="h1" className="text-2xl font-bold">{script.name}</TruncatedText>
               {script.description && (
-                <p className="text-sm text-muted-foreground mt-0.5">{script.description}</p>
+                <p className="text-sm text-muted-foreground mt-0.5 break-words">{script.description}</p>
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
               <Pencil className="size-4 mr-2" />
               Edit
@@ -169,16 +170,16 @@ export function GlobalScriptDetail() {
               </div>
               {script.workingDir && (
                 <div className="flex items-center gap-2">
-                  <FolderOpen className="size-3.5 text-muted-foreground" />
-                  <span className="text-muted-foreground">Default working dir:</span>
-                  <span className="font-mono text-xs truncate">{script.workingDir}</span>
+                  <FolderOpen className="size-3.5 text-muted-foreground flex-shrink-0" />
+                  <span className="text-muted-foreground flex-shrink-0">Default working dir:</span>
+                  <TruncatedText className="font-mono text-xs flex-1 min-w-0">{script.workingDir}</TruncatedText>
                 </div>
               )}
               {script.scriptPath && (
                 <div className="flex items-center gap-2">
-                  <FileCode className="size-3.5 text-muted-foreground" />
-                  <span className="text-muted-foreground">Script file:</span>
-                  <span className="font-mono text-xs truncate">{script.scriptPath}</span>
+                  <FileCode className="size-3.5 text-muted-foreground flex-shrink-0" />
+                  <span className="text-muted-foreground flex-shrink-0">Script file:</span>
+                  <TruncatedText className="font-mono text-xs flex-1 min-w-0">{script.scriptPath}</TruncatedText>
                 </div>
               )}
               {script.tags.length > 0 && (

@@ -27,6 +27,7 @@ const aliasTypeIcon = (type: AliasType, size = 'size-8') => {
 import { useAppStore } from '@/stores/appStore';
 import { AliasForm } from './AliasForm';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { toast } from 'sonner';
 import type { UpdateShellAliasInput } from '@/types';
@@ -107,21 +108,25 @@ export function AliasDetail() {
           Back to Shell Config
         </Button>
 
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            {aliasTypeIcon(aliasType as AliasType)}
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold font-mono">{alias.name}</h1>
-                <Badge variant="outline" className="text-xs">{aliasType}</Badge>
-                <StatusBadge status={alias.status} />
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="flex-shrink-0">
+              {aliasTypeIcon(aliasType as AliasType)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 min-w-0">
+                <TruncatedText as="h1" className="text-2xl font-bold font-mono min-w-0">{alias.name}</TruncatedText>
+                <Badge variant="outline" className="text-xs flex-shrink-0">{aliasType}</Badge>
+                <div className="flex-shrink-0">
+                  <StatusBadge status={alias.status} />
+                </div>
               </div>
               {alias.description && (
-                <p className="text-sm text-muted-foreground mt-0.5">{alias.description}</p>
+                <p className="text-sm text-muted-foreground mt-0.5 break-words">{alias.description}</p>
               )}
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
+          <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)} className="flex-shrink-0">
             <Pencil className="size-4 mr-2" />
             Edit
           </Button>

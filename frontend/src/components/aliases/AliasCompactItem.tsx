@@ -14,6 +14,7 @@ const aliasTypeIcon = (type: AliasType) => {
 };
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import type { ShellAlias, TagDefinition } from '@/types';
 
 interface AliasCompactItemProps {
@@ -31,16 +32,16 @@ export function AliasCompactItem({ alias, tagDefinitions, onEdit, onDelete, onCl
       onClick={onClick}
     >
       {aliasTypeIcon(alias.aliasType || 'function')}
-      <span className="font-medium text-sm font-mono truncate mr-2">{alias.name}</span>
-      <span className="text-xs text-muted-foreground font-mono truncate mr-2 hidden sm:inline">
+      <TruncatedText className="font-medium text-sm font-mono min-w-0 mr-2">{alias.name}</TruncatedText>
+      <TruncatedText className="text-xs text-muted-foreground font-mono flex-1 min-w-0 mr-2 hidden sm:inline">
         {alias.command}
-      </span>
+      </TruncatedText>
       {alias.tags.length > 0 && (
-        <span className="ml-1.5">
+        <span className="ml-1.5 flex-shrink-0">
           <TagBadge tag={alias.tags[0]} tagDefinitions={tagDefinitions} />
         </span>
       )}
-      <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+      <div className="ml-2 flex items-center gap-1.5 flex-shrink-0">
         <div
           className={cn('opacity-0 group-hover:opacity-100 transition-opacity')}
           onClick={(e) => e.stopPropagation()}

@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import { useAppStore } from '@/stores/appStore';
 import type { Project } from '@/types';
 import { Play, FolderOpen, MoreVertical, Circle, Code } from 'lucide-react';
@@ -66,7 +67,7 @@ export function ProjectCompactItem({ project, onEdit, onDelete }: ProjectCardPro
       )}
 
       {/* Name */}
-      <span className="font-medium truncate text-sm">{project.name}</span>
+      <TruncatedText className="font-medium text-sm min-w-0">{project.name}</TruncatedText>
 
       {/* Primary tag */}
       {project.tags.length > 0 && (

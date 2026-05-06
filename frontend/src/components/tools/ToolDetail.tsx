@@ -23,6 +23,7 @@ import { useAppStore } from '@/stores/appStore';
 import { ToolForm } from './ToolForm';
 import { AliasForm } from '@/components/aliases/AliasForm';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import { toast } from 'sonner';
 import { openToolConfig, openToolLocation, openToolLocationVscode, openToolUrl, openInExplorer } from '@/lib/tauri';
 import type { UpdateToolInput, CreateShellAliasInput, UpdateShellAliasInput, ShellAlias } from '@/types';
@@ -143,17 +144,17 @@ export function ToolDetail() {
           Back to Tools
         </Button>
 
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <Wrench className="size-8" style={{ color: tool.color || '#6b7280' }} />
-            <div>
-              <h1 className="text-2xl font-bold">{tool.name}</h1>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <Wrench className="size-8 flex-shrink-0" style={{ color: tool.color || '#6b7280' }} />
+            <div className="min-w-0 flex-1">
+              <TruncatedText as="h1" className="text-2xl font-bold">{tool.name}</TruncatedText>
               {tool.description && (
-                <p className="text-sm text-muted-foreground mt-0.5">{tool.description}</p>
+                <p className="text-sm text-muted-foreground mt-0.5 break-words">{tool.description}</p>
               )}
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
+          <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)} className="flex-shrink-0">
             <Pencil className="size-4 mr-2" />
             Edit
           </Button>
@@ -190,14 +191,14 @@ export function ToolDetail() {
 
           {tool.installLocation && (
             <div className="flex items-center gap-2">
-              <MapPin className="size-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Location:</span>
-              <span className="font-mono text-xs truncate">{tool.installLocation}</span>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleOpenLocationVscode}>
+              <MapPin className="size-3.5 text-muted-foreground flex-shrink-0" />
+              <span className="text-muted-foreground flex-shrink-0">Location:</span>
+              <TruncatedText className="font-mono text-xs flex-1 min-w-0">{tool.installLocation}</TruncatedText>
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs flex-shrink-0" onClick={handleOpenLocationVscode}>
                 <Code className="size-3 mr-1" />
                 VSCode
               </Button>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleOpenLocation}>
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs flex-shrink-0" onClick={handleOpenLocation}>
                 <FolderOpen className="size-3 mr-1" />
                 Explorer
               </Button>
@@ -206,10 +207,10 @@ export function ToolDetail() {
 
           {tool.homepage && (
             <div className="flex items-center gap-2">
-              <Globe className="size-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Homepage:</span>
-              <span className="text-xs truncate">{tool.homepage}</span>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => handleOpenUrl(tool.homepage!)}>
+              <Globe className="size-3.5 text-muted-foreground flex-shrink-0" />
+              <span className="text-muted-foreground flex-shrink-0">Homepage:</span>
+              <TruncatedText className="text-xs flex-1 min-w-0">{tool.homepage}</TruncatedText>
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs flex-shrink-0" onClick={() => handleOpenUrl(tool.homepage!)}>
                 <ExternalLink className="size-3 mr-1" />
                 Open
               </Button>

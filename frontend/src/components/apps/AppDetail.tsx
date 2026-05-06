@@ -18,6 +18,7 @@ import {
 import { useAppStore } from '@/stores/appStore';
 import { AppForm } from './AppForm';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { toast } from 'sonner';
 import { launchApp as launchAppApi, openAppConfig, openAppUrl, openInExplorer } from '@/lib/tauri';
@@ -102,17 +103,17 @@ export function AppDetail() {
           Back to Apps
         </Button>
 
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <AppWindow className="size-8" style={{ color: app.color || '#6b7280' }} />
-            <div>
-              <h1 className="text-2xl font-bold">{app.name}</h1>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <AppWindow className="size-8 flex-shrink-0" style={{ color: app.color || '#6b7280' }} />
+            <div className="min-w-0 flex-1">
+              <TruncatedText as="h1" className="text-2xl font-bold">{app.name}</TruncatedText>
               {app.description && (
-                <p className="text-sm text-muted-foreground mt-0.5">{app.description}</p>
+                <p className="text-sm text-muted-foreground mt-0.5 break-words">{app.description}</p>
               )}
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
+          <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)} className="flex-shrink-0">
             <Pencil className="size-4 mr-2" />
             Edit
           </Button>
@@ -170,10 +171,10 @@ export function AppDetail() {
 
           {app.homepage && (
             <div className="flex items-center gap-2">
-              <Globe className="size-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Homepage:</span>
-              <span className="text-xs truncate">{app.homepage}</span>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => handleOpenUrl(app.homepage!)}>
+              <Globe className="size-3.5 text-muted-foreground flex-shrink-0" />
+              <span className="text-muted-foreground flex-shrink-0">Homepage:</span>
+              <TruncatedText className="text-xs flex-1 min-w-0">{app.homepage}</TruncatedText>
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs flex-shrink-0" onClick={() => handleOpenUrl(app.homepage!)}>
                 <ExternalLink className="size-3 mr-1" />
                 Open
               </Button>
@@ -182,10 +183,10 @@ export function AppDetail() {
 
           {app.toolboxUrl && (
             <div className="flex items-center gap-2">
-              <Globe className="size-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Toolbox:</span>
-              <span className="text-xs truncate">{resolveToolboxUrl(app.toolboxUrl)}</span>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => handleOpenUrl(resolveToolboxUrl(app.toolboxUrl!))}>
+              <Globe className="size-3.5 text-muted-foreground flex-shrink-0" />
+              <span className="text-muted-foreground flex-shrink-0">Toolbox:</span>
+              <TruncatedText className="text-xs flex-1 min-w-0">{resolveToolboxUrl(app.toolboxUrl)}</TruncatedText>
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs flex-shrink-0" onClick={() => handleOpenUrl(resolveToolboxUrl(app.toolboxUrl!))}>
                 <ExternalLink className="size-3 mr-1" />
                 Open
               </Button>

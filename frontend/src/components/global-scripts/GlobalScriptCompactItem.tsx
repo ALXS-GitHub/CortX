@@ -8,6 +8,7 @@ import { Play, Square, MoreVertical, FileCode, Circle, Pencil, Trash2 } from 'lu
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import type { GlobalScript, ScriptStatus } from '@/types';
 
 interface GlobalScriptCardProps {
@@ -60,7 +61,7 @@ export function GlobalScriptCompactItem({
       </div>
 
       {/* Name */}
-      <span className="font-medium text-sm truncate mr-2">{script.name}</span>
+      <TruncatedText className="font-medium text-sm min-w-0 mr-2">{script.name}</TruncatedText>
 
       {/* Status badge */}
       <StatusBadge status={status} />

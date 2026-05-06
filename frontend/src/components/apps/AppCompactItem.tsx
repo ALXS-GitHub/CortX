@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { AppWindow, MoreVertical, Pencil, Trash2, FileText, Rocket } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
@@ -37,14 +38,14 @@ export function AppCompactItem({ app, tagDefinitions, onEdit, onDelete, onClick 
       onClick={onClick}
     >
       <AppWindow className="size-3.5 flex-shrink-0 mr-2" style={{ color: app.color || '#6b7280' }} />
-      <span className="font-medium text-sm truncate mr-2">{app.name}</span>
+      <TruncatedText className="font-medium text-sm flex-1 min-w-0 mr-2">{app.name}</TruncatedText>
       <StatusBadge status={app.status} />
       {app.tags.length > 0 && (
-        <span className="ml-1.5">
+        <span className="ml-1.5 flex-shrink-0">
           <TagBadge tag={app.tags[0]} tagDefinitions={tagDefinitions} />
         </span>
       )}
-      <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+      <div className="ml-2 flex items-center gap-1.5 flex-shrink-0">
         {app.configPaths.length > 0 && (
           <div className={cn(
             'flex items-center gap-1 text-xs text-muted-foreground',

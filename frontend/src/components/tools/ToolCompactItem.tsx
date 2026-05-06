@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Wrench, MoreVertical, Pencil, Trash2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import type { Tool, TagDefinition } from '@/types';
 
 interface ToolCardProps {
@@ -23,14 +24,14 @@ export function ToolCompactItem({ tool, tagDefinitions, onEdit, onDelete, onClic
       onClick={onClick}
     >
       <Wrench className="size-3.5 flex-shrink-0 mr-2" style={{ color: tool.color || '#6b7280' }} />
-      <span className="font-medium text-sm truncate mr-2">{tool.name}</span>
+      <TruncatedText className="font-medium text-sm flex-1 min-w-0 mr-2">{tool.name}</TruncatedText>
       <StatusBadge status={tool.status} />
       {tool.tags.length > 0 && (
-        <span className="ml-1.5">
+        <span className="ml-1.5 flex-shrink-0">
           <TagBadge tag={tool.tags[0]} tagDefinitions={tagDefinitions} />
         </span>
       )}
-      <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+      <div className="ml-2 flex items-center gap-1.5 flex-shrink-0">
         {tool.configPaths.length > 0 && (
           <div className={cn(
             'flex items-center gap-1 text-xs text-muted-foreground',
