@@ -755,18 +755,35 @@ fn default_scan_extensions() -> Vec<String> {
 }
 
 fn default_command_templates() -> HashMap<String, String> {
-    HashMap::from([
+    let mut templates: HashMap<String, String> = HashMap::from([
         ("py".into(), "python {{SCRIPT_FILE}}".into()),
-        ("ps1".into(), "powershell -ExecutionPolicy Bypass -File {{SCRIPT_FILE}}".into()),
-        ("bat".into(), "{{SCRIPT_FILE}}".into()),
-        ("cmd".into(), "{{SCRIPT_FILE}}".into()),
-        ("sh".into(), "bash {{SCRIPT_FILE}}".into()),
-        ("bash".into(), "bash {{SCRIPT_FILE}}".into()),
         ("js".into(), "node {{SCRIPT_FILE}}".into()),
         ("ts".into(), "npx tsx {{SCRIPT_FILE}}".into()),
         ("rb".into(), "ruby {{SCRIPT_FILE}}".into()),
         ("pl".into(), "perl {{SCRIPT_FILE}}".into()),
-    ])
+    ]);
+
+    // Shell-script extensions vary in usefulness by host OS; only seed the ones
+    // the user is likely to actually run there. Custom templates can still be
+    // added manually from Settings.
+    #[cfg(target_os = "windows")]
+    {
+        templates.insert(
+            "ps1".into(),
+            "powershell -ExecutionPolicy Bypass -File {{SCRIPT_FILE}}".into(),
+        );
+        templates.insert("bat".into(), "{{SCRIPT_FILE}}".into());
+        templates.insert("cmd".into(), "{{SCRIPT_FILE}}".into());
+    }
+
+    #[cfg(unix)]
+    {
+        templates.insert("sh".into(), "bash {{SCRIPT_FILE}}".into());
+        templates.insert("bash".into(), "bash {{SCRIPT_FILE}}".into());
+        templates.insert("zsh".into(), "zsh {{SCRIPT_FILE}}".into());
+    }
+
+    templates
 }
 
 fn default_ignored_patterns() -> Vec<String> {

@@ -86,7 +86,7 @@ mod tests {
             script_path: script_path.map(|s| s.to_string()),
             working_dir: None,
             color: None,
-            folder_id: None,
+            status: None,
             tags: vec![],
             parameters: params,
             parameter_presets: vec![],
