@@ -533,10 +533,11 @@ pub async fn launch_external_terminal(
             TerminalPreset::Custom => {
                 if settings.terminal.custom_path.is_empty() {
                     // Try common terminal emulators
+                    let xfce_arg = format!("bash -c '{}'", full_command);
                     let terminals = [
                         ("gnome-terminal", vec!["--", "bash", "-c", &full_command]),
                         ("konsole", vec!["-e", "bash", "-c", &full_command]),
-                        ("xfce4-terminal", vec!["-e", &format!("bash -c '{}'", full_command)]),
+                        ("xfce4-terminal", vec!["-e", &xfce_arg]),
                         ("alacritty", vec!["-e", "bash", "-c", &full_command]),
                         ("kitty", vec!["bash", "-c", &full_command]),
                         ("xterm", vec!["-e", "bash", "-c", &full_command]),
@@ -578,10 +579,11 @@ pub async fn launch_external_terminal(
             }
             // All presets fallback to auto-detection on Linux
             _ => {
+                let xfce_arg = format!("bash -c '{}'", full_command);
                 let terminals = [
                     ("gnome-terminal", vec!["--", "bash", "-c", &full_command]),
                     ("konsole", vec!["-e", "bash", "-c", &full_command]),
-                    ("xfce4-terminal", vec!["-e", &format!("bash -c '{}'", full_command)]),
+                    ("xfce4-terminal", vec!["-e", &xfce_arg]),
                     ("alacritty", vec!["-e", "bash", "-c", &full_command]),
                     ("kitty", vec!["bash", "-c", &full_command]),
                     ("xterm", vec!["-e", "bash", "-c", &full_command]),
