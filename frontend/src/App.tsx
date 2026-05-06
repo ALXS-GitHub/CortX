@@ -47,7 +47,7 @@ function MainContent({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className="flex-1 overflow-auto"
+      className="flex-1 min-w-0 overflow-auto"
       style={{ paddingBottom: bottomPadding + 16 }} // +16 for some extra space
     >
       {children}
@@ -278,7 +278,7 @@ function App() {
         <div className="flex-1 flex overflow-hidden">
           <SidebarProvider>
             <AppSidebar />
-            <SidebarInset>
+            <SidebarInset className="min-w-0">
               <header className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
                 <SidebarTrigger className="-ml-1" />
                 <div className="text-sm font-medium text-muted-foreground">
