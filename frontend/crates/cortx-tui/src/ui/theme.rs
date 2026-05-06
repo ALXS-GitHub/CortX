@@ -4,20 +4,23 @@ use ratatui::style::{Color, Modifier, Style};
 pub const BORDER_ACTIVE: Color = Color::Cyan;
 pub const BORDER_INACTIVE: Color = Color::DarkGray;
 
-// Status colors
+// Status colors — named ANSI colors render with adequate contrast on both
+// light and dark themes for the saturated palette (Red/Green/Blue/Yellow).
 pub const STATUS_RUNNING: Color = Color::Green;
 pub const STATUS_COMPLETED: Color = Color::Blue;
 pub const STATUS_FAILED: Color = Color::Red;
 pub const STATUS_IDLE: Color = Color::DarkGray;
 
-// Text colors
-pub const TEXT_PRIMARY: Color = Color::White;
-pub const TEXT_SECONDARY: Color = Color::Gray;
-pub const TEXT_MUTED: Color = Color::DarkGray;
+// Text colors. Color::Reset adopts the terminal's default foreground, so the
+// TUI is readable on both dark and light terminal themes. Secondary/muted use
+// fixed mid-grays that keep contrast against either background.
+pub const TEXT_PRIMARY: Color = Color::Reset;
+pub const TEXT_SECONDARY: Color = Color::Rgb(140, 140, 140);
+pub const TEXT_MUTED: Color = Color::Rgb(110, 110, 110);
 pub const TEXT_HIGHLIGHT: Color = Color::Yellow;
 
 // Log colors
-pub const LOG_STDOUT: Color = Color::White;
+pub const LOG_STDOUT: Color = Color::Reset;
 pub const LOG_STDERR: Color = Color::Red;
 
 // Search
@@ -25,7 +28,6 @@ pub const SEARCH_MATCH: Color = Color::Yellow;
 
 // Misc
 pub const TAG_COLOR: Color = Color::Cyan;
-pub const SELECTED_BG: Color = Color::Rgb(40, 40, 60);
 pub const SEPARATOR_COLOR: Color = Color::DarkGray;
 
 /// Parse a hex color string like "#3b82f6" into a ratatui Color
@@ -62,7 +64,9 @@ pub fn style_border_inactive() -> Style {
 }
 
 pub fn style_selected() -> Style {
-    Style::default().bg(SELECTED_BG).fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+    // REVERSED swaps foreground and background using terminal-defined colors,
+    // so the highlight stays readable regardless of the active terminal theme.
+    Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
 }
 
 pub fn style_status(status: &cortx_core::models::ScriptStatus) -> Style {
