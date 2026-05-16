@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
@@ -19,6 +19,8 @@ import { AliasDetail } from '@/components/aliases/AliasDetail';
 import { AppsView } from '@/components/apps/AppsView';
 import { AppDetail } from '@/components/apps/AppDetail';
 import { RunScriptDialog } from '@/components/global-scripts/RunScriptDialog';
+import { CommandPalette } from '@/components/command-palette/CommandPalette';
+import { useCommandPaletteShortcut } from '@/components/command-palette/useCommandPaletteShortcut';
 import { useAppStore } from '@/stores/appStore';
 import {
   onServiceLog,
@@ -69,6 +71,8 @@ function RunScriptDialogGlobal() {
 
 function App() {
   const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptsConfig, loadTools, loadAliases, loadStatusDefinitions, loadApps } = useAppStore();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useCommandPaletteShortcut(paletteOpen, setPaletteOpen);
 
   // Keep track of whether listeners are set up
   const listenersSetUp = useRef(false);
@@ -314,6 +318,7 @@ function App() {
       <UpdateChecker />
       <ClosingModal />
       <RunScriptDialogGlobal />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </TooltipProvider>
   );
 }
