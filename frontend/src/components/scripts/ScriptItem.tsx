@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import type { Script, Service, ScriptStatus } from '@/types';
 import {
   Play,
@@ -80,22 +81,30 @@ export function ScriptItem({ script, services, onEdit, onDelete }: ScriptItemPro
 
           {/* Content */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h3 className="font-medium">{script.name}</h3>
-              <ScriptStatusBadge status={status} />
+            <div className="flex items-center gap-2 min-w-0">
+              <TruncatedText as="h3" className="font-medium">{script.name}</TruncatedText>
+              <div className="flex-shrink-0">
+                <ScriptStatusBadge status={status} />
+              </div>
             </div>
             {script.description && (
-              <p className="text-sm text-muted-foreground mt-0.5">{script.description}</p>
+              <p className="text-sm text-muted-foreground mt-0.5 break-words">{script.description}</p>
             )}
             <div className="mt-1 space-y-0.5 text-xs text-muted-foreground font-mono">
-              <p className="truncate">$ {script.command}</p>
+              <div className="flex gap-1">
+                <span className="flex-shrink-0">$</span>
+                <TruncatedText className="flex-1 min-w-0">{script.command}</TruncatedText>
+              </div>
               {script.scriptPath && (
-                <p className="truncate">Path: {script.scriptPath}</p>
+                <div className="flex gap-1">
+                  <span className="flex-shrink-0">Path:</span>
+                  <TruncatedText className="flex-1 min-w-0">{script.scriptPath}</TruncatedText>
+                </div>
               )}
             </div>
             {linkedServices.length > 0 && (
               <div className="flex items-center gap-1 mt-2">
-                <Link2 className="size-3 text-muted-foreground" />
+                <Link2 className="size-3 text-muted-foreground flex-shrink-0" />
                 <div className="flex gap-1 flex-wrap">
                   {linkedServices.map((service) => (
                     <Badge key={service.id} variant="secondary" className="text-xs">
@@ -108,7 +117,7 @@ export function ScriptItem({ script, services, onEdit, onDelete }: ScriptItemPro
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-shrink-0">
             {hasLogs && (
               <Tooltip>
                 <TooltipTrigger asChild>

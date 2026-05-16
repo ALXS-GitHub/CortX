@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import type { Service } from '@/types';
 import {
   Play,
@@ -137,13 +138,21 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
 
           {/* Content */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h3 className="font-medium">{service.name}</h3>
-              <StatusBadge status={status} activeMode={activeMode} activeArgPreset={activeArgPreset} />
+            <div className="flex items-center gap-2 min-w-0">
+              <TruncatedText as="h3" className="font-medium">{service.name}</TruncatedText>
+              <div className="flex-shrink-0">
+                <StatusBadge status={status} activeMode={activeMode} activeArgPreset={activeArgPreset} />
+              </div>
             </div>
             <div className="mt-1 space-y-0.5 text-xs text-muted-foreground font-mono">
-              <p className="truncate">Path: {fullPath}</p>
-              <p className="truncate">Command: {service.command}</p>
+              <div className="flex gap-1">
+                <span className="flex-shrink-0">Path:</span>
+                <TruncatedText className="flex-1 min-w-0">{fullPath}</TruncatedText>
+              </div>
+              <div className="flex gap-1">
+                <span className="flex-shrink-0">Command:</span>
+                <TruncatedText className="flex-1 min-w-0">{service.command}</TruncatedText>
+              </div>
               {/* Show OS-detected ports if any; fall back to the configured port from the service definition. */}
               {runtime && runtime.detectedPorts.length > 0 ? (
                 <p>Port{runtime.detectedPorts.length > 1 ? 's' : ''}: {runtime.detectedPorts.join(', ')}</p>
@@ -154,7 +163,7 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

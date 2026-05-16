@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { TruncatedText } from '@/components/ui/TruncatedText';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { EnvFile, EnvComparison, Service } from '@/types';
 import { EnvVariableRow } from './EnvVariableRow';
@@ -199,36 +200,36 @@ export function EnvFileCard({ envFile, projectId, services, exampleFile }: EnvFi
 
               {/* Content */}
               <div className="flex-1 min-w-0 text-left">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium font-mono">{envFile.filename}</span>
-                  <Badge className={variantColors[envFile.variant]}>
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <TruncatedText className="font-medium font-mono min-w-0">{envFile.filename}</TruncatedText>
+                  <Badge className={`${variantColors[envFile.variant]} flex-shrink-0`}>
                     {variantLabels[envFile.variant]}
                   </Badge>
                   {envFile.isManuallyAdded && (
-                    <Badge variant="outline" className="text-xs">
+                    <Badge variant="outline" className="text-xs flex-shrink-0">
                       Manual
                     </Badge>
                   )}
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-muted-foreground flex-shrink-0">
                     {envFile.variables.length} vars
                   </span>
                 </div>
-                <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                <TruncatedText className="text-xs text-muted-foreground mt-0.5 block">
                   {envFile.relativePath}
-                </p>
+                </TruncatedText>
                 {linkedService && (
                   <div className="flex items-center gap-1 mt-1">
-                    <Link className="size-3 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">
-                      Linked to {linkedService.name}
-                    </span>
+                    <Link className="size-3 text-muted-foreground flex-shrink-0" />
+                    <TruncatedText className="text-xs text-muted-foreground min-w-0">
+                      {`Linked to ${linkedService.name}`}
+                    </TruncatedText>
                   </div>
                 )}
               </div>
 
               {/* Actions */}
               <div
-                className="flex items-center gap-1"
+                className="flex items-center gap-1 flex-shrink-0"
                 onClick={(e) => e.stopPropagation()}
               >
                 <Tooltip>
