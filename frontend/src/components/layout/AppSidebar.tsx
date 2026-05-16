@@ -36,25 +36,26 @@ export function AppSidebar() {
     selectProject,
     serviceRuntimes,
     scriptRuntimes,
-    showTerminal,
-    hiddenTerminalIds,
-    closedTerminalIds,
+    terminals,
+    openTerminal,
+    closeTerminal,
     startService,
     stopService,
-    closeTerminal,
     runScript,
     stopScript,
-    closeScriptTerminal,
-    showScriptTerminal,
     terminalPanelOpen,
     terminalHeight,
     globalScripts,
     globalScriptRuntimes,
     stopGlobalScript,
-    closeGlobalScriptTerminal,
-    showGlobalScriptTerminal,
     openRunScriptDialog,
   } = useAppStore();
+
+  // Helpers to query terminal visibility by raw runtime ID + kind.
+  const isHidden = (kind: 'service' | 'script' | 'global-script', runtimeKey: string) =>
+    terminals.get(`${kind}:${runtimeKey}`)?.visibility === 'hidden';
+  const isClosed = (kind: 'service' | 'script' | 'global-script', runtimeKey: string) =>
+    terminals.get(`${kind}:${runtimeKey}`)?.visibility === 'closed';
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => setAppVersion(''));
@@ -84,7 +85,7 @@ export function AppSidebar() {
 
   for (const [serviceId, runtime] of serviceRuntimes.entries()) {
     // Skip closed terminals
-    if (closedTerminalIds.has(serviceId)) continue;
+    if (isClosed('service', serviceId)) continue;
     // Only show services that have logs or are running
     if (runtime.logs.length === 0 && runtime.status === 'stopped') continue;
 
@@ -97,7 +98,7 @@ export function AppSidebar() {
           serviceId,
           serviceName: service.name,
           status: runtime.status,
-          isHidden: hiddenTerminalIds.has(serviceId),
+          isHidden: isHidden('service', serviceId),
         };
 
         if (existing) {
@@ -138,7 +139,7 @@ export function AppSidebar() {
 
   for (const [scriptId, runtime] of scriptRuntimes.entries()) {
     // Skip closed terminals
-    if (closedTerminalIds.has(scriptId)) continue;
+    if (isClosed('script', scriptId)) continue;
     // Only show scripts that have logs or are not idle
     if (runtime.logs.length === 0 && runtime.status === 'idle') continue;
 
@@ -151,7 +152,7 @@ export function AppSidebar() {
           scriptId,
           scriptName: script.name,
           status: runtime.status,
-          isHidden: hiddenTerminalIds.has(scriptId),
+          isHidden: isHidden('script', scriptId),
         };
 
         if (existing) {
@@ -181,7 +182,7 @@ export function AppSidebar() {
   // Get global scripts with runtime state
   const globalScriptsWithRuntime = Array.from(globalScriptRuntimes.entries())
     .filter(([scriptId, runtime]) => {
-      if (closedTerminalIds.has(scriptId)) return false;
+      if (isClosed('global-script', scriptId)) return false;
       return runtime.logs.length > 0 || runtime.status !== 'idle';
     })
     .map(([scriptId, runtime]) => {
@@ -190,7 +191,7 @@ export function AppSidebar() {
         scriptId,
         scriptName: script?.name || 'Unknown',
         status: runtime.status,
-        isHidden: hiddenTerminalIds.has(scriptId),
+        isHidden: isHidden('global-script', scriptId),
       };
     });
 
@@ -320,7 +321,7 @@ export function AppSidebar() {
 
                   const handleCloseAll = (e: React.MouseEvent) => {
                     e.stopPropagation();
-                    services.forEach(s => closeTerminal(s.serviceId));
+                    services.forEach(s => closeTerminal(`service:${s.serviceId}`));
                   };
 
                   const allStopped = !hasRunning;
@@ -377,7 +378,7 @@ export function AppSidebar() {
                       {services.map(({ serviceId, serviceName, status, isHidden }) => (
                         <SidebarMenuSubItem key={serviceId}>
                           <SidebarMenuSubButton
-                            onClick={() => showTerminal(serviceId)}
+                            onClick={() => openTerminal('service', serviceId)}
                             className="relative group/service"
                           >
                             <div className="relative">
@@ -432,9 +433,9 @@ export function AppSidebar() {
                                     className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      closeTerminal(serviceId);
+                                      closeTerminal(`service:${serviceId}`);
                                     }}
-                                    onKeyDown={(e) => e.key === 'Enter' && closeTerminal(serviceId)}
+                                    onKeyDown={(e) => e.key === 'Enter' && closeTerminal(`service:${serviceId}`)}
                                     title="Close terminal"
                                   >
                                     <X className="size-3" />
@@ -480,7 +481,7 @@ export function AppSidebar() {
 
                   const handleCloseAllScripts = (e: React.MouseEvent) => {
                     e.stopPropagation();
-                    scripts.forEach(s => closeScriptTerminal(s.scriptId));
+                    scripts.forEach(s => closeTerminal(`script:${s.scriptId}`));
                   };
 
                   const allStopped = !hasRunning;
@@ -540,7 +541,7 @@ export function AppSidebar() {
                         return (
                         <SidebarMenuSubItem key={scriptId}>
                           <SidebarMenuSubButton
-                            onClick={() => showScriptTerminal(scriptId)}
+                            onClick={() => openTerminal('script', scriptId)}
                             className="relative group/script"
                           >
                             <div className="relative">
@@ -591,9 +592,9 @@ export function AppSidebar() {
                                     className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      closeScriptTerminal(scriptId);
+                                      closeTerminal(`script:${scriptId}`);
                                     }}
-                                    onKeyDown={(e) => e.key === 'Enter' && closeScriptTerminal(scriptId)}
+                                    onKeyDown={(e) => e.key === 'Enter' && closeTerminal(`script:${scriptId}`)}
                                     title="Close terminal"
                                   >
                                     <X className="size-3" />
@@ -646,7 +647,7 @@ export function AppSidebar() {
                   return (
                     <SidebarMenuItem key={scriptId}>
                       <SidebarMenuButton
-                        onClick={() => showGlobalScriptTerminal(scriptId)}
+                        onClick={() => openTerminal('global-script', scriptId)}
                         className="relative group/gscript"
                         tooltip={scriptName}
                       >
@@ -702,9 +703,9 @@ export function AppSidebar() {
                                 className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  closeGlobalScriptTerminal(scriptId);
+                                  closeTerminal(`global-script:${scriptId}`);
                                 }}
-                                onKeyDown={(e) => e.key === 'Enter' && closeGlobalScriptTerminal(scriptId)}
+                                onKeyDown={(e) => e.key === 'Enter' && closeTerminal(`global-script:${scriptId}`)}
                                 title="Close terminal"
                               >
                                 <X className="size-3" />

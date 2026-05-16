@@ -88,11 +88,27 @@ interface TerminalDndContextProps {
 
 export function TerminalDndContext({ children, allTerminals: _allTerminals }: TerminalDndContextProps) {
   const {
-    terminalPanes,
+    terminals,
     addPane,
     moveTerminalToPane,
     reorderTerminalInPane,
   } = useAppStore();
+
+  // Derive the ordered list of terminal IDs in a given pane.
+  // Replaces the old pane.terminalIds[] field — the order field on Terminal entities is canonical.
+  const terminalIdsInPane = useCallback(
+    (paneId: string): string[] => {
+      const inPane: { id: string; order: number }[] = [];
+      for (const t of terminals.values()) {
+        if (t.paneId === paneId && t.visibility === 'visible') {
+          inPane.push({ id: t.id, order: t.order });
+        }
+      }
+      inPane.sort((a, b) => a.order - b.order);
+      return inPane.map((t) => t.id);
+    },
+    [terminals]
+  );
 
   const [activeTerminal, setActiveTerminal] = useState<TerminalItem | null>(null);
 
@@ -156,27 +172,22 @@ export function TerminalDndContext({ children, allTerminals: _allTerminals }: Te
         // Moving to a different pane at specific position
         moveTerminalToPane(draggedTerminalId, targetPaneId);
         // Then reorder to the correct position
-        const targetPane = terminalPanes.find(p => p.id === targetPaneId);
-        if (targetPane) {
-          const overIndex = targetPane.terminalIds.indexOf(overData.terminalId);
-          if (overIndex !== -1) {
-            // The terminal was just added at the end, move it to the right position
-            reorderTerminalInPane(targetPaneId, draggedTerminalId, overIndex);
-          }
+        const targetIds = terminalIdsInPane(targetPaneId);
+        const overIndex = targetIds.indexOf(overData.terminalId);
+        if (overIndex !== -1) {
+          reorderTerminalInPane(targetPaneId, draggedTerminalId, overIndex);
         }
       } else if (active.id !== over.id) {
         // Reordering within the same pane
-        const pane = terminalPanes.find(p => p.id === sourcePaneId);
-        if (pane) {
-          const oldIndex = pane.terminalIds.indexOf(draggedTerminalId);
-          const newIndex = pane.terminalIds.indexOf(overData.terminalId);
-          if (oldIndex !== -1 && newIndex !== -1) {
-            reorderTerminalInPane(sourcePaneId, draggedTerminalId, newIndex);
-          }
+        const ids = terminalIdsInPane(sourcePaneId);
+        const oldIndex = ids.indexOf(draggedTerminalId);
+        const newIndex = ids.indexOf(overData.terminalId);
+        if (oldIndex !== -1 && newIndex !== -1) {
+          reorderTerminalInPane(sourcePaneId, draggedTerminalId, newIndex);
         }
       }
     }
-  }, [terminalPanes, addPane, moveTerminalToPane, reorderTerminalInPane]);
+  }, [terminalIdsInPane, addPane, moveTerminalToPane, reorderTerminalInPane]);
 
   const handleDragCancel = useCallback(() => {
     setActiveTerminal(null);

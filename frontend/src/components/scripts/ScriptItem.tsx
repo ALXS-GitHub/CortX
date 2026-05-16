@@ -33,9 +33,7 @@ export function ScriptItem({ script, services, onEdit, onDelete }: ScriptItemPro
     scriptRuntimes,
     runScript,
     stopScript,
-    setActiveTerminalScriptId,
-    toggleTerminalPanel,
-    terminalPanelOpen,
+    openTerminal,
   } = useAppStore();
 
   const runtime = scriptRuntimes.get(script.id);
@@ -64,10 +62,7 @@ export function ScriptItem({ script, services, onEdit, onDelete }: ScriptItemPro
   };
 
   const handleViewLogs = () => {
-    setActiveTerminalScriptId(script.id);
-    if (!terminalPanelOpen) {
-      toggleTerminalPanel();
-    }
+    openTerminal('script', script.id);
   };
 
   return (

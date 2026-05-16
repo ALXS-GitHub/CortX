@@ -50,9 +50,7 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
     stopService,
     copyLaunchCommand,
     launchExternal,
-    setActiveTerminalServiceId,
-    toggleTerminalPanel,
-    terminalPanelOpen,
+    openTerminal,
   } = useAppStore();
 
   const runtime = serviceRuntimes.get(service.id);
@@ -118,10 +116,7 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
   };
 
   const handleViewLogs = () => {
-    setActiveTerminalServiceId(service.id);
-    if (!terminalPanelOpen) {
-      toggleTerminalPanel();
-    }
+    openTerminal('service', service.id);
   };
 
   const fullPath = service.workingDir === '.' || !service.workingDir
