@@ -12,88 +12,136 @@ import {
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
 
-import { buildActions } from './buildActions';
+import { buildEntities } from './buildEntities';
 import { buildItemValue, commandFilter, parseQuery } from './searchFilter';
-import type { CommandAction, CommandCategory } from './types';
+import { formatShortcut, matchesShortcut, SHORTCUTS } from './shortcuts';
+import type { CommandEntity, EntityAction, EntityCategory } from './types';
 
 interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-const CATEGORY_ORDER: CommandCategory[] = [
+const CATEGORY_ORDER: EntityCategory[] = [
   'Navigation',
   'Apps',
+  'Projects',
   'Services',
   'Scripts',
-  'Projects',
   'Tools',
+  'Shell Config',
 ];
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
-  // Subscribe so the action list refreshes when relevant slices change
-  // (services running/stopped, projects added, etc.).
   const store = useAppStore();
   const [query, setQuery] = useState('');
   const [selectedValue, setSelectedValue] = useState('');
+  const [actionsPanelOpen, setActionsPanelOpen] = useState(false);
 
-  const actions = useMemo(() => buildActions(store), [store]);
-  const grouped = useMemo(() => groupByCategory(actions), [actions]);
+  const entities = useMemo(() => buildEntities(store), [store]);
+  const grouped = useMemo(() => groupByCategory(entities), [entities]);
   const activeScope = useMemo(() => parseQuery(query).scope, [query]);
 
-  // Lookup from a CommandItem's `value` to the action it represents — used by
-  // the Cmd+Enter handler to find the action of the currently-selected row.
-  const actionByValue = useMemo(() => {
-    const m = new Map<string, CommandAction>();
-    for (const a of actions) {
-      m.set(buildItemValue(a.category, a.label, a.keywords), a);
+  /** Map value attribute → entity, for keyboard shortcut dispatch. */
+  const entityByValue = useMemo(() => {
+    const m = new Map<string, CommandEntity>();
+    for (const e of entities) {
+      m.set(buildItemValue(e.category, e.label, e.keywords), e);
     }
     return m;
-  }, [actions]);
+  }, [entities]);
 
-  const handleAction = useCallback(
-    async (action: CommandAction, mode: 'run' | 'navigate') => {
-      onOpenChange(false);
-      setQuery('');
+  const closeAndReset = useCallback(() => {
+    onOpenChange(false);
+    setQuery('');
+    setActionsPanelOpen(false);
+  }, [onOpenChange]);
+
+  const runAction = useCallback(
+    async (action: EntityAction) => {
+      closeAndReset();
       try {
-        if (mode === 'navigate' && action.navigateTo) {
-          await action.navigateTo();
-        } else {
-          await action.run();
-        }
+        await action.run();
       } catch (err) {
         toast.error(`Failed: ${err}`);
       }
     },
-    [onOpenChange],
+    [closeAndReset],
   );
 
-  // Cmd+Enter / Ctrl+Enter -> navigateTo on the currently selected item.
+  // Reset transient state every time the palette opens fresh.
+  useEffect(() => {
+    if (!open) {
+      setActionsPanelOpen(false);
+    }
+  }, [open]);
+
+  // Global keydown while palette is open: action shortcuts + Ctrl+K toggle +
+  // Esc-out of the actions panel. Capture phase so we beat cmdk's own Enter.
   useEffect(() => {
     if (!open) return;
+    const selected = entityByValue.get(selectedValue);
+
     const onKey = (e: KeyboardEvent) => {
-      const isAlt = e.key === 'Enter' && (e.metaKey || e.ctrlKey);
-      if (!isAlt) return;
-      const action = actionByValue.get(selectedValue);
-      if (!action) return;
-      e.preventDefault();
-      e.stopPropagation();
-      void handleAction(action, 'navigate');
+      // Esc inside an open actions panel closes the panel first.
+      if (e.key === 'Escape' && actionsPanelOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        setActionsPanelOpen(false);
+        return;
+      }
+
+      // Toggle the actions panel — works regardless of whether an entity is
+      // selected, but only useful when one is.
+      if (matchesShortcut(e, SHORTCUTS.toggleActions)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setActionsPanelOpen((v) => !v);
+        return;
+      }
+
+      if (!selected) return;
+
+      // Plain Enter -> primary action (cmdk also fires onSelect, which calls
+      // runAction; we don't need a separate handler here).
+      if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        return;
+      }
+
+      // Other shortcuts: walk the entity's actions and fire the matching one.
+      for (const action of selected.actions) {
+        if (action.shortcut && matchesShortcut(e, action.shortcut)) {
+          // The primary action also has the Enter shortcut — but plain Enter
+          // is handled by cmdk's onSelect, so skip it here to avoid firing twice.
+          if (
+            action.shortcut.key === 'Enter' &&
+            !action.shortcut.meta &&
+            !action.shortcut.shift &&
+            !action.shortcut.alt
+          ) {
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          void runAction(action);
+          return;
+        }
+      }
     };
-    // Capture phase so cmdk's own Enter handler doesn't fire first.
+
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, selectedValue, actionByValue, handleAction]);
+  }, [open, selectedValue, entityByValue, actionsPanelOpen, runAction]);
 
-  const selectedAction = actionByValue.get(selectedValue);
-  const hasNavigate = !!selectedAction?.navigateTo;
+  const selectedEntity = entityByValue.get(selectedValue);
+  const primaryAction = selectedEntity?.actions[0];
 
   return (
     <CommandDialog
       open={open}
       onOpenChange={(o) => {
-        onOpenChange(o);
-        if (!o) setQuery('');
+        if (!o) closeAndReset();
+        else onOpenChange(o);
       }}
       filter={commandFilter}
       value={selectedValue}
@@ -118,21 +166,29 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             <div key={cat}>
               {i > 0 && <CommandSeparator />}
               <CommandGroup heading={cat}>
-                {items.map((action) => (
+                {items.map((entity) => (
                   <CommandItem
-                    key={action.id}
-                    value={buildItemValue(action.category, action.label, action.keywords)}
-                    onSelect={() => handleAction(action, 'run')}
+                    key={entity.id}
+                    value={buildItemValue(entity.category, entity.label, entity.keywords)}
+                    onSelect={() => {
+                      const primary = entity.actions[0];
+                      if (primary) void runAction(primary);
+                    }}
                   >
-                    {action.icon}
+                    {entity.icon}
                     <div className="flex flex-col min-w-0 flex-1">
-                      <span className="truncate">{action.label}</span>
-                      {action.subtitle && (
+                      <span className="truncate">{entity.label}</span>
+                      {entity.subtitle && (
                         <span className="text-xs text-muted-foreground truncate">
-                          {action.subtitle}
+                          {entity.subtitle}
                         </span>
                       )}
                     </div>
+                    {entity.actions[0]?.label && (
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {entity.actions[0].label}
+                      </span>
+                    )}
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -140,30 +196,113 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           );
         })}
       </CommandList>
-      <div className="flex items-center justify-end gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
-        <span>
-          <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground">↵</kbd> Run
-        </span>
-        {hasNavigate && (
-          <span>
-            <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground">⌘/Ctrl</kbd>
-            <kbd className="ml-1 px-1 py-0.5 rounded border bg-muted text-foreground">↵</kbd> Go to detail
-          </span>
-        )}
-        <span>
-          <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground">Esc</kbd> Close
-        </span>
-      </div>
+
+      {actionsPanelOpen && selectedEntity && (
+        <ActionsPanel
+          entity={selectedEntity}
+          onPick={runAction}
+          onClose={() => setActionsPanelOpen(false)}
+        />
+      )}
+
+      <Footer
+        primaryLabel={primaryAction?.label}
+        hasActions={(selectedEntity?.actions.length ?? 0) > 1}
+      />
     </CommandDialog>
   );
 }
 
-function groupByCategory(actions: CommandAction[]): Map<CommandCategory, CommandAction[]> {
-  const m = new Map<CommandCategory, CommandAction[]>();
-  for (const a of actions) {
-    const list = m.get(a.category) ?? [];
-    list.push(a);
-    m.set(a.category, list);
+function ActionsPanel({
+  entity,
+  onPick,
+  onClose,
+}: {
+  entity: CommandEntity;
+  onPick: (action: EntityAction) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="border-t bg-muted/30 px-2 py-2 max-h-64 overflow-y-auto">
+      <div className="flex items-center justify-between px-2 py-1 text-xs text-muted-foreground">
+        <span>Actions for {entity.label}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="hover:text-foreground"
+        >
+          Close
+        </button>
+      </div>
+      <div className="flex flex-col">
+        {entity.actions.map((action) => (
+          <button
+            key={action.id}
+            type="button"
+            onClick={() => onPick(action)}
+            className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground"
+          >
+            {action.icon}
+            <span className="flex-1 truncate">{action.label}</span>
+            {action.shortcut && <Kbd shortcut={action.shortcut} />}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Footer({
+  primaryLabel,
+  hasActions,
+}: {
+  primaryLabel?: string;
+  hasActions: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
+      <div className="flex items-center gap-2">
+        <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground">↵</kbd>
+        <span>{primaryLabel ?? 'Select'}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        {hasActions && (
+          <div className="flex items-center gap-1">
+            <Kbd shortcut={SHORTCUTS.toggleActions} />
+            <span>Actions</span>
+          </div>
+        )}
+        <div className="flex items-center gap-1">
+          <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground">Esc</kbd>
+          <span>Close</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Kbd({ shortcut }: { shortcut: import('./types').KeyBinding }) {
+  const parts = formatShortcut(shortcut);
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {parts.map((p, i) => (
+        <kbd
+          key={i}
+          className="px-1 py-0.5 rounded border bg-muted text-foreground text-[10px]"
+        >
+          {p}
+        </kbd>
+      ))}
+    </span>
+  );
+}
+
+function groupByCategory(entities: CommandEntity[]): Map<EntityCategory, CommandEntity[]> {
+  const m = new Map<EntityCategory, CommandEntity[]>();
+  for (const e of entities) {
+    const list = m.get(e.category) ?? [];
+    list.push(e);
+    m.set(e.category, list);
   }
   return m;
 }

@@ -1,32 +1,45 @@
 import type { ReactNode } from 'react';
 
-export type CommandCategory =
+export type EntityCategory =
   | 'Navigation'
   | 'Apps'
   | 'Services'
   | 'Scripts'
   | 'Projects'
-  | 'Tools';
+  | 'Tools'
+  | 'Shell Config';
 
-export interface CommandAction {
-  /** Stable key — used for cmdk identity. */
+/**
+ * A keyboard shortcut binding. `meta` matches both Meta (Cmd) and Ctrl —
+ * we treat them as the same modifier for cross-platform consistency.
+ */
+export interface KeyBinding {
+  /** e.g. "Enter", "o", "h", "," — must match KeyboardEvent.key exactly (case-insensitive for letters). */
+  key: string;
+  meta?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+}
+
+export interface EntityAction {
+  /** Stable identifier within the entity (e.g. "launch", "open-folder"). */
   id: string;
-  category: CommandCategory;
-  /** Primary label shown in the row, e.g. "Launch WezTerm". */
   label: string;
-  /** Secondary breadcrumb, e.g. "App" or "Project › Service". */
-  subtitle?: string;
-  /** Lucide icon (or any node) shown on the left. */
   icon?: ReactNode;
-  /** Comma-separated keywords boosted in cmdk's fuzzy match. */
-  keywords?: string;
-  /** Side-effect: navigate, start, stop, open, etc. */
+  /** Optional keyboard binding shown next to the action and triggerable directly. */
+  shortcut?: KeyBinding;
   run: () => void | Promise<void>;
-  /**
-   * Optional alternative action triggered with Cmd+Enter / Ctrl+Enter.
-   * Convention: navigate to the entity's detail page inside CortX so the
-   * user can edit / inspect instead of firing the primary action.
-   * Falls back to `run` when missing.
-   */
-  navigateTo?: () => void | Promise<void>;
+}
+
+export interface CommandEntity {
+  /** Stable identifier across rebuilds. */
+  id: string;
+  category: EntityCategory;
+  label: string;
+  subtitle?: string;
+  icon?: ReactNode;
+  /** Boost terms for fuzzy matching (tags, action labels, etc.). */
+  keywords?: string;
+  /** Ordered list of actions. First entry is the default (fired on Enter). */
+  actions: EntityAction[];
 }
