@@ -180,15 +180,10 @@ pub fn update_service(
             service.extra_args = input.extra_args;
             service.arg_presets = input.arg_presets;
             service.default_arg_preset = input.default_arg_preset;
-            if input.color.is_some() {
-                service.color = input.color;
-            }
-            if input.port.is_some() {
-                service.port = input.port;
-            }
-            if input.env_vars.is_some() {
-                service.env_vars = input.env_vars;
-            }
+            // Always assign so the user can clear these fields by submitting them empty.
+            service.color = input.color;
+            service.port = input.port;
+            service.env_vars = input.env_vars;
         })
         .map_err(|e| e.to_string())
 }

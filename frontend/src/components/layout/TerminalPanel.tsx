@@ -174,7 +174,6 @@ function DroppablePaneContent({
   onSelectTerminal,
   onHideTerminal,
   onClearLogs,
-  onStopTerminal,
   onRemovePane,
   onFocusPane,
   showRemoveButton,
@@ -187,7 +186,6 @@ function DroppablePaneContent({
   onSelectTerminal: (terminalId: string) => void;
   onHideTerminal: (terminalId: string) => void;
   onClearLogs: (terminalId: string) => void;
-  onStopTerminal: (terminalId: string) => void;
   onRemovePane: () => void;
   onFocusPane: () => void;
   showRemoveButton: boolean;
@@ -321,36 +319,9 @@ function DroppablePaneContent({
           )}
         </SortableContext>
 
-        {/* Pane actions */}
+        {/* Pane actions — Clear/Stop live in the top panel toolbar (one shared set
+            for the focused pane). Only the Close-pane button is per-pane. */}
         <div className="ml-auto flex items-center shrink-0 px-1">
-          {activeTerminal && (
-            <>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClearLogs(activeTerminal.id);
-                }}
-                title="Clear logs"
-              >
-                <Trash2 className="size-3" />
-              </Button>
-              {activeTerminal.status === 'running' && (
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onStopTerminal(activeTerminal.id);
-                  }}
-                  title="Stop"
-                >
-                  <Square className="size-3" />
-                </Button>
-              )}
-            </>
-          )}
           {showRemoveButton && (
             <Button
               variant="ghost"
@@ -769,15 +740,6 @@ export function TerminalPanel() {
     else clearServiceLogs(parsed.runtimeKey);
   }, [resolveTerminal, clearScriptLogs, clearServiceLogs, clearGlobalScriptLogs]);
 
-  // Stop service/script for a pane's terminal
-  const handleStopPaneTerminal = useCallback(async (id: string) => {
-    const parsed = resolveTerminal(id);
-    if (!parsed) return;
-    if (parsed.kind === 'global-script') await stopGlobalScript(parsed.runtimeKey);
-    else if (parsed.kind === 'script') await stopScript(parsed.runtimeKey);
-    else await stopService(parsed.runtimeKey);
-  }, [resolveTerminal, stopScript, stopService, stopGlobalScript]);
-
   if (!terminalPanelOpen) {
     return (
       <div className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t">
@@ -935,7 +897,6 @@ export function TerminalPanel() {
                         onSelectTerminal={(terminalId) => setActiveTerminalInPane(pane.id, terminalId)}
                         onHideTerminal={handleHideTerminal}
                         onClearLogs={handleClearPaneLogs}
-                        onStopTerminal={handleStopPaneTerminal}
                         onRemovePane={() => removePane(pane.id)}
                         onFocusPane={() => focusPane(pane.id)}
                         showRemoveButton={terminalPanes.length > 1}
