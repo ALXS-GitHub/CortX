@@ -130,6 +130,13 @@ fn handle_normal_tools(app: &mut App, key: KeyEvent) {
         KeyCode::Char('k') | KeyCode::Up => app.tools_move_up(),
         KeyCode::Char('g') => app.tools_move_top(),
         KeyCode::Char('G') => app.tools_move_bottom(),
+
+        // Open install location in the file manager
+        KeyCode::Enter | KeyCode::Char('o') => app.open_selected_tool_install_location(),
+        // Open homepage URL in the default browser
+        KeyCode::Char('h') => app.open_selected_tool_homepage(),
+        // Open primary config_path
+        KeyCode::Char('c') => app.open_selected_tool_config(),
         _ => {}
     }
 }
@@ -150,6 +157,11 @@ fn handle_normal_apps(app: &mut App, key: KeyEvent) {
         KeyCode::Char('k') | KeyCode::Up => app.apps_move_up(),
         KeyCode::Char('g') => app.apps_move_top(),
         KeyCode::Char('G') => app.apps_move_bottom(),
+
+        // Launch the selected app
+        KeyCode::Enter => app.launch_selected_app(),
+        // Open primary config_path
+        KeyCode::Char('o') => app.open_selected_app_config(),
         _ => {}
     }
 }

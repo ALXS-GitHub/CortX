@@ -11,7 +11,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     let area = f.area();
     let popup_width = 60u16.min(area.width.saturating_sub(4));
-    let popup_height = 26u16.min(area.height.saturating_sub(4));
+    let popup_height = 36u16.min(area.height.saturating_sub(4));
 
     let x = (area.width.saturating_sub(popup_width)) / 2;
     let y = (area.height.saturating_sub(popup_height)) / 2;
@@ -50,12 +50,27 @@ pub fn render(f: &mut Frame, app: &App) {
         help_line("5", "Apps tab"),
         Line::from(""),
         Line::from(Span::styled(
-            "Output Panel:",
+            "Output Panel (Scripts):",
             Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
         )),
         help_line("c", "Clear output"),
         help_line("f", "Toggle auto-scroll"),
         help_line("j / k", "Scroll output"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Tools:",
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+        )),
+        help_line("Enter / o", "Open install location"),
+        help_line("h", "Open homepage URL"),
+        help_line("c", "Open config path"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Apps:",
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+        )),
+        help_line("Enter", "Launch app"),
+        help_line("o", "Open config path"),
         Line::from(""),
         help_line("?", "Toggle this help"),
         help_line("q", "Quit"),

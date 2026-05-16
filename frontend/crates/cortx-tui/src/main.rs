@@ -1,6 +1,7 @@
 mod app;
 mod event;
 mod input;
+mod os_open;
 mod tui_emitter;
 mod ui;
 mod util;

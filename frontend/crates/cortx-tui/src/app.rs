@@ -557,6 +557,32 @@ impl App {
         self.apply_apps_filter();
     }
 
+    /// Launch the currently selected app via its `executable_path` + `launch_args`.
+    /// Errors are silently swallowed (the TUI has no toast mechanism yet).
+    pub fn launch_selected_app(&self) {
+        let Some(app) = self.selected_app() else { return };
+        let Some(exe) = app.executable_path.as_deref() else { return };
+        if exe.trim().is_empty() {
+            return;
+        }
+        let extra_args: Vec<String> = app
+            .launch_args
+            .as_deref()
+            .map(|s| s.split_whitespace().map(String::from).collect())
+            .unwrap_or_default();
+        let _ = crate::os_open::launch_executable(exe, &extra_args);
+    }
+
+    /// Open the selected app's primary config_path (first one).
+    pub fn open_selected_app_config(&self) {
+        let Some(app) = self.selected_app() else { return };
+        let Some(cfg) = app.config_paths.first() else { return };
+        if cfg.path.trim().is_empty() {
+            return;
+        }
+        let _ = crate::os_open::open_path(&cfg.path);
+    }
+
     pub fn enter_apps_search(&mut self) {
         self.input_mode = InputMode::Search;
         self.apps_search_query.clear();
@@ -920,6 +946,36 @@ impl App {
         self.tools_search_query.clear();
         self.active_tag_filter = None;
         self.apply_tools_filter();
+    }
+
+    /// Open the selected tool's install location in the file manager.
+    pub fn open_selected_tool_install_location(&self) {
+        let Some(tool) = self.selected_tool() else { return };
+        let Some(loc) = tool.install_location.as_deref() else { return };
+        if loc.trim().is_empty() {
+            return;
+        }
+        let _ = crate::os_open::open_path(loc);
+    }
+
+    /// Open the selected tool's homepage URL in the browser.
+    pub fn open_selected_tool_homepage(&self) {
+        let Some(tool) = self.selected_tool() else { return };
+        let Some(url) = tool.homepage.as_deref() else { return };
+        if url.trim().is_empty() {
+            return;
+        }
+        let _ = crate::os_open::open_url(url);
+    }
+
+    /// Open the selected tool's primary config_path (first one).
+    pub fn open_selected_tool_config(&self) {
+        let Some(tool) = self.selected_tool() else { return };
+        let Some(cfg) = tool.config_paths.first() else { return };
+        if cfg.path.trim().is_empty() {
+            return;
+        }
+        let _ = crate::os_open::open_path(&cfg.path);
     }
 
     pub fn enter_tools_search(&mut self) {
