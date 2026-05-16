@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { createElement } from 'react';
 
-import { openInExplorer, openInVSCode } from '@/lib/tauri';
+import { openInExplorer, openInVscode } from '@/lib/tauri';
 import type { useAppStore } from '@/stores/appStore';
 import type { CommandAction } from './types';
 
@@ -127,7 +127,7 @@ export function buildActions(store: Store): CommandAction[] {
       subtitle: project.rootPath,
       icon: createElement(Code, { className: 'size-4' }),
       keywords: `open vscode code editor project ${project.tags.join(' ')}`,
-      run: () => openInVSCode(project.rootPath),
+      run: () => openInVscode(project.rootPath),
     });
   }
 
