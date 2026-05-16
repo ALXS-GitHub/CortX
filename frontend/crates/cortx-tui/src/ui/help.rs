@@ -11,7 +11,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     let area = f.area();
     let popup_width = 60u16.min(area.width.saturating_sub(4));
-    let popup_height = 36u16.min(area.height.saturating_sub(4));
+    let popup_height = 46u16.min(area.height.saturating_sub(4));
 
     let x = (area.width.saturating_sub(popup_width)) / 2;
     let y = (area.height.saturating_sub(popup_height)) / 2;
@@ -71,6 +71,25 @@ pub fn render(f: &mut Frame, app: &App) {
         )),
         help_line("Enter", "Launch app"),
         help_line("o", "Open config path"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Projects:",
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+        )),
+        help_line("Enter", "Open project (drill in)"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Project detail:",
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD),
+        )),
+        help_line("Enter", "Start selected service"),
+        help_line("s", "Stop selected service"),
+        help_line("A", "Start all services"),
+        help_line("S", "Stop all services"),
+        help_line("Tab", "Toggle list / output"),
+        help_line("o", "Open project folder"),
+        help_line("v", "Open in VS Code"),
+        help_line("Esc", "Back to projects"),
         Line::from(""),
         help_line("?", "Toggle this help"),
         help_line("q", "Quit"),

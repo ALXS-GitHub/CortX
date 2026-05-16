@@ -1,4 +1,4 @@
-use cortx_core::models::{GlobalScript, Tool, TagDefinition, ScriptStatus, ScriptParamType, LogStream, ShellAlias, App as CoreApp, StatusDefinition, Project};
+use cortx_core::models::{GlobalScript, Tool, TagDefinition, ScriptStatus, ScriptParamType, LogStream, ShellAlias, App as CoreApp, StatusDefinition, Project, Service, ServiceStatus};
 use cortx_core::process_manager::ProcessManager;
 use cortx_core::storage::Storage;
 use std::collections::HashMap;
@@ -64,6 +64,26 @@ impl Default for ScriptRuntime {
             exit_code: None,
             success: None,
             last_command: None,
+        }
+    }
+}
+
+/// Runtime state for a project service
+#[derive(Debug, Clone)]
+pub struct ServiceRuntime {
+    pub status: ServiceStatus,
+    pub pid: Option<u32>,
+    pub logs: Vec<LogLine>,
+    pub exit_code: Option<i32>,
+}
+
+impl Default for ServiceRuntime {
+    fn default() -> Self {
+        Self {
+            status: ServiceStatus::Stopped,
+            pid: None,
+            logs: Vec::new(),
+            exit_code: None,
         }
     }
 }
@@ -314,6 +334,14 @@ pub struct App {
     pub projects_selected_index: usize,
     pub projects_search_query: String,
 
+    // Project detail (drill-in) state
+    /// When Some, the Projects tab renders the detail view for that project.
+    pub viewing_project_id: Option<String>,
+    pub services_selected_index: usize,
+    /// Which service's logs are currently shown in the output panel.
+    pub active_service_id: Option<String>,
+    pub service_runtimes: HashMap<String, ServiceRuntime>,
+
     // Tag filter
     pub active_tag_filter: Option<String>,
     pub tag_filter_index: usize,
@@ -378,6 +406,10 @@ impl App {
             projects_filtered_indices,
             projects_selected_index: 0,
             projects_search_query: String::new(),
+            viewing_project_id: None,
+            services_selected_index: 0,
+            active_service_id: None,
+            service_runtimes: HashMap::new(),
             active_tag_filter: None,
             tag_filter_index: 0,
         }
@@ -811,6 +843,225 @@ impl App {
             self.projects_selected_index = 0;
         } else if self.projects_selected_index >= self.projects_filtered_indices.len() {
             self.projects_selected_index = self.projects_filtered_indices.len() - 1;
+        }
+    }
+
+    // === Project detail (drill-in) methods ===
+
+    /// Return the project currently being drilled into, if any.
+    pub fn viewing_project(&self) -> Option<&Project> {
+        let id = self.viewing_project_id.as_ref()?;
+        self.projects.iter().find(|p| &p.id == id)
+    }
+
+    /// Services of the project being drilled into, sorted by `order` then name.
+    pub fn viewing_project_services(&self) -> Vec<&Service> {
+        let Some(p) = self.viewing_project() else { return Vec::new() };
+        let mut svc: Vec<&Service> = p.services.iter().collect();
+        svc.sort_by(|a, b| {
+            a.order
+                .cmp(&b.order)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+        svc
+    }
+
+    pub fn selected_service(&self) -> Option<&Service> {
+        let services = self.viewing_project_services();
+        services.get(self.services_selected_index).copied()
+    }
+
+    /// Drill into the selected project. Resets service selection.
+    pub fn enter_project_detail(&mut self) {
+        let Some(p) = self.selected_project() else { return };
+        self.viewing_project_id = Some(p.id.clone());
+        self.services_selected_index = 0;
+        self.active_panel = ActivePanel::ScriptList;
+        // Auto-focus the output panel on whichever service is selected first.
+        self.active_service_id = self
+            .viewing_project_services()
+            .first()
+            .map(|s| s.id.clone());
+        self.auto_scroll = true;
+        self.output_scroll = 0;
+    }
+
+    /// Exit drill-in back to the projects list.
+    pub fn exit_project_detail(&mut self) {
+        self.viewing_project_id = None;
+        self.services_selected_index = 0;
+        self.active_service_id = None;
+        self.active_panel = ActivePanel::ScriptList;
+    }
+
+    pub fn services_move_up(&mut self) {
+        if self.services_selected_index > 0 {
+            self.services_selected_index -= 1;
+        }
+        self.refresh_active_service();
+    }
+
+    pub fn services_move_down(&mut self) {
+        let len = self.viewing_project_services().len();
+        if len > 0 && self.services_selected_index < len - 1 {
+            self.services_selected_index += 1;
+        }
+        self.refresh_active_service();
+    }
+
+    pub fn services_move_top(&mut self) {
+        self.services_selected_index = 0;
+        self.refresh_active_service();
+    }
+
+    pub fn services_move_bottom(&mut self) {
+        let len = self.viewing_project_services().len();
+        if len > 0 {
+            self.services_selected_index = len - 1;
+        }
+        self.refresh_active_service();
+    }
+
+    fn refresh_active_service(&mut self) {
+        self.active_service_id = self.selected_service().map(|s| s.id.clone());
+        self.auto_scroll = true;
+        self.output_scroll = 0;
+    }
+
+    /// Build the command string for a service, applying the active mode / arg preset
+    /// (currently picks defaults; no in-TUI override UI yet).
+    fn resolve_service_command(svc: &Service) -> (String, Option<String>, Option<String>) {
+        let mut cmd = svc.command.clone();
+        let mode = svc.default_mode.clone();
+        let arg_preset = svc.default_arg_preset.clone();
+
+        if let (Some(modes), Some(m)) = (svc.modes.as_ref(), mode.as_ref()) {
+            if let Some(template) = modes.get(m.as_str()) {
+                cmd = template.clone();
+            }
+        }
+
+        let preset_args = arg_preset
+            .as_ref()
+            .and_then(|p| svc.arg_presets.as_ref().and_then(|m| m.get(p).cloned()))
+            .or_else(|| svc.extra_args.clone());
+
+        if let Some(args) = preset_args {
+            let trimmed = args.trim();
+            if !trimmed.is_empty() {
+                if !cmd.ends_with(' ') {
+                    cmd.push(' ');
+                }
+                cmd.push_str(trimmed);
+            }
+        }
+
+        (cmd, mode, arg_preset)
+    }
+
+    /// Start the currently selected service. No-op if it's already running.
+    pub fn start_selected_service(&mut self) {
+        let Some(svc) = self.selected_service().cloned() else { return };
+        if self.process_manager.is_running(&svc.id) {
+            return;
+        }
+        let (command, mode, arg_preset) = Self::resolve_service_command(&svc);
+        let emitter = self.emitter.clone();
+        let _ = self.process_manager.start_service(
+            emitter,
+            svc.id.clone(),
+            svc.working_dir.clone(),
+            command,
+            svc.env_vars.clone(),
+            mode,
+            arg_preset,
+        );
+        self.active_service_id = Some(svc.id.clone());
+        self.auto_scroll = true;
+        self.output_scroll = 0;
+    }
+
+    /// Stop the currently selected service. No-op if not running.
+    pub fn stop_selected_service(&mut self) {
+        let Some(svc) = self.selected_service().cloned() else { return };
+        let _ = self.process_manager.stop_service(&*self.emitter, &svc.id);
+    }
+
+    /// Start every service of the project that isn't already running.
+    pub fn start_all_services(&mut self) {
+        let services: Vec<Service> = self
+            .viewing_project_services()
+            .into_iter()
+            .cloned()
+            .collect();
+        for svc in services {
+            if self.process_manager.is_running(&svc.id) {
+                continue;
+            }
+            let (command, mode, arg_preset) = Self::resolve_service_command(&svc);
+            let emitter = self.emitter.clone();
+            let _ = self.process_manager.start_service(
+                emitter,
+                svc.id.clone(),
+                svc.working_dir.clone(),
+                command,
+                svc.env_vars.clone(),
+                mode,
+                arg_preset,
+            );
+        }
+    }
+
+    /// Stop every running service of the project.
+    pub fn stop_all_services(&mut self) {
+        let services: Vec<Service> = self
+            .viewing_project_services()
+            .into_iter()
+            .cloned()
+            .collect();
+        for svc in services {
+            let _ = self.process_manager.stop_service(&*self.emitter, &svc.id);
+        }
+    }
+
+    /// Open the project root in the OS file manager.
+    pub fn open_project_folder(&self) {
+        let Some(p) = self.viewing_project() else { return };
+        if p.root_path.trim().is_empty() {
+            return;
+        }
+        let _ = crate::os_open::open_path(&p.root_path);
+    }
+
+    /// Open the project root in VS Code (falls back to file manager if `code` is missing).
+    pub fn open_project_vscode(&self) {
+        let Some(p) = self.viewing_project() else { return };
+        if p.root_path.trim().is_empty() {
+            return;
+        }
+        // Try `code <path>` first; if it fails, just open in file manager.
+        let spawned = std::process::Command::new("code")
+            .arg(&p.root_path)
+            .spawn();
+        if spawned.is_err() {
+            let _ = crate::os_open::open_path(&p.root_path);
+        }
+    }
+
+    pub fn get_active_service_logs(&self) -> &[LogLine] {
+        self.active_service_id
+            .as_ref()
+            .and_then(|id| self.service_runtimes.get(id))
+            .map(|r| r.logs.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn clear_active_service_logs(&mut self) {
+        if let Some(ref id) = self.active_service_id {
+            if let Some(runtime) = self.service_runtimes.get_mut(id) {
+                runtime.logs.clear();
+                self.output_scroll = 0;
+            }
         }
     }
 
@@ -1404,6 +1655,26 @@ impl App {
                 runtime.success = Some(success);
                 runtime.status = if success { ScriptStatus::Completed } else { ScriptStatus::Failed };
             }
+            ProcessEvent::ServiceLog { service_id, stream, content } => {
+                let runtime = self.service_runtimes.entry(service_id).or_default();
+                let clean = content.replace('\r', "");
+                runtime.logs.push(LogLine { stream, content: clean });
+                if runtime.logs.len() > 5000 {
+                    let drain = runtime.logs.len() - 5000;
+                    runtime.logs.drain(..drain);
+                }
+            }
+            ProcessEvent::ServiceStatus { service_id, status, pid } => {
+                let runtime = self.service_runtimes.entry(service_id).or_default();
+                runtime.status = status;
+                runtime.pid = pid;
+            }
+            ProcessEvent::ServiceExit { service_id, exit_code } => {
+                let runtime = self.service_runtimes.entry(service_id).or_default();
+                runtime.exit_code = exit_code;
+                runtime.status = ServiceStatus::Stopped;
+                runtime.pid = None;
+            }
         }
     }
 }
@@ -1425,6 +1696,20 @@ pub enum ProcessEvent {
         script_id: String,
         exit_code: Option<i32>,
         success: bool,
+    },
+    ServiceLog {
+        service_id: String,
+        stream: LogStream,
+        content: String,
+    },
+    ServiceStatus {
+        service_id: String,
+        status: ServiceStatus,
+        pid: Option<u32>,
+    },
+    ServiceExit {
+        service_id: String,
+        exit_code: Option<i32>,
     },
 }
 

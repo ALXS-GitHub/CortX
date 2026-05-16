@@ -2488,6 +2488,11 @@ fn cmd_run(
                 break;
             }
             Ok(ProcessEvent::Status { .. }) => {}
+            // Service events are not surfaced by `cortx run` (it runs global
+            // scripts only). Ignore them if any slip through.
+            Ok(ProcessEvent::ServiceLog { .. })
+            | Ok(ProcessEvent::ServiceStatus { .. })
+            | Ok(ProcessEvent::ServiceExit { .. }) => {}
             Err(_) => break,
         }
     }

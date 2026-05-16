@@ -259,35 +259,102 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                     (left, right)
                 }
                 ActiveTab::Projects => {
-                    let project_count = app.projects_filtered_indices.len();
-                    let mut hints = vec![
-                        Span::styled(" q", Style::default().fg(theme::TEXT_HIGHLIGHT)),
-                        Span::raw(" Quit  "),
-                        Span::styled("/", Style::default().fg(theme::TEXT_HIGHLIGHT)),
-                        Span::raw(" Search  "),
-                        Span::styled("t", Style::default().fg(theme::TEXT_HIGHLIGHT)),
-                        Span::raw(" Tags  "),
-                        Span::styled("r", Style::default().fg(theme::TEXT_HIGHLIGHT)),
-                        Span::raw(" Reload  "),
-                        Span::styled("?", Style::default().fg(theme::TEXT_HIGHLIGHT)),
-                        Span::raw(" Help"),
-                    ];
-                    if !app.projects_search_query.is_empty() || app.active_tag_filter.is_some() {
-                        hints.push(Span::raw("  "));
-                        hints.push(Span::styled("Esc", Style::default().fg(theme::TEXT_HIGHLIGHT)));
-                        hints.push(Span::raw(" Clear"));
-                    }
-                    let left = Line::from(hints);
-                    let mut right_spans = vec![
-                        Span::styled(
-                            format!("{} projects", project_count),
+                    if app.viewing_project_id.is_some() {
+                        // Drilled-in to a project: service-scoped hints
+                        let services_count = app.viewing_project_services().len();
+                        let running_count = app
+                            .viewing_project_services()
+                            .iter()
+                            .filter(|s| {
+                                app.service_runtimes
+                                    .get(&s.id)
+                                    .map(|r| r.status == cortx_core::models::ServiceStatus::Running)
+                                    .unwrap_or(false)
+                            })
+                            .count();
+
+                        let hints = match app.active_panel {
+                            ActivePanel::ScriptList => vec![
+                                Span::styled(" Esc", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Back  "),
+                                Span::styled("Enter", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Start  "),
+                                Span::styled("s", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Stop  "),
+                                Span::styled("A/S", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Start/Stop All  "),
+                                Span::styled("Tab", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Output  "),
+                                Span::styled("o", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Folder  "),
+                                Span::styled("v", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" VSCode  "),
+                                Span::styled("?", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Help"),
+                            ],
+                            ActivePanel::Output => vec![
+                                Span::styled(" Esc", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Back  "),
+                                Span::styled("c", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Clear  "),
+                                Span::styled("f", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Auto-scroll  "),
+                                Span::styled("j/k", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Scroll  "),
+                                Span::styled("Tab", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Services  "),
+                                Span::styled("?", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                                Span::raw(" Help"),
+                            ],
+                        };
+                        let left = Line::from(hints);
+                        let mut right_spans = vec![Span::styled(
+                            format!("{} services", services_count),
                             Style::default().fg(theme::TEXT_SECONDARY),
-                        ),
-                    ];
-                    right_spans.extend(tag_filter_spans(app));
-                    right_spans.push(Span::raw(" "));
-                    let right = Line::from(right_spans);
-                    (left, right)
+                        )];
+                        if running_count > 0 {
+                            right_spans.push(Span::styled(
+                                format!("  {} running ", running_count),
+                                Style::default().fg(theme::STATUS_RUNNING),
+                            ));
+                        } else {
+                            right_spans.push(Span::raw(" "));
+                        }
+                        let right = Line::from(right_spans);
+                        (left, right)
+                    } else {
+                        let project_count = app.projects_filtered_indices.len();
+                        let mut hints = vec![
+                            Span::styled(" q", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                            Span::raw(" Quit  "),
+                            Span::styled("/", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                            Span::raw(" Search  "),
+                            Span::styled("t", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                            Span::raw(" Tags  "),
+                            Span::styled("Enter", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                            Span::raw(" Open  "),
+                            Span::styled("r", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                            Span::raw(" Reload  "),
+                            Span::styled("?", Style::default().fg(theme::TEXT_HIGHLIGHT)),
+                            Span::raw(" Help"),
+                        ];
+                        if !app.projects_search_query.is_empty() || app.active_tag_filter.is_some() {
+                            hints.push(Span::raw("  "));
+                            hints.push(Span::styled("Esc", Style::default().fg(theme::TEXT_HIGHLIGHT)));
+                            hints.push(Span::raw(" Clear"));
+                        }
+                        let left = Line::from(hints);
+                        let mut right_spans = vec![
+                            Span::styled(
+                                format!("{} projects", project_count),
+                                Style::default().fg(theme::TEXT_SECONDARY),
+                            ),
+                        ];
+                        right_spans.extend(tag_filter_spans(app));
+                        right_spans.push(Span::raw(" "));
+                        let right = Line::from(right_spans);
+                        (left, right)
+                    }
                 }
             }
         }

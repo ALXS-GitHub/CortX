@@ -14,6 +14,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 }
 
 fn handle_normal(app: &mut App, key: KeyEvent) {
+    // While drilled into a project, route everything through the detail handler.
+    // Top-level shortcuts (tab switch, quit, help) still apply, but search /
+    // tag filter / Esc-clear are scoped to "exit detail" instead.
+    if app.viewing_project_id.is_some() {
+        handle_normal_project_detail(app, key);
+        return;
+    }
+
     match key.code {
         // Quit
         KeyCode::Char('q') => app.should_quit = true,
@@ -172,6 +180,77 @@ fn handle_normal_projects(app: &mut App, key: KeyEvent) {
         KeyCode::Char('k') | KeyCode::Up => app.projects_move_up(),
         KeyCode::Char('g') => app.projects_move_top(),
         KeyCode::Char('G') => app.projects_move_bottom(),
+        // Drill in to the selected project's detail view.
+        KeyCode::Enter => app.enter_project_detail(),
+        _ => {}
+    }
+}
+
+/// Handler active while drilled into a project (viewing_project_id.is_some()).
+/// Tab switches (1/2/3/4/5), `q`, `?`, and Ctrl-C still work; everything else
+/// is service-scoped.
+fn handle_normal_project_detail(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Quit
+        KeyCode::Char('q') => app.should_quit = true,
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.should_quit = true;
+        }
+
+        // Help
+        KeyCode::Char('?') => app.input_mode = InputMode::Help,
+
+        // Switching tabs implicitly leaves the detail view.
+        KeyCode::Char('1') => { app.exit_project_detail(); app.active_tab = ActiveTab::Projects; }
+        KeyCode::Char('2') => { app.exit_project_detail(); app.active_tab = ActiveTab::Scripts; }
+        KeyCode::Char('3') => { app.exit_project_detail(); app.active_tab = ActiveTab::Tools; }
+        KeyCode::Char('4') => { app.exit_project_detail(); app.active_tab = ActiveTab::Aliases; }
+        KeyCode::Char('5') => { app.exit_project_detail(); app.active_tab = ActiveTab::Apps; }
+
+        // Back to the projects list
+        KeyCode::Esc => app.exit_project_detail(),
+
+        // Navigation — depends on focused panel
+        KeyCode::Char('j') | KeyCode::Down => {
+            match app.active_panel {
+                ActivePanel::ScriptList => app.services_move_down(),
+                ActivePanel::Output => app.scroll_output_down(),
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            match app.active_panel {
+                ActivePanel::ScriptList => app.services_move_up(),
+                ActivePanel::Output => app.scroll_output_up(),
+            }
+        }
+        KeyCode::Char('g') => app.services_move_top(),
+        KeyCode::Char('G') => app.services_move_bottom(),
+
+        // Panel switch (ServiceList <-> Output)
+        KeyCode::Tab => app.toggle_panel(),
+
+        // Service actions
+        KeyCode::Enter => app.start_selected_service(),
+        KeyCode::Char('s') => app.stop_selected_service(),
+        KeyCode::Char('A') => app.start_all_services(),
+        KeyCode::Char('S') => app.stop_all_services(),
+
+        // Project-level shortcuts
+        KeyCode::Char('o') => app.open_project_folder(),
+        KeyCode::Char('v') => app.open_project_vscode(),
+
+        // Output controls (only when output panel is focused)
+        KeyCode::Char('c') => {
+            if app.active_panel == ActivePanel::Output {
+                app.clear_active_service_logs();
+            }
+        }
+        KeyCode::Char('f') => {
+            if app.active_panel == ActivePanel::Output {
+                app.toggle_auto_scroll();
+            }
+        }
+
         _ => {}
     }
 }

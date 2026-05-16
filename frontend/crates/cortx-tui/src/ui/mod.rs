@@ -16,6 +16,7 @@ mod apps_list;
 mod app_info;
 mod projects_list;
 mod project_info;
+mod project_detail;
 
 use ratatui::prelude::*;
 
@@ -96,14 +97,19 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             app_info::render(f, h_chunks[1], app);
         }
         ActiveTab::Projects => {
-            // Body: left panel (projects list) | right panel (project info, full height)
-            let h_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-                .split(body);
+            if app.viewing_project_id.is_some() {
+                // Drill-in: full-body project detail view
+                project_detail::render(f, body, app);
+            } else {
+                // Body: left panel (projects list) | right panel (project info, full height)
+                let h_chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+                    .split(body);
 
-            projects_list::render(f, h_chunks[0], app);
-            project_info::render(f, h_chunks[1], app);
+                projects_list::render(f, h_chunks[0], app);
+                project_info::render(f, h_chunks[1], app);
+            }
         }
     }
 

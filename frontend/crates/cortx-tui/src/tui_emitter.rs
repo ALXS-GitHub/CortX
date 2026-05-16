@@ -17,11 +17,30 @@ impl TuiEmitter {
 }
 
 impl ProcessEventEmitter for TuiEmitter {
-    // Service events - not used in TUI V1 (global scripts only)
-    fn emit_service_log(&self, _service_id: &str, _stream: LogStream, _content: String) {}
-    fn emit_service_status(&self, _service_id: &str, _status: ServiceStatus, _pid: Option<u32>,
-                           _active_mode: Option<String>, _active_arg_preset: Option<String>) {}
-    fn emit_service_exit(&self, _service_id: &str, _exit_code: Option<i32>) {}
+    // Service events — wired through the same mpsc channel for project detail view.
+    fn emit_service_log(&self, service_id: &str, stream: LogStream, content: String) {
+        let _ = self.tx.send(ProcessEvent::ServiceLog {
+            service_id: service_id.to_string(),
+            stream,
+            content,
+        });
+    }
+
+    fn emit_service_status(&self, service_id: &str, status: ServiceStatus, pid: Option<u32>,
+                           _active_mode: Option<String>, _active_arg_preset: Option<String>) {
+        let _ = self.tx.send(ProcessEvent::ServiceStatus {
+            service_id: service_id.to_string(),
+            status,
+            pid,
+        });
+    }
+
+    fn emit_service_exit(&self, service_id: &str, exit_code: Option<i32>) {
+        let _ = self.tx.send(ProcessEvent::ServiceExit {
+            service_id: service_id.to_string(),
+            exit_code,
+        });
+    }
 
     // Project script events - not used in TUI V1
     fn emit_script_log(&self, _script_id: &str, _stream: LogStream, _content: String) {}
