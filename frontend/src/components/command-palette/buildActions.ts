@@ -61,6 +61,7 @@ export function buildActions(store: Store): CommandAction[] {
       icon: createElement(AppWindow, { className: 'size-4' }),
       keywords: `app launch ${app.tags.join(' ')}`,
       run: () => store.launchApp(app.id),
+      navigateTo: () => store.selectApp(app.id),
     });
   }
 
@@ -71,6 +72,10 @@ export function buildActions(store: Store): CommandAction[] {
       const isRunning = runtime?.status === 'running' || runtime?.status === 'starting';
       const breadcrumb = `${project.name} › ${service.name}`;
 
+      // Services don't have their own detail page — Cmd+Enter opens the
+      // parent project, which is where service edit/inspect actually lives.
+      const navigateToProject = () => store.selectProject(project.id);
+
       if (!isRunning) {
         actions.push({
           id: `service:start:${service.id}`,
@@ -80,6 +85,7 @@ export function buildActions(store: Store): CommandAction[] {
           icon: createElement(Play, { className: 'size-4' }),
           keywords: `start service ${breadcrumb} ${service.command}`,
           run: () => store.startService(service.id),
+          navigateTo: navigateToProject,
         });
       } else {
         actions.push({
@@ -90,6 +96,7 @@ export function buildActions(store: Store): CommandAction[] {
           icon: createElement(Square, { className: 'size-4' }),
           keywords: `stop service ${breadcrumb}`,
           run: () => store.stopService(service.id),
+          navigateTo: navigateToProject,
         });
       }
     }
@@ -106,11 +113,13 @@ export function buildActions(store: Store): CommandAction[] {
       icon: createElement(ScrollText, { className: 'size-4' }),
       keywords: `run script ${script.tags.join(' ')} ${script.command}`,
       run: () => store.runGlobalScript(script.id, script.workingDir ?? '.'),
+      navigateTo: () => store.selectGlobalScript(script.id),
     });
   }
 
   // -- Projects: open folder / open VS Code --------------------------------
   for (const project of store.projects) {
+    const goToProject = () => store.selectProject(project.id);
     actions.push({
       id: `project:open-folder:${project.id}`,
       category: 'Projects',
@@ -119,6 +128,7 @@ export function buildActions(store: Store): CommandAction[] {
       icon: createElement(FolderOpen, { className: 'size-4' }),
       keywords: `open folder project ${project.tags.join(' ')}`,
       run: () => openInExplorer(project.rootPath),
+      navigateTo: goToProject,
     });
     actions.push({
       id: `project:open-vscode:${project.id}`,
@@ -128,6 +138,7 @@ export function buildActions(store: Store): CommandAction[] {
       icon: createElement(Code, { className: 'size-4' }),
       keywords: `open vscode code editor project ${project.tags.join(' ')}`,
       run: () => openInVscode(project.rootPath),
+      navigateTo: goToProject,
     });
   }
 
@@ -143,6 +154,7 @@ export function buildActions(store: Store): CommandAction[] {
       icon: createElement(Terminal, { className: 'size-4' }),
       keywords: `open tool install location ${tool.tags.join(' ')}`,
       run: () => openInExplorer(loc),
+      navigateTo: () => store.selectTool(tool.id),
     });
   }
 

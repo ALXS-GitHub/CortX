@@ -22,4 +22,11 @@ export interface CommandAction {
   keywords?: string;
   /** Side-effect: navigate, start, stop, open, etc. */
   run: () => void | Promise<void>;
+  /**
+   * Optional alternative action triggered with Cmd+Enter / Ctrl+Enter.
+   * Convention: navigate to the entity's detail page inside CortX so the
+   * user can edit / inspect instead of firing the primary action.
+   * Falls back to `run` when missing.
+   */
+  navigateTo?: () => void | Promise<void>;
 }

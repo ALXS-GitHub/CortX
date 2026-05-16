@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   CommandDialog,
@@ -35,20 +35,58 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   // (services running/stopped, projects added, etc.).
   const store = useAppStore();
   const [query, setQuery] = useState('');
+  const [selectedValue, setSelectedValue] = useState('');
 
   const actions = useMemo(() => buildActions(store), [store]);
   const grouped = useMemo(() => groupByCategory(actions), [actions]);
   const activeScope = useMemo(() => parseQuery(query).scope, [query]);
 
-  const handleRun = async (action: CommandAction) => {
-    onOpenChange(false);
-    setQuery('');
-    try {
-      await action.run();
-    } catch (err) {
-      toast.error(`Failed: ${err}`);
+  // Lookup from a CommandItem's `value` to the action it represents — used by
+  // the Cmd+Enter handler to find the action of the currently-selected row.
+  const actionByValue = useMemo(() => {
+    const m = new Map<string, CommandAction>();
+    for (const a of actions) {
+      m.set(buildItemValue(a.category, a.label, a.keywords), a);
     }
-  };
+    return m;
+  }, [actions]);
+
+  const handleAction = useCallback(
+    async (action: CommandAction, mode: 'run' | 'navigate') => {
+      onOpenChange(false);
+      setQuery('');
+      try {
+        if (mode === 'navigate' && action.navigateTo) {
+          await action.navigateTo();
+        } else {
+          await action.run();
+        }
+      } catch (err) {
+        toast.error(`Failed: ${err}`);
+      }
+    },
+    [onOpenChange],
+  );
+
+  // Cmd+Enter / Ctrl+Enter -> navigateTo on the currently selected item.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      const isAlt = e.key === 'Enter' && (e.metaKey || e.ctrlKey);
+      if (!isAlt) return;
+      const action = actionByValue.get(selectedValue);
+      if (!action) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void handleAction(action, 'navigate');
+    };
+    // Capture phase so cmdk's own Enter handler doesn't fire first.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [open, selectedValue, actionByValue, handleAction]);
+
+  const selectedAction = actionByValue.get(selectedValue);
+  const hasNavigate = !!selectedAction?.navigateTo;
 
   return (
     <CommandDialog
@@ -58,6 +96,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         if (!o) setQuery('');
       }}
       filter={commandFilter}
+      value={selectedValue}
+      onValueChange={setSelectedValue}
     >
       <CommandInput
         placeholder="Type a command, or @tools / @apps / @services..."
@@ -82,7 +122,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   <CommandItem
                     key={action.id}
                     value={buildItemValue(action.category, action.label, action.keywords)}
-                    onSelect={() => handleRun(action)}
+                    onSelect={() => handleAction(action, 'run')}
                   >
                     {action.icon}
                     <div className="flex flex-col min-w-0 flex-1">
@@ -100,6 +140,20 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           );
         })}
       </CommandList>
+      <div className="flex items-center justify-end gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
+        <span>
+          <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground">↵</kbd> Run
+        </span>
+        {hasNavigate && (
+          <span>
+            <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground">⌘/Ctrl</kbd>
+            <kbd className="ml-1 px-1 py-0.5 rounded border bg-muted text-foreground">↵</kbd> Go to detail
+          </span>
+        )}
+        <span>
+          <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground">Esc</kbd> Close
+        </span>
+      </div>
     </CommandDialog>
   );
 }
