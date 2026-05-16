@@ -287,35 +287,6 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {projects.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Recent Projects</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {projects
-                  .slice()
-                  .sort((a, b) => {
-                    const aDate = a.lastOpenedAt || a.createdAt;
-                    const bDate = b.lastOpenedAt || b.createdAt;
-                    return new Date(bDate).getTime() - new Date(aDate).getTime();
-                  })
-                  .slice(0, 5)
-                  .map((project) => (
-                    <SidebarMenuItem key={project.id}>
-                      <SidebarMenuButton
-                        onClick={() => selectProject(project.id)}
-                        tooltip={project.name}
-                      >
-                        <FolderOpen className="size-4" />
-                        <span>{project.name}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-
         {/* Services Section - Grouped by Project */}
         {totalServiceCount > 0 && (
           <SidebarGroup>
