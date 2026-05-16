@@ -13,6 +13,7 @@ import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
 
 import { buildActions } from './buildActions';
+import { buildItemValue, commandFilter, parseQuery } from './searchFilter';
 import type { CommandAction, CommandCategory } from './types';
 
 interface CommandPaletteProps {
@@ -37,6 +38,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   const actions = useMemo(() => buildActions(store), [store]);
   const grouped = useMemo(() => groupByCategory(actions), [actions]);
+  const activeScope = useMemo(() => parseQuery(query).scope, [query]);
 
   const handleRun = async (action: CommandAction) => {
     onOpenChange(false);
@@ -55,12 +57,18 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         onOpenChange(o);
         if (!o) setQuery('');
       }}
+      filter={commandFilter}
     >
       <CommandInput
-        placeholder="Type a command, or search..."
+        placeholder="Type a command, or @tools / @apps / @services..."
         value={query}
         onValueChange={setQuery}
       />
+      {activeScope && (
+        <div className="border-b px-3 py-1.5 text-xs text-muted-foreground">
+          Filtered by scope: <span className="text-foreground font-medium">@{activeScope}</span>
+        </div>
+      )}
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
         {CATEGORY_ORDER.map((cat, i) => {
@@ -73,7 +81,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 {items.map((action) => (
                   <CommandItem
                     key={action.id}
-                    value={`${action.label} ${action.keywords ?? ''}`}
+                    value={buildItemValue(action.category, action.label, action.keywords)}
                     onSelect={() => handleRun(action)}
                   >
                     {action.icon}
