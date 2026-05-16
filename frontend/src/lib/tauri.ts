@@ -15,6 +15,7 @@ import type {
   ServiceLogPayload,
   ServiceStatusPayload,
   ServiceExitPayload,
+  ServicePortsPayload,
   ScriptLogPayload,
   ScriptStatusPayload,
   ScriptExitPayload,
@@ -190,6 +191,14 @@ export async function onServiceExit(
   callback: (payload: ServiceExitPayload) => void
 ): Promise<UnlistenFn> {
   return listen<ServiceExitPayload>('service-exit', (event) => {
+    callback(event.payload);
+  });
+}
+
+export async function onServicePorts(
+  callback: (payload: ServicePortsPayload) => void
+): Promise<UnlistenFn> {
+  return listen<ServicePortsPayload>('service-ports', (event) => {
     callback(event.payload);
   });
 }

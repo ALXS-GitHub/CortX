@@ -1,6 +1,7 @@
 use cortx_core::models::{
     LogStream, ScriptExitPayload, ScriptLogPayload, ScriptStatus, ScriptStatusPayload,
-    ServiceExitPayload, ServiceLogPayload, ServiceStatus, ServiceStatusPayload,
+    ServiceExitPayload, ServiceLogPayload, ServicePortsPayload, ServiceStatus,
+    ServiceStatusPayload,
 };
 use cortx_core::process_manager::ProcessEventEmitter;
 use tauri::{AppHandle, Emitter};
@@ -119,6 +120,16 @@ impl ProcessEventEmitter for TauriEmitter {
                 script_id: script_id.to_string(),
                 exit_code,
                 success,
+            },
+        );
+    }
+
+    fn emit_service_ports(&self, service_id: &str, ports: Vec<u16>) {
+        let _ = self.app_handle.emit(
+            "service-ports",
+            ServicePortsPayload {
+                service_id: service_id.to_string(),
+                ports,
             },
         );
     }

@@ -42,9 +42,10 @@ export function TabDragOverlay({ terminal }: TabDragOverlayProps) {
       )}
       <StatusIndicator status={terminal.status} type={terminal.type} />
       <span className="truncate max-w-[150px]">{terminal.name}</span>
-      {terminal.type === 'service' && terminal.detectedPort && (
+      {terminal.type === 'service' && terminal.detectedPorts.length > 0 && (
         <span className="text-[10px] px-1 py-0.5 rounded bg-primary/20 text-primary font-mono shrink-0">
-          :{terminal.detectedPort}
+          :{terminal.detectedPorts[0]}
+          {terminal.detectedPorts.length > 1 && `+${terminal.detectedPorts.length - 1}`}
         </span>
       )}
     </div>

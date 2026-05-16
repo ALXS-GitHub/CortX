@@ -19,3 +19,6 @@ fs2 = "0.4"
 regex = "1"
 notify = "7"
 notify-debouncer-mini = "0.5"
+# Cross-platform OS-level listening-port lookup by PID (#12)
+netstat2 = "0.11"
+sysinfo = "0.32"

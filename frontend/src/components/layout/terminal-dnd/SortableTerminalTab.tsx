@@ -90,9 +90,13 @@ export function SortableTerminalTab({
       )}
       <StatusIndicator status={terminal.status} type={terminal.type} />
       <span className="truncate pointer-events-none">{terminal.name}</span>
-      {terminal.type === 'service' && terminal.detectedPort && (
-        <span className="text-[10px] px-1 py-0.5 rounded bg-primary/20 text-primary font-mono shrink-0 pointer-events-none">
-          :{terminal.detectedPort}
+      {terminal.type === 'service' && terminal.detectedPorts.length > 0 && (
+        <span
+          className="text-[10px] px-1 py-0.5 rounded bg-primary/20 text-primary font-mono shrink-0 pointer-events-none"
+          title={terminal.detectedPorts.length > 1 ? `Listening on: ${terminal.detectedPorts.join(', ')}` : undefined}
+        >
+          :{terminal.detectedPorts[0]}
+          {terminal.detectedPorts.length > 1 && `+${terminal.detectedPorts.length - 1}`}
         </span>
       )}
       <Button

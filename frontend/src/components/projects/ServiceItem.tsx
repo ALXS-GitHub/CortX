@@ -144,7 +144,12 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
             <div className="mt-1 space-y-0.5 text-xs text-muted-foreground font-mono">
               <p className="truncate">Path: {fullPath}</p>
               <p className="truncate">Command: {service.command}</p>
-              {service.port && <p>Port: {service.port}</p>}
+              {/* Show OS-detected ports if any; fall back to the configured port from the service definition. */}
+              {runtime && runtime.detectedPorts.length > 0 ? (
+                <p>Port{runtime.detectedPorts.length > 1 ? 's' : ''}: {runtime.detectedPorts.join(', ')}</p>
+              ) : service.port ? (
+                <p>Port: {service.port}</p>
+              ) : null}
             </div>
           </div>
 

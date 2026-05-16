@@ -45,6 +45,14 @@ pub trait ProcessEventEmitter: Send + Sync {
     fn emit_global_script_log(&self, script_id: &str, stream: LogStream, content: String);
     fn emit_global_script_status(&self, script_id: &str, status: ScriptStatus, pid: Option<u32>);
     fn emit_global_script_exit(&self, script_id: &str, exit_code: Option<i32>, success: bool);
+
+    /// Emit the latest list of TCP ports that `service_id` (or any of its
+    /// descendant processes) currently has in LISTEN state. Called periodically
+    /// by the port poller while the service is running, and once with an empty
+    /// list when the service stops.
+    ///
+    /// Default no-op for emitters that don't surface port info (TUI / MCP).
+    fn emit_service_ports(&self, _service_id: &str, _ports: Vec<u16>) {}
 }
 
 pub struct ProcessInfo {
@@ -196,6 +204,54 @@ impl ProcessManager {
             mode.clone(),
             arg_preset.clone(),
         );
+
+        // Spawn port poller — queries the OS for TCP ports the service (and its
+        // descendants) are listening on, emits when the set changes. Fast cadence
+        // for the first 15 seconds (catch services that bind shortly after spawn),
+        // then slower cadence (catch rebinds / late-bound ports without burning CPU).
+        {
+            let processes_pp = self.processes.clone();
+            let shutdown_pp = self.shutdown_flag.clone();
+            let emitter_pp = emitter.clone();
+            let service_id_pp = service_id.clone();
+            thread::spawn(move || {
+                let start = std::time::Instant::now();
+                let mut last_ports: Vec<u16> = Vec::new();
+                let mut emitted_at_least_once = false;
+                loop {
+                    if shutdown_pp.load(Ordering::SeqCst) {
+                        break;
+                    }
+
+                    // If the service is gone from the processes map, the wait-thread
+                    // already cleaned up — exit silently and emit empty ports below.
+                    let pid_opt = {
+                        let processes = processes_pp.lock();
+                        processes.get(&service_id_pp).map(|p| p.pid)
+                    };
+                    let Some(pid) = pid_opt else {
+                        break;
+                    };
+
+                    let ports = crate::port_detector::get_listening_ports_for_pid_tree(pid)
+                        .unwrap_or_default();
+
+                    if !emitted_at_least_once || ports != last_ports {
+                        emitter_pp.emit_service_ports(&service_id_pp, ports.clone());
+                        last_ports = ports;
+                        emitted_at_least_once = true;
+                    }
+
+                    let elapsed_secs = start.elapsed().as_secs();
+                    let interval_ms = if elapsed_secs < 15 { 1500 } else { 5000 };
+                    thread::sleep(std::time::Duration::from_millis(interval_ms));
+                }
+                // Service is no longer running — emit an empty port list to clear UI.
+                if !shutdown_pp.load(Ordering::SeqCst) {
+                    emitter_pp.emit_service_ports(&service_id_pp, Vec::new());
+                }
+            });
+        }
 
         // Spawn thread to wait for process exit
         let processes = self.processes.clone();

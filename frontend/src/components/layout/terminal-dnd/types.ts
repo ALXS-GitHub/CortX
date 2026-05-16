@@ -10,7 +10,7 @@ export interface TerminalItem {
   projectId: string;
   status: ServiceStatus | ScriptStatus;
   logs: LogEntry[];
-  detectedPort?: number;
+  detectedPorts: number[];
   activeMode?: string;
   lastExitCode?: number;
   lastSuccess?: boolean;

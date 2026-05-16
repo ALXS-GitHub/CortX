@@ -3,6 +3,7 @@ pub mod error;
 pub mod file_watcher;
 pub mod help_parser;
 pub mod models;
+pub mod port_detector;
 pub mod process_manager;
 pub mod script_discovery;
 pub mod shell_init;

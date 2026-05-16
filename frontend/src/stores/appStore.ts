@@ -48,7 +48,10 @@ interface ServiceRuntime {
   status: ServiceStatus;
   pid?: number;
   logs: LogEntry[];
-  detectedPort?: number;
+  /** TCP ports the service (and its descendants) are currently listening on,
+   *  populated by the OS-level poller via the `service-ports` Tauri event.
+   *  Empty list = no listening ports detected (yet, or service released them). */
+  detectedPorts: number[];
   activeMode?: string;
   activeArgPreset?: string;
 }
@@ -185,51 +188,6 @@ function pickNewActiveForPane(
   return candidates[0]?.id ?? null;
 }
 
-// Strip ANSI escape codes and orphaned bracket sequences
-function stripAnsiCodes(str: string): string {
-  // Remove proper ANSI escape codes (ESC [ ... m)
-  let result = str.replace(/\x1b\[[0-9;]*m/g, '');
-  // Also remove orphaned bracket sequences (e.g., [1m, [22m, [39m)
-  result = result.replace(/\[([0-9;]*)m/g, '');
-  return result;
-}
-
-// Port detection patterns
-const PORT_PATTERNS = [
-  // URLs with ports - most specific first
-  /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::\]):(\d{2,5})/i,
-  /https?:\/\/[^/:]+:(\d{2,5})/i,
-  // Direct host:port patterns
-  /(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})/i,
-  // Common log messages
-  /listening\s+(?:on\s+)?(?:port\s+)?:?(\d{2,5})/i,
-  /server\s+(?:is\s+)?(?:running|started|listening)\s+(?:on\s+)?(?:port\s+)?:?(\d{2,5})/i,
-  /started\s+(?:on\s+)?(?:port\s+)?:?(\d{2,5})/i,
-  /running\s+(?:on\s+)?(?:port\s+)?:?(\d{2,5})/i,
-  /available\s+(?:on|at)\s+(?:port\s+)?:?(\d{2,5})/i,
-  /bound\s+to\s+(?:port\s+)?:?(\d{2,5})/i,
-  // Generic port mentions
-  /port[:\s]+(\d{2,5})/i,
-  /:(\d{4,5})(?:\/|\s|$)/,  // :PORT followed by / or space or end
-];
-
-function detectPort(content: string): number | null {
-  // Strip ANSI codes first to handle colored output
-  const cleanContent = stripAnsiCodes(content);
-
-  for (const pattern of PORT_PATTERNS) {
-    const match = cleanContent.match(pattern);
-    if (match && match[1]) {
-      const port = parseInt(match[1], 10);
-      // Valid port range (excluding very common non-port numbers)
-      if (port >= 1024 && port <= 65535) {
-        return port;
-      }
-    }
-  }
-  return null;
-}
-
 interface AppState {
   // Projects
   projects: Project[];
@@ -330,6 +288,7 @@ interface AppState {
 
   // Actions - Runtime updates
   updateServiceStatus: (serviceId: string, status: ServiceStatus, pid?: number, activeMode?: string, activeArgPreset?: string) => void;
+  updateServiceDetectedPorts: (serviceId: string, ports: number[]) => void;
   appendServiceLog: (serviceId: string, log: LogEntry) => void;
   clearServiceLogs: (serviceId: string) => void;
 
@@ -703,12 +662,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateServiceStatus: (serviceId, status, pid, activeMode, activeArgPreset) => {
     set((state) => {
       const runtimes = new Map(state.serviceRuntimes);
-      const existing = runtimes.get(serviceId) || { status: 'stopped', logs: [] };
-      // Clear detected port, mode, and preset when service stops
-      const detectedPort = status === 'stopped' ? undefined : existing.detectedPort;
+      const existing = runtimes.get(serviceId) || { status: 'stopped', logs: [], detectedPorts: [] };
+      // Clear detected ports, mode, and preset when service stops; the OS poller
+      // will also emit an empty list on shutdown but we clear eagerly here too.
+      const detectedPorts = status === 'stopped' ? [] : existing.detectedPorts;
       const mode = status === 'stopped' ? undefined : (activeMode ?? existing.activeMode);
       const preset = status === 'stopped' ? undefined : (activeArgPreset ?? existing.activeArgPreset);
-      runtimes.set(serviceId, { ...existing, status, pid, detectedPort, activeMode: mode, activeArgPreset: preset });
+      runtimes.set(serviceId, { ...existing, status, pid, detectedPorts, activeMode: mode, activeArgPreset: preset });
       // Auto-create Terminal entity (in hidden state) if this is the first time we see this runtime
       const terminals = ensureTerminal(state.terminals, 'service', serviceId);
       return { serviceRuntimes: runtimes, terminals };
@@ -718,22 +678,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   appendServiceLog: (serviceId, log) => {
     set((state) => {
       const runtimes = new Map(state.serviceRuntimes);
-      const existing = runtimes.get(serviceId) || { status: 'stopped', logs: [] };
-      // Keep last 1000 logs
+      const existing = runtimes.get(serviceId) || { status: 'stopped', logs: [], detectedPorts: [] };
+      // Keep last 1000 logs. Port detection no longer happens here — the backend
+      // queries the OS directly via the port poller (see process_manager.rs).
       const logs = [...existing.logs, log].slice(-1000);
-
-      // Try to detect port from log content (only if not already detected)
-      let detectedPort = existing.detectedPort;
-      if (!detectedPort) {
-        const port = detectPort(log.content);
-        if (port) {
-          detectedPort = port;
-        }
-      }
-
-      runtimes.set(serviceId, { ...existing, logs, detectedPort });
+      runtimes.set(serviceId, { ...existing, logs });
       const terminals = ensureTerminal(state.terminals, 'service', serviceId);
       return { serviceRuntimes: runtimes, terminals };
+    });
+  },
+
+  /**
+   * Update the list of OS-detected listening TCP ports for a service.
+   * Called by the `service-ports` Tauri event listener.
+   */
+  updateServiceDetectedPorts: (serviceId: string, ports: number[]) => {
+    set((state) => {
+      const runtimes = new Map(state.serviceRuntimes);
+      const existing = runtimes.get(serviceId) || { status: 'stopped', logs: [], detectedPorts: [] };
+      runtimes.set(serviceId, { ...existing, detectedPorts: ports });
+      return { serviceRuntimes: runtimes };
     });
   },
 

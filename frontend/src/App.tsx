@@ -24,6 +24,7 @@ import {
   onServiceLog,
   onServiceStatus,
   onServiceExit,
+  onServicePorts,
   onScriptLog,
   onScriptStatus,
   onScriptExit,
@@ -103,6 +104,7 @@ function App() {
     let unlistenServiceLog: (() => void) | undefined;
     let unlistenServiceStatus: (() => void) | undefined;
     let unlistenServiceExit: (() => void) | undefined;
+    let unlistenServicePorts: (() => void) | undefined;
     // Script listeners
     let unlistenScriptLog: (() => void) | undefined;
     let unlistenScriptStatus: (() => void) | undefined;
@@ -137,6 +139,12 @@ function App() {
       unlistenServiceExit = await onServiceExit((payload) => {
         if (isCancelled) return;
         console.log(`Service ${payload.serviceId} exited with code ${payload.exitCode}`);
+      });
+
+      unlistenServicePorts = await onServicePorts((payload) => {
+        if (isCancelled) return;
+        const { updateServiceDetectedPorts } = useAppStore.getState();
+        updateServiceDetectedPorts(payload.serviceId, payload.ports);
       });
 
       // Script event listeners
@@ -212,6 +220,7 @@ function App() {
       unlistenServiceLog?.();
       unlistenServiceStatus?.();
       unlistenServiceExit?.();
+      unlistenServicePorts?.();
       unlistenScriptLog?.();
       unlistenScriptStatus?.();
       unlistenScriptExit?.();

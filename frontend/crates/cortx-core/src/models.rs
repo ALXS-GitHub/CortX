@@ -491,6 +491,13 @@ pub struct ServiceExitPayload {
     pub exit_code: Option<i32>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServicePortsPayload {
+    pub service_id: String,
+    pub ports: Vec<u16>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ScriptStatus {

@@ -545,7 +545,7 @@ export function TerminalPanel() {
         projectId,
         status: runtime.status,
         logs: runtime.logs,
-        detectedPort: runtime.detectedPort,
+        detectedPorts: runtime.detectedPorts,
         activeMode: runtime.activeMode,
       });
     }
@@ -561,6 +561,7 @@ export function TerminalPanel() {
         projectId,
         status: runtime.status,
         logs: runtime.logs,
+        detectedPorts: [],
         lastExitCode: runtime.lastExitCode,
         lastSuccess: runtime.lastSuccess,
       });
@@ -577,6 +578,7 @@ export function TerminalPanel() {
         projectId: '',
         status: runtime.status,
         logs: runtime.logs,
+        detectedPorts: [],
         lastExitCode: runtime.lastExitCode,
         lastSuccess: runtime.lastSuccess,
       });

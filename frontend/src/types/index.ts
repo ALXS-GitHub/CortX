@@ -153,6 +153,11 @@ export interface ServiceExitPayload {
   exitCode?: number;
 }
 
+export interface ServicePortsPayload {
+  serviceId: string;
+  ports: number[];
+}
+
 // Script types
 export type ScriptStatus = 'idle' | 'running' | 'completed' | 'failed';
 
