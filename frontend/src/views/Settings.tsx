@@ -26,8 +26,11 @@ import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags
 import { toast } from 'sonner';
 import { TagDefinitionManager } from '@/components/global-scripts/TagDefinitionManager';
 import { StatusDefinitionManager } from '@/components/settings/StatusDefinitionManager';
-import { generateShellInit } from '@/lib/tauri';
+import { generateShellInit, setGlobalHotkey as setGlobalHotkeyApi } from '@/lib/tauri';
+import { HotkeyInput } from '@/components/settings/HotkeyInput';
 import type { AppSettings, TerminalPreset, ExportSummary, ImportOptions } from '@/types';
+
+const DEFAULT_GLOBAL_HOTKEY = 'CmdOrCtrl+Shift+Space';
 
 // Terminal preset labels and descriptions
 const TERMINAL_PRESETS: {
@@ -114,6 +117,7 @@ export function Settings() {
   const [launchMethod, setLaunchMethod] = useState<'clipboard' | 'external' | 'integrated'>('integrated');
   const [toolboxBaseUrl, setToolboxBaseUrl] = useState('');
   const [backupRepoPath, setBackupRepoPath] = useState('');
+  const [globalHotkey, setGlobalHotkey] = useState<string>(DEFAULT_GLOBAL_HOTKEY);
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [commandTemplates, setCommandTemplates] = useState<Record<string, string>>({});
   const [newExtension, setNewExtension] = useState('');
@@ -135,6 +139,7 @@ export function Settings() {
       setLaunchMethod(settings.defaults.launchMethod);
       setToolboxBaseUrl(settings.toolboxBaseUrl ?? '');
       setBackupRepoPath(settings.backupRepoPath ?? '');
+      setGlobalHotkey(settings.globalHotkey ?? DEFAULT_GLOBAL_HOTKEY);
       setCommandTemplates(settings.scriptsConfig.commandTemplates ?? {});
       setHasChanges(false);
     }
@@ -282,10 +287,17 @@ export function Settings() {
       },
       toolboxBaseUrl,
       backupRepoPath: backupRepoPath || undefined,
+      globalHotkey: globalHotkey || undefined,
     };
 
     try {
       await updateSettings(newSettings);
+      // Re-register the OS-level hotkey so the change takes effect immediately.
+      try {
+        await setGlobalHotkeyApi(globalHotkey ?? '');
+      } catch (err) {
+        toast.error(`Hotkey saved but registration failed: ${err}`);
+      }
       setHasChanges(false);
       toast.success('Settings saved');
 
@@ -519,6 +531,34 @@ export function Settings() {
             </Select>
             <p className="text-xs text-muted-foreground">
               The default method used when starting services
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Command Palette */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Command Palette</CardTitle>
+          <CardDescription>
+            Open the command palette from anywhere using a system-wide hotkey.
+            Inside the app, <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground text-xs">Cmd/Ctrl+K</kbd> always works regardless of this setting.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label>Global Hotkey</Label>
+            <HotkeyInput
+              value={globalHotkey}
+              defaultCombo={DEFAULT_GLOBAL_HOTKEY}
+              onChange={(combo) => {
+                setGlobalHotkey(combo);
+                setHasChanges(true);
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              Click the field, press your desired combo. Esc to cancel, Backspace to clear (disables).
+              On macOS, the OS may prompt for Accessibility permission the first time.
             </p>
           </div>
         </CardContent>
