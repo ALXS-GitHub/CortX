@@ -772,6 +772,13 @@ pub fn update_settings(state: State<AppState>, settings: AppSettings) -> Result<
         .map_err(|e| e.to_string())
 }
 
+/// (Re-)register the global hotkey. Pass an empty string to unregister
+/// (effectively disables "open palette from anywhere").
+#[tauri::command]
+pub fn set_global_hotkey(app: tauri::AppHandle, combo: String) -> Result<(), String> {
+    crate::register_hotkey(&app, &combo)
+}
+
 // Utility commands
 
 #[tauri::command]

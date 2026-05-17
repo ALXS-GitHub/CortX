@@ -34,6 +34,7 @@ import {
   onGlobalScriptStatus,
   onGlobalScriptExit,
   onDataChanged,
+  onOpenCommandPalette,
   getRunningServices,
 } from '@/lib/tauri';
 import type { LogEntry } from '@/types';
@@ -73,6 +74,23 @@ function App() {
   const { currentView, loadProjects, loadSettings, loadGlobalScripts, loadTagDefinitions, loadScriptsConfig, loadTools, loadAliases, loadStatusDefinitions, loadApps } = useAppStore();
   const [paletteOpen, setPaletteOpen] = useState(false);
   useCommandPaletteShortcut(paletteOpen, setPaletteOpen);
+
+  // OS-level global hotkey -> toggle palette (window is shown + focused on
+  // the backend side before this fires).
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    onOpenCommandPalette(() => {
+      setPaletteOpen((v) => !v);
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Keep track of whether listeners are set up
   const listenersSetUp = useRef(false);

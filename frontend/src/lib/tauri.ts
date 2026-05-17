@@ -157,6 +157,11 @@ export async function updateSettings(settings: AppSettings): Promise<void> {
   return invoke('update_settings', { settings });
 }
 
+/** Register (or re-register) the OS-level global hotkey. Empty string disables. */
+export async function setGlobalHotkey(combo: string): Promise<void> {
+  return invoke('set_global_hotkey', { combo });
+}
+
 // Utility commands
 export async function openInExplorer(path: string): Promise<void> {
   return invoke('open_in_explorer', { path });
@@ -528,6 +533,12 @@ export async function openAppUrl(url: string): Promise<void> {
 // Data change listener (file watcher)
 export async function onDataChanged(callback: () => void): Promise<UnlistenFn> {
   return listen('data-changed', () => callback());
+}
+
+/** Fires when the OS-level global hotkey is pressed, asking the UI to open
+ *  the command palette (and ensure the window is shown + focused). */
+export async function onOpenCommandPalette(callback: () => void): Promise<UnlistenFn> {
+  return listen('open-command-palette', () => callback());
 }
 
 // Global script event listeners

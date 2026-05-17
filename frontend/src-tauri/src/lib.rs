@@ -9,7 +9,24 @@ use cortx_core::file_watcher;
 use process_manager::ProcessManager;
 use storage::Storage;
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+pub const DEFAULT_GLOBAL_HOTKEY: &str = "CmdOrCtrl+Shift+Space";
+
+/// (Re-)register the global palette hotkey. Empty / blank `combo` unregisters.
+pub fn register_hotkey(app: &AppHandle, combo: &str) -> Result<(), String> {
+    // Always clear before registering — keeps state consistent across calls.
+    let _ = app.global_shortcut().unregister_all();
+    let trimmed = combo.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let shortcut: Shortcut = trimmed.parse().map_err(|e| format!("Invalid hotkey '{}': {}", trimmed, e))?;
+    app.global_shortcut()
+        .register(shortcut)
+        .map_err(|e| e.to_string())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -28,7 +45,22 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_fs::init());
+        .plugin(tauri_plugin_fs::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+                    if event.state == ShortcutState::Pressed {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.unminimize();
+                            let _ = win.set_focus();
+                        }
+                        let _ = app.emit("open-command-palette", ());
+                    }
+                })
+                .build(),
+        );
 
     // Only initialize updater in release builds
     #[cfg(not(debug_assertions))]
@@ -81,6 +113,16 @@ pub fn run() {
 
             // Keep watcher alive for the lifetime of the app
             app.manage(watcher_handle);
+
+            // Register the global hotkey from persisted settings (or default).
+            let combo = state
+                .storage
+                .get_settings()
+                .global_hotkey
+                .unwrap_or_else(|| DEFAULT_GLOBAL_HOTKEY.to_string());
+            if let Err(e) = register_hotkey(app.handle(), &combo) {
+                log::warn!("Could not register global hotkey '{}': {}", combo, e);
+            }
 
             Ok(())
         })
@@ -149,6 +191,7 @@ pub fn run() {
             // Settings commands
             commands::get_settings,
             commands::update_settings,
+            commands::set_global_hotkey,
             // Utility commands
             commands::open_in_explorer,
             commands::open_in_vscode,

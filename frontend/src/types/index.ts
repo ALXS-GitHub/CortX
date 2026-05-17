@@ -113,6 +113,9 @@ export interface AppSettings {
   scriptsConfig: ScriptsConfig;
   toolboxBaseUrl: string;
   backupRepoPath?: string;
+  /** tauri-plugin-global-shortcut combo (e.g. "CmdOrCtrl+Shift+Space").
+   *  Undefined / empty means "disabled". */
+  globalHotkey?: string;
 }
 
 export type ServiceStatus = 'stopped' | 'starting' | 'running' | 'error';

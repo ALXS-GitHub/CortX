@@ -323,6 +323,11 @@ pub struct AppSettings {
     /// Path to a local git repo for backing up CortX data
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup_repo_path: Option<String>,
+    /// Global hotkey combo for opening the command palette from anywhere.
+    /// Empty string or None means "disabled". Uses tauri-plugin-global-shortcut
+    /// syntax: e.g. "CmdOrCtrl+Shift+Space", "Alt+F1".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub global_hotkey: Option<String>,
 }
 
 // Input types for commands
