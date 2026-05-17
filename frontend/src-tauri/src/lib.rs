@@ -8,11 +8,57 @@ use commands::AppState;
 use cortx_core::file_watcher;
 use process_manager::ProcessManager;
 use storage::Storage;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 pub const DEFAULT_GLOBAL_HOTKEY: &str = "CmdOrCtrl+Shift+Space";
+
+/// Show / unminimize / focus the main window. No-op if it's missing.
+fn show_main_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+/// Toggle the main window's visibility. Used by left-clicks on the tray icon.
+fn toggle_main_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        match w.is_visible() {
+            Ok(true) => {
+                let _ = w.hide();
+            }
+            _ => {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }
+    }
+}
+
+/// Trigger the real quit flow: set the `quitting` flag and close the window.
+/// The on_window_event handler observes the flag and runs the cleanup path.
+fn trigger_quit(app: &AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.quitting.store(true, Ordering::SeqCst);
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        // Surface the window so the ClosingModal is visible during cleanup.
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = w.close();
+    } else {
+        // No window left — there's nothing for CloseRequested to fire on,
+        // so just exit the app directly.
+        app.exit(0);
+    }
+}
 
 /// (Re-)register the global palette hotkey. Empty / blank `combo` unregisters.
 pub fn register_hotkey(app: &AppHandle, combo: &str) -> Result<(), String> {
@@ -37,6 +83,7 @@ pub fn run() {
     let app_state = AppState {
         storage: Arc::new(storage),
         process_manager: Arc::new(process_manager),
+        quitting: Arc::new(AtomicBool::new(false)),
     };
 
     #[allow(unused_mut)]
@@ -124,38 +171,85 @@ pub fn run() {
                 log::warn!("Could not register global hotkey '{}': {}", combo, e);
             }
 
+            // System tray icon — keeps the app alive after the window is
+            // hidden via X, and provides Show / Open Palette / Quit actions.
+            let show_item = MenuItem::with_id(app, "tray-show", "Show CortX", true, None::<&str>)?;
+            let palette_item =
+                MenuItem::with_id(app, "tray-palette", "Open Command Palette", true, None::<&str>)?;
+            let sep = PredefinedMenuItem::separator(app)?;
+            let quit_item = MenuItem::with_id(app, "tray-quit", "Quit CortX", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_item, &palette_item, &sep, &quit_item])?;
+
+            let mut tray_builder = TrayIconBuilder::with_id("main-tray")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .tooltip("CortX")
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "tray-show" => show_main_window(app),
+                    "tray-palette" => {
+                        show_main_window(app);
+                        let _ = app.emit("open-command-palette", ());
+                    }
+                    "tray-quit" => trigger_quit(app),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button,
+                        button_state,
+                        ..
+                    } = event
+                    {
+                        if button == MouseButton::Left && button_state == MouseButtonState::Up {
+                            toggle_main_window(tray.app_handle());
+                        }
+                    }
+                });
+
+            if let Some(icon) = app.default_window_icon().cloned() {
+                tray_builder = tray_builder.icon(icon);
+            }
+            let _tray = tray_builder.build(app)?;
+
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Prevent the window from closing immediately
-                api.prevent_close();
-
                 let app_handle = window.app_handle().clone();
-                let window_clone = window.clone();
+                let is_quitting = app_handle
+                    .try_state::<AppState>()
+                    .map(|s| s.quitting.load(Ordering::SeqCst))
+                    .unwrap_or(false);
 
-                // Spawn a thread to handle cleanup
+                // Default behaviour: clicking the X (or any close request that
+                // didn't go through trigger_quit / quit_app) just hides the
+                // window. The tray icon keeps the app alive and the hotkey
+                // active. Services stay running.
+                if !is_quitting {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    return;
+                }
+
+                // Real quit path — same flow as before: stop_all -> destroy.
+                // We additionally call app.exit(0) at the end because the
+                // tray icon would otherwise keep the process alive.
+                api.prevent_close();
+                let window_clone = window.clone();
                 std::thread::spawn(move || {
-                    // Get the process manager and check if there are running processes
                     if let Some(state) = app_handle.try_state::<AppState>() {
                         let has_running = state.process_manager.has_running_processes();
-
                         if has_running {
-                            // Emit event to frontend to show closing modal
-                            log::info!("Window close requested - notifying frontend of cleanup...");
+                            log::info!("Quit requested - notifying frontend of cleanup...");
                             let _ = window_clone.emit("app-closing", true);
-
-                            // Small delay to let frontend show modal
                             std::thread::sleep(std::time::Duration::from_millis(100));
                         }
-
                         log::info!("Stopping all services...");
                         state.process_manager.stop_all();
                         log::info!("All services stopped, closing window...");
                     }
-
-                    // Now destroy the window (not close, which would trigger another CloseRequested)
                     let _ = window_clone.destroy();
+                    app_handle.exit(0);
                 });
             }
         })
@@ -192,6 +286,7 @@ pub fn run() {
             commands::get_settings,
             commands::update_settings,
             commands::set_global_hotkey,
+            commands::quit_app,
             // Utility commands
             commands::open_in_explorer,
             commands::open_in_vscode,

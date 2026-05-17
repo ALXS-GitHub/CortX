@@ -162,6 +162,12 @@ export async function setGlobalHotkey(combo: string): Promise<void> {
   return invoke('set_global_hotkey', { combo });
 }
 
+/** Real quit — runs the service-cleanup flow and exits the process.
+ *  In contrast, closing the window (X / window.close()) only hides to tray. */
+export async function quitApp(): Promise<void> {
+  return invoke('quit_app');
+}
+
 // Utility commands
 export async function openInExplorer(path: string): Promise<void> {
   return invoke('open_in_explorer', { path });

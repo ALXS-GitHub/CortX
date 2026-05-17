@@ -23,6 +23,9 @@ use walkdir::WalkDir;
 pub struct AppState {
     pub storage: Arc<Storage>,
     pub process_manager: Arc<ProcessManager>,
+    /// Set to true to opt out of "close = hide-to-tray" and run the real
+    /// quit cleanup flow when the next CloseRequested event fires.
+    pub quitting: Arc<std::sync::atomic::AtomicBool>,
 }
 
 // Project commands
@@ -777,6 +780,25 @@ pub fn update_settings(state: State<AppState>, settings: AppSettings) -> Result<
 #[tauri::command]
 pub fn set_global_hotkey(app: tauri::AppHandle, combo: String) -> Result<(), String> {
     crate::register_hotkey(&app, &combo)
+}
+
+/// Real quit (as opposed to the X button which now hides to tray).
+/// Sets the quitting flag so the CloseRequested handler runs the cleanup
+/// flow, then closes the window. The flag is checked again inside the
+/// handler — see lib.rs::on_window_event.
+#[tauri::command]
+pub fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    use tauri::Manager;
+    if let Some(state) = app.try_state::<AppState>() {
+        state.quitting.store(true, Ordering::SeqCst);
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        w.close().map_err(|e| e.to_string())
+    } else {
+        app.exit(0);
+        Ok(())
+    }
 }
 
 // Utility commands
