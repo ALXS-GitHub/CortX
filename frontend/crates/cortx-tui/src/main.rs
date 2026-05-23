@@ -234,9 +234,12 @@ enum Command {
 enum ScriptAction {
     /// List all global scripts
     List {
-        /// Filter by tag
+        /// Filter by tag (exact, case-insensitive)
         #[arg(long)]
         tag: Option<String>,
+        /// Filter by name (case-insensitive substring)
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Show details for a script
     Get {
@@ -303,9 +306,15 @@ enum ScriptAction {
 enum ProjectAction {
     /// List all projects
     List {
-        /// Filter by tag
+        /// Filter by tag (exact, case-insensitive)
         #[arg(long)]
         tag: Option<String>,
+        /// Filter by name (case-insensitive substring)
+        #[arg(long)]
+        name: Option<String>,
+        /// Filter by root path (case-insensitive substring)
+        #[arg(long)]
+        path: Option<String>,
         /// Include subcollections in --json output. Comma-separated subset of
         /// {services, scripts, envFiles}, or "all". Default is shallow:
         /// scalar fields plus serviceCount / scriptCount / envFileCount.
@@ -500,9 +509,12 @@ enum ServiceAction {
 enum ToolAction {
     /// List all tools
     List {
-        /// Filter by tag
+        /// Filter by tag (exact, case-insensitive)
         #[arg(long)]
         tag: Option<String>,
+        /// Filter by name (case-insensitive substring)
+        #[arg(long)]
+        name: Option<String>,
         /// Scan system for installed tools (Scoop/Chocolatey)
         #[arg(long)]
         scan: bool,
@@ -587,7 +599,11 @@ enum ToolAction {
 #[derive(Subcommand)]
 enum AliasCommand {
     /// List all aliases
-    List,
+    List {
+        /// Filter by name (case-insensitive substring)
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Show details for an alias
     Get {
         /// Alias name
@@ -652,7 +668,11 @@ enum AliasCommand {
 #[derive(Subcommand)]
 enum AppAction {
     /// List all apps
-    List,
+    List {
+        /// Filter by name (case-insensitive substring)
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Show details for an app
     Get {
         /// App name or ID
@@ -855,6 +875,16 @@ fn resolve_by_name_or_id<'a, T>(
         .ok_or_else(|| format!("'{}' not found", name_or_id))
 }
 
+/// Case-insensitive substring match. Returns true when `needle` is `None`
+/// (no filter active) or when `haystack` contains `needle`. Used by every
+/// `list` subcommand's `--name` / `--path` filter (#19).
+fn matches_substr(haystack: &str, needle: Option<&str>) -> bool {
+    match needle {
+        None => true,
+        Some(n) => haystack.to_lowercase().contains(&n.to_lowercase()),
+    }
+}
+
 // ============================================================================
 // Delete confirmation
 // ============================================================================
@@ -908,20 +938,16 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         // Legacy shortcuts
-        Some(Command::Scripts) => cmd_script_list(&storage, None, json),
-        Some(Command::Tools { scan }) => {
-            if scan {
-                cmd_tool_list(&storage, None, true, json)
-            } else {
-                cmd_tool_list(&storage, None, false, json)
-            }
-        }
+        Some(Command::Scripts) => cmd_script_list(&storage, None, None, json),
+        Some(Command::Tools { scan }) => cmd_tool_list(&storage, None, None, scan, json),
 
         Some(Command::Init { shell }) => cmd_init(&storage, &shell),
 
         // Script group
         Some(Command::Script { action }) => match action {
-            ScriptAction::List { tag } => cmd_script_list(&storage, tag.as_deref(), json),
+            ScriptAction::List { tag, name } => {
+                cmd_script_list(&storage, tag.as_deref(), name.as_deref(), json)
+            }
             ScriptAction::Get { name_or_id } => cmd_script_get(&storage, &name_or_id, json),
             ScriptAction::Create { name, command, dir, tag, description, status } => {
                 cmd_script_create(&storage, &name, &command, dir.as_deref(), tag, description.as_deref(), status.as_deref(), json)
@@ -934,9 +960,14 @@ fn main() -> anyhow::Result<()> {
 
         // Project group
         Some(Command::Project { action }) => match action {
-            ProjectAction::List { tag, include } => {
-                cmd_project_list(&storage, tag.as_deref(), &include, json)
-            }
+            ProjectAction::List { tag, name, path, include } => cmd_project_list(
+                &storage,
+                tag.as_deref(),
+                name.as_deref(),
+                path.as_deref(),
+                &include,
+                json,
+            ),
             ProjectAction::Get { name_or_id } => cmd_project_get(&storage, &name_or_id, json),
             ProjectAction::Create { name, path, description, tag, status, toolbox_url } => {
                 cmd_project_create(&storage, &name, &path, description.as_deref(), tag, status.as_deref(), toolbox_url.as_deref(), json)
@@ -985,7 +1016,9 @@ fn main() -> anyhow::Result<()> {
 
         // Tool group
         Some(Command::Tool { action }) => match action {
-            ToolAction::List { tag, scan } => cmd_tool_list(&storage, tag.as_deref(), scan, json),
+            ToolAction::List { tag, name, scan } => {
+                cmd_tool_list(&storage, tag.as_deref(), name.as_deref(), scan, json)
+            }
             ToolAction::Get { name_or_id } => cmd_tool_get(&storage, &name_or_id, json),
             ToolAction::Create { name, description, tag, status, install_method, install_location, version, homepage, color, config_path } => {
                 cmd_tool_create(&storage, &name, description.as_deref(), tag, status.as_deref(), install_method.as_deref(), install_location.as_deref(), version.as_deref(), homepage.as_deref(), color.as_deref(), config_path, json)
@@ -998,7 +1031,7 @@ fn main() -> anyhow::Result<()> {
 
         // Alias group
         Some(Command::Alias { command: alias_cmd }) => match alias_cmd {
-            AliasCommand::List => cmd_alias_list(&storage, json),
+            AliasCommand::List { name } => cmd_alias_list(&storage, name.as_deref(), json),
             AliasCommand::Get { name } => cmd_alias_get(&storage, &name, json),
             AliasCommand::Add { name, command, description, alias_type, setup, script, tool_id } => {
                 cmd_alias_add(&storage, &name, &command, description.as_deref(), alias_type.as_deref(), setup, script, tool_id)
@@ -1011,7 +1044,7 @@ fn main() -> anyhow::Result<()> {
 
         // App group
         Some(Command::App { action }) => match action {
-            AppAction::List => cmd_app_list(&storage, json),
+            AppAction::List { name } => cmd_app_list(&storage, name.as_deref(), json),
             AppAction::Get { name_or_id } => cmd_app_get(&storage, &name_or_id, json),
             AppAction::Create { name, description, executable, tag, status, homepage, launch_args, color, config_path } => {
                 cmd_app_create(&storage, &name, description.as_deref(), executable.as_deref(), tag, status.as_deref(), homepage.as_deref(), launch_args.as_deref(), color.as_deref(), config_path, json)
@@ -1077,15 +1110,23 @@ fn main() -> anyhow::Result<()> {
 // Script commands
 // ============================================================================
 
-fn cmd_script_list(storage: &Storage, tag_filter: Option<&str>, json: bool) -> anyhow::Result<()> {
+fn cmd_script_list(
+    storage: &Storage,
+    tag_filter: Option<&str>,
+    name_filter: Option<&str>,
+    json: bool,
+) -> anyhow::Result<()> {
     let scripts = storage.get_all_global_scripts();
 
-    let filtered: Vec<&GlobalScript> = if let Some(tag) = tag_filter {
-        let tag_lower = tag.to_lowercase();
-        scripts.iter().filter(|s| s.tags.iter().any(|t| t.to_lowercase() == tag_lower)).collect()
-    } else {
-        scripts.iter().collect()
-    };
+    let tag_lower = tag_filter.map(|t| t.to_lowercase());
+    let filtered: Vec<&GlobalScript> = scripts
+        .iter()
+        .filter(|s| match tag_lower.as_deref() {
+            Some(t) => s.tags.iter().any(|tg| tg.to_lowercase() == t),
+            None => true,
+        })
+        .filter(|s| matches_substr(&s.name, name_filter))
+        .collect();
 
     if json {
         let items: Vec<&GlobalScript> = filtered;
@@ -1370,17 +1411,23 @@ fn project_to_list_json(p: &Project, inc: ProjectListIncludes) -> serde_json::Va
 fn cmd_project_list(
     storage: &Storage,
     tag_filter: Option<&str>,
+    name_filter: Option<&str>,
+    path_filter: Option<&str>,
     include: &[String],
     json: bool,
 ) -> anyhow::Result<()> {
     let projects = storage.get_all_projects();
 
-    let filtered: Vec<&Project> = if let Some(tag) = tag_filter {
-        let tag_lower = tag.to_lowercase();
-        projects.iter().filter(|p| p.tags.iter().any(|t| t.to_lowercase() == tag_lower)).collect()
-    } else {
-        projects.iter().collect()
-    };
+    let tag_lower = tag_filter.map(|t| t.to_lowercase());
+    let filtered: Vec<&Project> = projects
+        .iter()
+        .filter(|p| match tag_lower.as_deref() {
+            Some(t) => p.tags.iter().any(|tg| tg.to_lowercase() == t),
+            None => true,
+        })
+        .filter(|p| matches_substr(&p.name, name_filter))
+        .filter(|p| matches_substr(&p.root_path, path_filter))
+        .collect();
 
     if json {
         let includes = parse_project_list_includes(include)?;
@@ -2213,9 +2260,16 @@ fn cmd_ps(storage: &Storage, json: bool) -> anyhow::Result<()> {
 // Tool commands
 // ============================================================================
 
-fn cmd_tool_list(storage: &Storage, tag_filter: Option<&str>, scan: bool, json: bool) -> anyhow::Result<()> {
+fn cmd_tool_list(
+    storage: &Storage,
+    tag_filter: Option<&str>,
+    name_filter: Option<&str>,
+    scan: bool,
+    json: bool,
+) -> anyhow::Result<()> {
     if scan {
-        let tools = cortx_core::tool_discovery::scan_installed_tools();
+        let mut tools = cortx_core::tool_discovery::scan_installed_tools();
+        tools.retain(|t| matches_substr(&t.name, name_filter));
 
         if json {
             println!("{}", serde_json::to_string_pretty(&tools)?);
@@ -2243,12 +2297,15 @@ fn cmd_tool_list(storage: &Storage, tag_filter: Option<&str>, scan: bool, json: 
     } else {
         let tools = storage.get_all_tools();
 
-        let filtered: Vec<&Tool> = if let Some(tag) = tag_filter {
-            let tag_lower = tag.to_lowercase();
-            tools.iter().filter(|t| t.tags.iter().any(|tg| tg.to_lowercase() == tag_lower)).collect()
-        } else {
-            tools.iter().collect()
-        };
+        let tag_lower = tag_filter.map(|t| t.to_lowercase());
+        let filtered: Vec<&Tool> = tools
+            .iter()
+            .filter(|t| match tag_lower.as_deref() {
+                Some(t_l) => t.tags.iter().any(|tg| tg.to_lowercase() == t_l),
+                None => true,
+            })
+            .filter(|t| matches_substr(&t.name, name_filter))
+            .collect();
 
         if json {
             println!("{}", serde_json::to_string_pretty(&filtered)?);
@@ -2436,8 +2493,13 @@ fn cmd_tool_delete(storage: &Storage, name_or_id: &str, yes: bool) -> anyhow::Re
 // Alias commands
 // ============================================================================
 
-fn cmd_alias_list(storage: &Storage, json: bool) -> anyhow::Result<()> {
-    let aliases = storage.get_all_aliases();
+fn cmd_alias_list(
+    storage: &Storage,
+    name_filter: Option<&str>,
+    json: bool,
+) -> anyhow::Result<()> {
+    let mut aliases = storage.get_all_aliases();
+    aliases.retain(|a| matches_substr(&a.name, name_filter));
 
     if json {
         println!("{}", serde_json::to_string_pretty(&aliases)?);
@@ -2645,8 +2707,13 @@ fn cmd_alias_remove(storage: &Storage, name: &str) -> anyhow::Result<()> {
 // App commands
 // ============================================================================
 
-fn cmd_app_list(storage: &Storage, json: bool) -> anyhow::Result<()> {
-    let apps = storage.get_all_apps();
+fn cmd_app_list(
+    storage: &Storage,
+    name_filter: Option<&str>,
+    json: bool,
+) -> anyhow::Result<()> {
+    let mut apps = storage.get_all_apps();
+    apps.retain(|a| matches_substr(&a.name, name_filter));
 
     if json {
         println!("{}", serde_json::to_string_pretty(&apps)?);
