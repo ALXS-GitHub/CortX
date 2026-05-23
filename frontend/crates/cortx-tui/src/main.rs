@@ -76,7 +76,8 @@ fn should_colorize() -> bool {
     name = "cortx",
     version,
     about = "CortX - Manage and run scripts, tools, projects & more",
-    after_help = "Tip: `cortx <script_name>` is a shortcut for `cortx run <script_name>`"
+    after_help = "For AI agents: run `cortx docs` to print the full LLM-oriented reference.\n\n\
+                  Tip: `cortx <script_name>` is a shortcut for `cortx run <script_name>`."
 )]
 struct Cli {
     /// Output JSON instead of formatted tables
@@ -1134,8 +1135,24 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
             cmd_run(&storage, &process_manager, &args[0], None, &args[1..].to_vec())
         }
 
-        // TUI
-        None => run_tui(storage, process_manager),
+        // No subcommand: launch the TUI when stdout is a terminal,
+        // otherwise (piped / captured / agent tool call) print the docs
+        // hint instead of hanging on an interactive screen.
+        None => {
+            use std::io::IsTerminal;
+            if std::io::stdout().is_terminal() {
+                run_tui(storage, process_manager)
+            } else {
+                println!(
+                    "CortX CLI — interactive TUI requires a terminal."
+                );
+                println!(
+                    "For AI agents: run `cortx docs` for the full LLM-oriented reference."
+                );
+                println!("Run `cortx --help` for command-line usage.");
+                Ok(())
+            }
+        }
     }
 }
 
