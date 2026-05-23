@@ -19,7 +19,7 @@ use ratatui::prelude::*;
 use cortx_core::file_watcher;
 use cortx_core::models::{
     App as CoreApp, GlobalScript, ImportOptions, Project,
-    Service, ShellAlias, StatusDefinition, TagDefinition, Tool,
+    Script, Service, ShellAlias, StatusDefinition, TagDefinition, Tool,
 };
 use cortx_core::process_manager::ProcessManager;
 use cortx_core::runtime_state::{
@@ -299,6 +299,36 @@ enum ProjectAction {
         /// Skip confirmation prompt
         #[arg(long)]
         yes: bool,
+    },
+    /// Run a project-scoped script detached. Returns the PID immediately;
+    /// logs stream to `<app_dir>/runtime/<script_id>.log`.
+    Run {
+        /// Project name or ID
+        project: String,
+        /// Script name or ID (within the project)
+        script: String,
+        /// Extra arguments to pass to the script
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Stop a running project script (kills the process tree).
+    Stop {
+        project: String,
+        script: String,
+    },
+    /// Show the runtime state of a project script: PID, uptime, command.
+    Status {
+        project: String,
+        script: String,
+    },
+    /// Print buffered logs for a project script.
+    Logs {
+        project: String,
+        script: String,
+        #[arg(long, default_value_t = 100)]
+        tail: usize,
+        #[arg(short, long)]
+        follow: bool,
     },
 }
 
@@ -844,6 +874,18 @@ fn main() -> anyhow::Result<()> {
                 cmd_project_update(&storage, &name_or_id, name, path, description, tag, status, toolbox_url, json)
             }
             ProjectAction::Delete { name_or_id, yes } => cmd_project_delete(&storage, &name_or_id, yes),
+            ProjectAction::Run { project, script, args } => {
+                cmd_project_run(&storage, &project, &script, &args, json)
+            }
+            ProjectAction::Stop { project, script } => {
+                cmd_project_script_stop(&storage, &project, &script, json)
+            }
+            ProjectAction::Status { project, script } => {
+                cmd_project_script_status(&storage, &project, &script, json)
+            }
+            ProjectAction::Logs { project, script, tail, follow } => {
+                cmd_project_script_logs(&storage, &project, &script, tail, follow)
+            }
         },
 
         // Service group
@@ -1703,6 +1745,231 @@ fn follow_log(path: &std::path::Path) -> anyhow::Result<()> {
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
+}
+
+// ----- Project script process control --------------------------------------
+
+fn resolve_project_script(
+    storage: &Storage,
+    project_ref: &str,
+    script_ref: &str,
+) -> anyhow::Result<(Project, Script)> {
+    let projects = storage.get_all_projects();
+    let project = resolve_by_name_or_id(&projects, project_ref, |p| &p.id, |p| &p.name)
+        .map_err(|e| anyhow::anyhow!("Project {}", e))?
+        .clone();
+    let script = resolve_by_name_or_id(
+        &project.scripts,
+        script_ref,
+        |s| &s.id,
+        |s| &s.name,
+    )
+    .map_err(|e| anyhow::anyhow!("Project script {}", e))?
+    .clone();
+    Ok((project, script))
+}
+
+fn resolve_script_working_dir(project: &Project, script: &Script) -> String {
+    let dir = script.working_dir.trim();
+    if dir.is_empty() || dir == "." {
+        project.root_path.clone()
+    } else {
+        let path = std::path::Path::new(dir);
+        if path.is_absolute() {
+            dir.to_string()
+        } else {
+            std::path::Path::new(&project.root_path)
+                .join(dir)
+                .to_string_lossy()
+                .to_string()
+        }
+    }
+}
+
+fn cmd_project_run(
+    storage: &Storage,
+    project_ref: &str,
+    script_ref: &str,
+    extra_args: &[String],
+    json: bool,
+) -> anyhow::Result<()> {
+    let (project, script) = resolve_project_script(storage, project_ref, script_ref)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+
+    if let Some(existing) = store.get(&script.id) {
+        if runtime_state::is_pid_alive(existing.pid) {
+            return Err(anyhow::anyhow!(
+                "Project script '{}' already running (PID {})",
+                script.name,
+                existing.pid
+            ));
+        }
+        store.unregister(&script.id)?;
+    }
+
+    let mut command = if let Some(ref path) = script.script_path {
+        script.command.replace("{{SCRIPT_FILE}}", path)
+    } else {
+        script.command.clone()
+    };
+    if !extra_args.is_empty() {
+        command = format!("{} {}", command, extra_args.join(" "));
+    }
+
+    let working_dir = resolve_script_working_dir(&project, &script);
+    let (program, args) = runtime_state::shell_wrap(&command);
+    let log_path = store.log_path(&script.id);
+
+    let pid = runtime_state::spawn_detached(
+        &program,
+        &args,
+        &working_dir,
+        None,
+        &log_path,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to spawn project script: {}", e))?;
+
+    let entry = RuntimeEntry {
+        id: script.id.clone(),
+        kind: EntityKind::ProjectScript,
+        pid,
+        display_name: script.name.clone(),
+        command: command.clone(),
+        working_dir,
+        started_at: chrono::Utc::now(),
+        project_id: Some(project.id.clone()),
+        project_name: Some(project.name.clone()),
+        mode: None,
+        arg_preset: None,
+    };
+    store.register(&entry)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&entry)?);
+    } else {
+        println!(
+            "Running project script '{}' (PID {}). Logs: {}",
+            script.name,
+            pid,
+            log_path.display()
+        );
+    }
+    Ok(())
+}
+
+fn cmd_project_script_stop(
+    storage: &Storage,
+    project_ref: &str,
+    script_ref: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    let (_project, script) = resolve_project_script(storage, project_ref, script_ref)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+
+    let entry = store
+        .get(&script.id)
+        .ok_or_else(|| anyhow::anyhow!("Project script '{}' is not running", script.name))?;
+
+    if runtime_state::is_pid_alive(entry.pid) {
+        runtime_state::kill_pid_tree(entry.pid)
+            .map_err(|e| anyhow::anyhow!("Failed to stop: {}", e))?;
+    }
+    store.unregister(&script.id)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "stopped": true,
+                "script_id": script.id,
+                "pid": entry.pid,
+            })
+        );
+    } else {
+        println!(
+            "Stopped project script '{}' (PID {}).",
+            script.name, entry.pid
+        );
+    }
+    Ok(())
+}
+
+fn cmd_project_script_status(
+    storage: &Storage,
+    project_ref: &str,
+    script_ref: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    let (_project, script) = resolve_project_script(storage, project_ref, script_ref)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+
+    match store.get(&script.id) {
+        Some(entry) => {
+            let alive = runtime_state::is_pid_alive(entry.pid);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "script_id": entry.id,
+                        "script_name": entry.display_name,
+                        "project_name": entry.project_name,
+                        "status": if alive { "running" } else { "stopped" },
+                        "pid": entry.pid,
+                        "started_at": entry.started_at,
+                        "command": entry.command,
+                        "working_dir": entry.working_dir,
+                        "log_path": store.log_path(&entry.id),
+                    })
+                );
+            } else {
+                println!("Script:    {}", entry.display_name);
+                println!("Status:    {}", if alive { "running" } else { "stopped (stale)" });
+                println!("PID:       {}", entry.pid);
+                println!("Started:   {}", entry.started_at.format("%Y-%m-%d %H:%M:%S"));
+                println!("Command:   {}", entry.command);
+                println!("Log:       {}", store.log_path(&entry.id).display());
+            }
+            Ok(())
+        }
+        None => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "script_id": script.id,
+                        "script_name": script.name,
+                        "status": "stopped",
+                    })
+                );
+            } else {
+                println!("Project script '{}' is not running.", script.name);
+            }
+            Ok(())
+        }
+    }
+}
+
+fn cmd_project_script_logs(
+    storage: &Storage,
+    project_ref: &str,
+    script_ref: &str,
+    tail: usize,
+    follow: bool,
+) -> anyhow::Result<()> {
+    let (_project, script) = resolve_project_script(storage, project_ref, script_ref)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+    let log_path = store.log_path(&script.id);
+    if !log_path.exists() {
+        return Err(anyhow::anyhow!(
+            "No log file for project script '{}'. Has it ever been run via the CLI?",
+            script.name
+        ));
+    }
+    print_log_tail(&log_path, tail)?;
+    if follow {
+        follow_log(&log_path)?;
+    }
+    Ok(())
 }
 
 fn cmd_ps(storage: &Storage, json: bool) -> anyhow::Result<()> {
