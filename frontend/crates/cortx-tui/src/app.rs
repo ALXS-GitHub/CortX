@@ -966,6 +966,13 @@ impl App {
             return;
         }
         let (command, mode, arg_preset) = Self::resolve_service_command(&svc);
+        let meta = self
+            .viewing_project()
+            .map(|p| {
+                cortx_core::process_manager::RuntimeMeta::new(svc.name.clone())
+                    .with_project(p.id.clone(), p.name.clone())
+            })
+            .unwrap_or_else(|| cortx_core::process_manager::RuntimeMeta::new(svc.name.clone()));
         let emitter = self.emitter.clone();
         let _ = self.process_manager.start_service(
             emitter,
@@ -975,6 +982,7 @@ impl App {
             svc.env_vars.clone(),
             mode,
             arg_preset,
+            meta,
         );
         self.active_service_id = Some(svc.id.clone());
         self.auto_scroll = true;
@@ -989,6 +997,9 @@ impl App {
 
     /// Start every service of the project that isn't already running.
     pub fn start_all_services(&mut self) {
+        let project_meta = self
+            .viewing_project()
+            .map(|p| (p.id.clone(), p.name.clone()));
         let services: Vec<Service> = self
             .viewing_project_services()
             .into_iter()
@@ -999,6 +1010,10 @@ impl App {
                 continue;
             }
             let (command, mode, arg_preset) = Self::resolve_service_command(&svc);
+            let mut meta = cortx_core::process_manager::RuntimeMeta::new(svc.name.clone());
+            if let Some((ref id, ref name)) = project_meta {
+                meta = meta.with_project(id.clone(), name.clone());
+            }
             let emitter = self.emitter.clone();
             let _ = self.process_manager.start_service(
                 emitter,
@@ -1008,6 +1023,7 @@ impl App {
                 svc.env_vars.clone(),
                 mode,
                 arg_preset,
+                meta,
             );
         }
     }
@@ -1567,6 +1583,7 @@ impl App {
             program,
             args,
             script.env_vars.clone(),
+            cortx_core::process_manager::RuntimeMeta::new(script.name.clone()),
         ) {
             Ok(_pid) => {
                 self.active_script_id = Some(script.id.clone());

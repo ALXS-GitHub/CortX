@@ -13,7 +13,8 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler
 use cortx_core::command_builder;
 use cortx_core::help_parser;
 use cortx_core::models::*;
-use cortx_core::process_manager::ProcessManager;
+use cortx_core::process_manager::{ProcessManager, RuntimeMeta};
+use cortx_core::runtime_state::RuntimeStore;
 use cortx_core::script_discovery;
 use cortx_core::storage::Storage;
 use cortx_core::tool_discovery;
@@ -34,9 +35,10 @@ pub struct CortxMcp {
 impl CortxMcp {
     pub fn new() -> anyhow::Result<Self> {
         let storage = Arc::new(Storage::new()?);
+        let runtime_store = Arc::new(RuntimeStore::new(storage.app_dir())?);
         let emitter = Arc::new(McpEmitter::new());
         let process_state = emitter.state();
-        let process_manager = Arc::new(ProcessManager::new());
+        let process_manager = Arc::new(ProcessManager::new(runtime_store));
 
         Ok(Self {
             storage,
@@ -247,6 +249,7 @@ impl CortxMcp {
                 program,
                 args,
                 script.env_vars.clone(),
+                RuntimeMeta::new(script.name.clone()),
             )
             .map_err(|e| mcp_err(e))?;
 
@@ -527,6 +530,8 @@ impl CortxMcp {
                 service.env_vars.clone(),
                 p.mode.clone(),
                 p.arg_preset.clone(),
+                RuntimeMeta::new(service.name.clone())
+                    .with_project(project.id.clone(), project.name.clone()),
             )
             .map_err(|e| mcp_err(e))?;
 
@@ -636,6 +641,8 @@ impl CortxMcp {
                 p.script_id.clone(),
                 script.working_dir.clone(),
                 script.command.clone(),
+                RuntimeMeta::new(script.name.clone())
+                    .with_project(project.id.clone(), project.name.clone()),
             )
             .map_err(|e| mcp_err(e))?;
 

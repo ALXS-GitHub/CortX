@@ -6,6 +6,7 @@ mod tauri_emitter;
 
 use commands::AppState;
 use cortx_core::file_watcher;
+use cortx_core::runtime_state::RuntimeStore;
 use process_manager::ProcessManager;
 use storage::Storage;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -78,7 +79,10 @@ pub fn register_hotkey(app: &AppHandle, combo: &str) -> Result<(), String> {
 pub fn run() {
     // Initialize storage
     let storage = Storage::new().expect("Failed to initialize storage");
-    let process_manager = ProcessManager::new();
+    let runtime_store = Arc::new(
+        RuntimeStore::new(storage.app_dir()).expect("Failed to initialize runtime store"),
+    );
+    let process_manager = ProcessManager::new(runtime_store);
 
     let app_state = AppState {
         storage: Arc::new(storage),

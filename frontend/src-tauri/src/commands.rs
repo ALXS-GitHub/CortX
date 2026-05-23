@@ -701,6 +701,8 @@ pub fn start_integrated_service(
         service.env_vars,
         effective_mode,
         effective_arg_preset,
+        cortx_core::process_manager::RuntimeMeta::new(service.name.clone())
+            .with_project(project.id.clone(), project.name.clone()),
     )
 }
 
@@ -746,6 +748,8 @@ pub fn run_script(
         script_id,
         working_dir,
         script.command,
+        cortx_core::process_manager::RuntimeMeta::new(script.name.clone())
+            .with_project(project.id.clone(), project.name.clone()),
     )
 }
 
@@ -1531,6 +1535,7 @@ pub fn run_global_script(
     let _ = state.storage.add_execution_record(record);
 
     let emitter: Arc<dyn ProcessEventEmitter> = Arc::new(TauriEmitter::new(app_handle));
+    let script_name = script.name.clone();
     let pid = state.process_manager.run_global_script(
         emitter,
         script_id.clone(),
@@ -1538,6 +1543,7 @@ pub fn run_global_script(
         program,
         args,
         script.env_vars,
+        cortx_core::process_manager::RuntimeMeta::new(script_name),
     )?;
 
     Ok(pid)

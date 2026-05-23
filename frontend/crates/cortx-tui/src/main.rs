@@ -21,7 +21,7 @@ use cortx_core::models::{
     App as CoreApp, GlobalScript, ImportOptions, Project,
     Script, Service, ShellAlias, StatusDefinition, TagDefinition, Tool,
 };
-use cortx_core::process_manager::ProcessManager;
+use cortx_core::process_manager::{ProcessManager, RuntimeMeta};
 use cortx_core::runtime_state::{
     self, EntityKind, RuntimeEntry, RuntimeStore,
 };
@@ -857,7 +857,8 @@ fn main() -> anyhow::Result<()> {
     let json = cli.json;
 
     let storage = Arc::new(Storage::new()?);
-    let process_manager = Arc::new(ProcessManager::new());
+    let runtime_store = Arc::new(RuntimeStore::new(storage.app_dir())?);
+    let process_manager = Arc::new(ProcessManager::new(runtime_store.clone()));
 
     match cli.command {
         // Legacy shortcuts
@@ -3330,6 +3331,7 @@ fn cmd_run(
             program,
             args,
             script.env_vars.clone(),
+            RuntimeMeta::new(script.name.clone()),
         )
         .map_err(|e| anyhow::anyhow!(e))?;
 
