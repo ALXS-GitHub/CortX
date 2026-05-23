@@ -22,6 +22,9 @@ use cortx_core::models::{
     Service, ShellAlias, StatusDefinition, TagDefinition, Tool,
 };
 use cortx_core::process_manager::ProcessManager;
+use cortx_core::runtime_state::{
+    self, EntityKind, RuntimeEntry, RuntimeStore,
+};
 use cortx_core::storage::Storage;
 
 use app::{App, ProcessEvent};
@@ -149,6 +152,9 @@ enum Command {
 
     /// Backup data to configured git repo
     Backup,
+
+    /// List CLI-managed running processes (services, project scripts, global scripts).
+    Ps,
 
     /// Print full CLI documentation — if you're an AI agent, read this first
     Docs,
@@ -351,6 +357,41 @@ enum ServiceAction {
         /// Skip confirmation prompt
         #[arg(long)]
         yes: bool,
+    },
+    /// Start a service detached. Returns the PID immediately; logs stream
+    /// to `<app_dir>/runtime/<service_id>.log`.
+    Start {
+        /// Project name or ID
+        project: String,
+        /// Service name or ID (within the project)
+        service: String,
+        /// Mode name (overrides the service's default_mode)
+        #[arg(long)]
+        mode: Option<String>,
+        /// Arg preset name (overrides the service's default_arg_preset)
+        #[arg(long)]
+        arg_preset: Option<String>,
+    },
+    /// Stop a running service (kills the process tree).
+    Stop {
+        project: String,
+        service: String,
+    },
+    /// Show the runtime state of a service: PID, uptime, last log lines.
+    Status {
+        project: String,
+        service: String,
+    },
+    /// Print buffered logs for a service.
+    Logs {
+        project: String,
+        service: String,
+        /// Tail the last N lines (default 100)
+        #[arg(long, default_value_t = 100)]
+        tail: usize,
+        /// Follow the log file and print new lines as they arrive
+        #[arg(short, long)]
+        follow: bool,
     },
 }
 
@@ -815,6 +856,18 @@ fn main() -> anyhow::Result<()> {
                 cmd_service_update(&storage, &id, name, command, dir, json)
             }
             ServiceAction::Delete { id, yes } => cmd_service_delete(&storage, &id, yes),
+            ServiceAction::Start { project, service, mode, arg_preset } => {
+                cmd_service_start(&storage, &project, &service, mode.as_deref(), arg_preset.as_deref(), json)
+            }
+            ServiceAction::Stop { project, service } => {
+                cmd_service_stop(&storage, &project, &service, json)
+            }
+            ServiceAction::Status { project, service } => {
+                cmd_service_status(&storage, &project, &service, json)
+            }
+            ServiceAction::Logs { project, service, tail, follow } => {
+                cmd_service_logs(&storage, &project, &service, tail, follow)
+            }
         },
 
         // Tool group
@@ -884,6 +937,7 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Import { file, all }) => cmd_import(&storage, &file, all),
         Some(Command::Backup) => cmd_backup(&storage),
         Some(Command::Docs) => cmd_docs(),
+        Some(Command::Ps) => cmd_ps(&storage, json),
 
         // Run shortcuts
         Some(Command::Run { script, args, preset }) => {
@@ -1351,6 +1405,352 @@ fn cmd_service_delete(storage: &Storage, id: &str, yes: bool) -> anyhow::Result<
 
     storage.delete_service(id).map_err(|e| anyhow::anyhow!("{}", e))?;
     println!("Service deleted.");
+    Ok(())
+}
+
+// ----- Process control -----------------------------------------------------
+
+/// Look up `(project, service)` by accepting either UUIDs or names for both.
+fn resolve_project_service(
+    storage: &Storage,
+    project_ref: &str,
+    service_ref: &str,
+) -> anyhow::Result<(Project, Service)> {
+    let projects = storage.get_all_projects();
+    let project = resolve_by_name_or_id(&projects, project_ref, |p| &p.id, |p| &p.name)
+        .map_err(|e| anyhow::anyhow!("Project {}", e))?
+        .clone();
+    let service = resolve_by_name_or_id(
+        &project.services,
+        service_ref,
+        |s| &s.id,
+        |s| &s.name,
+    )
+    .map_err(|e| anyhow::anyhow!("Service {}", e))?
+    .clone();
+    Ok((project, service))
+}
+
+/// Build the shell command string for a service, honoring mode + arg preset
+/// + extra_args the same way `cortx-mcp` does.
+fn build_service_command_string(
+    service: &Service,
+    mode: Option<&str>,
+    arg_preset: Option<&str>,
+) -> (String, Option<String>, Option<String>) {
+    let mut command = service.command.clone();
+    let active_mode = mode
+        .map(String::from)
+        .or_else(|| service.default_mode.clone());
+    if let (Some(ref name), Some(ref modes)) = (&active_mode, &service.modes) {
+        if let Some(suffix) = modes.get(name) {
+            command = format!("{} {}", command, suffix);
+        }
+    }
+
+    let active_preset = arg_preset
+        .map(String::from)
+        .or_else(|| service.default_arg_preset.clone());
+    if let (Some(ref name), Some(ref presets)) = (&active_preset, &service.arg_presets) {
+        if let Some(args) = presets.get(name) {
+            command = format!("{} {}", command, args);
+        }
+    }
+
+    if let Some(ref extra) = service.extra_args {
+        if !extra.is_empty() {
+            command = format!("{} {}", command, extra);
+        }
+    }
+
+    (command, active_mode, active_preset)
+}
+
+fn resolve_service_working_dir(project: &Project, service: &Service) -> String {
+    let dir = service.working_dir.trim();
+    if dir.is_empty() || dir == "." {
+        project.root_path.clone()
+    } else {
+        let path = std::path::Path::new(dir);
+        if path.is_absolute() {
+            dir.to_string()
+        } else {
+            std::path::Path::new(&project.root_path)
+                .join(dir)
+                .to_string_lossy()
+                .to_string()
+        }
+    }
+}
+
+fn cmd_service_start(
+    storage: &Storage,
+    project_ref: &str,
+    service_ref: &str,
+    mode: Option<&str>,
+    arg_preset: Option<&str>,
+    json: bool,
+) -> anyhow::Result<()> {
+    let (project, service) = resolve_project_service(storage, project_ref, service_ref)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+
+    // Prune any stale entry under this service id so a fresh start can register.
+    if let Some(existing) = store.get(&service.id) {
+        if runtime_state::is_pid_alive(existing.pid) {
+            return Err(anyhow::anyhow!(
+                "Service '{}' already running (PID {})",
+                service.name,
+                existing.pid
+            ));
+        }
+        store.unregister(&service.id)?;
+    }
+
+    let (command, active_mode, active_preset) =
+        build_service_command_string(&service, mode, arg_preset);
+    let working_dir = resolve_service_working_dir(&project, &service);
+    let (program, args) = runtime_state::shell_wrap(&command);
+    let log_path = store.log_path(&service.id);
+
+    let pid = runtime_state::spawn_detached(
+        &program,
+        &args,
+        &working_dir,
+        service.env_vars.as_ref(),
+        &log_path,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to spawn service: {}", e))?;
+
+    let entry = RuntimeEntry {
+        id: service.id.clone(),
+        kind: EntityKind::Service,
+        pid,
+        display_name: service.name.clone(),
+        command: command.clone(),
+        working_dir,
+        started_at: chrono::Utc::now(),
+        project_id: Some(project.id.clone()),
+        project_name: Some(project.name.clone()),
+        mode: active_mode,
+        arg_preset: active_preset,
+    };
+    store.register(&entry)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&entry)?);
+    } else {
+        println!(
+            "Started service '{}' (PID {}). Logs: {}",
+            service.name,
+            pid,
+            log_path.display()
+        );
+    }
+    Ok(())
+}
+
+fn cmd_service_stop(
+    storage: &Storage,
+    project_ref: &str,
+    service_ref: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    let (_project, service) = resolve_project_service(storage, project_ref, service_ref)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+
+    let entry = store
+        .get(&service.id)
+        .ok_or_else(|| anyhow::anyhow!("Service '{}' is not running", service.name))?;
+
+    if runtime_state::is_pid_alive(entry.pid) {
+        runtime_state::kill_pid_tree(entry.pid)
+            .map_err(|e| anyhow::anyhow!("Failed to stop: {}", e))?;
+    }
+    store.unregister(&service.id)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "stopped": true,
+                "service_id": service.id,
+                "pid": entry.pid,
+            })
+        );
+    } else {
+        println!("Stopped service '{}' (PID {}).", service.name, entry.pid);
+    }
+    Ok(())
+}
+
+fn cmd_service_status(
+    storage: &Storage,
+    project_ref: &str,
+    service_ref: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    let (_project, service) = resolve_project_service(storage, project_ref, service_ref)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+
+    match store.get(&service.id) {
+        Some(entry) => {
+            let alive = runtime_state::is_pid_alive(entry.pid);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "service_id": entry.id,
+                        "service_name": entry.display_name,
+                        "project_name": entry.project_name,
+                        "status": if alive { "running" } else { "stopped" },
+                        "pid": entry.pid,
+                        "started_at": entry.started_at,
+                        "mode": entry.mode,
+                        "arg_preset": entry.arg_preset,
+                        "command": entry.command,
+                        "working_dir": entry.working_dir,
+                        "log_path": store.log_path(&entry.id),
+                    })
+                );
+            } else {
+                println!("Service:    {}", entry.display_name);
+                println!("Status:     {}", if alive { "running" } else { "stopped (stale)" });
+                println!("PID:        {}", entry.pid);
+                println!("Started:    {}", entry.started_at.format("%Y-%m-%d %H:%M:%S"));
+                if let Some(ref m) = entry.mode {
+                    println!("Mode:       {}", m);
+                }
+                if let Some(ref p) = entry.arg_preset {
+                    println!("Arg preset: {}", p);
+                }
+                println!("Command:    {}", entry.command);
+                println!("Log:        {}", store.log_path(&entry.id).display());
+            }
+            Ok(())
+        }
+        None => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "service_id": service.id,
+                        "service_name": service.name,
+                        "status": "stopped",
+                    })
+                );
+            } else {
+                println!("Service '{}' is not running.", service.name);
+            }
+            Ok(())
+        }
+    }
+}
+
+fn cmd_service_logs(
+    storage: &Storage,
+    project_ref: &str,
+    service_ref: &str,
+    tail: usize,
+    follow: bool,
+) -> anyhow::Result<()> {
+    let (_project, service) = resolve_project_service(storage, project_ref, service_ref)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+    let log_path = store.log_path(&service.id);
+    if !log_path.exists() {
+        return Err(anyhow::anyhow!(
+            "No log file for service '{}'. Has it ever been started via the CLI?",
+            service.name
+        ));
+    }
+
+    print_log_tail(&log_path, tail)?;
+    if follow {
+        follow_log(&log_path)?;
+    }
+    Ok(())
+}
+
+/// Print the last `n` lines of `path`.
+fn print_log_tail(path: &std::path::Path, n: usize) -> anyhow::Result<()> {
+    let content = std::fs::read_to_string(path)?;
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(n);
+    for line in &lines[start..] {
+        println!("{}", line);
+    }
+    Ok(())
+}
+
+/// Tail the file forever, polling for new bytes. Exits on Ctrl-C.
+fn follow_log(path: &std::path::Path) -> anyhow::Result<()> {
+    use std::io::{BufRead, BufReader, Seek, SeekFrom};
+    let file = std::fs::File::open(path)?;
+    let mut pos = file.metadata()?.len();
+    loop {
+        let mut file = std::fs::File::open(path)?;
+        let cur_len = file.metadata()?.len();
+        if cur_len < pos {
+            // File was truncated — restart from the beginning.
+            pos = 0;
+        }
+        if cur_len > pos {
+            file.seek(SeekFrom::Start(pos))?;
+            let reader = BufReader::new(&file);
+            for line in reader.lines().flatten() {
+                println!("{}", line);
+            }
+            pos = cur_len;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+fn cmd_ps(storage: &Storage, json: bool) -> anyhow::Result<()> {
+    let store = RuntimeStore::new(storage.app_dir())?;
+    store.prune_stale();
+    let entries = store.list();
+
+    if json {
+        let payload: Vec<_> = entries
+            .iter()
+            .map(|(e, alive)| {
+                serde_json::json!({
+                    "id": e.id,
+                    "kind": e.kind.as_str(),
+                    "pid": e.pid,
+                    "status": if *alive { "running" } else { "stopped" },
+                    "display_name": e.display_name,
+                    "project_name": e.project_name,
+                    "started_at": e.started_at,
+                    "mode": e.mode,
+                    "arg_preset": e.arg_preset,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    if entries.is_empty() {
+        println!("No CLI-managed processes running.");
+        return Ok(());
+    }
+
+    println!(
+        "{:<12} {:<25} {:<25} {:<8} {}",
+        "KIND", "NAME", "PROJECT", "PID", "STARTED"
+    );
+    println!("{}", "-".repeat(90));
+    for (entry, _alive) in &entries {
+        println!(
+            "{:<12} {:<25} {:<25} {:<8} {}",
+            entry.kind.as_str(),
+            entry.display_name,
+            entry.project_name.as_deref().unwrap_or("-"),
+            entry.pid,
+            entry.started_at.format("%Y-%m-%d %H:%M:%S"),
+        );
+    }
     Ok(())
 }
 
