@@ -75,6 +75,18 @@ fn ok_text(msg: impl Into<String>) -> Result<CallToolResult, McpError> {
     Ok(CallToolResult::success(vec![Content::text(msg.into())]))
 }
 
+/// Read the last `n` lines of `path`, returning [] if the file is missing
+/// or can't be read. Used by get_process_status / get_process_logs to
+/// surface log content captured by ProcessManager's tee.
+fn tail_log_file(path: &std::path::Path, n: usize) -> Vec<String> {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].iter().map(|s| s.to_string()).collect()
+}
+
 // ============================================================================
 // Tool implementations
 // ============================================================================
@@ -847,55 +859,102 @@ impl CortxMcp {
     // Process Management (3)
     // ========================================================================
 
-    #[tool(description = "Get status and recent logs for a running or completed process. Pass the script_id or service_id used when starting it. Returns status, PID, exit code, and last 5 log lines.", annotations(read_only_hint = true))]
+    #[tool(description = "Get status and recent logs for a process. Reads the canonical runtime store + log file on disk, so processes started by any CortX surface (GUI, CLI, MCP, TUI) are visible. Returns status, PID, exit code if known, and last 5 log lines.", annotations(read_only_hint = true))]
     fn get_process_status(
         &self,
         Parameters(p): Parameters<GetProcessStatusParams>,
     ) -> Result<CallToolResult, McpError> {
-        let state = self.process_state.lock();
-        match state.get(&p.id) {
-            Some(ps) => {
-                let last_lines: Vec<&str> = ps.logs.iter().rev().take(5).map(|s| s.as_str()).collect();
-                ok_json(&serde_json::json!({
-                    "id": p.id,
-                    "status": ps.status.to_string(),
-                    "pid": ps.pid,
-                    "exit_code": ps.exit_code,
-                    "success": ps.success,
-                    "log_lines_buffered": ps.logs.len(),
-                    "last_lines": last_lines.into_iter().rev().collect::<Vec<_>>(),
-                }))
-            }
-            None => {
-                // Check if it's a known running process
-                let is_running = self.process_manager.is_running(&p.id)
-                    || self.process_manager.is_script_running(&p.id)
-                    || self.process_manager.is_global_script_running(&p.id);
-                if is_running {
-                    ok_json(&serde_json::json!({
-                        "id": p.id,
-                        "status": "running",
-                        "log_lines_buffered": 0,
-                    }))
-                } else {
-                    Err(mcp_err(format!(
-                        "No process state found for '{}'. It may have never been started.",
-                        p.id
-                    )))
-                }
-            }
+        let store = self.process_manager.runtime_store();
+        let entry = store.get(&p.id);
+        let alive = entry
+            .as_ref()
+            .map(|e| cortx_core::runtime_state::is_pid_alive(e.pid))
+            .unwrap_or(false);
+
+        // In-memory MCP state still holds exit_code / success for processes
+        // MCP itself spawned. Cross-instance processes won't have these.
+        let in_mem = self.process_state.lock();
+        let local = in_mem.get(&p.id);
+
+        let last_lines = tail_log_file(&store.log_path(&p.id), 5);
+
+        match (entry, alive, local) {
+            (Some(e), true, _) => ok_json(&serde_json::json!({
+                "id": p.id,
+                "status": "running",
+                "pid": e.pid,
+                "display_name": e.display_name,
+                "project_name": e.project_name,
+                "started_at": e.started_at,
+                "exit_code": serde_json::Value::Null,
+                "success": serde_json::Value::Null,
+                "last_lines": last_lines,
+            })),
+            (entry_opt, false, Some(ps)) => ok_json(&serde_json::json!({
+                "id": p.id,
+                "status": ps.status.to_string(),
+                "pid": ps.pid.or(entry_opt.as_ref().map(|e| e.pid)),
+                "display_name": entry_opt.as_ref().map(|e| e.display_name.clone()),
+                "exit_code": ps.exit_code,
+                "success": ps.success,
+                "last_lines": last_lines,
+            })),
+            (Some(e), false, None) => ok_json(&serde_json::json!({
+                "id": p.id,
+                "status": "stopped",
+                "pid": e.pid,
+                "display_name": e.display_name,
+                "last_lines": last_lines,
+            })),
+            (None, _, None) => Err(mcp_err(format!(
+                "No process state found for '{}'. It may have never been started.",
+                p.id
+            ))),
+            // Unreachable: alive is derived from entry, so alive=true implies
+            // entry=Some. Compiler can't prove it though.
+            (None, true, Some(_)) => unreachable!(),
         }
     }
 
-    #[tool(description = "Get buffered log output for a running or completed process. Returns the last N lines (default 100, max 500). Use 'tail' to control how many lines to return.", annotations(read_only_hint = true))]
+    #[tool(description = "Get log output for a process. Reads the on-disk log file at <app_dir>/runtime/<id>.log written by every CortX surface, so logs of GUI/CLI-started processes are visible. Returns the last N lines (default 100).", annotations(read_only_hint = true))]
     fn get_process_logs(
         &self,
         Parameters(p): Parameters<GetProcessLogsParams>,
     ) -> Result<CallToolResult, McpError> {
+        let tail = p.tail.unwrap_or(100);
+        let log_path = self.process_manager.runtime_store().log_path(&p.id);
+
+        if log_path.exists() {
+            let lines = tail_log_file(&log_path, tail);
+            let entry = self.process_manager.runtime_store().get(&p.id);
+            let status = match entry {
+                Some(ref e) if cortx_core::runtime_state::is_pid_alive(e.pid) => "running",
+                Some(_) => "stopped",
+                None => self
+                    .process_state
+                    .lock()
+                    .get(&p.id)
+                    .map(|ps| match ps.status {
+                        crate::process_state::ProcessStatus::Running => "running",
+                        crate::process_state::ProcessStatus::Completed => "completed",
+                        crate::process_state::ProcessStatus::Failed => "failed",
+                        crate::process_state::ProcessStatus::Stopped => "stopped",
+                    })
+                    .unwrap_or("unknown"),
+            };
+            return ok_json(&serde_json::json!({
+                "id": p.id,
+                "status": status,
+                "returned_lines": lines.len(),
+                "logs": lines,
+            }));
+        }
+
+        // Fallback to in-memory buffer (legacy path for MCP-spawned processes
+        // that ran before the log file existed for whatever reason).
         let state = self.process_state.lock();
         match state.get(&p.id) {
             Some(ps) => {
-                let tail = p.tail.unwrap_or(100);
                 let lines: Vec<&str> = ps
                     .logs
                     .iter()
@@ -918,38 +977,29 @@ impl CortxMcp {
         }
     }
 
-    #[tool(description = "List all currently running services and scripts with their PIDs and status.", annotations(read_only_hint = true))]
+    #[tool(description = "List ALL currently running services and scripts across every CortX surface (GUI, CLI, MCP, TUI). Sourced from the shared runtime store on disk, so processes started by other CortX instances are visible here too.", annotations(read_only_hint = true))]
     fn list_running_processes(&self) -> Result<CallToolResult, McpError> {
-        let services = self.process_manager.get_running_services();
-        let state = self.process_state.lock();
-        let mut processes: Vec<serde_json::Value> = Vec::new();
-
-        for id in &services {
-            let status = state
-                .get(id)
-                .map(|ps| ps.status.to_string())
-                .unwrap_or_else(|| "running".to_string());
-            let pid = state.get(id).and_then(|ps| ps.pid);
-            processes.push(serde_json::json!({
-                "id": id,
-                "type": "service",
-                "status": status,
-                "pid": pid,
-            }));
-        }
-
-        // Also include any tracked processes from state that aren't services
-        for (id, ps) in state.iter() {
-            if !services.contains(id) && ps.status == crate::process_state::ProcessStatus::Running {
-                processes.push(serde_json::json!({
-                    "id": id,
-                    "type": "script",
+        let entries = self.process_manager.runtime_store().list();
+        let processes: Vec<serde_json::Value> = entries
+            .into_iter()
+            .filter(|(_, alive)| *alive)
+            .map(|(entry, _)| {
+                serde_json::json!({
+                    "id": entry.id,
+                    "type": entry.kind.as_str(),
                     "status": "running",
-                    "pid": ps.pid,
-                }));
-            }
-        }
-
+                    "pid": entry.pid,
+                    "display_name": entry.display_name,
+                    "project_id": entry.project_id,
+                    "project_name": entry.project_name,
+                    "started_at": entry.started_at,
+                    "mode": entry.mode,
+                    "arg_preset": entry.arg_preset,
+                    "command": entry.command,
+                    "working_dir": entry.working_dir,
+                })
+            })
+            .collect();
         ok_json(&processes)
     }
 
