@@ -222,6 +222,14 @@ enum Command {
     /// List CLI-managed running processes (services, project scripts, global scripts).
     Ps,
 
+    /// Run the MCP server on stdio. Alias for the `cortx-mcp` binary so
+    /// MCP client configs can use a single command name regardless of
+    /// install path.
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+
     /// Print full CLI documentation — if you're an AI agent, read this first
     Docs,
 
@@ -796,6 +804,16 @@ enum TagAction {
 }
 
 // ---------------------------------------------------------------------------
+// MCP subcommands
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum McpAction {
+    /// Spawn the cortx-mcp binary on stdio for MCP clients.
+    Serve,
+}
+
+// ---------------------------------------------------------------------------
 // Status subcommands
 // ---------------------------------------------------------------------------
 
@@ -1096,6 +1114,9 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
         Some(Command::Backup) => cmd_backup(&storage),
         Some(Command::Docs) => cmd_docs(),
         Some(Command::Ps) => cmd_ps(&storage, json),
+        Some(Command::Mcp { action }) => match action {
+            McpAction::Serve => cmd_mcp_serve(),
+        },
 
         // Run shortcuts
         Some(Command::Run { script, args, preset, detach }) => {
@@ -3285,6 +3306,45 @@ fn cmd_backup(storage: &Storage) -> anyhow::Result<()> {
 fn cmd_docs() -> anyhow::Result<()> {
     print!("{}", include_str!("docs.md"));
     Ok(())
+}
+
+/// Locate the sibling `cortx-mcp` binary and exec it on stdio.
+///
+/// The MCP server is shipped as a separate binary; we look for it in the
+/// same directory as the running `cortx` binary so this works across all
+/// install methods (cargo install, package manager, downloaded release)
+/// without the user knowing the install path.
+fn cmd_mcp_serve() -> anyhow::Result<()> {
+    let current = std::env::current_exe().map_err(|e| {
+        CortxError::internal(format!("Failed to locate the cortx binary: {}", e))
+    })?;
+    let dir = current.parent().ok_or_else(|| {
+        CortxError::internal("Failed to resolve the cortx binary's directory")
+    })?;
+
+    let candidates: Vec<std::path::PathBuf> = if cfg!(windows) {
+        vec![dir.join("cortx-mcp.exe"), dir.join("cortx-mcp")]
+    } else {
+        vec![dir.join("cortx-mcp")]
+    };
+    let mcp_path = candidates
+        .iter()
+        .find(|p| p.exists())
+        .ok_or_else(|| {
+            CortxError::internal(format!(
+                "cortx-mcp binary not found next to cortx (looked in {}). \
+                 Install both binaries together — they ship in the same release.",
+                dir.display()
+            ))
+        })?;
+
+    // stdio is inherited so the MCP client on the other side of stdin/stdout
+    // talks straight to cortx-mcp.
+    let status = std::process::Command::new(mcp_path)
+        .status()
+        .map_err(|e| CortxError::internal(format!("Failed to launch cortx-mcp: {}", e)))?;
+
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 // ============================================================================
