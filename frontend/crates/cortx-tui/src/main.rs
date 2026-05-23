@@ -1,4 +1,5 @@
 mod app;
+mod cli_error;
 mod event;
 mod input;
 mod os_open;
@@ -7,8 +8,11 @@ mod ui;
 mod util;
 
 use std::io;
+use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
+
+use cli_error::{report_error, CortxError};
 
 use clap::{Parser, Subcommand};
 use crossterm::{
@@ -860,9 +864,10 @@ enum SettingsAction {
 fn resolve_by_name_or_id<'a, T>(
     items: &'a [T],
     name_or_id: &str,
+    resource: &str,
     get_id: impl Fn(&T) -> &str,
     get_name: impl Fn(&T) -> &str,
-) -> Result<&'a T, String> {
+) -> Result<&'a T, CortxError> {
     // Try exact ID first
     if let Some(item) = items.iter().find(|i| get_id(i) == name_or_id) {
         return Ok(item);
@@ -872,7 +877,7 @@ fn resolve_by_name_or_id<'a, T>(
     items
         .iter()
         .find(|i| get_name(i).to_lowercase() == lower)
-        .ok_or_else(|| format!("'{}' not found", name_or_id))
+        .ok_or_else(|| CortxError::not_found(resource, name_or_id))
 }
 
 /// Case-insensitive substring match. Returns true when `needle` is `None`
@@ -925,13 +930,20 @@ fn confirm_delete(entity: &str, name: &str, skip: bool) -> bool {
 // main
 // ============================================================================
 
-fn main() -> anyhow::Result<()> {
+fn main() -> ExitCode {
     env_logger::init();
 
     let cli = Cli::parse();
     let json = cli.json;
     init_color(cli.no_color);
 
+    match run(cli, json) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => ExitCode::from(report_error(&e, json) as u8),
+    }
+}
+
+fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
     let storage = Arc::new(Storage::new()?);
     let runtime_store = Arc::new(RuntimeStore::new(storage.app_dir())?);
     let process_manager = Arc::new(ProcessManager::new(runtime_store.clone()));
@@ -1195,8 +1207,7 @@ fn cmd_script_list(
 
 fn cmd_script_get(storage: &Storage, name_or_id: &str, json: bool) -> anyhow::Result<()> {
     let scripts = storage.get_all_global_scripts();
-    let script = resolve_by_name_or_id(&scripts, name_or_id, |s| &s.id, |s| &s.name)
-        .map_err(|e| anyhow::anyhow!("Script {}", e))?;
+    let script = resolve_by_name_or_id(&scripts, name_or_id, "global_script", |s| &s.id, |s| &s.name)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(script)?);
@@ -1268,8 +1279,7 @@ fn cmd_script_update(
     json: bool,
 ) -> anyhow::Result<()> {
     let scripts = storage.get_all_global_scripts();
-    let existing = resolve_by_name_or_id(&scripts, name_or_id, |s| &s.id, |s| &s.name)
-        .map_err(|e| anyhow::anyhow!("Script {}", e))?;
+    let existing = resolve_by_name_or_id(&scripts, name_or_id, "global_script", |s| &s.id, |s| &s.name)?;
     let id = existing.id.clone();
 
     let updated = storage.update_global_script(&id, |s| {
@@ -1291,8 +1301,7 @@ fn cmd_script_update(
 
 fn cmd_script_delete(storage: &Storage, name_or_id: &str, yes: bool) -> anyhow::Result<()> {
     let scripts = storage.get_all_global_scripts();
-    let script = resolve_by_name_or_id(&scripts, name_or_id, |s| &s.id, |s| &s.name)
-        .map_err(|e| anyhow::anyhow!("Script {}", e))?;
+    let script = resolve_by_name_or_id(&scripts, name_or_id, "global_script", |s| &s.id, |s| &s.name)?;
 
     if !confirm_delete("script", &script.name, yes) {
         println!("Cancelled.");
@@ -1473,8 +1482,7 @@ fn cmd_project_list(
 
 fn cmd_project_get(storage: &Storage, name_or_id: &str, json: bool) -> anyhow::Result<()> {
     let projects = storage.get_all_projects();
-    let project = resolve_by_name_or_id(&projects, name_or_id, |p| &p.id, |p| &p.name)
-        .map_err(|e| anyhow::anyhow!("Project {}", e))?;
+    let project = resolve_by_name_or_id(&projects, name_or_id, "project", |p| &p.id, |p| &p.name)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&project.sanitized_for_output())?);
@@ -1543,8 +1551,7 @@ fn cmd_project_update(
     json: bool,
 ) -> anyhow::Result<()> {
     let projects = storage.get_all_projects();
-    let existing = resolve_by_name_or_id(&projects, name_or_id, |p| &p.id, |p| &p.name)
-        .map_err(|e| anyhow::anyhow!("Project {}", e))?;
+    let existing = resolve_by_name_or_id(&projects, name_or_id, "project", |p| &p.id, |p| &p.name)?;
     let id = existing.id.clone();
 
     let updated = storage.update_project(&id, |p| {
@@ -1566,8 +1573,7 @@ fn cmd_project_update(
 
 fn cmd_project_delete(storage: &Storage, name_or_id: &str, yes: bool) -> anyhow::Result<()> {
     let projects = storage.get_all_projects();
-    let project = resolve_by_name_or_id(&projects, name_or_id, |p| &p.id, |p| &p.name)
-        .map_err(|e| anyhow::anyhow!("Project {}", e))?;
+    let project = resolve_by_name_or_id(&projects, name_or_id, "project", |p| &p.id, |p| &p.name)?;
 
     if !confirm_delete("project", &project.name, yes) {
         println!("Cancelled.");
@@ -1585,8 +1591,7 @@ fn cmd_project_delete(storage: &Storage, name_or_id: &str, yes: bool) -> anyhow:
 
 fn cmd_service_list(storage: &Storage, project_ref: &str, json: bool) -> anyhow::Result<()> {
     let projects = storage.get_all_projects();
-    let project = resolve_by_name_or_id(&projects, project_ref, |p| &p.id, |p| &p.name)
-        .map_err(|e| anyhow::anyhow!("Project {}", e))?;
+    let project = resolve_by_name_or_id(&projects, project_ref, "project", |p| &p.id, |p| &p.name)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&project.services)?);
@@ -1623,8 +1628,7 @@ fn cmd_service_add(
     json: bool,
 ) -> anyhow::Result<()> {
     let projects = storage.get_all_projects();
-    let project = resolve_by_name_or_id(&projects, project_ref, |p| &p.id, |p| &p.name)
-        .map_err(|e| anyhow::anyhow!("Project {}", e))?;
+    let project = resolve_by_name_or_id(&projects, project_ref, "project", |p| &p.id, |p| &p.name)?;
     let project_id = project.id.clone();
 
     let mut service = Service::new(name.to_string(), dir.to_string(), command.to_string());
@@ -1694,16 +1698,15 @@ fn resolve_project_service(
     service_ref: &str,
 ) -> anyhow::Result<(Project, Service)> {
     let projects = storage.get_all_projects();
-    let project = resolve_by_name_or_id(&projects, project_ref, |p| &p.id, |p| &p.name)
-        .map_err(|e| anyhow::anyhow!("Project {}", e))?
+    let project = resolve_by_name_or_id(&projects, project_ref, "project", |p| &p.id, |p| &p.name)?
         .clone();
     let service = resolve_by_name_or_id(
         &project.services,
         service_ref,
+        "service",
         |s| &s.id,
         |s| &s.name,
-    )
-    .map_err(|e| anyhow::anyhow!("Service {}", e))?
+    )?
     .clone();
     Ok((project, service))
 }
@@ -1774,11 +1777,7 @@ fn cmd_service_start(
     // Prune any stale entry under this service id so a fresh start can register.
     if let Some(existing) = store.get(&service.id) {
         if runtime_state::is_pid_alive(existing.pid) {
-            return Err(anyhow::anyhow!(
-                "Service '{}' already running (PID {})",
-                service.name,
-                existing.pid
-            ));
+            return Err(CortxError::already_running("service", &service.name, existing.pid).into());
         }
         store.unregister(&service.id)?;
     }
@@ -1837,7 +1836,7 @@ fn cmd_service_stop(
 
     let entry = store
         .get(&service.id)
-        .ok_or_else(|| anyhow::anyhow!("Service '{}' is not running", service.name))?;
+        .ok_or_else(|| CortxError::not_running("service", &service.name))?;
 
     if runtime_state::is_pid_alive(entry.pid) {
         runtime_state::kill_pid_tree(entry.pid)
@@ -1990,16 +1989,15 @@ fn resolve_project_script(
     script_ref: &str,
 ) -> anyhow::Result<(Project, Script)> {
     let projects = storage.get_all_projects();
-    let project = resolve_by_name_or_id(&projects, project_ref, |p| &p.id, |p| &p.name)
-        .map_err(|e| anyhow::anyhow!("Project {}", e))?
+    let project = resolve_by_name_or_id(&projects, project_ref, "project", |p| &p.id, |p| &p.name)?
         .clone();
     let script = resolve_by_name_or_id(
         &project.scripts,
         script_ref,
+        "project_script",
         |s| &s.id,
         |s| &s.name,
-    )
-    .map_err(|e| anyhow::anyhow!("Project script {}", e))?
+    )?
     .clone();
     Ok((project, script))
 }
@@ -2033,11 +2031,9 @@ fn cmd_project_run(
 
     if let Some(existing) = store.get(&script.id) {
         if runtime_state::is_pid_alive(existing.pid) {
-            return Err(anyhow::anyhow!(
-                "Project script '{}' already running (PID {})",
-                script.name,
-                existing.pid
-            ));
+            return Err(
+                CortxError::already_running("project_script", &script.name, existing.pid).into(),
+            );
         }
         store.unregister(&script.id)?;
     }
@@ -2103,7 +2099,7 @@ fn cmd_project_script_stop(
 
     let entry = store
         .get(&script.id)
-        .ok_or_else(|| anyhow::anyhow!("Project script '{}' is not running", script.name))?;
+        .ok_or_else(|| CortxError::not_running("project_script", &script.name))?;
 
     if runtime_state::is_pid_alive(entry.pid) {
         runtime_state::kill_pid_tree(entry.pid)
@@ -2360,8 +2356,7 @@ fn cmd_tool_list(
 
 fn cmd_tool_get(storage: &Storage, name_or_id: &str, json: bool) -> anyhow::Result<()> {
     let tools = storage.get_all_tools();
-    let tool = resolve_by_name_or_id(&tools, name_or_id, |t| &t.id, |t| &t.name)
-        .map_err(|e| anyhow::anyhow!("Tool {}", e))?;
+    let tool = resolve_by_name_or_id(&tools, name_or_id, "tool", |t| &t.id, |t| &t.name)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(tool)?);
@@ -2451,8 +2446,7 @@ fn cmd_tool_update(
     json: bool,
 ) -> anyhow::Result<()> {
     let tools = storage.get_all_tools();
-    let existing = resolve_by_name_or_id(&tools, name_or_id, |t| &t.id, |t| &t.name)
-        .map_err(|e| anyhow::anyhow!("Tool {}", e))?;
+    let existing = resolve_by_name_or_id(&tools, name_or_id, "tool", |t| &t.id, |t| &t.name)?;
     let id = existing.id.clone();
 
     let parsed_configs = config_path.map(|entries| parse_config_paths(&entries));
@@ -2476,8 +2470,7 @@ fn cmd_tool_update(
 
 fn cmd_tool_delete(storage: &Storage, name_or_id: &str, yes: bool) -> anyhow::Result<()> {
     let tools = storage.get_all_tools();
-    let tool = resolve_by_name_or_id(&tools, name_or_id, |t| &t.id, |t| &t.name)
-        .map_err(|e| anyhow::anyhow!("Tool {}", e))?;
+    let tool = resolve_by_name_or_id(&tools, name_or_id, "tool", |t| &t.id, |t| &t.name)?;
 
     if !confirm_delete("tool", &tool.name, yes) {
         println!("Cancelled.");
@@ -2552,8 +2545,7 @@ fn cmd_alias_list(
 
 fn cmd_alias_get(storage: &Storage, name: &str, json: bool) -> anyhow::Result<()> {
     let aliases = storage.get_all_aliases();
-    let alias = resolve_by_name_or_id(&aliases, name, |a| &a.id, |a| &a.name)
-        .map_err(|e| anyhow::anyhow!("Alias {}", e))?;
+    let alias = resolve_by_name_or_id(&aliases, name, "alias", |a| &a.id, |a| &a.name)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(alias)?);
@@ -2634,7 +2626,7 @@ fn cmd_alias_add(
 
     // Check for duplicate name
     if storage.get_alias_by_name(name).is_some() {
-        return Err(anyhow::anyhow!("Alias '{}' already exists", name));
+        return Err(CortxError::already_exists("alias", name).into());
     }
 
     let mut alias = ShellAlias::new(name.to_string(), command.to_string());
@@ -2673,8 +2665,7 @@ fn cmd_alias_update(
     json: bool,
 ) -> anyhow::Result<()> {
     let aliases = storage.get_all_aliases();
-    let existing = resolve_by_name_or_id(&aliases, name_or_id, |a| &a.id, |a| &a.name)
-        .map_err(|e| anyhow::anyhow!("Alias {}", e))?;
+    let existing = resolve_by_name_or_id(&aliases, name_or_id, "alias", |a| &a.id, |a| &a.name)?;
     let id = existing.id.clone();
 
     let updated = storage.update_alias(&id, |a| {
@@ -2697,7 +2688,7 @@ fn cmd_alias_update(
 /// Remove an alias by name
 fn cmd_alias_remove(storage: &Storage, name: &str) -> anyhow::Result<()> {
     let alias = storage.get_alias_by_name(name)
-        .ok_or_else(|| anyhow::anyhow!("Alias '{}' not found", name))?;
+        .ok_or_else(|| CortxError::not_found("alias", name))?;
     storage.delete_alias(&alias.id).map_err(|e| anyhow::anyhow!("{}", e))?;
     println!("Alias '{}' removed.", name);
     Ok(())
@@ -2768,8 +2759,7 @@ fn cmd_app_list(
 
 fn cmd_app_get(storage: &Storage, name_or_id: &str, json: bool) -> anyhow::Result<()> {
     let apps = storage.get_all_apps();
-    let app = resolve_by_name_or_id(&apps, name_or_id, |a| &a.id, |a| &a.name)
-        .map_err(|e| anyhow::anyhow!("App {}", e))?;
+    let app = resolve_by_name_or_id(&apps, name_or_id, "app", |a| &a.id, |a| &a.name)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(app)?);
@@ -2857,8 +2847,7 @@ fn cmd_app_update(
     json: bool,
 ) -> anyhow::Result<()> {
     let apps = storage.get_all_apps();
-    let existing = resolve_by_name_or_id(&apps, name_or_id, |a| &a.id, |a| &a.name)
-        .map_err(|e| anyhow::anyhow!("App {}", e))?;
+    let existing = resolve_by_name_or_id(&apps, name_or_id, "app", |a| &a.id, |a| &a.name)?;
     let id = existing.id.clone();
 
     let parsed_configs = config_path.map(|entries| parse_config_paths(&entries));
@@ -2882,8 +2871,7 @@ fn cmd_app_update(
 
 fn cmd_app_delete(storage: &Storage, name_or_id: &str, yes: bool) -> anyhow::Result<()> {
     let apps = storage.get_all_apps();
-    let app = resolve_by_name_or_id(&apps, name_or_id, |a| &a.id, |a| &a.name)
-        .map_err(|e| anyhow::anyhow!("App {}", e))?;
+    let app = resolve_by_name_or_id(&apps, name_or_id, "app", |a| &a.id, |a| &a.name)?;
 
     if !confirm_delete("app", &app.name, yes) {
         println!("Cancelled.");
@@ -2905,10 +2893,12 @@ fn cmd_app_launch(storage: &Storage, name: &str) -> anyhow::Result<()> {
         .iter()
         .find(|a| a.name.to_lowercase() == name_lower)
         .or_else(|| apps.iter().find(|a| a.name.to_lowercase().contains(&name_lower)))
-        .ok_or_else(|| anyhow::anyhow!("App '{}' not found", name))?;
+        .ok_or_else(|| CortxError::not_found("app", name))?;
 
     let exe = app.executable_path.as_deref()
-        .ok_or_else(|| anyhow::anyhow!("App '{}' has no executable path set", app.name))?;
+        .ok_or_else(|| CortxError::invalid_argument(format!(
+            "App '{}' has no executable path set", app.name
+        )))?;
 
     println!("Launching: {} ({})", app.name, exe);
 
@@ -3340,7 +3330,7 @@ fn resolve_global_script(storage: &Storage, name: &str) -> anyhow::Result<Global
     scripts
         .into_iter()
         .find(|s| s.name.eq_ignore_ascii_case(name))
-        .ok_or_else(|| anyhow::anyhow!("Script '{}' not found", name))
+        .ok_or_else(|| anyhow::Error::from(CortxError::not_found("global_script", name)))
 }
 
 /// Build the `(program, args)` for a global script, applying a preset if
@@ -3356,7 +3346,7 @@ fn build_global_command(
             .parameter_presets
             .iter()
             .find(|p| p.name.eq_ignore_ascii_case(preset_name))
-            .ok_or_else(|| anyhow::anyhow!("Preset '{}' not found", preset_name))?;
+            .ok_or_else(|| CortxError::not_found("preset", preset_name))?;
 
         for param in &script.parameters {
             let is_enabled = if !preset.enabled.is_empty() {
@@ -3388,11 +3378,9 @@ fn cmd_run_detached(
 
     if let Some(existing) = store.get(&script.id) {
         if runtime_state::is_pid_alive(existing.pid) {
-            return Err(anyhow::anyhow!(
-                "Global script '{}' already running (PID {})",
-                script.name,
-                existing.pid
-            ));
+            return Err(
+                CortxError::already_running("global_script", &script.name, existing.pid).into(),
+            );
         }
         store.unregister(&script.id)?;
     }
@@ -3452,7 +3440,7 @@ fn cmd_global_script_stop(storage: &Storage, name: &str, json: bool) -> anyhow::
 
     let entry = store
         .get(&script.id)
-        .ok_or_else(|| anyhow::anyhow!("'{}' is not running detached", script.name))?;
+        .ok_or_else(|| CortxError::not_running("global_script", &script.name))?;
 
     if runtime_state::is_pid_alive(entry.pid) {
         runtime_state::kill_pid_tree(entry.pid)
@@ -3510,7 +3498,7 @@ fn cmd_run(
     let script = scripts
         .iter()
         .find(|s| s.name.eq_ignore_ascii_case(name))
-        .ok_or_else(|| anyhow::anyhow!("Script '{}' not found", name))?;
+        .ok_or_else(|| CortxError::not_found("global_script", name))?;
 
     // Build param_values HashMap from preset (if any)
     let mut param_values = std::collections::HashMap::new();
@@ -3519,7 +3507,7 @@ fn cmd_run(
             .parameter_presets
             .iter()
             .find(|p| p.name.eq_ignore_ascii_case(preset_name))
-            .ok_or_else(|| anyhow::anyhow!("Preset '{}' not found", preset_name))?;
+            .ok_or_else(|| CortxError::not_found("preset", preset_name))?;
 
         for param in &script.parameters {
             let is_enabled = if !preset.enabled.is_empty() {
