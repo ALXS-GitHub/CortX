@@ -802,6 +802,7 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
+ "strsim",
  "tokio",
  "unicode-width 0.2.0",
 ]

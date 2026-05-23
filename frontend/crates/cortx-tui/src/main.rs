@@ -893,10 +893,13 @@ fn resolve_by_name_or_id<'a, T>(
     }
     // Then case-insensitive name
     let lower = name_or_id.to_lowercase();
-    items
-        .iter()
-        .find(|i| get_name(i).to_lowercase() == lower)
-        .ok_or_else(|| CortxError::not_found(resource, name_or_id))
+    if let Some(item) = items.iter().find(|i| get_name(i).to_lowercase() == lower) {
+        return Ok(item);
+    }
+    // Last: NOT_FOUND with Did-you-mean candidates (#23).
+    let names: Vec<&str> = items.iter().map(|i| get_name(i)).collect();
+    let suggestions = cli_error::suggest_names(name_or_id, &names, 3);
+    Err(CortxError::not_found(resource, name_or_id).with_suggestions(suggestions))
 }
 
 /// Case-insensitive substring match. Returns true when `needle` is `None`
@@ -3404,10 +3407,21 @@ fn colorize_tags(tags: &[String], tag_defs: &[TagDefinition]) -> String {
 /// Look up a global script by case-insensitive name.
 fn resolve_global_script(storage: &Storage, name: &str) -> anyhow::Result<GlobalScript> {
     let scripts = storage.get_all_global_scripts();
-    scripts
-        .into_iter()
-        .find(|s| s.name.eq_ignore_ascii_case(name))
-        .ok_or_else(|| anyhow::Error::from(CortxError::not_found("global_script", name)))
+    if let Some(s) = scripts.iter().find(|s| s.name.eq_ignore_ascii_case(name)) {
+        return Ok(s.clone());
+    }
+
+    // Build suggestions: nearest script names + cross-domain alias hit
+    // (the classic "I typed `cortx run gs` but `gs` is an alias" trap).
+    let names: Vec<&str> = scripts.iter().map(|s| s.name.as_str()).collect();
+    let mut suggestions = cli_error::suggest_names(name, &names, 3);
+    if storage.get_alias_by_name(name).is_some() {
+        suggestions.insert(0, format!("alias '{}' (run `cortx alias get {}`)", name, name));
+    }
+
+    Err(anyhow::Error::from(
+        CortxError::not_found("global_script", name).with_suggestions(suggestions),
+    ))
 }
 
 /// Build the `(program, args)` for a global script, applying a preset if
@@ -3571,11 +3585,8 @@ fn cmd_run(
     preset_name: Option<&str>,
     extra_args: &[String],
 ) -> anyhow::Result<()> {
-    let scripts = storage.get_all_global_scripts();
-    let script = scripts
-        .iter()
-        .find(|s| s.name.eq_ignore_ascii_case(name))
-        .ok_or_else(|| CortxError::not_found("global_script", name))?;
+    let script = resolve_global_script(storage, name)?;
+    let script = &script;
 
     // Build param_values HashMap from preset (if any)
     let mut param_values = std::collections::HashMap::new();

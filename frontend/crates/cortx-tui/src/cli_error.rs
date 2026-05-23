@@ -31,6 +31,11 @@ pub struct CortxError {
     pub resource: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identifier: Option<String>,
+    /// "Did you mean?" candidates. Pre-formatted strings — same-domain
+    /// matches are bare names ("watch-radar"); cross-domain hints carry
+    /// their kind ("alias 'gs'"). Empty when no suggestions apply.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub suggestions: Vec<String>,
 }
 
 impl CortxError {
@@ -40,6 +45,7 @@ impl CortxError {
             message: message.into(),
             resource: None,
             identifier: None,
+            suggestions: Vec::new(),
         }
     }
 
@@ -50,6 +56,11 @@ impl CortxError {
 
     pub fn with_identifier(mut self, identifier: impl Into<String>) -> Self {
         self.identifier = Some(identifier.into());
+        self
+    }
+
+    pub fn with_suggestions(mut self, suggestions: Vec<String>) -> Self {
+        self.suggestions = suggestions;
         self
     }
 
@@ -171,9 +182,33 @@ fn resource_label(resource: &str) -> &str {
     }
 }
 
+/// Top-N case-insensitive nearest-name suggestions using normalized
+/// Damerau-Levenshtein similarity. Returns names sorted by descending
+/// similarity, only including those above a 0.5 similarity floor — that's
+/// generous enough to catch typos and case differences without flooding
+/// the user with unrelated names.
+pub fn suggest_names(needle: &str, haystack: &[&str], top_n: usize) -> Vec<String> {
+    let needle_lower = needle.to_lowercase();
+    let mut scored: Vec<(f64, String)> = haystack
+        .iter()
+        .map(|name| {
+            let score = strsim::normalized_damerau_levenshtein(
+                &needle_lower,
+                &name.to_lowercase(),
+            );
+            (score, (*name).to_string())
+        })
+        .filter(|(s, _)| *s >= 0.5)
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(top_n);
+    scored.into_iter().map(|(_, n)| n).collect()
+}
+
 /// Print an error and return the exit code to use. JSON envelope on
-/// stderr when `--json` is in effect; otherwise the plain `Error: ...`
-/// line we've always emitted. Either way, stdout is untouched.
+/// stderr when `--json` is in effect; otherwise a multi-line `Error: ...`
+/// followed by "Did you mean:" when suggestions exist. Either way,
+/// stdout is untouched.
 pub fn report_error(err: &anyhow::Error, json: bool) -> i32 {
     let cortx_err = err
         .downcast_ref::<CortxError>()
@@ -190,6 +225,12 @@ pub fn report_error(err: &anyhow::Error, json: bool) -> i32 {
         eprintln!("{}", rendered);
     } else {
         eprintln!("Error: {}", cortx_err.message);
+        if !cortx_err.suggestions.is_empty() {
+            eprintln!("Did you mean:");
+            for s in &cortx_err.suggestions {
+                eprintln!("  - {}", s);
+            }
+        }
     }
     1
 }
