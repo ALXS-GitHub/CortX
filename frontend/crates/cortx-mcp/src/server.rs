@@ -289,7 +289,7 @@ impl CortxMcp {
     // Projects (5)
     // ========================================================================
 
-    #[tool(description = "List all projects, optionally filtered by tag. Each project includes its services, scripts, and env files.", annotations(read_only_hint = true))]
+    #[tool(description = "List all projects, optionally filtered by tag. Each project includes its services, scripts, and env file metadata (paths, keys, line numbers) — env variable VALUES are never exposed.", annotations(read_only_hint = true))]
     fn list_projects(
         &self,
         Parameters(p): Parameters<ListProjectsParams>,
@@ -299,17 +299,18 @@ impl CortxMcp {
         if let Some(tag) = p.tag {
             projects.retain(|proj| proj.tags.iter().any(|t| t.eq_ignore_ascii_case(&tag)));
         }
-        ok_json(&projects)
+        let sanitized: Vec<_> = projects.iter().map(|p| p.sanitized_for_output()).collect();
+        ok_json(&sanitized)
     }
 
-    #[tool(description = "Get a project by ID with its services, scripts, and env files.", annotations(read_only_hint = true))]
+    #[tool(description = "Get a project by ID with its services, scripts, and env file metadata (paths, keys, line numbers). Env variable VALUES are never exposed — read the .env file directly if needed.", annotations(read_only_hint = true))]
     fn get_project(
         &self,
         Parameters(p): Parameters<GetProjectParams>,
     ) -> Result<CallToolResult, McpError> {
         self.reload()?;
         match self.storage.get_project(&p.id) {
-            Some(proj) => ok_json(&proj),
+            Some(proj) => ok_json(&proj.sanitized_for_output()),
             None => Err(mcp_err("Project not found")),
         }
     }

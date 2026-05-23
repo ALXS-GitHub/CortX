@@ -1030,8 +1030,17 @@ impl Storage {
     // Import / Export
     // ========================================================================
 
-    /// Export all data (scripts, tags, tools, projects, settings) as a ScriptExport JSON string
+    /// Export all data (scripts, tags, tools, projects, settings) as a ScriptExport JSON string.
+    ///
+    /// Project env-file VALUES are stripped — only keys, line numbers, and file
+    /// paths survive the export. On re-import, the values are repopulated by
+    /// re-reading the on-disk `.env` files via the normal discover/refresh flow.
     pub fn export_scripts_config(&self) -> Result<String, StorageError> {
+        let sanitized_projects: Vec<Project> = self
+            .get_all_projects()
+            .iter()
+            .map(|p| p.sanitized_for_output())
+            .collect();
         let export = ScriptExport {
             version: "6.0".to_string(),
             scripts: self.get_all_global_scripts(),
@@ -1041,7 +1050,7 @@ impl Storage {
             aliases: self.get_all_aliases(),
             apps: self.get_all_apps(),
             status_definitions: self.get_all_status_definitions(),
-            projects: self.get_all_projects(),
+            projects: sanitized_projects,
             settings: Some(self.get_settings()),
             exported_at: chrono::Utc::now(),
         };

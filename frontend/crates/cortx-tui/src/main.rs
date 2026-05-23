@@ -1103,7 +1103,8 @@ fn cmd_project_list(storage: &Storage, tag_filter: Option<&str>, json: bool) -> 
     };
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&filtered)?);
+        let sanitized: Vec<Project> = filtered.iter().map(|p| p.sanitized_for_output()).collect();
+        println!("{}", serde_json::to_string_pretty(&sanitized)?);
         return Ok(());
     }
 
@@ -1145,7 +1146,7 @@ fn cmd_project_get(storage: &Storage, name_or_id: &str, json: bool) -> anyhow::R
         .map_err(|e| anyhow::anyhow!("Project {}", e))?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(project)?);
+        println!("{}", serde_json::to_string_pretty(&project.sanitized_for_output())?);
         return Ok(());
     }
 

@@ -137,6 +137,23 @@ impl Project {
             toolbox_url: None,
         }
     }
+
+    /// Clone with every `env_files[].variables[].value` cleared.
+    ///
+    /// Must be called before serializing a Project to any external surface
+    /// (CLI `--json`, MCP tool result, `export_scripts_config`). Keeps the
+    /// keys, line numbers, and file paths — only the secret values are
+    /// stripped. Tauri IPC for the local GUI does **not** sanitize, because
+    /// the GUI displays env values on the user's own machine.
+    pub fn sanitized_for_output(&self) -> Self {
+        let mut clone = self.clone();
+        for env_file in &mut clone.env_files {
+            for var in &mut env_file.variables {
+                var.value.clear();
+            }
+        }
+        clone
+    }
 }
 
 // Environment file models
