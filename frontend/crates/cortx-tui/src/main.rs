@@ -7,6 +7,7 @@ mod ui;
 mod util;
 
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
 use clap::{Parser, Subcommand};
@@ -31,6 +32,38 @@ use app::{App, ProcessEvent};
 use tui_emitter::TuiEmitter;
 
 // ============================================================================
+// Color control (#17)
+// ============================================================================
+
+/// Whether the current run should emit ANSI color escapes. Set once at
+/// startup by `init_color()` from the CLI flag + env vars + isatty check,
+/// then read by every truecolor formatter.
+static SHOULD_COLORIZE: AtomicBool = AtomicBool::new(false);
+
+/// Resolve color preference using the standard precedence:
+/// 1. `--no-color` flag → off
+/// 2. `CLICOLOR_FORCE` env var (any non-empty value) → on (escape hatch)
+/// 3. `NO_COLOR` env var (any non-empty value, https://no-color.org) → off
+/// 4. stdout isatty → on; otherwise off
+fn init_color(no_color_flag: bool) {
+    use std::io::IsTerminal;
+    let enabled = if no_color_flag {
+        false
+    } else if std::env::var_os("CLICOLOR_FORCE").is_some_and(|v| !v.is_empty()) {
+        true
+    } else if std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()) {
+        false
+    } else {
+        std::io::stdout().is_terminal()
+    };
+    SHOULD_COLORIZE.store(enabled, Ordering::SeqCst);
+}
+
+fn should_colorize() -> bool {
+    SHOULD_COLORIZE.load(Ordering::SeqCst)
+}
+
+// ============================================================================
 // CLI definition
 // ============================================================================
 
@@ -45,6 +78,13 @@ struct Cli {
     /// Output JSON instead of formatted tables
     #[arg(long, global = true)]
     json: bool,
+
+    /// Disable ANSI color output regardless of terminal type.
+    /// Color is also auto-disabled when stdout is not a TTY or when the
+    /// NO_COLOR environment variable is set. Use CLICOLOR_FORCE=1 to
+    /// force color even in non-TTY contexts.
+    #[arg(long, global = true)]
+    no_color: bool,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -855,6 +895,7 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     let json = cli.json;
+    init_color(cli.no_color);
 
     let storage = Arc::new(Storage::new()?);
     let runtime_store = Arc::new(RuntimeStore::new(storage.app_dir())?);
@@ -2853,8 +2894,8 @@ fn cmd_status_list(storage: &Storage, json: bool) -> anyhow::Result<()> {
     for d in &sorted {
         let color = d.color.as_deref().unwrap_or("-");
         let order = d.order.map(|o| o.to_string()).unwrap_or_else(|| "-".to_string());
-        // Colorize status name with its own color
-        let name_display = if let Some(hex) = d.color.as_deref() {
+        // Colorize status name with its own color (only when color is enabled)
+        let name_display = if let (true, Some(hex)) = (should_colorize(), d.color.as_deref()) {
             let hex = hex.trim_start_matches('#');
             if hex.len() == 6 {
                 if let (Ok(r), Ok(g), Ok(b)) = (
@@ -3077,8 +3118,12 @@ fn cmd_docs() -> anyhow::Result<()> {
 // Colorize tags (unchanged)
 // ============================================================================
 
-/// Colorize a list of tags using ANSI truecolor from tag definitions
+/// Colorize a list of tags using ANSI truecolor from tag definitions.
+/// Falls back to plain text when color is disabled (see [`should_colorize`]).
 fn colorize_tags(tags: &[String], tag_defs: &[TagDefinition]) -> String {
+    if !should_colorize() {
+        return tags.join(", ");
+    }
     tags.iter()
         .map(|tag| {
             let def = tag_defs.iter().find(|d| d.name.eq_ignore_ascii_case(tag));
