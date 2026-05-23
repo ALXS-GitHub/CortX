@@ -306,6 +306,11 @@ enum ProjectAction {
         /// Filter by tag
         #[arg(long)]
         tag: Option<String>,
+        /// Include subcollections in --json output. Comma-separated subset of
+        /// {services, scripts, envFiles}, or "all". Default is shallow:
+        /// scalar fields plus serviceCount / scriptCount / envFileCount.
+        #[arg(long, value_delimiter = ',')]
+        include: Vec<String>,
     },
     /// Show project details
     Get {
@@ -929,7 +934,9 @@ fn main() -> anyhow::Result<()> {
 
         // Project group
         Some(Command::Project { action }) => match action {
-            ProjectAction::List { tag } => cmd_project_list(&storage, tag.as_deref(), json),
+            ProjectAction::List { tag, include } => {
+                cmd_project_list(&storage, tag.as_deref(), &include, json)
+            }
             ProjectAction::Get { name_or_id } => cmd_project_get(&storage, &name_or_id, json),
             ProjectAction::Create { name, path, description, tag, status, toolbox_url } => {
                 cmd_project_create(&storage, &name, &path, description.as_deref(), tag, status.as_deref(), toolbox_url.as_deref(), json)
@@ -1260,7 +1267,112 @@ fn cmd_script_delete(storage: &Storage, name_or_id: &str, yes: bool) -> anyhow::
 // Project commands
 // ============================================================================
 
-fn cmd_project_list(storage: &Storage, tag_filter: Option<&str>, json: bool) -> anyhow::Result<()> {
+/// Which subcollections to embed in `cortx project list --json`.
+/// Defaults to all-false → shallow output with counts only.
+#[derive(Debug, Default, Clone, Copy)]
+struct ProjectListIncludes {
+    services: bool,
+    scripts: bool,
+    env_files: bool,
+}
+
+fn parse_project_list_includes(items: &[String]) -> anyhow::Result<ProjectListIncludes> {
+    let mut inc = ProjectListIncludes::default();
+    for raw in items {
+        for part in raw.split(',') {
+            match part.trim() {
+                "" => continue,
+                "all" => {
+                    return Ok(ProjectListIncludes {
+                        services: true,
+                        scripts: true,
+                        env_files: true,
+                    })
+                }
+                "services" => inc.services = true,
+                "scripts" => inc.scripts = true,
+                "envFiles" | "env_files" | "env-files" => inc.env_files = true,
+                other => {
+                    return Err(anyhow::anyhow!(
+                        "Unknown --include value '{}'. Valid: services, scripts, envFiles, all",
+                        other
+                    ))
+                }
+            }
+        }
+    }
+    Ok(inc)
+}
+
+/// Build the JSON shape for one project, honoring the include set.
+/// Always uses sanitized env-file values (no secrets in output, see #15).
+/// Optional fields are omitted when None to match the rest of the JSON
+/// output's `skip_serializing_if` conventions.
+fn project_to_list_json(p: &Project, inc: ProjectListIncludes) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    map.insert("id".into(), serde_json::Value::String(p.id.clone()));
+    map.insert("name".into(), serde_json::Value::String(p.name.clone()));
+    map.insert(
+        "rootPath".into(),
+        serde_json::Value::String(p.root_path.clone()),
+    );
+    if let Some(ref v) = p.description {
+        map.insert("description".into(), serde_json::Value::String(v.clone()));
+    }
+    if let Some(ref v) = p.image_path {
+        map.insert("imagePath".into(), serde_json::Value::String(v.clone()));
+    }
+    map.insert("tags".into(), serde_json::to_value(&p.tags).unwrap());
+    if let Some(ref v) = p.status {
+        map.insert("status".into(), serde_json::Value::String(v.clone()));
+    }
+    if let Some(ref v) = p.toolbox_url {
+        map.insert("toolboxUrl".into(), serde_json::Value::String(v.clone()));
+    }
+    map.insert("createdAt".into(), serde_json::to_value(p.created_at).unwrap());
+    map.insert("updatedAt".into(), serde_json::to_value(p.updated_at).unwrap());
+    if let Some(ts) = p.last_opened_at {
+        map.insert("lastOpenedAt".into(), serde_json::to_value(ts).unwrap());
+    }
+    map.insert(
+        "serviceCount".into(),
+        serde_json::Value::from(p.services.len()),
+    );
+    map.insert(
+        "scriptCount".into(),
+        serde_json::Value::from(p.scripts.len()),
+    );
+    map.insert(
+        "envFileCount".into(),
+        serde_json::Value::from(p.env_files.len()),
+    );
+
+    if inc.services {
+        map.insert("services".into(), serde_json::to_value(&p.services).unwrap());
+    }
+    if inc.scripts {
+        map.insert("scripts".into(), serde_json::to_value(&p.scripts).unwrap());
+    }
+    if inc.env_files {
+        let sanitized = p.sanitized_for_output();
+        map.insert(
+            "envFiles".into(),
+            serde_json::to_value(&sanitized.env_files).unwrap(),
+        );
+        map.insert(
+            "envFilesDiscovered".into(),
+            serde_json::Value::Bool(p.env_files_discovered),
+        );
+    }
+    serde_json::Value::Object(map)
+}
+
+fn cmd_project_list(
+    storage: &Storage,
+    tag_filter: Option<&str>,
+    include: &[String],
+    json: bool,
+) -> anyhow::Result<()> {
     let projects = storage.get_all_projects();
 
     let filtered: Vec<&Project> = if let Some(tag) = tag_filter {
@@ -1271,8 +1383,12 @@ fn cmd_project_list(storage: &Storage, tag_filter: Option<&str>, json: bool) -> 
     };
 
     if json {
-        let sanitized: Vec<Project> = filtered.iter().map(|p| p.sanitized_for_output()).collect();
-        println!("{}", serde_json::to_string_pretty(&sanitized)?);
+        let includes = parse_project_list_includes(include)?;
+        let payload: Vec<serde_json::Value> = filtered
+            .iter()
+            .map(|p| project_to_list_json(p, includes))
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
     }
 
