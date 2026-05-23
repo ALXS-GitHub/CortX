@@ -62,6 +62,28 @@ enum Command {
         /// Use a specific parameter preset
         #[arg(short, long)]
         preset: Option<String>,
+        /// Run detached in the background and return immediately with the PID.
+        /// Logs are written to <app_dir>/runtime/<script_id>.log and can be
+        /// followed with `cortx logs <name>` or stopped with `cortx stop <name>`.
+        #[arg(short = 'd', long)]
+        detach: bool,
+    },
+
+    /// Stop a global script that was started with `cortx run --detach`.
+    Stop {
+        /// Script name
+        script: String,
+    },
+
+    /// Tail the log of a global script that was started with `cortx run --detach`.
+    /// Use `cortx ps` to see all running detached scripts.
+    Logs {
+        /// Script name
+        script: String,
+        #[arg(long, default_value_t = 100)]
+        tail: usize,
+        #[arg(short, long)]
+        follow: bool,
     },
 
     /// List all scripts (shortcut for `script list`)
@@ -982,8 +1004,16 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Ps) => cmd_ps(&storage, json),
 
         // Run shortcuts
-        Some(Command::Run { script, args, preset }) => {
-            cmd_run(&storage, &process_manager, &script, preset.as_deref(), &args)
+        Some(Command::Run { script, args, preset, detach }) => {
+            if detach {
+                cmd_run_detached(&storage, &script, preset.as_deref(), &args, json)
+            } else {
+                cmd_run(&storage, &process_manager, &script, preset.as_deref(), &args)
+            }
+        }
+        Some(Command::Stop { script }) => cmd_global_script_stop(&storage, &script, json),
+        Some(Command::Logs { script, tail, follow }) => {
+            cmd_global_script_logs(&storage, &script, tail, follow)
         }
         Some(Command::External(args)) => {
             cmd_run(&storage, &process_manager, &args[0], None, &args[1..].to_vec())
@@ -3072,6 +3102,172 @@ fn colorize_tags(tags: &[String], tag_defs: &[TagDefinition]) -> String {
 // ============================================================================
 // Run script (unchanged)
 // ============================================================================
+
+// ----- Global script process control --------------------------------------
+
+/// Look up a global script by case-insensitive name.
+fn resolve_global_script(storage: &Storage, name: &str) -> anyhow::Result<GlobalScript> {
+    let scripts = storage.get_all_global_scripts();
+    scripts
+        .into_iter()
+        .find(|s| s.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| anyhow::anyhow!("Script '{}' not found", name))
+}
+
+/// Build the `(program, args)` for a global script, applying a preset if
+/// requested. Extracted so `cmd_run` and `cmd_run_detached` stay in sync.
+fn build_global_command(
+    script: &GlobalScript,
+    preset_name: Option<&str>,
+    extra_args: &[String],
+) -> anyhow::Result<(String, Vec<String>)> {
+    let mut param_values = std::collections::HashMap::new();
+    if let Some(preset_name) = preset_name {
+        let preset = script
+            .parameter_presets
+            .iter()
+            .find(|p| p.name.eq_ignore_ascii_case(preset_name))
+            .ok_or_else(|| anyhow::anyhow!("Preset '{}' not found", preset_name))?;
+
+        for param in &script.parameters {
+            let is_enabled = if !preset.enabled.is_empty() {
+                preset.enabled.get(&param.name).copied().unwrap_or(false) || param.required
+            } else {
+                preset.values.contains_key(&param.name)
+            };
+            if !is_enabled {
+                continue;
+            }
+            if let Some(value) = preset.values.get(&param.name) {
+                param_values.insert(param.name.clone(), value.clone());
+            }
+        }
+    }
+    cortx_core::command_builder::build_command(script, &param_values, extra_args)
+        .ok_or_else(|| anyhow::anyhow!("Empty command"))
+}
+
+fn cmd_run_detached(
+    storage: &Storage,
+    name: &str,
+    preset_name: Option<&str>,
+    extra_args: &[String],
+    json: bool,
+) -> anyhow::Result<()> {
+    let script = resolve_global_script(storage, name)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+
+    if let Some(existing) = store.get(&script.id) {
+        if runtime_state::is_pid_alive(existing.pid) {
+            return Err(anyhow::anyhow!(
+                "Global script '{}' already running (PID {})",
+                script.name,
+                existing.pid
+            ));
+        }
+        store.unregister(&script.id)?;
+    }
+
+    let (program, args) = build_global_command(&script, preset_name, extra_args)?;
+    let working_dir = script
+        .working_dir
+        .clone()
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| ".".to_string())
+        });
+    let log_path = store.log_path(&script.id);
+    let command_display = format!("{} {}", program, args.join(" "));
+
+    let pid = runtime_state::spawn_detached(
+        &program,
+        &args,
+        &working_dir,
+        script.env_vars.as_ref(),
+        &log_path,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to spawn global script: {}", e))?;
+
+    let entry = RuntimeEntry {
+        id: script.id.clone(),
+        kind: EntityKind::GlobalScript,
+        pid,
+        display_name: script.name.clone(),
+        command: command_display,
+        working_dir,
+        started_at: chrono::Utc::now(),
+        project_id: None,
+        project_name: None,
+        mode: None,
+        arg_preset: preset_name.map(String::from),
+    };
+    store.register(&entry)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&entry)?);
+    } else {
+        println!(
+            "Started '{}' detached (PID {}). Logs: {}",
+            script.name,
+            pid,
+            log_path.display()
+        );
+    }
+    Ok(())
+}
+
+fn cmd_global_script_stop(storage: &Storage, name: &str, json: bool) -> anyhow::Result<()> {
+    let script = resolve_global_script(storage, name)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+
+    let entry = store
+        .get(&script.id)
+        .ok_or_else(|| anyhow::anyhow!("'{}' is not running detached", script.name))?;
+
+    if runtime_state::is_pid_alive(entry.pid) {
+        runtime_state::kill_pid_tree(entry.pid)
+            .map_err(|e| anyhow::anyhow!("Failed to stop: {}", e))?;
+    }
+    store.unregister(&script.id)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "stopped": true,
+                "script_id": script.id,
+                "pid": entry.pid,
+            })
+        );
+    } else {
+        println!("Stopped '{}' (PID {}).", script.name, entry.pid);
+    }
+    Ok(())
+}
+
+fn cmd_global_script_logs(
+    storage: &Storage,
+    name: &str,
+    tail: usize,
+    follow: bool,
+) -> anyhow::Result<()> {
+    let script = resolve_global_script(storage, name)?;
+    let store = RuntimeStore::new(storage.app_dir())?;
+    let log_path = store.log_path(&script.id);
+    if !log_path.exists() {
+        return Err(anyhow::anyhow!(
+            "No log file for '{}'. Run with `cortx run --detach {}` first.",
+            script.name,
+            script.name
+        ));
+    }
+    print_log_tail(&log_path, tail)?;
+    if follow {
+        follow_log(&log_path)?;
+    }
+    Ok(())
+}
 
 /// Run a script directly by name
 fn cmd_run(
