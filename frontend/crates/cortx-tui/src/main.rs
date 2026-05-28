@@ -263,11 +263,19 @@ enum ScriptAction {
     Create {
         /// Script name
         name: String,
-        /// Command to run
+        /// Command to run. Use {{SCRIPT_FILE}} as a placeholder substituted
+        /// by --script-path (e.g. "uv run {{SCRIPT_FILE}}").
         command: String,
         /// Working directory
         #[arg(long)]
         dir: Option<String>,
+        /// Absolute path to the script file. Substituted into {{SCRIPT_FILE}}
+        /// inside `command`.
+        #[arg(long)]
+        script_path: Option<String>,
+        /// Display color (hex like "#eab308")
+        #[arg(long)]
+        color: Option<String>,
         /// Tags
         #[arg(long)]
         tag: Option<Vec<String>>,
@@ -291,6 +299,12 @@ enum ScriptAction {
         /// Working directory
         #[arg(long)]
         dir: Option<String>,
+        /// Absolute path to the script file
+        #[arg(long)]
+        script_path: Option<String>,
+        /// Display color (hex like "#eab308")
+        #[arg(long)]
+        color: Option<String>,
         /// Tags (replaces all)
         #[arg(long)]
         tag: Option<Vec<String>>,
@@ -468,6 +482,27 @@ enum ServiceAction {
         /// Working directory
         #[arg(long)]
         dir: Option<String>,
+        /// Mode definitions as name=cmd pairs (replaces all modes)
+        #[arg(long)]
+        mode: Option<Vec<String>>,
+        /// Default mode name
+        #[arg(long)]
+        default_mode: Option<String>,
+        /// Arg preset definitions as name=args pairs (replaces all presets)
+        #[arg(long)]
+        arg_preset: Option<Vec<String>>,
+        /// Default arg preset name
+        #[arg(long)]
+        default_arg_preset: Option<String>,
+        /// Port number
+        #[arg(long)]
+        port: Option<u16>,
+        /// Color hex (e.g. "#eab308")
+        #[arg(long)]
+        color: Option<String>,
+        /// Environment variables as KEY=VALUE pairs (replaces all)
+        #[arg(long)]
+        env: Option<Vec<String>>,
     },
     /// Delete a service
     Delete {
@@ -983,11 +1018,11 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
                 cmd_script_list(&storage, tag.as_deref(), name.as_deref(), json)
             }
             ScriptAction::Get { name_or_id } => cmd_script_get(&storage, &name_or_id, json),
-            ScriptAction::Create { name, command, dir, tag, description, status } => {
-                cmd_script_create(&storage, &name, &command, dir.as_deref(), tag, description.as_deref(), status.as_deref(), json)
+            ScriptAction::Create { name, command, dir, script_path, color, tag, description, status } => {
+                cmd_script_create(&storage, &name, &command, dir.as_deref(), script_path.as_deref(), color.as_deref(), tag, description.as_deref(), status.as_deref(), json)
             }
-            ScriptAction::Update { name_or_id, name, command, dir, tag, description, status } => {
-                cmd_script_update(&storage, &name_or_id, name, command, dir, tag, description, status, json)
+            ScriptAction::Update { name_or_id, name, command, dir, script_path, color, tag, description, status } => {
+                cmd_script_update(&storage, &name_or_id, name, command, dir, script_path, color, tag, description, status, json)
             }
             ScriptAction::Delete { name_or_id, yes } => cmd_script_delete(&storage, &name_or_id, yes),
         },
@@ -1030,8 +1065,8 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
             ServiceAction::Add { project, name, dir, command, mode, default_mode, port, color } => {
                 cmd_service_add(&storage, &project, &name, &dir, &command, mode, default_mode, port, color, json)
             }
-            ServiceAction::Update { id, name, command, dir } => {
-                cmd_service_update(&storage, &id, name, command, dir, json)
+            ServiceAction::Update { id, name, command, dir, mode, default_mode, arg_preset, default_arg_preset, port, color, env } => {
+                cmd_service_update(&storage, &id, name, command, dir, mode, default_mode, arg_preset, default_arg_preset, port, color, env, json)
             }
             ServiceAction::Delete { id, yes } => cmd_service_delete(&storage, &id, yes),
             ServiceAction::Start { project, service, mode, arg_preset } => {
@@ -1286,6 +1321,8 @@ fn cmd_script_create(
     name: &str,
     command: &str,
     dir: Option<&str>,
+    script_path: Option<&str>,
+    color: Option<&str>,
     tags: Option<Vec<String>>,
     description: Option<&str>,
     status: Option<&str>,
@@ -1293,6 +1330,8 @@ fn cmd_script_create(
 ) -> anyhow::Result<()> {
     let mut script = GlobalScript::new(name.to_string(), command.to_string(), dir.map(|s| s.to_string()));
     script.description = description.map(|s| s.to_string());
+    script.script_path = script_path.map(|s| s.to_string());
+    script.color = color.map(|s| s.to_string());
     if let Some(tags) = tags {
         script.tags = tags;
     }
@@ -1314,6 +1353,8 @@ fn cmd_script_update(
     name: Option<String>,
     command: Option<String>,
     dir: Option<String>,
+    script_path: Option<String>,
+    color: Option<String>,
     tags: Option<Vec<String>>,
     description: Option<String>,
     status: Option<String>,
@@ -1327,6 +1368,8 @@ fn cmd_script_update(
         if let Some(ref n) = name { s.name = n.clone(); }
         if let Some(ref c) = command { s.command = c.clone(); }
         if let Some(ref d) = dir { s.working_dir = Some(d.clone()); }
+        if let Some(ref p) = script_path { s.script_path = Some(p.clone()); }
+        if let Some(ref col) = color { s.color = Some(col.clone()); }
         if let Some(ref t) = tags { s.tags = t.clone(); }
         if let Some(ref d) = description { s.description = Some(d.clone()); }
         if let Some(ref st) = status { s.status = Some(st.clone()); }
@@ -1699,12 +1742,37 @@ fn cmd_service_update(
     name: Option<String>,
     command: Option<String>,
     dir: Option<String>,
+    mode: Option<Vec<String>>,
+    default_mode: Option<String>,
+    arg_preset: Option<Vec<String>>,
+    default_arg_preset: Option<String>,
+    port: Option<u16>,
+    color: Option<String>,
+    env: Option<Vec<String>>,
     json: bool,
 ) -> anyhow::Result<()> {
+    // Pre-parse the shell-map style args before entering the update closure.
+    let modes_map = mode.map(|entries| parse_shell_map(&entries));
+    let arg_presets_map = arg_preset.map(|entries| parse_shell_map(&entries));
+    let env_map = env.map(|entries| parse_shell_map(&entries));
+
     let updated = storage.update_service(id, |s| {
         if let Some(ref n) = name { s.name = n.clone(); }
         if let Some(ref c) = command { s.command = c.clone(); }
         if let Some(ref d) = dir { s.working_dir = d.clone(); }
+        if let Some(ref m) = modes_map {
+            s.modes = if m.is_empty() { None } else { Some(m.clone()) };
+        }
+        if let Some(ref dm) = default_mode { s.default_mode = Some(dm.clone()); }
+        if let Some(ref ap) = arg_presets_map {
+            s.arg_presets = if ap.is_empty() { None } else { Some(ap.clone()) };
+        }
+        if let Some(ref dap) = default_arg_preset { s.default_arg_preset = Some(dap.clone()); }
+        if let Some(p) = port { s.port = Some(p); }
+        if let Some(ref col) = color { s.color = Some(col.clone()); }
+        if let Some(ref e) = env_map {
+            s.env_vars = if e.is_empty() { None } else { Some(e.clone()) };
+        }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
