@@ -26,5 +26,10 @@ sysinfo = "0.32"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+# Read persisted User/Machine PATH from the registry without spawning a process
+# (avoids the PowerShell window flash + UI freeze on the Settings page).
+winreg = "0.52"
+
 [dev-dependencies]
 tempfile = "3"

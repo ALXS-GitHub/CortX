@@ -210,25 +210,25 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 }
 
 /// On Windows, the persisted PATH new processes inherit (User + Machine scopes),
-/// read from the environment registry via PowerShell.
+/// read directly from the registry. This must NOT spawn a process — it runs on
+/// every Settings-page load, and shelling out to PowerShell caused a visible
+/// console window + UI freeze.
 #[cfg(windows)]
 fn persisted_path() -> String {
-    let read = |scope: &str| -> String {
-        std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &format!("[Environment]::GetEnvironmentVariable('PATH','{scope}')"),
-            ])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| s.trim_end_matches(['\r', '\n']).to_string())
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
+
+    let read = |root: RegKey, subkey: &str| -> String {
+        root.open_subkey(subkey)
+            .and_then(|k| k.get_value::<String, _>("Path"))
             .unwrap_or_default()
     };
-    format!("{};{}", read("User"), read("Machine"))
+    let user = read(RegKey::predef(HKEY_CURRENT_USER), "Environment");
+    let machine = read(
+        RegKey::predef(HKEY_LOCAL_MACHINE),
+        r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+    );
+    format!("{user};{machine}")
 }
 
 /// Whether `dir` is on the PATH that newly-spawned processes (agents, new
@@ -282,8 +282,12 @@ pub fn install_to_path(dir: &Path) -> Result<InstallOutcome, String> {
              [Environment]::SetEnvironmentVariable('PATH', $new, 'User')\n\
              exit 0"
         );
+        // CREATE_NO_WINDOW (0x08000000): keep the PowerShell call invisible so no
+        // console window flashes when the user clicks "Add to PATH".
+        use std::os::windows::process::CommandExt;
         let out = std::process::Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .creation_flags(0x0800_0000)
             .output()
             .map_err(|e| e.to_string())?;
         match out.status.code() {
