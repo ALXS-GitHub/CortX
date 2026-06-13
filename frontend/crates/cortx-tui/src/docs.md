@@ -25,10 +25,10 @@ CortX manages ten types of entities:
 | **GlobalScript** | Standalone script, not attached to any project. Has parameters, presets, env vars. The "scripts" domain in the CLI refers to these. |
 | **Tool** | Registry entry for an installed CLI utility (git, ripgrep, etc.). Metadata: version, install method, config paths. |
 | **App** | GUI application registry (VS Code, Discord, etc.). Has executable path and launch args. |
-| **ShellAlias** | Shell shortcut synced into `cortx init <shell>`. Types: `function`, `script`, `init`. |
+| **ShellAlias** | Shell shortcut synced into `cortx init <shell>`. Types: `function`, `script`, `init`. A `function` alias can also be **shimmed** (`shim: true`) — written as a real launcher file so it's callable from any process, not just `cortx init` shells. |
 | **TagDefinition** | Named tag with optional color and sort order. Used across all entities. |
 | **StatusDefinition** | Named status (Active, WIP, Deprecated…) with color + order. |
-| **Settings** | App-wide config: terminal preset, theme, launch method, toolbox base URL, backup repo path, script scan config. |
+| **Settings** | App-wide config: terminal preset, theme, launch method, toolbox base URL, backup repo path, script scan config, shim directory (`shimDir`). |
 
 ### Key concepts
 
@@ -36,6 +36,7 @@ CortX manages ten types of entities:
 - **Tags**: Free-form strings. The first tag on an item is the "primary tag" (used for grouping/sorting). `TagDefinition` enriches a tag name with a color and display order.
 - **Statuses**: Same pattern as tags. `StatusDefinition` enriches status strings.
 - **`execution_order` on aliases**: Controls ordering inside `cortx init <shell>` output. Aliases with `execution_order` set run first (sorted ascending); others run after by insertion order. Used to force, e.g., `oh-my-posh init` before `zoxide init` so zoxide can hook the prompt AFTER oh-my-posh sets it.
+- **Shims on aliases**: A plain alias only exists inside a shell that sourced `cortx init`, so a non-interactive process (an agent, a scheduled task) **cannot call it**. Enabling the alias's `shim` writes a real launcher file to the shim dir; once that dir is on PATH, the alias is callable from anywhere. **If you need to invoke an alias yourself and it isn't found, enable its shim** — see `cortx shim`.
 
 ### Choosing the right entity type
 
@@ -259,3 +260,4 @@ The CLI and MCP share the same backend — changes via one are immediately visib
 5. **The TUI starts if you run `cortx` with no args** — always pass a subcommand when scripting.
 6. **`cortx init <shell>` is meant to be eval'd in a shell profile** — don't run it as a standalone command; its output is shell code.
 7. **For destructive bulk ops, prefer `cortx export` first** — you can always re-import if something goes wrong.
+8. **Can't call an alias? Enable its shim.** Aliases are only defined inside shells that sourced `cortx init`, so from your own process they won't resolve. Run `cortx alias update <name> --shim true` (function-type only), make sure `cortx shim install` has been run once (check with `cortx shim path`), then call it directly. `cortx alias get <name>` shows the current shim state.

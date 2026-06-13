@@ -2684,9 +2684,14 @@ fn cmd_alias_list(
                 })
                 .unwrap_or_else(|| "-".to_string())
         };
-        println!("{:<20} {:<10} {:<40} {}", a.name, alias_type, cmd_display, tags_display);
+        // Mark shimmed aliases so it's visible which are callable from anywhere.
+        let name_display = if a.shim { format!("{}*", a.name) } else { a.name.clone() };
+        println!("{:<20} {:<10} {:<40} {}", name_display, alias_type, cmd_display, tags_display);
     }
     println!("\n{} alias(es)", aliases.len());
+    if sorted.iter().any(|a| a.shim) {
+        println!("* = shim enabled (callable from any process; see `cortx shim`)");
+    }
     Ok(())
 }
 
@@ -2703,6 +2708,16 @@ fn cmd_alias_get(storage: &Storage, name: &str, json: bool) -> anyhow::Result<()
     println!("ID:              {}", alias.id);
     println!("Type:            {}", alias.alias_type);
     println!("Command:         {}", alias.command);
+    if alias.alias_type == "function" {
+        println!(
+            "Shim:            {}",
+            if alias.shim {
+                "enabled (callable from any process — agents, tasks, non-interactive shells)"
+            } else {
+                "disabled (only callable in shells that source `cortx init`; enable with --shim true)"
+            }
+        );
+    }
     if let Some(ref desc) = alias.description {
         println!("Description:     {}", desc);
     }
