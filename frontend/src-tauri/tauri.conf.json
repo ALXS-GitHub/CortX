@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Cortx",
   "mainBinaryName": "cortx-app",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "identifier": "com.cortx.app",
   "build": {
     "frontendDist": "../dist",
@@ -25,7 +25,10 @@
         "visible": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 140, "y": 20 }
+        "trafficLightPosition": {
+          "x": 140,
+          "y": 20
+        }
       }
     ],
     "security": {
