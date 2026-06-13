@@ -2012,6 +2012,7 @@ pub fn create_alias(state: State<AppState>, input: CreateShellAliasInput) -> Res
     alias.script = input.script;
     alias.tool_id = input.tool_id;
     alias.execution_order = input.execution_order;
+    alias.shim = input.shim.unwrap_or(false);
     let count = state.storage.get_all_aliases().len() as u32;
     alias.order = count;
 
@@ -2058,12 +2059,33 @@ pub fn update_alias(state: State<AppState>, id: String, input: UpdateShellAliasI
         if input.execution_order.is_some() {
             alias.execution_order = input.execution_order;
         }
+        if let Some(shim) = input.shim {
+            alias.shim = shim;
+        }
     }).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_alias(state: State<AppState>, id: String) -> Result<(), String> {
     state.storage.delete_alias(&id).map_err(|e| e.to_string())
+}
+
+/// Status of the alias shim system: directory, whether on PATH, shimmed names.
+#[tauri::command]
+pub fn get_shim_status(state: State<AppState>) -> cortx_core::shim::ShimStatus {
+    state.storage.shim_status()
+}
+
+/// Reconcile the shim directory with current aliases (write/remove launchers).
+#[tauri::command]
+pub fn sync_shims(state: State<AppState>) -> Result<cortx_core::shim::SyncReport, String> {
+    state.storage.sync_all_shims().map_err(|e| e.to_string())
+}
+
+/// Add the shim directory to the user's persistent PATH (one-click, idempotent).
+#[tauri::command]
+pub fn install_shim_path(state: State<AppState>) -> Result<cortx_core::shim::InstallOutcome, String> {
+    state.storage.install_shim_path()
 }
 
 #[tauri::command]

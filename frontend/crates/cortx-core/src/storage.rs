@@ -780,6 +780,7 @@ impl Storage {
             aliases.push(alias.clone());
         }
         self.save_aliases()?;
+        self.sync_shim(&alias);
         Ok(alias)
     }
 
@@ -788,13 +789,14 @@ impl Storage {
         id: &str,
         updater: impl FnOnce(&mut ShellAlias),
     ) -> Result<ShellAlias, StorageError> {
-        let alias = {
+        let (alias, old_name) = {
             let mut aliases = self.aliases.write();
             let alias = aliases
                 .iter_mut()
                 .find(|a| a.id == id)
                 .ok_or_else(|| StorageError::AliasNotFound(id.to_string()))?;
 
+            let old_name = alias.name.clone();
             updater(alias);
             alias.updated_at = chrono::Utc::now();
 
@@ -811,23 +813,67 @@ impl Storage {
                     format!("Alias '{}' already exists", alias_clone.name),
                 )));
             }
-            alias_clone
+            (alias_clone, old_name)
         };
         self.save_aliases()?;
+        // Real-time shim reconciliation: if the name changed, drop the old shim
+        // file first, then write/remove according to the new state.
+        if old_name != alias.name {
+            let _ = crate::shim::remove_shim(&self.shim_dir(), &old_name);
+        }
+        self.sync_shim(&alias);
         Ok(alias)
     }
 
     pub fn delete_alias(&self, id: &str) -> Result<(), StorageError> {
-        {
+        let removed_name = {
             let mut aliases = self.aliases.write();
+            let name = aliases.iter().find(|a| a.id == id).map(|a| a.name.clone());
             let initial_len = aliases.len();
             aliases.retain(|a| a.id != id);
             if aliases.len() == initial_len {
                 return Err(StorageError::AliasNotFound(id.to_string()));
             }
-        }
+            name
+        };
         self.save_aliases()?;
+        if let Some(name) = removed_name {
+            let _ = crate::shim::remove_shim(&self.shim_dir(), &name);
+        }
         Ok(())
+    }
+
+    // ========================================================================
+    // Shims (real launcher files for aliases — callable from any process)
+    // ========================================================================
+
+    /// Effective shim directory (the configured setting, or platform default).
+    pub fn shim_dir(&self) -> PathBuf {
+        crate::shim::resolve_shim_dir(&self.settings.read())
+    }
+
+    /// Best-effort reconcile of a single alias's shim. A failure here is logged
+    /// to stderr but never blocks the data write that triggered it.
+    fn sync_shim(&self, alias: &ShellAlias) {
+        if let Err(e) = crate::shim::sync_alias(&self.shim_dir(), alias) {
+            eprintln!("[cortx] shim sync failed for alias '{}': {}", alias.name, e);
+        }
+    }
+
+    /// Reconcile the entire shim directory against all aliases (writes missing
+    /// shims, removes orphans). Used by `cortx shim sync` and the GUI.
+    pub fn sync_all_shims(&self) -> Result<crate::shim::SyncReport, StorageError> {
+        crate::shim::sync_all(&self.shim_dir(), &self.get_all_aliases()).map_err(StorageError::Io)
+    }
+
+    /// Status of the shim directory: path, whether it's on PATH, shimmed names.
+    pub fn shim_status(&self) -> crate::shim::ShimStatus {
+        crate::shim::status(&self.settings.read(), &self.aliases.read())
+    }
+
+    /// Add the shim directory to the user's persistent PATH (idempotent).
+    pub fn install_shim_path(&self) -> Result<crate::shim::InstallOutcome, String> {
+        crate::shim::install_to_path(&self.shim_dir())
     }
 
     // ========================================================================
@@ -1243,6 +1289,11 @@ impl Storage {
                 self.save_settings()?;
                 settings_imported = true;
             }
+        }
+
+        // Materialize shims for any imported aliases (best-effort).
+        if aliases_added > 0 {
+            let _ = crate::shim::sync_all(&self.shim_dir(), &self.get_all_aliases());
         }
 
         Ok(ImportResult {

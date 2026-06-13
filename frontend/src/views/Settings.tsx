@@ -22,13 +22,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
-import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags, Copy, Check, TerminalSquare, ChevronDown, ChevronUp, CircleDot, GitBranch } from 'lucide-react';
+import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags, Copy, Check, TerminalSquare, ChevronDown, ChevronUp, CircleDot, GitBranch, Globe } from 'lucide-react';
 import { toast } from 'sonner';
 import { TagDefinitionManager } from '@/components/global-scripts/TagDefinitionManager';
 import { StatusDefinitionManager } from '@/components/settings/StatusDefinitionManager';
-import { generateShellInit, setGlobalHotkey as setGlobalHotkeyApi } from '@/lib/tauri';
+import { generateShellInit, setGlobalHotkey as setGlobalHotkeyApi, getShimStatus, syncShims, installShimPath } from '@/lib/tauri';
 import { HotkeyInput } from '@/components/settings/HotkeyInput';
-import type { AppSettings, TerminalPreset, ExportSummary, ImportOptions } from '@/types';
+import type { AppSettings, TerminalPreset, ExportSummary, ImportOptions, ShimStatus } from '@/types';
 
 const DEFAULT_GLOBAL_HOTKEY = 'CmdOrCtrl+Shift+Space';
 
@@ -119,6 +119,9 @@ export function Settings() {
   const [backupRepoPath, setBackupRepoPath] = useState('');
   const [globalHotkey, setGlobalHotkey] = useState<string>(DEFAULT_GLOBAL_HOTKEY);
   const [isBackingUp, setIsBackingUp] = useState(false);
+  const [shimDir, setShimDir] = useState('');
+  const [shimStatus, setShimStatus] = useState<ShimStatus | null>(null);
+  const [isInstallingPath, setIsInstallingPath] = useState(false);
   const [commandTemplates, setCommandTemplates] = useState<Record<string, string>>({});
   const [newExtension, setNewExtension] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
@@ -140,10 +143,43 @@ export function Settings() {
       setToolboxBaseUrl(settings.toolboxBaseUrl ?? '');
       setBackupRepoPath(settings.backupRepoPath ?? '');
       setGlobalHotkey(settings.globalHotkey ?? DEFAULT_GLOBAL_HOTKEY);
+      setShimDir(settings.shimDir ?? '');
       setCommandTemplates(settings.scriptsConfig.commandTemplates ?? {});
       setHasChanges(false);
     }
   }, [settings]);
+
+  // Refresh shim status (directory, on-PATH, shimmed alias count).
+  const refreshShimStatus = async () => {
+    try {
+      setShimStatus(await getShimStatus());
+    } catch (e) {
+      console.error('Failed to load shim status:', e);
+    }
+  };
+
+  useEffect(() => {
+    refreshShimStatus();
+  }, []);
+
+  const handleInstallShimPath = async () => {
+    setIsInstallingPath(true);
+    try {
+      const outcome = await installShimPath();
+      if (outcome.status === 'added') {
+        toast.success('Shim folder added to PATH. Restart your terminals/agents once to pick it up.');
+      } else if (outcome.status === 'alreadyPresent') {
+        toast.info('Shim folder is already on your PATH.');
+      } else {
+        toast.message('Add this line to your shell profile:', { description: outcome.instruction });
+      }
+      await refreshShimStatus();
+    } catch (e) {
+      toast.error(`Failed to add to PATH: ${e}`);
+    } finally {
+      setIsInstallingPath(false);
+    }
+  };
 
   const handleBrowseTerminal = async () => {
     try {
@@ -288,10 +324,18 @@ export function Settings() {
       toolboxBaseUrl,
       backupRepoPath: backupRepoPath || undefined,
       globalHotkey: globalHotkey || undefined,
+      shimDir: shimDir.trim() || undefined,
     };
 
     try {
       await updateSettings(newSettings);
+      // Shim dir may have moved → reconcile launchers and refresh status.
+      try {
+        await syncShims();
+        await refreshShimStatus();
+      } catch (err) {
+        console.error('Shim sync after settings save failed:', err);
+      }
       // Re-register the OS-level hotkey so the change takes effect immediately.
       try {
         await setGlobalHotkeyApi(globalHotkey ?? '');
@@ -749,6 +793,84 @@ export function Settings() {
               <Upload className="size-4 mr-2" />
               {isBackingUp ? 'Backing up...' : 'Backup Now'}
             </Button>
+          </div>
+
+          <Separator />
+
+          {/* Alias Shims */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Globe className="size-4 text-muted-foreground" />
+              <Label className="text-sm font-medium">Alias Shims</Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              A shim is a real launcher file so an alias becomes callable from <strong>any</strong> process
+              — AI agents, scheduled tasks, non-interactive shells — not just terminals that load
+              <code className="bg-muted px-1 rounded mx-1">cortx init</code>. Enable per alias via the
+              “Callable from anywhere” switch. The shim folder must be on your PATH (one-time).
+            </p>
+
+            <div className="grid gap-2">
+              <Label htmlFor="shim-dir" className="text-xs text-muted-foreground">Shim Directory</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="shim-dir"
+                  value={shimDir}
+                  onChange={(e) => {
+                    setShimDir(e.target.value);
+                    setHasChanges(true);
+                  }}
+                  placeholder={shimStatus?.dir || 'Default: %LOCALAPPDATA%\\CortX\\bin'}
+                  className="flex-1 font-mono text-sm"
+                />
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      const selected = await open({ directory: true, multiple: false, title: 'Select Shim Directory' });
+                      if (selected && typeof selected === 'string') {
+                        setShimDir(selected);
+                        setHasChanges(true);
+                      }
+                    } catch (e) {
+                      console.error('Failed to open folder picker:', e);
+                    }
+                  }}
+                >
+                  <FolderOpen className="size-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave empty to use the platform default. Save settings to apply (shims are re-synced automatically).
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground">Status:</span>
+              {shimStatus?.onPath ? (
+                <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-500">
+                  <Check className="size-3.5" /> On PATH
+                </span>
+              ) : (
+                <span className="text-amber-600 dark:text-amber-500">Not on PATH</span>
+              )}
+              <span className="text-muted-foreground">·</span>
+              <span className="text-muted-foreground">{shimStatus?.count ?? 0} shimmed alias{(shimStatus?.count ?? 0) === 1 ? '' : 'es'}</span>
+            </div>
+
+            <Button
+              variant="outline"
+              onClick={handleInstallShimPath}
+              disabled={isInstallingPath || !!shimStatus?.onPath}
+            >
+              <Globe className="size-4 mr-2" />
+              {isInstallingPath ? 'Adding…' : shimStatus?.onPath ? 'Already on PATH' : 'Add to PATH'}
+            </Button>
+            {!shimStatus?.onPath && (
+              <p className="text-xs text-muted-foreground">
+                After adding, restart your terminals/agents once. Then enabling or disabling a shim is instant — no restart needed.
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>

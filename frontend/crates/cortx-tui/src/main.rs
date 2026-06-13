@@ -177,6 +177,12 @@ enum Command {
         command: AliasCommand,
     },
 
+    /// Manage alias shims (real launcher files callable from any process)
+    Shim {
+        #[command(subcommand)]
+        action: ShimAction,
+    },
+
     /// Manage GUI applications
     App {
         #[command(subcommand)]
@@ -678,6 +684,11 @@ enum AliasCommand {
         /// Tool UUID to link
         #[arg(long)]
         tool_id: Option<String>,
+        /// Also generate a shim so the alias is callable from any process
+        /// (agents, scheduled tasks) — not just shells that source `cortx init`.
+        /// Only applies to function-type aliases. See `cortx shim`.
+        #[arg(long)]
+        shim: bool,
     },
     /// Update an existing alias
     Update {
@@ -701,12 +712,31 @@ enum AliasCommand {
         /// Tags (replaces all)
         #[arg(long)]
         tag: Option<Vec<String>>,
+        /// Enable/disable shim generation for this alias (e.g. --shim true).
+        #[arg(long)]
+        shim: Option<bool>,
     },
     /// Remove an alias by name
     Remove {
         /// Alias name to remove
         name: String,
     },
+}
+
+// ---------------------------------------------------------------------------
+// Shim subcommands
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum ShimAction {
+    /// List shimmed aliases and show the shim directory + PATH status
+    List,
+    /// Reconcile the shim directory with current aliases (write/remove shims)
+    Sync,
+    /// Print the shim directory and whether it is on PATH
+    Path,
+    /// Add the shim directory to your user PATH (one-time; restart shells after)
+    Install,
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,13 +1132,21 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
         Some(Command::Alias { command: alias_cmd }) => match alias_cmd {
             AliasCommand::List { name } => cmd_alias_list(&storage, name.as_deref(), json),
             AliasCommand::Get { name } => cmd_alias_get(&storage, &name, json),
-            AliasCommand::Add { name, command, description, alias_type, setup, script, tool_id } => {
-                cmd_alias_add(&storage, &name, &command, description.as_deref(), alias_type.as_deref(), setup, script, tool_id)
+            AliasCommand::Add { name, command, description, alias_type, setup, script, tool_id, shim } => {
+                cmd_alias_add(&storage, &name, &command, description.as_deref(), alias_type.as_deref(), setup, script, tool_id, shim)
             }
-            AliasCommand::Update { name_or_id, name, command, description, alias_type, execution_order, tag } => {
-                cmd_alias_update(&storage, &name_or_id, name, command, description, alias_type, execution_order, tag, json)
+            AliasCommand::Update { name_or_id, name, command, description, alias_type, execution_order, tag, shim } => {
+                cmd_alias_update(&storage, &name_or_id, name, command, description, alias_type, execution_order, tag, shim, json)
             }
             AliasCommand::Remove { name } => cmd_alias_remove(&storage, &name),
+        },
+
+        // Shim group
+        Some(Command::Shim { action }) => match action {
+            ShimAction::List => cmd_shim_list(&storage, json),
+            ShimAction::Sync => cmd_shim_sync(&storage, json),
+            ShimAction::Path => cmd_shim_path(&storage, json),
+            ShimAction::Install => cmd_shim_install(&storage),
         },
 
         // App group
@@ -2717,6 +2755,7 @@ fn cmd_alias_add(
     setup: Option<Vec<String>>,
     script: Option<Vec<String>>,
     tool_id: Option<String>,
+    shim: bool,
 ) -> anyhow::Result<()> {
     // Validate name
     cortx_core::shell_init::validate_alias_name(name)
@@ -2756,9 +2795,16 @@ fn cmd_alias_add(
         }
     }
     alias.tool_id = tool_id;
+    alias.shim = shim;
 
+    let is_function = alias.alias_type == "function";
     storage.create_alias(alias).map_err(|e| anyhow::anyhow!("{}", e))?;
     println!("Alias '{}' added.", name);
+    if shim && !is_function {
+        eprintln!("Note: --shim only applies to function-type aliases; ignored here.");
+    } else if shim {
+        print_shim_hint(storage);
+    }
     Ok(())
 }
 
@@ -2771,6 +2817,7 @@ fn cmd_alias_update(
     alias_type: Option<String>,
     execution_order: Option<u32>,
     tags: Option<Vec<String>>,
+    shim: Option<bool>,
     json: bool,
 ) -> anyhow::Result<()> {
     let aliases = storage.get_all_aliases();
@@ -2784,12 +2831,20 @@ fn cmd_alias_update(
         if let Some(ref at) = alias_type { a.alias_type = at.clone(); }
         if let Some(eo) = execution_order { a.execution_order = Some(eo); }
         if let Some(ref t) = tags { a.tags = t.clone(); }
+        if let Some(s) = shim { a.shim = s; }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&updated)?);
     } else {
         println!("Alias '{}' updated.", updated.name);
+        if shim == Some(true) {
+            if updated.alias_type != "function" {
+                eprintln!("Note: shim only applies to function-type aliases; ignored here.");
+            } else {
+                print_shim_hint(storage);
+            }
+        }
     }
     Ok(())
 }
@@ -2800,6 +2855,102 @@ fn cmd_alias_remove(storage: &Storage, name: &str) -> anyhow::Result<()> {
         .ok_or_else(|| CortxError::not_found("alias", name))?;
     storage.delete_alias(&alias.id).map_err(|e| anyhow::anyhow!("{}", e))?;
     println!("Alias '{}' removed.", name);
+    Ok(())
+}
+
+/// Print a hint after enabling a shim, warning if the shim dir isn't on PATH.
+fn print_shim_hint(storage: &Storage) {
+    let st = storage.shim_status();
+    if !st.on_path {
+        eprintln!(
+            "Shim written to {} but that directory is not on PATH yet.\n\
+             Run `cortx shim install` once to add it (then restart your shells).",
+            st.dir
+        );
+    }
+}
+
+fn cmd_shim_list(storage: &Storage, json: bool) -> anyhow::Result<()> {
+    let st = storage.shim_status();
+    if json {
+        println!("{}", serde_json::to_string_pretty(&st)?);
+        return Ok(());
+    }
+    println!("Shim directory: {}", st.dir);
+    println!("On PATH:        {}", if st.on_path { "yes" } else { "no" });
+    println!("Shimmed aliases ({}):", st.count);
+    if st.names.is_empty() {
+        println!("  (none — enable with `cortx alias update <name> --shim true`)");
+    } else {
+        for n in &st.names {
+            println!("  - {}", n);
+        }
+    }
+    if !st.on_path {
+        println!();
+        println!("Tip: run `cortx shim install` to add the directory to your PATH.");
+    }
+    Ok(())
+}
+
+fn cmd_shim_sync(storage: &Storage, json: bool) -> anyhow::Result<()> {
+    let report = storage.sync_all_shims().map_err(|e| anyhow::anyhow!("{}", e))?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    println!(
+        "Shims synced: {} written, {} removed.",
+        report.written.len(),
+        report.removed.len()
+    );
+    for n in &report.written {
+        println!("  + {}", n);
+    }
+    for n in &report.removed {
+        println!("  - {}", n);
+    }
+    Ok(())
+}
+
+fn cmd_shim_path(storage: &Storage, json: bool) -> anyhow::Result<()> {
+    let st = storage.shim_status();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "dir": st.dir,
+                "onPath": st.on_path,
+            }))?
+        );
+        return Ok(());
+    }
+    println!("{}", st.dir);
+    if st.on_path {
+        println!("(on PATH)");
+    } else {
+        println!("(not on PATH — run `cortx shim install`)");
+    }
+    Ok(())
+}
+
+fn cmd_shim_install(storage: &Storage) -> anyhow::Result<()> {
+    use cortx_core::shim::InstallOutcome;
+    let dir = storage.shim_dir();
+    match storage.install_shim_path().map_err(|e| anyhow::anyhow!(e))? {
+        InstallOutcome::Added => {
+            println!("Added to your user PATH:\n  {}", dir.display());
+            println!("Restart your terminals/agents once for the change to take effect.");
+            println!("After that, enabling/disabling a shim is instant (no restart needed).");
+        }
+        InstallOutcome::AlreadyPresent => {
+            println!("Already on PATH:\n  {}", dir.display());
+        }
+        InstallOutcome::Manual { instruction } => {
+            println!("Add this line to your shell profile to put shims on PATH:");
+            println!("  {}", instruction);
+        }
+    }
     Ok(())
 }
 

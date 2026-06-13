@@ -292,6 +292,22 @@ Local App Launcher provides:
 
 ---
 
+#### F7: Shell Aliases & Shims
+
+**Description:** Manage shell shortcuts that sync into the user's shell via `cortx init <shell>`, and optionally materialize them as real launcher files ("shims") so they are callable from any process.
+
+**Requirements:**
+| ID | Requirement | Priority | Status |
+|----|-------------|----------|--------|
+| F7.1 | Define `function`/`script`/`init` aliases synced via `cortx init` | Must Have | Done |
+| F7.2 | Per-alias `shim` flag that writes a real launcher (`<name>` POSIX + `<name>.cmd`) to a configurable dir | Must Have | Done |
+| F7.3 | Shims callable from any process (agents, scheduled tasks, non-interactive shells) once dir is on PATH | Must Have | Done |
+| F7.4 | Real-time shim sync on alias create/update/delete (no shell restart) | Must Have | Done |
+| F7.5 | One-click "Add to PATH" + configurable shim directory in Settings | Must Have | Done |
+| F7.6 | TUI: display + toggle shim on selected alias | Could Have | Pending |
+
+---
+
 ### 4.3 Implementation Status Summary
 
 ```

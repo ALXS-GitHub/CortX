@@ -10,12 +10,14 @@ Don't forget to update PRD when adding features
 - [ ] When opening in VSCode make sure it's doesn't open a terminal that execute the code command (this terminal should be hidden or use another method to directly open VSCode without opening a terminal)
 - [ ] Find if there is a better way to handle the port used detection (instead of parsing output, maybe use some library or other way to detect which ports are used by which process)
 - [X] Shell init : ajouter un champ optionnel `execution_order` sur les aliases pour contrôler l'ordre d'exécution dans `cortx init` (actuellement `order` est l'ordre d'affichage, pas d'exécution — problème : zoxide init avant OMP → OMP écrase le prompt hook de zoxide)
+- [ ] TUI : intégration des shims d'alias — afficher l'état `Shim: on/off` dans le panneau de détail alias + une touche (ex. `s`) pour activer/désactiver le shim sur l'alias sélectionné (le champ `shim`, le hook storage temps-réel, et l'expo CLI/MCP/GUI sont déjà faits ; il ne reste que l'UI TUI)
 - [ ] TUI : vérifier que tous les process sont bien kill quand on quitte le TUI (certains scripts sont des services long-running)
 - [ ] TUI : vérifier que quand on stoppe un script (touche 's'), son process et tout son process tree sont bien kill (important pour les scripts qui lancent des sous-process comme des serveurs/watchers)
 - [ ] Adjust the areas position for dropping a terminal in current pane / left / right (I feel like it's not really 25 % / 50 % / 25 % of the pane width right now, because there are some gaps)
 
 ## Done
 
+- [X] Alias shims : champ `shim` par alias qui matérialise un fichier launcher réel (`<name>` POSIX + `<name>.cmd`) dans un dossier configurable (`shimDir`, défaut `%LOCALAPPDATA%\CortX\bin`) pour rendre l'alias appelable depuis n'importe quel process (agents, tâches planifiées, shells non-interactifs), pas seulement les shells qui sourcent `cortx init`. Sync temps-réel via le hook Storage (create/update/delete). Exposé en CLI (`--shim`, `cortx shim list/sync/path/install`), MCP, et GUI (toggle dans le form + section Settings « Alias Shims » avec bouton « Add to PATH »). TUI restant (cf. ci-dessus).
 - [X] Improve terminal scrolling experience (e.g. auto scroll to bottom on new output, go back to bottom button, scrollbar, etc...)
 - [X] Clickable links in terminal output
 - [X] Close all terminals button

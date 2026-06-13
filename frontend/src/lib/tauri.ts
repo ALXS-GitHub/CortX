@@ -44,6 +44,9 @@ import type {
   ShellAlias,
   CreateShellAliasInput,
   UpdateShellAliasInput,
+  ShimStatus,
+  ShimSyncReport,
+  ShimInstallOutcome,
   StatusDefinition,
   CreateStatusDefinitionInput,
   UpdateStatusDefinitionInput,
@@ -480,6 +483,19 @@ export async function reorderAliases(aliasIds: string[]): Promise<void> {
 
 export async function generateShellInit(shell: string): Promise<string> {
   return invoke('generate_shell_init', { shell });
+}
+
+// Shim commands (real launcher files for aliases, callable from any process)
+export async function getShimStatus(): Promise<ShimStatus> {
+  return invoke('get_shim_status');
+}
+
+export async function syncShims(): Promise<ShimSyncReport> {
+  return invoke('sync_shims');
+}
+
+export async function installShimPath(): Promise<ShimInstallOutcome> {
+  return invoke('install_shim_path');
 }
 
 // Status definition commands

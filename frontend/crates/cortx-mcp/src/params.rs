@@ -550,6 +550,8 @@ pub struct CreateAliasParams {
     pub tool_id: Option<String>,
     #[schemars(description = "Execution order for `cortx init` output. Aliases with this set appear first (sorted ascending). Leave null to appear after ordered ones.")]
     pub execution_order: Option<u32>,
+    #[schemars(description = "If true, also materialize a real launcher file ('shim') in the shim bin dir so the alias is callable from ANY process (agents, scheduled tasks, non-interactive shells), not just shells that source `cortx init`. Only effective for 'function' type. The shim dir must be on PATH — see `cortx shim install`.")]
+    pub shim: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -576,6 +578,8 @@ pub struct UpdateAliasParams {
     pub tool_id: Option<String>,
     #[schemars(description = "Execution order for `cortx init` output. Aliases with this set appear first (sorted ascending). Set to null to remove.")]
     pub execution_order: Option<u32>,
+    #[schemars(description = "Enable/disable shim generation for this alias. When true, a real launcher file is written to the shim bin dir so the alias is callable from any process. Only effective for 'function' type.")]
+    pub shim: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

@@ -1210,6 +1210,7 @@ impl CortxMcp {
         alias.script = p.script;
         alias.tool_id = p.tool_id;
         alias.execution_order = p.execution_order;
+        alias.shim = p.shim.unwrap_or(false);
         let count = self.storage.get_all_aliases().len() as u32;
         alias.order = count;
         let created = self.storage.create_alias(alias).map_err(|e| mcp_err(e.to_string()))?;
@@ -1260,6 +1261,9 @@ impl CortxMcp {
             }
             if p.execution_order.is_some() {
                 a.execution_order = p.execution_order;
+            }
+            if let Some(v) = p.shim {
+                a.shim = v;
             }
         }).map_err(|e| mcp_err(e.to_string()))?;
         ok_json(&updated)

@@ -116,6 +116,9 @@ export interface AppSettings {
   /** tauri-plugin-global-shortcut combo (e.g. "CmdOrCtrl+Shift+Space").
    *  Undefined / empty means "disabled". */
   globalHotkey?: string;
+  /** Directory where alias shims (real launcher files) are written. Empty/undefined
+   *  means use the platform default (`%LOCALAPPDATA%\CortX\bin`, `~/.local/share/CortX/bin`). */
+  shimDir?: string;
 }
 
 export type ServiceStatus = 'stopped' | 'starting' | 'running' | 'error';
@@ -584,6 +587,10 @@ export interface ShellAlias {
   script?: Record<string, string>;
   toolId?: string;
   executionOrder?: number;
+  /** When true, a real launcher file ("shim") is written so this alias is
+   *  callable from any process (agents, scheduled tasks), not just shells that
+   *  source `cortx init`. Only effective for `function` aliases. */
+  shim?: boolean;
 }
 
 export interface CreateShellAliasInput {
@@ -597,6 +604,7 @@ export interface CreateShellAliasInput {
   script?: Record<string, string>;
   toolId?: string;
   executionOrder?: number;
+  shim?: boolean;
 }
 
 export interface UpdateShellAliasInput {
@@ -610,4 +618,23 @@ export interface UpdateShellAliasInput {
   script?: Record<string, string>;
   toolId?: string;
   executionOrder?: number;
+  shim?: boolean;
 }
+
+// Alias shim (real launcher files) status & operations
+export interface ShimStatus {
+  dir: string;
+  onPath: boolean;
+  count: number;
+  names: string[];
+}
+
+export interface ShimSyncReport {
+  written: string[];
+  removed: string[];
+}
+
+export type ShimInstallOutcome =
+  | { status: 'added' }
+  | { status: 'alreadyPresent' }
+  | { status: 'manual'; instruction: string };

@@ -357,6 +357,10 @@ pub fn run() {
             commands::delete_alias,
             commands::reorder_aliases,
             commands::generate_shell_init,
+            // Shim commands
+            commands::get_shim_status,
+            commands::sync_shims,
+            commands::install_shim_path,
             // Status definition commands
             commands::get_all_status_definitions,
             commands::create_status_definition,

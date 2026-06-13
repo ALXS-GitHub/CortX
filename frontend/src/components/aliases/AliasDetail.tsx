@@ -14,6 +14,7 @@ import {
   Check,
   Wrench,
   Settings,
+  Globe,
 } from 'lucide-react';
 import type { AliasType } from '@/types';
 
@@ -117,6 +118,12 @@ export function AliasDetail() {
               <div className="flex items-center gap-2 min-w-0">
                 <TruncatedText as="h1" className="text-2xl font-bold font-mono min-w-0">{alias.name}</TruncatedText>
                 <Badge variant="outline" className="text-xs flex-shrink-0">{aliasType}</Badge>
+                {alias.shim && (
+                  <Badge variant="secondary" className="text-xs flex-shrink-0 gap-1" title="Shim enabled — callable from any process (agents, scheduled tasks)">
+                    <Globe className="size-3" />
+                    shim
+                  </Badge>
+                )}
                 <div className="flex-shrink-0">
                   <StatusBadge status={alias.status} />
                 </div>

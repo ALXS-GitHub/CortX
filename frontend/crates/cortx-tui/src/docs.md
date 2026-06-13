@@ -67,6 +67,7 @@ CortX manages ten types of entities:
 | `cortx run <name> [args] [--preset P]` | Run a global script. `--preset` applies a saved parameter preset. |
 | `cortx <name> [args]` | Shortcut for `cortx run <name>` |
 | `cortx init <shell>` | Generate shell init script (aliases + setup). Shells: `powershell`, `pwsh`, `ps`, `bash`, `zsh`, `fish`. |
+| `cortx shim <list\|sync\|path\|install>` | Manage alias shims — launcher files that make aliases callable from any process (agents, tasks). See `cortx shim`. |
 | `cortx export [--file PATH]` | Export all data as JSON. Default: cortx-export.json in cwd. |
 | `cortx import <file> [--all]` | Import from export file. `--all` imports every category without prompting. |
 | `cortx backup` | Git-backup all data files to the configured `backupRepoPath` (add + commit + push). |
@@ -134,8 +135,8 @@ The `--mode` flag is repeatable: `--mode dev="npm run dev" --mode prod="npm star
 |---|---|
 | `alias list` | |
 | `alias get <name>` | |
-| `alias add <name> <command>` | `[-d DESC] [-t TYPE] [--setup shell=code...] [--script shell=code...] [--tool-id UUID]` |
-| `alias update <name_or_id>` | `[--name X] [--command X] [--description X] [-t TYPE] [--execution-order N] [--tag X...]` |
+| `alias add <name> <command>` | `[-d DESC] [-t TYPE] [--setup shell=code...] [--script shell=code...] [--tool-id UUID] [--shim]` |
+| `alias update <name_or_id>` | `[--name X] [--command X] [--description X] [-t TYPE] [--execution-order N] [--tag X...] [--shim true|false]` |
 | `alias remove <name>` | No confirmation — removes directly |
 
 Alias types:
@@ -146,6 +147,21 @@ Alias types:
 `--setup shell=code` runs BEFORE the alias definition (e.g., `Remove-Alias ls -Force` to clear a builtin before redefining).
 
 Use `--execution-order N` to force ordering in `cortx init` output. Lower numbers come first; aliases without it run at the end by insertion order.
+
+### `cortx shim` — make aliases callable from any process
+
+A normal alias only exists inside shells that source `cortx init`. A **shim** is a real launcher file written to the shim directory (default `%LOCALAPPDATA%\CortX\bin`, `~/.local/share/CortX/bin`), so a `function`-type alias becomes callable by ANY process — AI agents, scheduled tasks, non-interactive shells — once that directory is on PATH. On Windows two files are written per alias: `<name>` (POSIX `sh`, for Git Bash/agents) and `<name>.cmd` (for PowerShell/cmd). Shims are written/removed in real time whenever an alias is created/updated/deleted.
+
+| Command | Notes |
+|---|---|
+| `alias add <name> <cmd> --shim` | Create a shimmed alias (function type only) |
+| `alias update <name> --shim true` | Toggle shim on/off for an existing alias |
+| `shim list` | Show shim dir, PATH status, and shimmed aliases |
+| `shim path` | Print the shim dir + whether it is on PATH |
+| `shim sync` | Reconcile the shim dir with current aliases |
+| `shim install` | Add the shim dir to the user PATH (one-time; restart shells after) |
+
+Only `function` aliases are shimmable (`script`/`init` inject shell state and can't be a file). The shim dir is configurable via the `shimDir` setting. After `cortx shim install`, restart shells once; subsequent enable/disable of a shim is instant.
 
 ### `cortx tag` — tag definitions
 

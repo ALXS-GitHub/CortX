@@ -8,5 +8,6 @@ pub mod process_manager;
 pub mod runtime_state;
 pub mod script_discovery;
 pub mod shell_init;
+pub mod shim;
 pub mod storage;
 pub mod tool_discovery;

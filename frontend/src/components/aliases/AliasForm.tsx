@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { X, ChevronDown } from 'lucide-react';
@@ -55,6 +56,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
   const [toolId, setToolId] = useState('');
   const [executionOrder, setExecutionOrder] = useState<string>('');
   const [setupOpen, setSetupOpen] = useState(false);
+  const [shim, setShim] = useState(false);
 
   const isEditing = !!alias;
 
@@ -99,6 +101,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
         setToolId(alias.toolId || '');
         setExecutionOrder(alias.executionOrder != null ? String(alias.executionOrder) : '');
         setSetupOpen(!!alias.setup && Object.values(alias.setup).some((v) => v.trim()));
+        setShim(!!alias.shim);
       } else {
         setName('');
         setCommand('');
@@ -112,6 +115,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
         setToolId(defaultToolId || '');
         setExecutionOrder('');
         setSetupOpen(false);
+        setShim(false);
       }
       setError(null);
       setShowTagSuggestions(false);
@@ -238,6 +242,7 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
         script: aliasType !== 'function' ? cleanMap(script) : undefined,
         toolId: toolId || undefined,
         executionOrder: executionOrder !== '' ? parseInt(executionOrder, 10) : undefined,
+        shim: aliasType === 'function' ? shim : false,
       };
       await onSubmit(data);
       onOpenChange(false);
@@ -314,6 +319,22 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
                 <p className="text-xs text-muted-foreground">
                   The command that will be executed when the alias is invoked
                 </p>
+              </div>
+            )}
+
+            {/* Shim toggle — only meaningful for function aliases */}
+            {aliasType === 'function' && (
+              <div className="flex items-start justify-between gap-4 rounded-md border p-3">
+                <div className="grid gap-1">
+                  <Label htmlFor="alias-shim" className="cursor-pointer">Callable from anywhere (shim)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Writes a real launcher file so this alias works in <strong>any</strong> process —
+                    agents, scheduled tasks, non-interactive shells — not just terminals that load
+                    <code className="bg-muted px-1 rounded mx-1">cortx init</code>. Requires the shim folder
+                    on your PATH (set up once in <strong>Settings → Shims</strong>).
+                  </p>
+                </div>
+                <Switch id="alias-shim" checked={shim} onCheckedChange={setShim} />
               </div>
             )}
 

@@ -6,7 +6,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { SquareTerminal, FileCode, Zap, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { SquareTerminal, FileCode, Zap, MoreVertical, Pencil, Trash2, Globe } from 'lucide-react';
 import type { AliasType } from '@/types';
 
 const aliasTypeIcon = (type: AliasType) => {
@@ -41,6 +41,11 @@ export function AliasCard({ alias, tagDefinitions, onEdit, onDelete, onClick }: 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="font-medium font-mono truncate">{alias.name}</h3>
+              {alias.shim && (
+                <span title="Shim enabled — callable from any process" className="flex-shrink-0">
+                  <Globe className="size-3.5 text-primary" />
+                </span>
+              )}
               <StatusBadge status={alias.status} />
             </div>
             <p className="text-sm text-muted-foreground mt-0.5 font-mono truncate">

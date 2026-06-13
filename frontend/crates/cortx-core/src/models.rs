@@ -345,6 +345,11 @@ pub struct AppSettings {
     /// syntax: e.g. "CmdOrCtrl+Shift+Space", "Alt+F1".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub global_hotkey: Option<String>,
+    /// Directory where alias "shims" (real launcher files) are written so that
+    /// shimmed aliases are callable from any process once this dir is on PATH.
+    /// Empty/None means use the platform default (see `shim::resolve_shim_dir`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shim_dir: Option<String>,
 }
 
 // Input types for commands
@@ -1002,6 +1007,12 @@ pub struct ShellAlias {
     /// Execution order for `cortx init` output. Aliases with this set appear first (sorted ascending). Those without appear after.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_order: Option<u32>,
+    /// When true, CortX materializes this alias as a real launcher file ("shim")
+    /// in the shim bin directory (which can be added to PATH) so it is callable
+    /// by ANY process — agents, scheduled tasks, non-interactive shells — not
+    /// only shells that source `cortx init`. Only honored for "function" type.
+    #[serde(default)]
+    pub shim: bool,
 }
 
 fn default_alias_type() -> String {
@@ -1026,6 +1037,7 @@ impl ShellAlias {
             script: None,
             tool_id: None,
             execution_order: None,
+            shim: false,
         }
     }
 }
@@ -1043,6 +1055,7 @@ pub struct CreateShellAliasInput {
     pub script: Option<HashMap<String, String>>,
     pub tool_id: Option<String>,
     pub execution_order: Option<u32>,
+    pub shim: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1058,6 +1071,7 @@ pub struct UpdateShellAliasInput {
     pub script: Option<HashMap<String, String>>,
     pub tool_id: Option<String>,
     pub execution_order: Option<u32>,
+    pub shim: Option<bool>,
 }
 
 // ============================================================================
