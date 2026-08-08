@@ -164,9 +164,26 @@ pub fn generate_init_script(shell: &Shell, aliases: &[ShellAlias]) -> String {
                 // "function" (default) — original wrapping logic
                 match shell {
                     Shell::PowerShell => {
+                        // A statement that starts with a quote parses in
+                        // *expression* mode, where the splatting operator
+                        // `@args` is illegal — and since `cortx init` output is
+                        // consumed by a single Invoke-Expression, one such alias
+                        // is a parse error that takes down the whole block, not
+                        // just itself. The call operator `&` forces command mode.
+                        //
+                        // Quoting is required in the stored command as soon as
+                        // the path holds a space (the .cmd and .sh shims have no
+                        // call operator to fall back on), so the generator is
+                        // where the PowerShell-specific syntax has to be added.
+                        let cmd = alias.command.trim();
+                        let call_op = if cmd.starts_with('"') || cmd.starts_with('\'') {
+                            "& "
+                        } else {
+                            ""
+                        };
                         output.push_str(&format!(
-                            "function {} {{ {} @args }}\n",
-                            alias.name, alias.command
+                            "function {} {{ {}{} @args }}\n",
+                            alias.name, call_op, cmd
                         ));
                     }
                     Shell::Bash | Shell::Zsh => {
@@ -188,4 +205,53 @@ pub fn generate_init_script(shell: &Shell, aliases: &[ShellAlias]) -> String {
     }
 
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn func_alias(name: &str, command: &str) -> ShellAlias {
+        ShellAlias::new(name.to_string(), command.to_string())
+    }
+
+    #[test]
+    fn powershell_quoted_command_gets_the_call_operator() {
+        let a = func_alias("payledger", r#""C:\Users\Alexis Munch\payledger.exe""#);
+        let out = generate_init_script(&Shell::PowerShell, std::slice::from_ref(&a));
+        assert!(
+            out.contains(r#"function payledger { & "C:\Users\Alexis Munch\payledger.exe" @args }"#),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn powershell_bare_command_is_left_alone() {
+        // Starts with a command word: already command mode, `&` would be noise.
+        let a = func_alias("onepack", r#"bun run "C:\a b\x.ts""#);
+        let out = generate_init_script(&Shell::PowerShell, std::slice::from_ref(&a));
+        assert!(
+            out.contains(r#"function onepack { bun run "C:\a b\x.ts" @args }"#),
+            "got: {out}"
+        );
+        assert!(!out.contains("{ &"), "got: {out}");
+    }
+
+    #[test]
+    fn powershell_existing_call_operator_is_not_doubled() {
+        let a = func_alias("zorg", r#"& "C:\a b\zorg.exe""#);
+        let out = generate_init_script(&Shell::PowerShell, std::slice::from_ref(&a));
+        assert!(out.contains(r#"{ & "C:\a b\zorg.exe" @args }"#), "got: {out}");
+        assert!(!out.contains("& &"), "got: {out}");
+    }
+
+    #[test]
+    fn posix_shells_need_no_call_operator() {
+        // In sh and fish a quoted string is a perfectly good command word.
+        let a = func_alias("payledger", r#""/opt/a b/payledger""#);
+        let bash = generate_init_script(&Shell::Bash, std::slice::from_ref(&a));
+        assert!(bash.contains(r#"payledger() { "/opt/a b/payledger" "$@"; }"#), "got: {bash}");
+        let fish = generate_init_script(&Shell::Fish, std::slice::from_ref(&a));
+        assert!(fish.contains(r#""/opt/a b/payledger" $argv"#), "got: {fish}");
+    }
 }
