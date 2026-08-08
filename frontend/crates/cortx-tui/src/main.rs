@@ -3180,7 +3180,7 @@ fn cmd_app_launch(storage: &Storage, name: &str) -> anyhow::Result<()> {
     let extra_args: Vec<String> = app
         .launch_args
         .as_deref()
-        .map(|s| s.split_whitespace().map(String::from).collect())
+        .map(cortx_core::command_builder::split_args)
         .unwrap_or_default();
 
     #[cfg(target_os = "windows")]

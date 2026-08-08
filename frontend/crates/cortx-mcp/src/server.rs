@@ -295,8 +295,8 @@ impl CortxMcp {
         &self,
         Parameters(p): Parameters<DetectScriptParametersParams>,
     ) -> Result<CallToolResult, McpError> {
-        let params =
-            help_parser::detect_parameters(&p.command).map_err(|e| mcp_err(e.to_string()))?;
+        let params = help_parser::detect_parameters(&p.command, p.script_path.as_deref())
+            .map_err(|e| mcp_err(e.to_string()))?;
         ok_json(&params)
     }
 
@@ -1491,7 +1491,7 @@ impl CortxMcp {
         let extra_args: Vec<String> = app
             .launch_args
             .as_deref()
-            .map(|s| s.split_whitespace().map(String::from).collect())
+            .map(cortx_core::command_builder::split_args)
             .unwrap_or_default();
 
         #[cfg(target_os = "windows")]

@@ -135,9 +135,14 @@ pub struct StopGlobalScriptParams {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DetectScriptParametersParams {
     #[schemars(
-        description = "Base command to run --help on (e.g. 'python myscript.py', 'cargo'). The tool appends --help automatically."
+        description = "Base command to run --help on (e.g. 'python myscript.py', 'cargo'). The tool appends --help automatically. May contain {{SCRIPT_FILE}}, replaced by 'script_path'."
     )]
     pub command: String,
+
+    #[schemars(
+        description = "Absolute path to script file. Replaces {{SCRIPT_FILE}} placeholder in 'command'. Required when the path contains spaces."
+    )]
+    pub script_path: Option<String>,
 }
 
 // ============================================================================

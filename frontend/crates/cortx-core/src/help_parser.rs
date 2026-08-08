@@ -224,28 +224,30 @@ pub fn parse_help_output(help_text: &str) -> Vec<ScriptParameter> {
     params
 }
 
-/// Run `<command> --help` and parse the output
-pub fn detect_parameters(command: &str) -> Result<Vec<ScriptParameter>, String> {
+/// Run `<command> --help` and parse the output.
+///
+/// `script_path` is expanded into `{{SCRIPT_FILE}}` *after* tokenization, so a
+/// script path containing spaces reaches the child process as a single argument
+/// instead of being torn apart. See `command_builder::tokenize_command`.
+pub fn detect_parameters(
+    command: &str,
+    script_path: Option<&str>,
+) -> Result<Vec<ScriptParameter>, String> {
+    let argv = crate::command_builder::tokenize_command(command, script_path);
+
     // Try --help first, then -h
-    let output = try_help_flag(command, "--help")
-        .or_else(|_| try_help_flag(command, "-h"))
+    let output = try_help_flag(&argv, "--help")
+        .or_else(|_| try_help_flag(&argv, "-h"))
         .map_err(|e| format!("Failed to run help command: {}", e))?;
 
     Ok(parse_help_output(&output))
 }
 
-fn try_help_flag(command: &str, flag: &str) -> Result<String, String> {
-    let parts: Vec<&str> = command.split_whitespace().collect();
-    if parts.is_empty() {
-        return Err("Empty command".to_string());
-    }
-
-    let program = parts[0];
-    let mut args: Vec<&str> = parts[1..].to_vec();
-    args.push(flag);
+fn try_help_flag(argv: &[String], flag: &str) -> Result<String, String> {
+    let (program, base_args) = argv.split_first().ok_or("Empty command")?;
 
     let mut cmd = std::process::Command::new(program);
-    cmd.args(&args);
+    cmd.args(base_args).arg(flag);
 
     // Force UTF-8 and avoid console allocation on Windows
     #[cfg(target_os = "windows")]

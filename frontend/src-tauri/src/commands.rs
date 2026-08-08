@@ -1520,7 +1520,7 @@ pub fn run_global_script(
     // Build program + args via shared builder
     let extra: Vec<String> = extra_args
         .as_deref()
-        .map(|e| e.split_whitespace().map(|s| s.to_string()).collect())
+        .map(cortx_core::command_builder::split_args)
         .unwrap_or_default();
     let param_map = parameter_values.clone().unwrap_or_default();
 
@@ -1703,13 +1703,7 @@ pub fn scan_installed_tools() -> Result<Vec<DiscoveredTool>, String> {
 
 #[tauri::command]
 pub fn auto_detect_script_params(command: String, script_path: Option<String>) -> Result<Vec<ScriptParameter>, String> {
-    // Resolve {{SCRIPT_FILE}} placeholder before running --help
-    let resolved = if let Some(ref path) = script_path {
-        command.replace("{{SCRIPT_FILE}}", path)
-    } else {
-        command
-    };
-    cortx_core::help_parser::detect_parameters(&resolved)
+    cortx_core::help_parser::detect_parameters(&command, script_path.as_deref())
 }
 
 // ============================================================================
@@ -2280,7 +2274,7 @@ pub fn launch_app(state: State<AppState>, app_id: String) -> Result<(), String> 
     let extra_args: Vec<String> = app
         .launch_args
         .as_deref()
-        .map(|s| s.split_whitespace().map(String::from).collect())
+        .map(cortx_core::command_builder::split_args)
         .unwrap_or_default();
 
     #[cfg(target_os = "windows")]

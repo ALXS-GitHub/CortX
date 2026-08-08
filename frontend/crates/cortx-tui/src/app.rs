@@ -271,7 +271,7 @@ impl ParamFormState {
             }
         }
 
-        let extra: Vec<String> = self.extra_args.split_whitespace().map(|s| s.to_string()).collect();
+        let extra: Vec<String> = cortx_core::command_builder::split_args(&self.extra_args);
 
         cortx_core::command_builder::build_command(&self.script, &param_values, &extra)
             .unwrap_or_else(|| (self.script.command.clone(), vec![]))
@@ -600,7 +600,7 @@ impl App {
         let extra_args: Vec<String> = app
             .launch_args
             .as_deref()
-            .map(|s| s.split_whitespace().map(String::from).collect())
+            .map(cortx_core::command_builder::split_args)
             .unwrap_or_default();
         let _ = crate::os_open::launch_executable(exe, &extra_args);
     }

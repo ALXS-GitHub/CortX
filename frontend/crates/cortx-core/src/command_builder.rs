@@ -3,6 +3,68 @@ use std::collections::HashMap;
 use crate::models::GlobalScript;
 use crate::models::ScriptParamType;
 
+/// Split a command string into argv, honouring `"..."` and `'...'` grouping so
+/// an argument containing spaces survives as one token.
+///
+/// Deliberately NOT a full shell lexer: a backslash is never an escape
+/// character, because on Windows every path is made of them (`C:\Users\...`)
+/// and treating them as escapes would mangle the common case. Quotes only
+/// group — they are consumed and never appear in the returned tokens.
+pub fn split_args(input: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut started = false;
+    let mut in_single = false;
+    let mut in_double = false;
+
+    for c in input.chars() {
+        match c {
+            '"' if !in_single => {
+                in_double = !in_double;
+                started = true;
+            }
+            '\'' if !in_double => {
+                in_single = !in_single;
+                started = true;
+            }
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if started {
+                    out.push(std::mem::take(&mut cur));
+                    started = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        out.push(cur);
+    }
+    out
+}
+
+/// Tokenize a command template, then substitute `{{SCRIPT_FILE}}` *inside* the
+/// resulting tokens.
+///
+/// The order is the whole point: substituting first and splitting afterwards
+/// tears a path containing spaces (`C:\Users\Alexis Munch\x.py`) into several
+/// arguments. Splitting first keeps the placeholder — which never contains
+/// whitespace — as exactly one token, so the path stays one argument no matter
+/// what it holds. Callers pass the result straight to `Command::args`, which
+/// applies the platform's own quoting.
+pub fn tokenize_command(command: &str, script_path: Option<&str>) -> Vec<String> {
+    let tokens = split_args(command);
+    match script_path {
+        Some(path) => tokens
+            .into_iter()
+            .map(|t| t.replace("{{SCRIPT_FILE}}", path))
+            .collect(),
+        None => tokens,
+    }
+}
+
 /// Build `(program, args)` from a GlobalScript, parameter values, and extra arguments.
 ///
 /// Returns `None` if the resolved command is empty.
@@ -11,22 +73,15 @@ pub fn build_command(
     param_values: &HashMap<String, String>,
     extra_args: &[String],
 ) -> Option<(String, Vec<String>)> {
-    // 1. Replace {{SCRIPT_FILE}} placeholder
-    let base_command = if let Some(ref script_path) = script.script_path {
-        script.command.replace("{{SCRIPT_FILE}}", script_path)
-    } else {
-        script.command.clone()
-    };
-
-    // 2. Split into program + base args
-    let mut tokens: Vec<String> = base_command.split_whitespace().map(|s| s.to_string()).collect();
+    // 1. Tokenize, then expand {{SCRIPT_FILE}} per token (see tokenize_command)
+    let mut tokens = tokenize_command(&script.command, script.script_path.as_deref());
     if tokens.is_empty() {
         return None;
     }
     let program = tokens.remove(0);
     let mut args = tokens;
 
-    // 3. Append parameter values in definition order
+    // 2. Append parameter values in definition order
     for param_def in &script.parameters {
         if let Some(value) = param_values.get(&param_def.name) {
             if value.is_empty() {
@@ -49,9 +104,8 @@ pub fn build_command(
                 }
                 // Push value(s)
                 if param_def.nargs.is_some() {
-                    for v in value.split_whitespace() {
-                        args.push(v.to_string());
-                    }
+                    // Quote-aware so a multi-value list can carry paths with spaces
+                    args.extend(split_args(value));
                 } else {
                     // Strip surrounding quotes if present
                     let clean = value
@@ -65,7 +119,7 @@ pub fn build_command(
         }
     }
 
-    // 4. Append extra args
+    // 3. Append extra args
     args.extend_from_slice(extra_args);
 
     Some((program, args))
@@ -118,6 +172,68 @@ mod tests {
         let script = make_script("python {{SCRIPT_FILE}}", Some("/path/to/script.py"), vec![]);
         let result = build_command(&script, &HashMap::new(), &[]);
         assert_eq!(result, Some(("python".to_string(), vec!["/path/to/script.py".to_string()])));
+    }
+
+    #[test]
+    fn script_path_with_spaces_stays_one_arg() {
+        let script = make_script(
+            "uv run {{SCRIPT_FILE}}",
+            Some(r"C:\Users\Alexis Munch\Scripts\rm_bg.py"),
+            vec![],
+        );
+        let result = build_command(&script, &HashMap::new(), &[]);
+        assert_eq!(
+            result,
+            Some((
+                "uv".to_string(),
+                vec![
+                    "run".to_string(),
+                    r"C:\Users\Alexis Munch\Scripts\rm_bg.py".to_string(),
+                ]
+            ))
+        );
+    }
+
+    #[test]
+    fn pre_quoted_placeholder_is_not_double_wrapped() {
+        // A template the user already quoted by hand must not leak literal quotes.
+        let script = make_script(
+            "python \"{{SCRIPT_FILE}}\"",
+            Some(r"C:\Users\Alexis Munch\x.py"),
+            vec![],
+        );
+        let result = build_command(&script, &HashMap::new(), &[]);
+        assert_eq!(
+            result,
+            Some((
+                "python".to_string(),
+                vec![r"C:\Users\Alexis Munch\x.py".to_string()]
+            ))
+        );
+    }
+
+    #[test]
+    fn split_args_groups_quoted_segments() {
+        assert_eq!(split_args("uv run x.py"), vec!["uv", "run", "x.py"]);
+        assert_eq!(
+            split_args(r#"app --msg "hello world" --out 'a b'"#),
+            vec!["app", "--msg", "hello world", "--out", "a b"]
+        );
+        // Backslashes are literal, never escapes.
+        assert_eq!(split_args(r"C:\Users\a\b.exe"), vec![r"C:\Users\a\b.exe"]);
+        assert_eq!(split_args("   "), Vec::<String>::new());
+    }
+
+    #[test]
+    fn nargs_keeps_quoted_paths_together() {
+        let params = vec![make_param("files", ScriptParamType::String, Some("--files"), None, Some("+"))];
+        let script = make_script("myapp", None, params);
+        let mut values = HashMap::new();
+        values.insert("files".to_string(), "\"a b.txt\" c.txt".to_string());
+        let result = build_command(&script, &values, &[]);
+        assert_eq!(result, Some(("myapp".to_string(), vec![
+            "--files".to_string(), "a b.txt".to_string(), "c.txt".to_string()
+        ])));
     }
 
     #[test]
