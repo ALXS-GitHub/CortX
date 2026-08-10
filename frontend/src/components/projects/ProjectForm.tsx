@@ -137,7 +137,8 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
             name: name.trim(),
             description: description.trim() || undefined,
             tags,
-            status: status.trim() || undefined,
+            // Sent even when empty: an empty status is how the backend is told to clear it.
+            status: status.trim(),
             toolboxUrl: toolboxUrl.trim() || undefined,
           }
         : {
@@ -145,7 +146,8 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
             rootPath: rootPath.trim(),
             description: description.trim() || undefined,
             tags,
-            status: status.trim() || undefined,
+            // Sent even when empty: an empty status is how the backend is told to clear it.
+            status: status.trim(),
             toolboxUrl: toolboxUrl.trim() || undefined,
           };
       await onSubmit(data);

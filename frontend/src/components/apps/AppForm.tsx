@@ -223,7 +223,8 @@ export function AppForm({ open, onOpenChange, app, apps, tagDefinitions, statusD
         name: name.trim(),
         description: description.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
-        status: status.trim() || undefined,
+        // Sent even when empty: an empty status is how the backend is told to clear it.
+        status: status.trim(),
         version: version.trim() || undefined,
         homepage: homepage.trim() || undefined,
         executablePath: executablePath.trim() || undefined,

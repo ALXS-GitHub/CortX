@@ -66,7 +66,7 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
   const existingStatuses = Array.from(
     new Set([
       ...statusDefinitions.map(d => d.name),
-      ...tools.map(t => t.status).filter(Boolean),
+      ...tools.map(t => t.status).filter(Boolean) as string[],
     ])
   );
 
@@ -226,7 +226,8 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
         name: name.trim(),
         description: description.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
-        status: status.trim() || undefined,
+        // Sent even when empty: an empty status is how the backend is told to clear it.
+        status: status.trim(),
         replacedBy: replacedBy.trim() || undefined,
         installMethod: installMethod.trim() || undefined,
         installLocation: installLocation.trim() || undefined,

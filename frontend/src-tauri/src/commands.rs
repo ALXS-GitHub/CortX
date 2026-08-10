@@ -10,6 +10,7 @@ use crate::models::{
     UpdateScriptInput, UpdateServiceInput, UpdateShellAliasInput,
     UpdateStatusDefinitionInput, UpdateToolInput,
 };
+use crate::models::{opt_text, opt_text_patch};
 use crate::process_manager::{ProcessEventEmitter, ProcessManager};
 use crate::storage::Storage;
 use crate::tauri_emitter::TauriEmitter;
@@ -54,7 +55,7 @@ pub fn create_project(state: State<AppState>, input: CreateProjectInput) -> Resu
     project.description = input.description;
     project.image_path = input.image_path;
     project.tags = input.tags;
-    project.status = input.status;
+    project.status = opt_text(input.status);
     project.toolbox_url = input.toolbox_url;
 
     state
@@ -94,11 +95,14 @@ pub fn update_project(
             if let Some(tags) = input.tags {
                 project.tags = tags;
             }
-            if input.status.is_some() {
-                project.status = input.status;
+            if let Some(status) = opt_text_patch(input.status) {
+                project.status = status;
             }
             if input.toolbox_url.is_some() {
                 project.toolbox_url = input.toolbox_url;
+            }
+            if let Some(favorite) = input.favorite {
+                project.favorite = favorite;
             }
         })
         .map_err(|e| e.to_string())
@@ -1410,7 +1414,7 @@ pub fn create_global_script(
     script.parameters = input.parameters.unwrap_or_default();
     script.parameter_presets = input.parameter_presets.unwrap_or_default();
     script.env_vars = input.env_vars;
-    script.status = input.status;
+    script.status = opt_text(input.status);
 
     // Set order to be last
     let all = state.storage.get_all_global_scripts();
@@ -1464,8 +1468,11 @@ pub fn update_global_script(
             if input.env_vars.is_some() {
                 script.env_vars = input.env_vars;
             }
-            if input.status.is_some() {
-                script.status = input.status;
+            if let Some(status) = opt_text_patch(input.status) {
+                script.status = status;
+            }
+            if let Some(favorite) = input.favorite {
+                script.favorite = favorite;
             }
         })
         .map_err(|e| e.to_string())
@@ -1503,12 +1510,15 @@ pub fn reorder_global_scripts(
     Ok(())
 }
 
+/// `working_dir` is an optional per-run override: blank or absent falls back to
+/// the script's own working dir, then to its folder — see
+/// `command_builder::resolve_working_dir`.
 #[tauri::command]
 pub fn run_global_script(
     app_handle: AppHandle,
     state: State<AppState>,
     script_id: String,
-    working_dir: String,
+    working_dir: Option<String>,
     parameter_values: Option<std::collections::HashMap<String, String>>,
     extra_args: Option<String>,
 ) -> Result<u32, String> {
@@ -1526,6 +1536,9 @@ pub fn run_global_script(
 
     let (program, args) = cortx_core::command_builder::build_command(&script, &param_map, &extra)
         .ok_or_else(|| "Empty command".to_string())?;
+
+    let working_dir =
+        cortx_core::command_builder::resolve_working_dir(&script, working_dir.as_deref());
 
     // Record execution start
     let mut record = ExecutionRecord::new(script_id.clone());
@@ -1728,7 +1741,10 @@ pub fn create_tool(
     state: State<AppState>,
     input: CreateToolInput,
 ) -> Result<Tool, String> {
-    let mut tool = Tool::new(input.name, input.status.unwrap_or_else(|| "Active".to_string()));
+    let mut tool = Tool::new(
+        input.name,
+        opt_text(input.status).unwrap_or_else(|| "Active".to_string()),
+    );
     tool.description = input.description;
     tool.tags = input.tags.unwrap_or_default();
     tool.replaced_by = input.replaced_by;
@@ -1769,8 +1785,9 @@ pub fn update_tool(
             if let Some(tags) = input.tags {
                 tool.tags = tags;
             }
-            if let Some(status) = input.status {
-                tool.status = status;
+            if let Some(status) = opt_text_patch(input.status) {
+                // Tool.status is a plain String: clearing it means "no status".
+                tool.status = status.unwrap_or_default();
             }
             if input.replaced_by.is_some() {
                 tool.replaced_by = input.replaced_by;
@@ -1798,6 +1815,9 @@ pub fn update_tool(
             }
             if input.color.is_some() {
                 tool.color = input.color;
+            }
+            if let Some(favorite) = input.favorite {
+                tool.favorite = favorite;
             }
         })
         .map_err(|e| e.to_string())
@@ -1998,7 +2018,7 @@ pub fn create_alias(state: State<AppState>, input: CreateShellAliasInput) -> Res
     if let Some(tags) = input.tags {
         alias.tags = tags;
     }
-    alias.status = input.status;
+    alias.status = opt_text(input.status);
     if let Some(at) = input.alias_type {
         alias.alias_type = at;
     }
@@ -2035,8 +2055,8 @@ pub fn update_alias(state: State<AppState>, id: String, input: UpdateShellAliasI
         if let Some(tags) = input.tags {
             alias.tags = tags;
         }
-        if input.status.is_some() {
-            alias.status = input.status;
+        if let Some(status) = opt_text_patch(input.status) {
+            alias.status = status;
         }
         if let Some(at) = input.alias_type {
             alias.alias_type = at;
@@ -2055,6 +2075,9 @@ pub fn update_alias(state: State<AppState>, id: String, input: UpdateShellAliasI
         }
         if let Some(shim) = input.shim {
             alias.shim = shim;
+        }
+        if let Some(favorite) = input.favorite {
+            alias.favorite = favorite;
         }
     }).map_err(|e| e.to_string())
 }
@@ -2177,7 +2200,7 @@ pub fn create_app(state: State<AppState>, input: CreateAppInput) -> Result<App, 
     let mut app = App::new(input.name);
     app.description = input.description;
     app.tags = input.tags.unwrap_or_default();
-    app.status = input.status;
+    app.status = opt_text(input.status);
     app.version = input.version;
     app.homepage = input.homepage;
     app.executable_path = input.executable_path;
@@ -2211,8 +2234,8 @@ pub fn update_app(
             if let Some(tags) = input.tags {
                 app.tags = tags;
             }
-            if input.status.is_some() {
-                app.status = input.status;
+            if let Some(status) = opt_text_patch(input.status) {
+                app.status = status;
             }
             if input.version.is_some() {
                 app.version = input.version;
@@ -2237,6 +2260,9 @@ pub fn update_app(
             }
             if input.color.is_some() {
                 app.color = input.color;
+            }
+            if let Some(favorite) = input.favorite {
+                app.favorite = favorite;
             }
         })
         .map_err(|e| e.to_string())

@@ -321,9 +321,11 @@ export async function reorderGlobalScripts(scriptIds: string[]): Promise<void> {
   return invoke('reorder_global_scripts', { scriptIds });
 }
 
+/** `workingDir` is an optional per-run override. Left out (or blank), the backend
+ *  falls back to the script's own working dir, then to the script file's folder. */
 export async function runGlobalScript(
   scriptId: string,
-  workingDir: string,
+  workingDir?: string,
   parameterValues?: Record<string, string>,
   extraArgs?: string
 ): Promise<number> {

@@ -42,6 +42,8 @@ export interface Project {
   tags: string[];
   status?: string;
   toolboxUrl?: string;
+  /** Pinned by the user: favorites are listed first and can be filtered on. */
+  favorite: boolean;
 }
 
 // Environment file types
@@ -202,8 +204,10 @@ export interface UpdateProjectInput {
   description?: string;
   imagePath?: string;
   tags?: string[];
+  /** Empty string clears the status; omit the field to leave it untouched. */
   status?: string;
   toolboxUrl?: string;
+  favorite?: boolean;
 }
 
 export interface CreateServiceInput {
@@ -312,6 +316,8 @@ export interface GlobalScript {
   order: number;
   autoDiscovered: boolean;
   status?: string;
+  /** Pinned by the user: favorites are listed first and can be filtered on. */
+  favorite: boolean;
 }
 
 export interface TagDefinition {
@@ -382,6 +388,8 @@ export interface Tool {
   order: number;
   createdAt: string;
   updatedAt: string;
+  /** Pinned by the user: favorites are listed first and can be filtered on. */
+  favorite: boolean;
 }
 
 export interface CreateToolInput {
@@ -404,7 +412,9 @@ export interface UpdateToolInput {
   name?: string;
   description?: string;
   tags?: string[];
+  /** Empty string clears the status; omit the field to leave it untouched. */
   status?: string;
+  favorite?: boolean;
   replacedBy?: string;
   installMethod?: string;
   installLocation?: string;
@@ -444,7 +454,9 @@ export interface UpdateGlobalScriptInput {
   parameterPresets?: ParameterPreset[];
   defaultPresetId?: string;
   envVars?: Record<string, string>;
+  /** Empty string clears the status; omit the field to leave it untouched. */
   status?: string;
+  favorite?: boolean;
 }
 
 export interface CreateTagDefinitionInput {
@@ -535,6 +547,8 @@ export interface App {
   order: number;
   createdAt: string;
   updatedAt: string;
+  /** Pinned by the user: favorites are listed first and can be filtered on. */
+  favorite: boolean;
 }
 
 export interface CreateAppInput {
@@ -556,7 +570,9 @@ export interface UpdateAppInput {
   name?: string;
   description?: string;
   tags?: string[];
+  /** Empty string clears the status; omit the field to leave it untouched. */
   status?: string;
+  favorite?: boolean;
   version?: string;
   homepage?: string;
   executablePath?: string;
@@ -591,6 +607,8 @@ export interface ShellAlias {
    *  callable from any process (agents, scheduled tasks), not just shells that
    *  source `cortx init`. Only effective for `function` aliases. */
   shim?: boolean;
+  /** Pinned by the user: favorites are listed first and can be filtered on. */
+  favorite: boolean;
 }
 
 export interface CreateShellAliasInput {
@@ -612,6 +630,7 @@ export interface UpdateShellAliasInput {
   command?: string;
   description?: string;
   tags?: string[];
+  /** Empty string clears the status; omit the field to leave it untouched. */
   status?: string;
   aliasType?: AliasType;
   setup?: Record<string, string>;
@@ -619,6 +638,7 @@ export interface UpdateShellAliasInput {
   toolId?: string;
   executionOrder?: number;
   shim?: boolean;
+  favorite?: boolean;
 }
 
 // Alias shim (real launcher files) status & operations

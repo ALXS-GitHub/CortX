@@ -169,7 +169,8 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
         workingDir: workingDir.trim() || undefined,
         color,
         tags: tags.length > 0 ? tags : undefined,
-        status: status.trim() || undefined,
+        // Sent even when empty: an empty status is how the backend is told to clear it.
+        status: status.trim(),
       };
       await onSubmit(data);
       onOpenChange(false);

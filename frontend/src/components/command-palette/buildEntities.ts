@@ -167,7 +167,7 @@ export function buildEntities(store: Store): CommandEntity[] {
         label: hasParams ? 'Run (defaults)' : 'Run',
         icon: createElement(Play, { className: iconSize }),
         shortcut: SHORTCUTS.primary,
-        run: () => store.runGlobalScript(script.id, script.workingDir ?? '.'),
+        run: () => store.runGlobalScript(script.id),
       },
       {
         id: 'open-in-cortx',

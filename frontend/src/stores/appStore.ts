@@ -311,7 +311,7 @@ interface AppState {
   updateGlobalScript: (id: string, input: UpdateGlobalScriptInput) => Promise<void>;
   deleteGlobalScript: (id: string) => Promise<void>;
   reorderGlobalScripts: (scriptIds: string[]) => Promise<void>;
-  runGlobalScript: (scriptId: string, workingDir: string, parameterValues?: Record<string, string>, extraArgs?: string) => Promise<void>;
+  runGlobalScript: (scriptId: string, workingDir?: string, parameterValues?: Record<string, string>, extraArgs?: string) => Promise<void>;
   stopGlobalScript: (scriptId: string) => Promise<void>;
   selectGlobalScript: (id: string | null) => void;
 

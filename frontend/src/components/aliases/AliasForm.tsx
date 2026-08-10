@@ -236,7 +236,8 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
         command: command.trim(),
         description: description.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
-        status: status.trim() || undefined,
+        // Sent even when empty: an empty status is how the backend is told to clear it.
+        status: status.trim(),
         aliasType: aliasType,
         setup: cleanMap(setup),
         script: aliasType !== 'function' ? cleanMap(script) : undefined,

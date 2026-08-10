@@ -4,6 +4,67 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 // ============================================================================
+// Optional-text helpers
+// ============================================================================
+
+/// Normalize an optional text field coming from a *create* payload:
+/// trims, and turns a blank value into `None`.
+pub fn opt_text(value: Option<String>) -> Option<String> {
+    opt_text_patch(value).flatten()
+}
+
+/// Interpret an optional text field coming from an *update* payload.
+///
+/// Update inputs use a single `Option`, where `None` means "field absent —
+/// keep the current value". That alone makes a field impossible to clear, so
+/// every surface sends an empty string to mean "clear it":
+///
+/// - `None` → `None`: no change.
+/// - `Some("")` (or whitespace only) → `Some(None)`: clear the field.
+/// - `Some(text)` → `Some(Some(trimmed))`: set the field.
+pub fn opt_text_patch(value: Option<String>) -> Option<Option<String>> {
+    value.map(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+#[cfg(test)]
+mod opt_text_tests {
+    use super::*;
+
+    #[test]
+    fn absent_field_is_no_change() {
+        assert_eq!(opt_text_patch(None), None);
+    }
+
+    #[test]
+    fn blank_field_clears() {
+        assert_eq!(opt_text_patch(Some(String::new())), Some(None));
+        assert_eq!(opt_text_patch(Some("   ".to_string())), Some(None));
+    }
+
+    #[test]
+    fn text_is_trimmed_and_set() {
+        assert_eq!(
+            opt_text_patch(Some("  Active  ".to_string())),
+            Some(Some("Active".to_string()))
+        );
+    }
+
+    #[test]
+    fn create_path_flattens_blanks_to_none() {
+        assert_eq!(opt_text(Some("  ".to_string())), None);
+        assert_eq!(opt_text(None), None);
+        assert_eq!(opt_text(Some(" Active ".to_string())), Some("Active".to_string()));
+    }
+}
+
+// ============================================================================
 // Existing models (extracted from frontend/src-tauri/src/models.rs)
 // ============================================================================
 
@@ -114,6 +175,9 @@ pub struct Project {
     pub status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub toolbox_url: Option<String>,
+    /// Pinned by the user: favorites are listed first and can be filtered on.
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 impl Project {
@@ -135,6 +199,7 @@ impl Project {
             tags: Vec::new(),
             status: None,
             toolbox_url: None,
+            favorite: false,
         }
     }
 
@@ -377,6 +442,7 @@ pub struct UpdateProjectInput {
     pub tags: Option<Vec<String>>,
     pub status: Option<String>,
     pub toolbox_url: Option<String>,
+    pub favorite: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -640,6 +706,9 @@ pub struct GlobalScript {
     pub auto_discovered: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// Pinned by the user: favorites are listed first and can be filtered on.
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 impl GlobalScript {
@@ -663,6 +732,7 @@ impl GlobalScript {
             order: 0,
             auto_discovered: false,
             status: None,
+            favorite: false,
         }
     }
 }
@@ -861,6 +931,7 @@ pub struct UpdateGlobalScriptInput {
     pub default_preset_id: Option<String>,
     pub env_vars: Option<HashMap<String, String>>,
     pub status: Option<String>,
+    pub favorite: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1013,6 +1084,9 @@ pub struct ShellAlias {
     /// only shells that source `cortx init`. Only honored for "function" type.
     #[serde(default)]
     pub shim: bool,
+    /// Pinned by the user: favorites are listed first and can be filtered on.
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 fn default_alias_type() -> String {
@@ -1038,6 +1112,7 @@ impl ShellAlias {
             tool_id: None,
             execution_order: None,
             shim: false,
+            favorite: false,
         }
     }
 }
@@ -1072,6 +1147,7 @@ pub struct UpdateShellAliasInput {
     pub tool_id: Option<String>,
     pub execution_order: Option<u32>,
     pub shim: Option<bool>,
+    pub favorite: Option<bool>,
 }
 
 // ============================================================================
@@ -1118,6 +1194,9 @@ pub struct Tool {
     pub order: u32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Pinned by the user: favorites are listed first and can be filtered on.
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 impl Tool {
@@ -1141,6 +1220,7 @@ impl Tool {
             order: 0,
             created_at: now,
             updated_at: now,
+            favorite: false,
         }
     }
 }
@@ -1179,6 +1259,7 @@ pub struct UpdateToolInput {
     pub toolbox_url: Option<String>,
     pub notes: Option<String>,
     pub color: Option<String>,
+    pub favorite: Option<bool>,
 }
 
 // ============================================================================
@@ -1245,6 +1326,9 @@ pub struct App {
     pub order: u32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Pinned by the user: favorites are listed first and can be filtered on.
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 impl App {
@@ -1267,6 +1351,7 @@ impl App {
             order: 0,
             created_at: now,
             updated_at: now,
+            favorite: false,
         }
     }
 }
@@ -1303,4 +1388,5 @@ pub struct UpdateAppInput {
     pub toolbox_url: Option<String>,
     pub notes: Option<String>,
     pub color: Option<String>,
+    pub favorite: Option<bool>,
 }

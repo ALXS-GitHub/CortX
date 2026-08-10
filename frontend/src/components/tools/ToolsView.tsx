@@ -100,7 +100,8 @@ export function ToolsView() {
   const allStatuses = useMemo(() => {
     const set = new Set([
       ...statusDefinitions.map((d) => d.name),
-      ...tools.map(t => t.status),
+      // A tool with a cleared status has an empty string: it is not a filter option.
+      ...tools.map(t => t.status).filter(Boolean),
     ]);
     return Array.from(set);
   }, [tools, statusDefinitions]);

@@ -144,7 +144,7 @@ impl CortxMcp {
         script.color = p.color;
         script.tags = p.tags.unwrap_or_default();
         script.env_vars = p.env_vars;
-        script.status = p.status;
+        script.status = opt_text(p.status);
         // Set order to end of list
         let count = self.storage.get_all_global_scripts().len() as u32;
         script.order = count;
@@ -191,8 +191,8 @@ impl CortxMcp {
                 if let Some(v) = p.env_vars {
                     s.env_vars = Some(v);
                 }
-                if let Some(v) = p.status {
-                    s.status = Some(v);
+                if let Some(v) = opt_text_patch(p.status) {
+                    s.status = v;
                 }
             })
             .map_err(|e| mcp_err(e.to_string()))?;
@@ -250,7 +250,7 @@ impl CortxMcp {
         let (program, args) = command_builder::build_command(&script, &param_values, &extra_args)
             .ok_or_else(|| mcp_err("Failed to build command (empty command)"))?;
 
-        let working_dir = script.working_dir.clone().unwrap_or_else(|| ".".to_string());
+        let working_dir = command_builder::resolve_working_dir(&script, None);
 
         let pid = self
             .process_manager
@@ -340,7 +340,7 @@ impl CortxMcp {
         project.description = p.description;
         project.image_path = p.image_path;
         project.tags = p.tags.unwrap_or_default();
-        project.status = p.status;
+        project.status = opt_text(p.status);
         project.toolbox_url = p.toolbox_url;
         let created = self
             .storage
@@ -373,8 +373,8 @@ impl CortxMcp {
                 if let Some(v) = p.tags {
                     proj.tags = v;
                 }
-                if let Some(v) = p.status {
-                    proj.status = Some(v);
+                if let Some(v) = opt_text_patch(p.status) {
+                    proj.status = v;
                 }
                 if let Some(v) = p.toolbox_url {
                     proj.toolbox_url = Some(v);
@@ -779,7 +779,10 @@ impl CortxMcp {
         Parameters(p): Parameters<CreateToolParams>,
     ) -> Result<CallToolResult, McpError> {
         self.reload()?;
-        let mut tool = Tool::new(p.name, p.status.unwrap_or_else(|| "Active".to_string()));
+        let mut tool = Tool::new(
+            p.name,
+            opt_text(p.status).unwrap_or_else(|| "Active".to_string()),
+        );
         tool.description = p.description;
         tool.tags = p.tags.unwrap_or_default();
         tool.replaced_by = p.replaced_by;
@@ -820,8 +823,9 @@ impl CortxMcp {
                 if let Some(v) = p.tags {
                     t.tags = v;
                 }
-                if let Some(v) = p.status {
-                    t.status = v;
+                if let Some(v) = opt_text_patch(p.status) {
+                    // Tool.status is a plain String: clearing it means "no status".
+                    t.status = v.unwrap_or_default();
                 }
                 if let Some(v) = p.replaced_by {
                     t.replaced_by = Some(v);
@@ -1202,7 +1206,7 @@ impl CortxMcp {
         if let Some(tags) = p.tags {
             alias.tags = tags;
         }
-        alias.status = p.status;
+        alias.status = opt_text(p.status);
         if let Some(at) = p.alias_type {
             alias.alias_type = at;
         }
@@ -1244,8 +1248,8 @@ impl CortxMcp {
             if let Some(v) = p.tags {
                 a.tags = v;
             }
-            if let Some(v) = p.status {
-                a.status = Some(v);
+            if let Some(v) = opt_text_patch(p.status) {
+                a.status = v;
             }
             if let Some(v) = p.alias_type {
                 a.alias_type = v;

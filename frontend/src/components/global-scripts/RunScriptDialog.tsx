@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { FolderOpen, Play } from 'lucide-react';
+import { FolderOpen, Play, WandSparkles } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
@@ -52,6 +52,20 @@ function saveRunState(scriptId: string, state: SavedRunState) {
   } catch {
     // ignore
   }
+}
+
+/** Folder holding the script file, or '' when the script isn't a file. */
+function scriptFolder(script: GlobalScript): string {
+  if (!script.scriptPath?.trim()) return '';
+  const normalized = script.scriptPath.replace(/\\/g, '/');
+  const lastSlash = normalized.lastIndexOf('/');
+  return lastSlash > 0 ? normalized.slice(0, lastSlash) : '';
+}
+
+/** Where the script runs when the field is left empty — mirrors the backend's
+ *  `resolve_working_dir`, minus its final "current directory" fallback. */
+function implicitWorkingDir(script: GlobalScript): string {
+  return script.workingDir?.trim() || scriptFolder(script);
 }
 
 interface RunScriptDialogProps {
@@ -191,11 +205,6 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
   const handleRun = async () => {
     if (!script) return;
 
-    if (!workingDir.trim()) {
-      toast.error('Working directory is required');
-      return;
-    }
-
     setIsRunning(true);
     try {
       // Only send enabled params
@@ -209,9 +218,10 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
       }
 
       const hasParams = Object.keys(activeParams).length > 0;
+      // Blank working dir is intentional: the backend resolves the fallback.
       await runGlobalScript(
         script.id,
-        workingDir.trim(),
+        workingDir.trim() || undefined,
         hasParams ? activeParams : undefined,
         extraArgs.trim() || undefined
       );
@@ -234,6 +244,9 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
   };
 
   if (!script) return null;
+
+  const folder = scriptFolder(script);
+  const fallbackDir = implicitWorkingDir(script);
 
   // Build preview command
   const buildPreviewCommand = () => {
@@ -288,18 +301,38 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
         <div className="space-y-4 py-2">
           {/* Working Directory */}
           <div className="space-y-1.5">
-            <Label>Working directory</Label>
+            <Label>
+              Working directory
+              <span className="text-muted-foreground font-normal ml-1.5">(optional)</span>
+            </Label>
             <div className="flex gap-2">
               <Input
                 value={workingDir}
                 onChange={(e) => setWorkingDir(e.target.value)}
-                placeholder="Select a directory..."
+                placeholder={fallbackDir || 'Runs where CortX was started...'}
                 className="font-mono text-xs"
               />
+              {folder && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setWorkingDir(folder)}
+                  title="Use the script's folder"
+                >
+                  <WandSparkles className="size-4" />
+                </Button>
+              )}
               <Button variant="outline" size="icon" onClick={handleBrowseDir} title="Browse">
                 <FolderOpen className="size-4" />
               </Button>
             </div>
+            {!workingDir.trim() && (
+              <p className="text-xs text-muted-foreground">
+                {fallbackDir
+                  ? <>Leave empty to run in <code className="font-mono">{fallbackDir}</code></>
+                  : 'Leave empty to run in the directory CortX was started from.'}
+              </p>
+            )}
           </div>
 
           {/* Parameters */}
@@ -443,7 +476,7 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleRun} disabled={isRunning || !workingDir.trim()}>
+          <Button onClick={handleRun} disabled={isRunning}>
             <Play className="size-4 mr-1.5" />
             {isRunning ? 'Starting...' : 'Run'}
           </Button>

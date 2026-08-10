@@ -125,6 +125,51 @@ pub fn build_command(
     Some((program, args))
 }
 
+/// Decide which directory a global script runs in.
+///
+/// The working directory is optional everywhere: a script that doesn't care
+/// where it runs should not force the user to pick a folder. Resolution order,
+/// first non-blank wins:
+///
+/// 1. `override_dir` — the per-run value typed in the UI.
+/// 2. `script.working_dir` — the script's own configured directory.
+/// 3. The folder holding `script.script_path`, when the script is a file.
+/// 4. The process's current directory (`.` if even that is unavailable).
+///
+/// Never returns an empty string: `Command::current_dir("")` fails to spawn.
+pub fn resolve_working_dir(script: &GlobalScript, override_dir: Option<&str>) -> String {
+    let non_blank = |s: &str| {
+        let t = s.trim();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        }
+    };
+
+    override_dir
+        .and_then(non_blank)
+        .or_else(|| script.working_dir.as_deref().and_then(non_blank))
+        .or_else(|| {
+            script
+                .script_path
+                .as_deref()
+                .and_then(non_blank)
+                .and_then(|p| {
+                    std::path::Path::new(&p)
+                        .parent()
+                        .map(|d| d.to_string_lossy().to_string())
+                })
+                .and_then(|d| non_blank(&d))
+        })
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| ".".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +195,7 @@ mod tests {
             updated_at: Utc::now(),
             order: 0,
             auto_discovered: false,
+            favorite: false,
         }
     }
 
@@ -344,5 +390,33 @@ mod tests {
             "--beta".to_string(), "2".to_string(),
             "--alpha".to_string(), "1".to_string(),
         ])));
+    }
+
+    #[test]
+    fn working_dir_override_wins() {
+        let mut script = make_script("myapp", Some("/scripts/run.py"), vec![]);
+        script.working_dir = Some("/configured".to_string());
+        assert_eq!(resolve_working_dir(&script, Some("/typed")), "/typed");
+    }
+
+    #[test]
+    fn blank_override_falls_back_to_configured_dir() {
+        let mut script = make_script("myapp", None, vec![]);
+        script.working_dir = Some("/configured".to_string());
+        assert_eq!(resolve_working_dir(&script, Some("   ")), "/configured");
+        assert_eq!(resolve_working_dir(&script, None), "/configured");
+    }
+
+    #[test]
+    fn falls_back_to_script_folder() {
+        let script = make_script("python {{SCRIPT_FILE}}", Some("/scripts/run.py"), vec![]);
+        assert_eq!(resolve_working_dir(&script, None), "/scripts");
+    }
+
+    #[test]
+    fn falls_back_to_current_dir_without_any_hint() {
+        let script = make_script("myapp", None, vec![]);
+        let resolved = resolve_working_dir(&script, None);
+        assert!(!resolved.trim().is_empty());
     }
 }
