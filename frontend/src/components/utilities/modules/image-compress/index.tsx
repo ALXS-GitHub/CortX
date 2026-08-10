@@ -99,7 +99,7 @@ export default function ImageCompressPanel({ ctx }: UtilityPanelProps) {
             files={ctx.files}
             job={job}
             pickOptions={{ title: 'Pick images', filters: IMAGE_FILTERS }}
-            dropLabel="Drop images here, or click to browse"
+            dropLabel="Drop one or more images here"
           />
 
           <SelectField

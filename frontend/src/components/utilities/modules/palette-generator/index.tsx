@@ -219,7 +219,7 @@ export default function PaletteGeneratorPanel({ ctx }: UtilityPanelProps) {
                 files={ctx.files}
                 onFiles={extract}
                 pickOptions={{ title: 'Pick an image', filters: IMAGE_FILTER }}
-                label="Drop an image here, or click to browse"
+                label="Drop an image here"
               />
 
               {source && (

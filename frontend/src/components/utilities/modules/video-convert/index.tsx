@@ -180,7 +180,7 @@ export default function VideoConvertPanel({ ctx }: UtilityPanelProps) {
             files={ctx.files}
             onFiles={(paths) => setInput(paths[0] ?? null)}
             pickOptions={{ title: 'Pick a video', filters: VIDEO_FILTERS }}
-            label="Drop a video here, or click to browse"
+            label="Drop a video here"
           />
           <SelectedFiles paths={input ? [input] : []} />
 

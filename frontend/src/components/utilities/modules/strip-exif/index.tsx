@@ -46,7 +46,7 @@ export default function StripExifPanel({ ctx }: UtilityPanelProps) {
             files={ctx.files}
             job={job}
             pickOptions={{ title: 'Pick images', filters: FILTERS }}
-            dropLabel="Drop JPEG, PNG or WebP files"
+            dropLabel="Drop one or more images here"
           />
 
           <Toggle

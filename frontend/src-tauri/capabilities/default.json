@@ -24,7 +24,11 @@
         { "name": "ffprobe", "cmd": "ffprobe", "args": true },
         { "name": "gs", "cmd": "gs", "args": true },
         { "name": "gswin64c", "cmd": "gswin64c", "args": true },
-        { "name": "gswin32c", "cmd": "gswin32c", "args": true }
+        { "name": "gswin32c", "cmd": "gswin32c", "args": true },
+        { "name": "qpdf", "cmd": "qpdf", "args": true },
+        { "name": "7z", "cmd": "7z", "args": true },
+        { "name": "7za", "cmd": "7za", "args": true },
+        { "name": "7zz", "cmd": "7zz", "args": true }
       ]
     },
     "dialog:allow-open",

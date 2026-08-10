@@ -99,7 +99,7 @@ export default function IconSetPanel({ ctx }: UtilityPanelProps) {
             files={ctx.files}
             job={job}
             pickOptions={{ title: 'Pick a source image', filters: IMAGE_FILTERS, multiple: false }}
-            dropLabel="Drop the source image (square works best)"
+            dropLabel="Drop the source image — square works best"
           />
 
           <Row label="Presets">

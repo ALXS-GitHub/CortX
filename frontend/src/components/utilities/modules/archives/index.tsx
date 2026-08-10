@@ -7,27 +7,69 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { FileDropZone, SelectedFiles } from '../../FileFields';
-import { PanelLayout, Row, TextField, Toggle } from '../../fields';
+import { ToolStatusNotice } from '../../ToolStatusNotice';
+import { PanelLayout, Row, SelectField, TextField, Toggle } from '../../fields';
+import { useExternalTool } from '../../lib/external';
 import { formatBytes } from '../../lib/image';
 import { usePanelOptions } from '../../options';
 import type { UtilityContext, UtilityPanelProps } from '../../types';
 import { createZip, isSafeEntryName, readZip, type ZipEntry } from './zip';
 
+/**
+ * Two backends, because they cover different needs:
+ *
+ * - built-in: plain ZIP through the platform's own deflate. Nothing to install,
+ *   which is the point — but ZIP only, no password, no Zip64.
+ * - 7-Zip: everything else. 7z/tar/gzip, real encryption, and extraction of
+ *   whatever 7-Zip can read (rar, iso, cab…). Needs the CLI on PATH.
+ */
+type Backend = 'builtin' | '7z';
+
 interface ArchiveOptions {
+  backend: Backend;
   compress: boolean;
   exclude: string;
   archiveName: string;
   intoSubfolder: boolean;
   keepStructure: boolean;
+  format: string;
+  level: number;
+  password: string;
+  encryptNames: boolean;
 }
 
 const DEFAULT_OPTIONS: ArchiveOptions = {
+  backend: 'builtin',
   compress: true,
   exclude: 'node_modules, .git, .DS_Store, target, dist',
   archiveName: 'archive.zip',
   intoSubfolder: true,
   keepStructure: true,
+  format: '7z',
+  level: 5,
+  password: '',
+  encryptNames: true,
 };
+
+const BACKEND_OPTIONS: { value: Backend; label: string }[] = [
+  { value: 'builtin', label: 'Built-in — ZIP, nothing to install' },
+  { value: '7z', label: '7-Zip — 7z/tar/gz, passwords, more formats' },
+];
+
+const FORMAT_OPTIONS = [
+  { value: '7z', label: '7z — best compression' },
+  { value: 'zip', label: 'zip — most portable' },
+  { value: 'tar', label: 'tar — no compression, keeps permissions' },
+  { value: 'gzip', label: 'gzip — single file only' },
+];
+
+const LEVEL_OPTIONS = [
+  { value: '0', label: '0 — store, no compression' },
+  { value: '1', label: '1 — fastest' },
+  { value: '5', label: '5 — normal' },
+  { value: '7', label: '7 — maximum' },
+  { value: '9', label: '9 — ultra, slow and memory hungry' },
+];
 
 /** Simple wildcard match, enough for the exclusion list. */
 function matches(name: string, pattern: string): boolean {
@@ -68,6 +110,9 @@ async function collect(
 
 export default function ArchivesPanel({ ctx }: UtilityPanelProps) {
   const { options, update, reset } = usePanelOptions<ArchiveOptions>(ctx, DEFAULT_OPTIONS);
+  // 7-Zip ships as `7z` on Windows, `7zz` for the official Linux/macOS build,
+  // and `7za` for the standalone one.
+  const sevenZip = useExternalTool(ctx, ['7z', '7zz', '7za'], ['i']);
 
   const [inputs, setInputs] = useState<string[]>([]);
   const [archive, setArchive] = useState<string | null>(null);
@@ -77,25 +122,69 @@ export default function ArchivesPanel({ ctx }: UtilityPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
+  const usingCli = options.backend === '7z';
+  const cliReady = !usingCli || sevenZip.status === 'ready';
+
   const addInputs = useCallback((paths: string[]) => {
     setInputs((prev) => [...new Set([...prev, ...paths])]);
     setSaved(null);
     setError(null);
   }, []);
 
-  const build = async () => {
-    if (inputs.length === 0) return;
-
+  const begin = () => {
     setBusy(true);
     setError(null);
     setSaved(null);
     setProgress(null);
+    setStatus(null);
+  };
+
+  const build = async () => {
+    if (inputs.length === 0) return;
+    begin();
 
     try {
       const folder = await ctx.files.pickDirectory('Where to save the archive');
       if (!folder) return;
 
       const patterns = parsePatterns(options.exclude);
+
+      if (usingCli) {
+        if (!sevenZip.program) throw new Error('7-Zip was not found');
+
+        const extension = options.format === 'gzip' ? 'gz' : options.format;
+        const requested = options.archiveName.trim() || `archive.${extension}`;
+        const name = requested.includes('.') ? requested : `${requested}.${extension}`;
+        const path = await ctx.files.join(folder, name);
+
+        const args = [
+          'a',
+          `-t${options.format}`,
+          `-mx=${options.level}`,
+          ...patterns.map((pattern) => `-xr!${pattern}`),
+          ...(options.password
+            ? [`-p${options.password}`, ...(options.format === '7z' && options.encryptNames ? ['-mhe=on'] : [])]
+            : []),
+          '-y',
+          path,
+          ...inputs,
+        ];
+
+        setStatus('Running 7-Zip…');
+        const run = await ctx.run(sevenZip.program, args, {
+          onLog: (line) => setStatus(line),
+        });
+        // 7-Zip returns 1 for non-fatal warnings (a file it could not open).
+        if (run.code !== 0 && run.code !== 1) {
+          throw new Error(run.stderr.trim() || run.stdout.trim() || `7-Zip exited with code ${run.code}`);
+        }
+
+        const size = (await ctx.files.read(path)).byteLength;
+        setSaved(path);
+        setStatus(`${formatBytes(size)}${run.code === 1 ? ' · finished with warnings' : ''}`);
+        return;
+      }
+
       const entries: ZipEntry[] = [];
 
       for (const input of inputs) {
@@ -128,8 +217,8 @@ export default function ArchivesPanel({ ctx }: UtilityPanelProps) {
         setProgress({ done, total }),
       );
 
-      const name = options.archiveName.trim() || 'archive.zip';
-      const path = await ctx.files.join(folder, name.endsWith('.zip') ? name : `${name}.zip`);
+      const requested = options.archiveName.trim() || 'archive.zip';
+      const path = await ctx.files.join(folder, requested.endsWith('.zip') ? requested : `${requested}.zip`);
       await ctx.files.write(path, zipped);
 
       setSaved(path);
@@ -144,25 +233,44 @@ export default function ArchivesPanel({ ctx }: UtilityPanelProps) {
 
   const extract = async () => {
     if (!archive) return;
-
-    setBusy(true);
-    setError(null);
-    setSaved(null);
-    setProgress(null);
+    begin();
 
     try {
       const folder = await ctx.files.pickDirectory('Where to extract');
       if (!folder) return;
 
-      const entries = await readZip(await ctx.files.read(archive));
-
       let destination = folder;
       if (options.intoSubfolder) {
-        const base = (await ctx.files.basename(archive)).replace(/\.zip$/i, '');
+        const base = (await ctx.files.basename(archive)).replace(/\.[^.]+$/, '');
         destination = await ctx.files.join(folder, base);
         await ctx.files.mkdir(destination);
       }
 
+      if (usingCli) {
+        if (!sevenZip.program) throw new Error('7-Zip was not found');
+
+        setStatus('Running 7-Zip…');
+        const run = await ctx.run(
+          sevenZip.program,
+          [
+            'x',
+            archive,
+            `-o${destination}`,
+            ...(options.password ? [`-p${options.password}`] : []),
+            '-y',
+          ],
+          { onLog: (line) => setStatus(line) },
+        );
+        if (run.code !== 0 && run.code !== 1) {
+          throw new Error(run.stderr.trim() || run.stdout.trim() || `7-Zip exited with code ${run.code}`);
+        }
+
+        setSaved(destination);
+        setStatus(run.code === 1 ? 'Extracted, with warnings' : 'Extracted');
+        return;
+      }
+
+      const entries = await readZip(await ctx.files.read(archive));
       let written = 0;
 
       for (const [index, entry] of entries.entries()) {
@@ -176,9 +284,7 @@ export default function ArchivesPanel({ ctx }: UtilityPanelProps) {
 
         const parts = entry.name.split('/');
         const fileName = parts.pop() as string;
-        const targetDir = parts.length
-          ? await ctx.files.join(destination, ...parts)
-          : destination;
+        const targetDir = parts.length ? await ctx.files.join(destination, ...parts) : destination;
 
         if (parts.length) await ctx.files.mkdir(targetDir);
         await ctx.files.write(await ctx.files.join(targetDir, fileName), await entry.read());
@@ -195,10 +301,32 @@ export default function ArchivesPanel({ ctx }: UtilityPanelProps) {
     }
   };
 
+  const backendPicker = (
+    <>
+      <SelectField
+        label="Backend"
+        value={options.backend}
+        onChange={(backend) => update({ backend })}
+        options={BACKEND_OPTIONS}
+      />
+      {usingCli && (
+        <ToolStatusNotice
+          tool={sevenZip}
+          name="7-Zip"
+          installHint="Install it (winget install 7zip.7zip, brew install sevenzip, or apt install p7zip-full) and make sure the CLI is on your PATH."
+        />
+      )}
+    </>
+  );
+
   const feedback = (
     <>
       {progress && progress.total > 1 && <Progress value={(progress.done / progress.total) * 100} />}
-      {status && !error && <p className="text-xs text-muted-foreground">{status}</p>}
+      {status && !error && (
+        <p className="truncate text-xs text-muted-foreground" title={status}>
+          {status}
+        </p>
+      )}
       {saved && (
         <div className="flex items-center gap-2 text-xs">
           <code className="min-w-0 flex-1 truncate font-mono">{saved}</code>
@@ -239,6 +367,8 @@ export default function ArchivesPanel({ ctx }: UtilityPanelProps) {
                 onClear={() => setInputs([])}
               />
 
+              {backendPicker}
+
               <TextField
                 label="Archive name"
                 value={options.archiveName}
@@ -253,16 +383,48 @@ export default function ArchivesPanel({ ctx }: UtilityPanelProps) {
                 />
               </Row>
 
-              <Toggle
-                label="Compress (off = store, much faster)"
-                checked={options.compress}
-                onChange={(compress) => update({ compress })}
-              />
-              <Toggle
-                label="Keep the folder name inside the archive"
-                checked={options.keepStructure}
-                onChange={(keepStructure) => update({ keepStructure })}
-              />
+              {usingCli ? (
+                <>
+                  <SelectField
+                    label="Format"
+                    value={options.format}
+                    onChange={(format) => update({ format })}
+                    options={FORMAT_OPTIONS}
+                  />
+                  <SelectField
+                    label="Compression level"
+                    value={String(options.level)}
+                    onChange={(value) => update({ level: Number(value) })}
+                    options={LEVEL_OPTIONS}
+                  />
+                  <TextField
+                    label="Password"
+                    hint="Optional. It is passed as a command-line argument, so it is briefly visible to other processes on this machine."
+                    value={options.password}
+                    onChange={(password) => update({ password })}
+                  />
+                  {options.password && options.format === '7z' && (
+                    <Toggle
+                      label="Encrypt the file names too"
+                      checked={options.encryptNames}
+                      onChange={(encryptNames) => update({ encryptNames })}
+                    />
+                  )}
+                </>
+              ) : (
+                <>
+                  <Toggle
+                    label="Compress (off = store, much faster)"
+                    checked={options.compress}
+                    onChange={(compress) => update({ compress })}
+                  />
+                  <Toggle
+                    label="Keep the folder name inside the archive"
+                    checked={options.keepStructure}
+                    onChange={(keepStructure) => update({ keepStructure })}
+                  />
+                </>
+              )}
 
               <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={reset}>
                 <RotateCcw className="size-3.5" />
@@ -272,16 +434,16 @@ export default function ArchivesPanel({ ctx }: UtilityPanelProps) {
           }
           output={
             <>
-              <Button onClick={build} disabled={busy || inputs.length === 0}>
+              <Button onClick={build} disabled={busy || inputs.length === 0 || !cliReady}>
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
                 Create archive
               </Button>
               {feedback}
               {inputs.length === 0 && (
                 <p className="text-sm text-muted-foreground">
-                  Folders are walked recursively. Everything runs locally with the platform's own
-                  deflate — no external archiver needed. Passwords, 7z, RAR and tar are not covered;
-                  neither are archives above 4 GB, which need Zip64.
+                  Folders are walked recursively. The built-in backend runs entirely locally with the
+                  platform's own deflate — ZIP only, no password, and nothing above 4 GB, which would
+                  need Zip64. Switch to 7-Zip for 7z, tar, encryption and larger archives.
                 </p>
               )}
             </>
@@ -296,29 +458,46 @@ export default function ArchivesPanel({ ctx }: UtilityPanelProps) {
               <FileDropZone
                 files={ctx.files}
                 onFiles={(paths) => setArchive(paths[0] ?? null)}
-                pickOptions={{ title: 'Pick a ZIP', filters: [{ name: 'ZIP', extensions: ['zip'] }] }}
-                label="Drop a .zip here, or click to browse"
+                pickOptions={{
+                  title: 'Pick an archive',
+                  filters: usingCli
+                    ? [{ name: 'Archives', extensions: ['zip', '7z', 'tar', 'gz', 'bz2', 'xz', 'rar', 'iso', 'cab'] }]
+                    : [{ name: 'ZIP', extensions: ['zip'] }],
+                }}
+                label={usingCli ? 'Drop an archive here' : 'Drop a .zip archive here'}
               />
               <SelectedFiles paths={archive ? [archive] : []} />
+
+              {backendPicker}
 
               <Toggle
                 label="Extract into a subfolder named after the archive"
                 checked={options.intoSubfolder}
                 onChange={(intoSubfolder) => update({ intoSubfolder })}
               />
+
+              {usingCli && (
+                <TextField
+                  label="Password"
+                  hint="Only if the archive is encrypted."
+                  value={options.password}
+                  onChange={(password) => update({ password })}
+                />
+              )}
             </>
           }
           output={
             <>
-              <Button onClick={extract} disabled={busy || !archive}>
+              <Button onClick={extract} disabled={busy || !archive || !cliReady}>
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
                 Extract
               </Button>
               {feedback}
               {!archive && (
                 <p className="text-sm text-muted-foreground">
-                  Entries whose path would escape the destination folder are refused rather than
-                  written.
+                  {usingCli
+                    ? '7-Zip reads far more than ZIP: 7z, tar, gz, bz2, xz, rar, iso, cab.'
+                    : 'Entries whose path would escape the destination folder are refused rather than written. Switch to 7-Zip to open anything other than a ZIP.'}
                 </p>
               )}
             </>

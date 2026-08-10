@@ -275,7 +275,7 @@ export default function QrCodePanel({ ctx }: UtilityPanelProps) {
                 files={ctx.files}
                 onFiles={pickLogo}
                 pickOptions={{ title: 'Pick a logo', filters: IMAGE_FILTERS }}
-                label="Drop a logo (optional)"
+                label="Drop a logo — optional"
                 className="py-4"
               />
             )}

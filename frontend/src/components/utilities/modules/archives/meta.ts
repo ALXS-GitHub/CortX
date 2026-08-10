@@ -4,11 +4,11 @@ import type { UtilityMeta } from '../../types';
 
 const meta: UtilityMeta = {
   id: 'archives',
-  name: 'ZIP Archives',
-  description: 'Zip files and folders, or extract an archive, with exclusion patterns.',
+  name: 'Archives',
+  description: 'Zip files and folders or extract an archive — built in, or through 7-Zip.',
   category: 'files',
   icon: FileArchive,
-  keywords: ['zip', 'unzip', 'archive', 'compress', 'extract', 'folder', 'bundle'],
+  keywords: ['zip', 'unzip', '7z', '7zip', 'tar', 'rar', 'archive', 'compress', 'extract', 'password', 'folder', 'bundle'],
 };
 
 export default meta;

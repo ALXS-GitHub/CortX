@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { AlertCircle, CheckCircle2, FolderOpen, Loader2, Play, Upload, X } from 'lucide-react';
 
@@ -14,16 +14,24 @@ import type { OutputTarget } from './output';
 import type { PickOptions, UtilityFiles } from './types';
 
 /**
- * Drop target for files. Tauri intercepts HTML5 drag & drop and emits its own
- * event instead — which is a feature here, because it carries real filesystem
- * paths rather than sandboxed `File` handles, and paths are what rule R2 needs
- * to pre-fill the output folder.
+ * Drop target for files, and the only way a utility takes input.
+ *
+ * Tauri intercepts HTML5 drag & drop and emits its own event instead — a
+ * feature here, since it carries real filesystem paths rather than sandboxed
+ * `File` handles, and paths are what rule R2 needs to pre-fill the output
+ * folder.
+ *
+ * The catch is that the event is webview-wide: every mounted zone hears every
+ * drop. So each zone hit-tests the cursor against its own box and ignores
+ * anything that landed elsewhere — otherwise a panel with two zones (a QR code
+ * and its logo) would feed both from one drop, and a zone on a hidden tab would
+ * steal files from the visible one.
  */
 export function FileDropZone({
   files,
   onFiles,
   pickOptions,
-  label = 'Drop a file here, or click to browse',
+  label = 'Drop files here',
   className,
 }: {
   files: UtilityFiles;
@@ -33,18 +41,42 @@ export function FileDropZone({
   className?: string;
 }) {
   const [hovering, setHovering] = useState(false);
+  const zoneRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
+    /**
+     * The event reports physical device pixels relative to the window, while
+     * layout is in CSS pixels — hence the devicePixelRatio conversion.
+     * A hidden zone measures 0×0 and so never matches.
+     */
+    const isOver = (position: { x: number; y: number }) => {
+      const element = zoneRef.current;
+      if (!element) return false;
+
+      const box = element.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0) return false;
+
+      const ratio = window.devicePixelRatio || 1;
+      const x = position.x / ratio;
+      const y = position.y / ratio;
+
+      return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
+    };
+
     getCurrentWebview()
       .onDragDropEvent((event) => {
-        if (event.payload.type === 'over') setHovering(true);
-        else if (event.payload.type === 'leave') setHovering(false);
-        else if (event.payload.type === 'drop') {
+        const { payload } = event;
+
+        if (payload.type === 'over') {
+          setHovering(isOver(payload.position));
+        } else if (payload.type === 'leave') {
           setHovering(false);
-          if (event.payload.paths.length > 0) onFiles(event.payload.paths);
+        } else if (payload.type === 'drop') {
+          setHovering(false);
+          if (isOver(payload.position) && payload.paths.length > 0) onFiles(payload.paths);
         }
       })
       .then((fn) => {
@@ -63,18 +95,36 @@ export function FileDropZone({
     if (paths.length > 0) onFiles(paths);
   };
 
+  const accepted = pickOptions?.filters?.flatMap((filter) => filter.extensions) ?? [];
+
   return (
     <button
+      ref={zoneRef}
       type="button"
       onClick={browse}
       className={cn(
-        'flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 py-8 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:bg-accent/40',
-        hovering && 'border-primary bg-accent/60',
+        'group flex w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed bg-muted/30 px-4 py-10 text-center transition-colors',
+        'hover:border-primary hover:bg-accent/50',
+        hovering ? 'border-primary bg-accent/70' : 'border-border',
         className,
       )}
     >
-      <Upload className="size-6" />
-      {label}
+      <Upload
+        className={cn(
+          'size-7 text-muted-foreground transition-colors group-hover:text-primary',
+          hovering && 'text-primary',
+        )}
+      />
+      <span className="text-sm font-medium">{label}</span>
+      <span className="text-xs text-muted-foreground">
+        or click anywhere in this box to browse
+      </span>
+      {accepted.length > 0 && (
+        <span className="text-[11px] text-muted-foreground/80">
+          {accepted.slice(0, 8).join(' · ')}
+          {accepted.length > 8 ? ' · …' : ''}
+        </span>
+      )}
     </button>
   );
 }

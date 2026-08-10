@@ -273,7 +273,7 @@ export default function ImageCropPanel({ ctx }: UtilityPanelProps) {
             files={ctx.files}
             onFiles={(paths) => setInputPath(paths[0] ?? null)}
             pickOptions={{ title: 'Pick an image', filters: IMAGE_FILTERS }}
-            label="Drop an image here, or click to browse"
+            label="Drop an image here"
           />
           <SelectedFiles paths={inputPath ? [inputPath] : []} />
 
