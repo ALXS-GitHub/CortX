@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { FolderOpen, Upload, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, FolderOpen, Loader2, Play, Upload, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 
 import { Row, Toggle } from './fields';
+import type { FileJob } from './job';
+import { formatBytes } from './lib/image';
 import type { OutputTarget } from './output';
 import type { PickOptions, UtilityFiles } from './types';
 
@@ -161,6 +164,155 @@ export function OutputFields({
         checked={target.overwrite}
         onChange={target.setOverwrite}
       />
+    </>
+  );
+}
+
+/**
+ * Input side of a file utility: drop zone, the selected files, and the R2
+ * output fields. With several inputs the name field disappears — each file
+ * derives its own — but the folder still applies to all of them.
+ */
+export function JobInputs({
+  files,
+  job,
+  pickOptions,
+  dropLabel,
+}: {
+  files: UtilityFiles;
+  job: FileJob;
+  pickOptions?: PickOptions;
+  dropLabel?: string;
+}) {
+  return (
+    <>
+      <FileDropZone
+        files={files}
+        onFiles={job.addInputs}
+        pickOptions={{ multiple: true, ...pickOptions }}
+        label={dropLabel}
+      />
+
+      <SelectedFiles paths={job.inputs} onRemove={job.removeInput} onClear={job.clearInputs} />
+
+      {job.inputs.length > 0 &&
+        (job.inputs.length === 1 ? (
+          <OutputFields files={files} target={job.target} />
+        ) : (
+          <>
+            <Row label="Output folder" hint="Each file keeps its own name.">
+              <div className="flex gap-2">
+                <Input
+                  value={job.target.dir}
+                  onChange={(e) => job.target.setDir(e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  title="Browse"
+                  onClick={async () => {
+                    const folder = await files.pickDirectory('Output folder');
+                    if (folder) job.target.setDir(folder);
+                  }}
+                >
+                  <FolderOpen className="size-4" />
+                </Button>
+              </div>
+            </Row>
+            <Toggle
+              label="Overwrite if the file already exists"
+              checked={job.target.overwrite}
+              onChange={job.target.setOverwrite}
+            />
+          </>
+        ))}
+    </>
+  );
+}
+
+/** Output side: the run button, progress, and what came out. */
+export function JobResults({
+  job,
+  onRun,
+  actionLabel = 'Run',
+  disabled,
+  children,
+}: {
+  job: FileJob;
+  onRun: () => void;
+  actionLabel?: string;
+  disabled?: boolean;
+  children?: React.ReactNode;
+}) {
+  const succeeded = job.results.filter((r) => r.output);
+  const failed = job.results.filter((r) => r.error);
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={onRun} disabled={disabled || job.running || job.inputs.length === 0}>
+          {job.running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+          {actionLabel}
+        </Button>
+        {succeeded.length > 0 && !job.running && (
+          <Button variant="outline" onClick={job.revealOutput}>
+            <FolderOpen className="size-4" />
+            Show in folder
+          </Button>
+        )}
+      </div>
+
+      {job.running && job.progress.total > 1 && (
+        <Progress value={(job.progress.done / job.progress.total) * 100} />
+      )}
+
+      {children}
+
+      {job.results.length > 0 && (
+        <div className="divide-y rounded-md border">
+          {job.results.map((result, i) => (
+            <div key={`${result.input}-${i}`} className="flex items-start gap-2 px-3 py-2 text-xs">
+              {result.error ? (
+                <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+              ) : (
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+              )}
+              <div className="min-w-0 flex-1">
+                <code className="block truncate font-mono" title={result.output ?? result.input}>
+                  {result.output ?? result.input}
+                </code>
+                {result.error ? (
+                  <span className="text-destructive">{result.error}</span>
+                ) : (
+                  result.sizeBefore !== undefined &&
+                  result.sizeAfter !== undefined && (
+                    <span className="text-muted-foreground">
+                      {formatBytes(result.sizeBefore)} → {formatBytes(result.sizeAfter)}
+                      {result.sizeBefore > 0 && (
+                        <>
+                          {' '}
+                          ({result.sizeAfter <= result.sizeBefore ? '−' : '+'}
+                          {Math.abs(
+                            Math.round((1 - result.sizeAfter / result.sizeBefore) * 100),
+                          )}
+                          %)
+                        </>
+                      )}
+                    </span>
+                  )
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {failed.length > 0 && !job.running && (
+        <p className="text-xs text-destructive">
+          {failed.length} file{failed.length > 1 ? 's' : ''} failed.
+        </p>
+      )}
     </>
   );
 }
