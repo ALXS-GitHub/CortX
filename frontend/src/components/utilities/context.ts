@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { exists, mkdir, readFile, writeFile } from '@tauri-apps/plugin-fs';
+import { exists, mkdir, readDir, readFile, writeFile } from '@tauri-apps/plugin-fs';
 import { Command } from '@tauri-apps/plugin-shell';
 import { basename, dirname, extname, join, tempDir } from '@tauri-apps/api/path';
 import { toast } from 'sonner';
@@ -69,6 +69,10 @@ const files: UtilityFiles = {
   exists: (path) => exists(path),
   mkdir: async (path) => {
     await mkdir(path, { recursive: true });
+  },
+  readDir: async (path) => {
+    const entries = await readDir(path);
+    return entries.map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory }));
   },
   reveal: (path) => openInExplorer(path),
   tempDir: () => tempDir(),

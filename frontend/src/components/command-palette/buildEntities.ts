@@ -12,10 +12,13 @@ import {
   Square,
   SquareTerminal,
   Terminal,
+  Wand2,
   Wrench,
 } from 'lucide-react';
 import { createElement, type ReactNode } from 'react';
 
+import { UTILITIES } from '@/components/utilities/registry';
+import { useUtilitySelection } from '@/components/utilities/selection';
 import { openAppUrl, openInExplorer, openInVscode, openToolUrl } from '@/lib/tauri';
 import type { useAppStore } from '@/stores/appStore';
 
@@ -47,6 +50,7 @@ export function buildEntities(store: Store): CommandEntity[] {
     { view: 'dashboard', label: 'Go to Projects', icon: FolderKanban },
     { view: 'scripts', label: 'Go to Scripts', icon: FileCode },
     { view: 'tools', label: 'Go to Tools', icon: Wrench },
+    { view: 'utilities', label: 'Go to Utilities', icon: Wand2 },
     { view: 'aliases', label: 'Go to Shell Config', icon: SquareTerminal },
     { view: 'apps', label: 'Go to Apps', icon: AppWindow },
     { view: 'settings', label: 'Go to Settings', icon: SettingsIcon },
@@ -316,6 +320,31 @@ export function buildEntities(store: Store): CommandEntity[] {
           icon: createElement(ArrowRight, { className: iconSize }),
           shortcut: SHORTCUTS.primary,
           run: () => store.selectAlias(alias.id),
+        },
+      ],
+    });
+  }
+
+  // -- Utilities -----------------------------------------------------------
+  // Static, so no store read: the registry is built at module load.
+  for (const { meta } of UTILITIES) {
+    entities.push({
+      id: `utility:${meta.id}`,
+      category: 'Utilities',
+      label: meta.name,
+      subtitle: meta.description,
+      icon: createElement(meta.icon, { className: iconSize }),
+      keywords: `utility tool ${meta.category} ${(meta.keywords ?? []).join(' ')}`,
+      actions: [
+        {
+          id: 'open',
+          label: 'Open',
+          icon: createElement(ArrowRight, { className: iconSize }),
+          shortcut: SHORTCUTS.primary,
+          run: () => {
+            useUtilitySelection.getState().openUtility(meta.id);
+            store.setCurrentView('utilities');
+          },
         },
       ],
     });

@@ -17,6 +17,16 @@
     "shell:allow-spawn",
     "shell:allow-execute",
     "shell:allow-kill",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "ffmpeg", "cmd": "ffmpeg", "args": true },
+        { "name": "ffprobe", "cmd": "ffprobe", "args": true },
+        { "name": "gs", "cmd": "gs", "args": true },
+        { "name": "gswin64c", "cmd": "gswin64c", "args": true },
+        { "name": "gswin32c", "cmd": "gswin32c", "args": true }
+      ]
+    },
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",
@@ -41,6 +51,10 @@
     },
     {
       "identifier": "fs:allow-mkdir",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-read-dir",
       "allow": [{ "path": "**" }]
     },
     "global-shortcut:default"

@@ -7,6 +7,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/ca
 import { Input } from '@/components/ui/input';
 
 import { useUtilityContext } from './context';
+import { useUtilitySelection } from './selection';
 import { UTILITIES, getUtility, type RegisteredUtility } from './registry';
 import { UTILITY_CATEGORY_LABELS, type UtilityCategory } from './types';
 
@@ -94,7 +95,7 @@ function UtilityHost({ id, onBack }: { id: string; onBack: () => void }) {
 }
 
 export function UtilitiesView() {
-  const [openId, setOpenId] = useState<string | null>(null);
+  const { openId, openUtility } = useUtilitySelection();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<UtilityCategory | null>(null);
 
@@ -126,7 +127,7 @@ export function UtilitiesView() {
   }, [search, category]);
 
   if (openId) {
-    return <UtilityHost id={openId} onBack={() => setOpenId(null)} />;
+    return <UtilityHost id={openId} onBack={() => openUtility(null)} />;
   }
 
   return (
@@ -170,7 +171,7 @@ export function UtilitiesView() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((u) => (
-            <UtilityCard key={u.meta.id} utility={u} onOpen={() => setOpenId(u.meta.id)} />
+            <UtilityCard key={u.meta.id} utility={u} onOpen={() => openUtility(u.meta.id)} />
           ))}
         </div>
       )}

@@ -70,6 +70,7 @@ export interface UtilityFiles {
   write(path: string, data: Uint8Array): Promise<void>;
   exists(path: string): Promise<boolean>;
   mkdir(path: string): Promise<void>;
+  readDir(path: string): Promise<{ name: string; isDirectory: boolean }[]>;
   reveal(path: string): Promise<void>;
   tempDir(): Promise<string>;
   dirname(path: string): Promise<string>;

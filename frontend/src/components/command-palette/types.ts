@@ -7,6 +7,7 @@ export type EntityCategory =
   | 'Scripts'
   | 'Projects'
   | 'Tools'
+  | 'Utilities'
   | 'Shell Config';
 
 /**
