@@ -26,7 +26,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Plus, Search, LayoutGrid } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Star } from 'lucide-react';
+import { toast } from 'sonner';
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@/types';
 
 type SortOption = 'recent' | 'name' | 'created' | 'status';
@@ -38,6 +39,7 @@ export function Dashboard() {
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortOption>('recent');
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
@@ -78,6 +80,10 @@ export function Dashboard() {
       result = result.filter((p) => p.status === selectedStatus);
     }
 
+    if (favoritesOnly) {
+      result = result.filter((p) => p.favorite);
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((p) =>
@@ -88,6 +94,8 @@ export function Dashboard() {
     }
 
     return result.slice().sort((a, b) => {
+      // Favorites float to the top of whatever sort is active.
+      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
       switch (sort) {
         case 'name':
           return a.name.localeCompare(b.name);
@@ -110,7 +118,15 @@ export function Dashboard() {
         }
       }
     });
-  }, [projects, selectedTags, selectedStatus, search, sort, statusDefinitions]);
+  }, [projects, selectedTags, selectedStatus, favoritesOnly, search, sort, statusDefinitions]);
+
+  const handleToggleFavorite = async (project: Project) => {
+    try {
+      await updateProject(project.id, { favorite: !project.favorite });
+    } catch (e) {
+      toast.error('Failed to update favorite', { description: String(e) });
+    }
+  };
 
   const handleAddProject = async (data: CreateProjectInput | UpdateProjectInput) => {
     await createProject(data as CreateProjectInput);
@@ -192,6 +208,16 @@ export function Dashboard() {
             <SelectItem value="status">Status</SelectItem>
           </SelectContent>
         </Select>
+        <Button
+          variant={favoritesOnly ? 'secondary' : 'outline'}
+          onClick={() => setFavoritesOnly((v) => !v)}
+          aria-pressed={favoritesOnly}
+          title="Show favorites only"
+        >
+          <Star className={favoritesOnly ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+          Favorites
+        </Button>
+
         <ViewModeToggle value={projectsViewMode} onChange={setProjectsViewMode} />
       </div>
 
@@ -272,6 +298,7 @@ export function Dashboard() {
               project={project}
               onEdit={() => setEditingProject(project)}
               onDelete={() => setDeletingProject(project)}
+              onToggleFavorite={() => handleToggleFavorite(project)}
             />
           ))}
         </div>
@@ -283,6 +310,7 @@ export function Dashboard() {
               project={project}
               onEdit={() => setEditingProject(project)}
               onDelete={() => setDeletingProject(project)}
+              onToggleFavorite={() => handleToggleFavorite(project)}
             />
           ))}
         </div>
@@ -294,6 +322,7 @@ export function Dashboard() {
               project={project}
               onEdit={() => setEditingProject(project)}
               onDelete={() => setDeletingProject(project)}
+              onToggleFavorite={() => handleToggleFavorite(project)}
             />
           ))}
         </div>

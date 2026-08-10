@@ -15,6 +15,7 @@ const aliasTypeIcon = (type: AliasType) => {
 };
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import type { ShellAlias, TagDefinition } from '@/types';
 
 interface AliasCardViewProps {
@@ -23,9 +24,10 @@ interface AliasCardViewProps {
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
+  onToggleFavorite: () => void;
 }
 
-export function AliasCardView({ alias, tagDefinitions, onEdit, onDelete, onClick }: AliasCardViewProps) {
+export function AliasCardView({ alias, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: AliasCardViewProps) {
   return (
     <Card className="group cursor-pointer hover:border-primary/50 transition-colors h-full flex flex-col overflow-hidden" onClick={onClick}>
       <CardHeader className="pb-2 px-4 pt-4">
@@ -35,6 +37,7 @@ export function AliasCardView({ alias, tagDefinitions, onEdit, onDelete, onClick
             <h3 className="font-medium font-mono truncate">{alias.name}</h3>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
+            <FavoriteButton favorite={alias.favorite} onToggle={onToggleFavorite} />
             <div
               className={cn('opacity-0 group-hover:opacity-100 transition-opacity')}
               onClick={(e) => e.stopPropagation()}

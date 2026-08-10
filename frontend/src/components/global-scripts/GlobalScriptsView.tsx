@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Search, ScanSearch, Check, Loader2 } from 'lucide-react';
+import { Plus, Search, ScanSearch, Check, Loader2, Star } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -62,6 +62,7 @@ export function GlobalScriptsView() {
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [sort, setSort] = useState<SortOption>('name');
   const [showScriptForm, setShowScriptForm] = useState(false);
   const [editingScript, setEditingScript] = useState<GlobalScript | undefined>(undefined);
@@ -114,6 +115,10 @@ export function GlobalScriptsView() {
       scripts = scripts.filter((s) => s.status === selectedStatus);
     }
 
+    if (favoritesOnly) {
+      scripts = scripts.filter((s) => s.favorite);
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       scripts = scripts.filter(
@@ -126,12 +131,14 @@ export function GlobalScriptsView() {
     }
 
     return scripts.slice().sort((a, b) => {
+      // Favorites float to the top of whatever sort is active.
+      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
       switch (sort) {
         case 'created': return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         default: return a.name.localeCompare(b.name);
       }
     });
-  }, [globalScripts, selectedTags, selectedStatus, search, sort]);
+  }, [globalScripts, selectedTags, selectedStatus, favoritesOnly, search, sort]);
 
   const handleCreateScript = async (data: CreateGlobalScriptInput | UpdateGlobalScriptInput) => {
     await createGlobalScript(data as CreateGlobalScriptInput);
@@ -232,6 +239,14 @@ export function GlobalScriptsView() {
     });
   };
 
+  const handleToggleFavorite = async (script: GlobalScript) => {
+    try {
+      await updateGlobalScript(script.id, { favorite: !script.favorite });
+    } catch (e) {
+      toast.error('Failed to update favorite', { description: String(e) });
+    }
+  };
+
   const scriptItemProps = (script: GlobalScript) => ({
     script,
     status: getScriptStatus(script.id),
@@ -240,6 +255,7 @@ export function GlobalScriptsView() {
     onEdit: () => { setEditingScript(script); setShowScriptForm(true); },
     onDelete: () => setDeletingScript(script),
     onClick: () => selectGlobalScript(script.id),
+    onToggleFavorite: () => handleToggleFavorite(script),
   });
 
   const renderScriptList = (scripts: GlobalScript[]) => {
@@ -339,6 +355,16 @@ export function GlobalScriptsView() {
               <SelectItem value="created">Date Created</SelectItem>
             </SelectContent>
           </Select>
+          <Button
+            variant={favoritesOnly ? 'secondary' : 'outline'}
+            size="sm"
+            onClick={() => setFavoritesOnly((v) => !v)}
+            aria-pressed={favoritesOnly}
+            title="Show favorites only"
+          >
+            <Star className={favoritesOnly ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+            Favorites
+          </Button>
           <ViewModeToggle value={scriptsViewMode} onChange={setScriptsViewMode} />
         </div>
 

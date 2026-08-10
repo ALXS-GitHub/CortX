@@ -30,6 +30,7 @@ import {
   FileKey,
   FileCode,
   ChevronDown,
+  Star,
 } from 'lucide-react';
 import {
   Popover,
@@ -111,6 +112,14 @@ export function ProjectView() {
         description: String(error),
       });
     });
+  };
+
+  const handleToggleFavorite = async () => {
+    try {
+      await updateProject(project.id, { favorite: !project.favorite });
+    } catch (e) {
+      toast.error('Failed to update favorite', { description: String(e) });
+    }
   };
 
   const handleAddService = async (data: CreateServiceInput | UpdateServiceInput) => {
@@ -235,6 +244,16 @@ export function ProjectView() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end max-w-[50%] lg:max-w-none">
+          <Button
+            variant="outline"
+            size="sm"
+            aria-pressed={project.favorite}
+            onClick={handleToggleFavorite}
+            title={project.favorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Star className={project.favorite ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+            {project.favorite ? 'Favorite' : 'Add to favorites'}
+          </Button>
           <Button variant="outline" size="sm" onClick={handleOpenInVscode}>
             <Code className="size-4 mr-2" />
             Open in VSCode

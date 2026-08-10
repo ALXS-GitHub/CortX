@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Star } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { AppCard } from './AppCard';
@@ -49,6 +49,7 @@ export function AppsView() {
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [sort, setSort] = useState<SortOption>('name');
   const [showAppForm, setShowAppForm] = useState(false);
   const [editingApp, setEditingApp] = useState<App | undefined>(undefined);
@@ -102,6 +103,10 @@ export function AppsView() {
       result = result.filter((a) => a.status === selectedStatus);
     }
 
+    if (favoritesOnly) {
+      result = result.filter((a) => a.favorite);
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -113,12 +118,14 @@ export function AppsView() {
     }
 
     return result.slice().sort((a, b) => {
+      // Favorites float to the top of whatever sort is active.
+      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
       switch (sort) {
         case 'created': return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         default: return a.name.localeCompare(b.name);
       }
     });
-  }, [apps, selectedTags, selectedStatus, search, sort]);
+  }, [apps, selectedTags, selectedStatus, favoritesOnly, search, sort]);
 
   const handleCreateApp = async (data: CreateAppInput | UpdateAppInput) => {
     await createApp(data as CreateAppInput);
@@ -142,12 +149,21 @@ export function AppsView() {
     setDeletingApp(null);
   };
 
+  const handleToggleFavorite = async (app: App) => {
+    try {
+      await updateAppItem(app.id, { favorite: !app.favorite });
+    } catch (e) {
+      toast.error('Failed to update favorite', { description: String(e) });
+    }
+  };
+
   const appItemProps = (app: App) => ({
     app,
     tagDefinitions,
     onEdit: () => { setEditingApp(app); setShowAppForm(true); },
     onDelete: () => setDeletingApp(app),
     onClick: () => selectApp(app.id),
+    onToggleFavorite: () => handleToggleFavorite(app),
   });
 
   const renderAppList = (appList: App[]) => {
@@ -233,6 +249,17 @@ export function AppsView() {
             <SelectItem value="created">Date Created</SelectItem>
           </SelectContent>
         </Select>
+
+        <Button
+          variant={favoritesOnly ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => setFavoritesOnly((v) => !v)}
+          aria-pressed={favoritesOnly}
+          title="Show favorites only"
+        >
+          <Star className={favoritesOnly ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+          Favorites
+        </Button>
 
         <ViewModeToggle value={appsViewMode} onChange={setAppsViewMode} />
       </div>

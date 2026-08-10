@@ -15,6 +15,7 @@ const aliasTypeIcon = (type: AliasType) => {
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { TruncatedText } from '@/components/ui/TruncatedText';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import type { ShellAlias, TagDefinition } from '@/types';
 
 interface AliasCompactItemProps {
@@ -23,9 +24,10 @@ interface AliasCompactItemProps {
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
+  onToggleFavorite: () => void;
 }
 
-export function AliasCompactItem({ alias, tagDefinitions, onEdit, onDelete, onClick }: AliasCompactItemProps) {
+export function AliasCompactItem({ alias, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: AliasCompactItemProps) {
   return (
     <div
       className="group flex items-center h-9 border rounded-md px-3 py-1.5 cursor-pointer hover:bg-muted/50 transition-colors overflow-hidden"
@@ -42,6 +44,7 @@ export function AliasCompactItem({ alias, tagDefinitions, onEdit, onDelete, onCl
         </span>
       )}
       <div className="ml-2 flex items-center gap-1.5 flex-shrink-0">
+        <FavoriteButton favorite={alias.favorite} onToggle={onToggleFavorite} size="sm" />
         <div
           className={cn('opacity-0 group-hover:opacity-100 transition-opacity')}
           onClick={(e) => e.stopPropagation()}

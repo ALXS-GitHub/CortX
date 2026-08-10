@@ -12,6 +12,7 @@ import { Play, Square, MoreVertical, FileCode, Circle, Pencil, Trash2 } from 'lu
 import { cn, formatCommandDisplay } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import type { GlobalScript, ScriptStatus } from '@/types';
 
 interface GlobalScriptCardProps {
@@ -22,6 +23,7 @@ interface GlobalScriptCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
+  onToggleFavorite: () => void;
 }
 
 function StatusBadge({ status }: { status: ScriptStatus }) {
@@ -45,6 +47,7 @@ export function GlobalScriptCard({
   onEdit,
   onDelete,
   onClick,
+  onToggleFavorite,
 }: GlobalScriptCardProps) {
   const { tagDefinitions } = useAppStore();
   const isRunning = status === 'running';
@@ -79,6 +82,8 @@ export function GlobalScriptCard({
               </div>
             )}
           </div>
+
+          <FavoriteButton favorite={script.favorite} onToggle={onToggleFavorite} />
 
           <div className={cn('flex items-center gap-1', 'opacity-0 group-hover:opacity-100 transition-opacity')} onClick={(e) => e.stopPropagation()}>
             {isRunning ? (

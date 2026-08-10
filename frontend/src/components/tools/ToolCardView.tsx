@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Wrench, MoreVertical, Pencil, Trash2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import type { Tool, TagDefinition } from '@/types';
 
 interface ToolCardProps {
@@ -15,9 +16,10 @@ interface ToolCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
+  onToggleFavorite: () => void;
 }
 
-export function ToolCardView({ tool, tagDefinitions, onEdit, onDelete, onClick }: ToolCardProps) {
+export function ToolCardView({ tool, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: ToolCardProps) {
   return (
     <Card className="group cursor-pointer hover:border-primary/50 transition-colors h-full flex flex-col" onClick={onClick}>
       <CardHeader className="pb-2 px-4 pt-4">
@@ -28,6 +30,7 @@ export function ToolCardView({ tool, tagDefinitions, onEdit, onDelete, onClick }
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <StatusBadge status={tool.status} />
+            <FavoriteButton favorite={tool.favorite} onToggle={onToggleFavorite} />
             <div
               className={cn('opacity-0 group-hover:opacity-100 transition-opacity')}
               onClick={(e) => e.stopPropagation()}

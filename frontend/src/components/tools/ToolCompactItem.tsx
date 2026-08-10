@@ -7,6 +7,7 @@ import { Wrench, MoreVertical, Pencil, Trash2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { TruncatedText } from '@/components/ui/TruncatedText';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import type { Tool, TagDefinition } from '@/types';
 
 interface ToolCardProps {
@@ -15,9 +16,10 @@ interface ToolCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
+  onToggleFavorite: () => void;
 }
 
-export function ToolCompactItem({ tool, tagDefinitions, onEdit, onDelete, onClick }: ToolCardProps) {
+export function ToolCompactItem({ tool, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: ToolCardProps) {
   return (
     <div
       className="group flex items-center h-9 border rounded-md px-3 py-1.5 cursor-pointer hover:bg-muted/50 transition-colors"
@@ -41,6 +43,7 @@ export function ToolCompactItem({ tool, tagDefinitions, onEdit, onDelete, onClic
             <span>{tool.configPaths.length}</span>
           </div>
         )}
+        <FavoriteButton favorite={tool.favorite} onToggle={onToggleFavorite} size="sm" />
         <div
           className={cn('opacity-0 group-hover:opacity-100 transition-opacity')}
           onClick={(e) => e.stopPropagation()}

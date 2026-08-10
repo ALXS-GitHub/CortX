@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { TruncatedText } from '@/components/ui/TruncatedText';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import type { GlobalScript, ScriptStatus } from '@/types';
 
 interface GlobalScriptCardProps {
@@ -19,6 +20,7 @@ interface GlobalScriptCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
+  onToggleFavorite: () => void;
 }
 
 function StatusBadge({ status }: { status: ScriptStatus }) {
@@ -42,6 +44,7 @@ export function GlobalScriptCompactItem({
   onEdit,
   onDelete,
   onClick,
+  onToggleFavorite,
 }: GlobalScriptCardProps) {
   const { tagDefinitions } = useAppStore();
   const isRunning = status === 'running';
@@ -78,6 +81,8 @@ export function GlobalScriptCompactItem({
 
       {/* Spacer */}
       <div className="flex-1" />
+
+      <FavoriteButton favorite={script.favorite} onToggle={onToggleFavorite} size="sm" />
 
       {/* Right side: run/stop + dropdown (hover visible) */}
       <div

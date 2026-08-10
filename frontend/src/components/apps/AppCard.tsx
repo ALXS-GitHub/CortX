@@ -10,6 +10,7 @@ import { AppWindow, MoreVertical, Pencil, Trash2, FileText, Rocket } from 'lucid
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
 import type { App, TagDefinition } from '@/types';
@@ -20,9 +21,10 @@ interface AppCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
+  onToggleFavorite: () => void;
 }
 
-export function AppCard({ app, tagDefinitions, onEdit, onDelete, onClick }: AppCardProps) {
+export function AppCard({ app, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: AppCardProps) {
   const { launchApp } = useAppStore();
 
   const handleLaunch = async (e: React.MouseEvent) => {
@@ -65,6 +67,8 @@ export function AppCard({ app, tagDefinitions, onEdit, onDelete, onClick }: AppC
               </div>
             )}
           </div>
+
+          <FavoriteButton favorite={app.favorite} onToggle={onToggleFavorite} />
 
           <div className={cn('flex items-center gap-1', 'opacity-0 group-hover:opacity-100 transition-opacity')} onClick={(e) => e.stopPropagation()}>
             <Button variant="ghost" size="icon" className="size-7" onClick={handleLaunch} title="Launch">

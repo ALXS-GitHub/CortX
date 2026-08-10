@@ -27,6 +27,14 @@ type Store = ReturnType<typeof useAppStore.getState>;
 const iconSize = 'size-4';
 
 /**
+ * Favorites first. cmdk ranks by match score and breaks ties in render order,
+ * so emitting starred entities earlier makes them win an equal-quality match.
+ */
+function favoritesFirst<T extends { favorite: boolean }>(items: T[]): T[] {
+  return items.slice().sort((a, b) => (a.favorite === b.favorite ? 0 : a.favorite ? -1 : 1));
+}
+
+/**
  * Build the list of entities surfaced by the command palette from the current
  * store snapshot. Each entity has a default action plus optional ones bound
  * to specific shortcuts.
@@ -65,7 +73,7 @@ export function buildEntities(store: Store): CommandEntity[] {
   }
 
   // -- Apps ----------------------------------------------------------------
-  for (const app of store.apps) {
+  for (const app of favoritesFirst(store.apps)) {
     const actions: EntityAction[] = [
       {
         id: 'launch',
@@ -114,7 +122,7 @@ export function buildEntities(store: Store): CommandEntity[] {
   }
 
   // -- Services (one entity per service) -----------------------------------
-  for (const project of store.projects) {
+  for (const project of favoritesFirst(store.projects)) {
     for (const service of project.services) {
       const runtime = store.serviceRuntimes.get(service.id);
       const isRunning = runtime?.status === 'running' || runtime?.status === 'starting';
@@ -159,7 +167,7 @@ export function buildEntities(store: Store): CommandEntity[] {
   }
 
   // -- Scripts (global only) -----------------------------------------------
-  for (const script of store.globalScripts) {
+  for (const script of favoritesFirst(store.globalScripts)) {
     const hasParams = script.parameters.length > 0;
     const actions: EntityAction[] = [
       {
@@ -189,7 +197,7 @@ export function buildEntities(store: Store): CommandEntity[] {
   }
 
   // -- Projects ------------------------------------------------------------
-  for (const project of store.projects) {
+  for (const project of favoritesFirst(store.projects)) {
     const services = project.services;
     const actions: EntityAction[] = [
       {
@@ -241,7 +249,7 @@ export function buildEntities(store: Store): CommandEntity[] {
   }
 
   // -- Tools ---------------------------------------------------------------
-  for (const tool of store.tools) {
+  for (const tool of favoritesFirst(store.tools)) {
     const actions: EntityAction[] = [
       {
         id: 'open-in-cortx',
@@ -293,7 +301,7 @@ export function buildEntities(store: Store): CommandEntity[] {
   }
 
   // -- Shell Config (aliases) ----------------------------------------------
-  for (const alias of store.aliases) {
+  for (const alias of favoritesFirst(store.aliases)) {
     entities.push({
       id: `alias:${alias.id}`,
       category: 'Shell Config',

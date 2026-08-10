@@ -14,6 +14,7 @@ import {
   Rocket,
   Play,
   Tag,
+  Star,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { AppForm } from './AppForm';
@@ -40,6 +41,15 @@ export function AppDetail() {
     () => apps.find((a) => a.id === selectedAppId),
     [apps, selectedAppId]
   );
+
+  const handleToggleFavorite = async () => {
+    if (!app) return;
+    try {
+      await updateAppItem(app.id, { favorite: !app.favorite });
+    } catch (e) {
+      toast.error('Failed to update favorite', { description: String(e) });
+    }
+  };
 
   const handleUpdate = async (data: UpdateAppInput) => {
     if (!app) return;
@@ -113,10 +123,22 @@ export function AppDetail() {
               )}
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)} className="flex-shrink-0">
-            <Pencil className="size-4 mr-2" />
-            Edit
-          </Button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={app.favorite}
+              onClick={handleToggleFavorite}
+              title={app.favorite ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Star className={app.favorite ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+              {app.favorite ? 'Favorite' : 'Add to favorites'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
+              <Pencil className="size-4 mr-2" />
+              Edit
+            </Button>
+          </div>
         </div>
       </div>
 

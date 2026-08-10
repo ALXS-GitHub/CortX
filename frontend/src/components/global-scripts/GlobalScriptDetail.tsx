@@ -15,6 +15,7 @@ import {
   Settings2,
   History,
   Layers,
+  Star,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { GlobalScriptForm } from './GlobalScriptForm';
@@ -45,6 +46,15 @@ export function GlobalScriptDetail() {
     () => globalScripts.find((s) => s.id === selectedGlobalScriptId),
     [globalScripts, selectedGlobalScriptId]
   );
+
+  const handleToggleFavorite = async () => {
+    if (!script) return;
+    try {
+      await updateGlobalScript(script.id, { favorite: !script.favorite });
+    } catch (e) {
+      toast.error('Failed to update favorite', { description: String(e) });
+    }
+  };
 
   const runtime = selectedGlobalScriptId
     ? globalScriptRuntimes.get(selectedGlobalScriptId)
@@ -104,6 +114,16 @@ export function GlobalScriptDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={script.favorite}
+              onClick={handleToggleFavorite}
+              title={script.favorite ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Star className={script.favorite ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+              {script.favorite ? 'Favorite' : 'Add to favorites'}
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
               <Pencil className="size-4 mr-2" />
               Edit

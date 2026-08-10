@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Star } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { AliasCard } from './AliasCard';
@@ -48,6 +48,7 @@ export function AliasesView() {
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [sort, setSort] = useState<SortOption>('name');
   const [showAliasForm, setShowAliasForm] = useState(false);
   const [editingAlias, setEditingAlias] = useState<ShellAlias | undefined>(undefined);
@@ -99,6 +100,10 @@ export function AliasesView() {
       result = result.filter((a) => a.status === selectedStatus);
     }
 
+    if (favoritesOnly) {
+      result = result.filter((a) => a.favorite);
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -111,12 +116,14 @@ export function AliasesView() {
     }
 
     return result.slice().sort((a, b) => {
+      // Favorites float to the top of whatever sort is active.
+      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
       switch (sort) {
         case 'created': return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         default: return a.name.localeCompare(b.name);
       }
     });
-  }, [aliases, selectedTags, selectedStatus, search, sort]);
+  }, [aliases, selectedTags, selectedStatus, favoritesOnly, search, sort]);
 
   const handleCreateAlias = async (data: CreateShellAliasInput | UpdateShellAliasInput) => {
     await createAlias(data as CreateShellAliasInput);
@@ -140,12 +147,21 @@ export function AliasesView() {
     setDeletingAlias(null);
   };
 
+  const handleToggleFavorite = async (alias: ShellAlias) => {
+    try {
+      await updateAlias(alias.id, { favorite: !alias.favorite });
+    } catch (e) {
+      toast.error('Failed to update favorite', { description: String(e) });
+    }
+  };
+
   const aliasItemProps = (alias: ShellAlias) => ({
     alias,
     tagDefinitions,
     onEdit: () => { setEditingAlias(alias); setShowAliasForm(true); },
     onDelete: () => setDeletingAlias(alias),
     onClick: () => selectAlias(alias.id),
+    onToggleFavorite: () => handleToggleFavorite(alias),
   });
 
   const renderAliasList = (aliasList: ShellAlias[]) => {
@@ -233,6 +249,17 @@ export function AliasesView() {
             <SelectItem value="created">Date Created</SelectItem>
           </SelectContent>
         </Select>
+
+        <Button
+          variant={favoritesOnly ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => setFavoritesOnly((v) => !v)}
+          aria-pressed={favoritesOnly}
+          title="Show favorites only"
+        >
+          <Star className={favoritesOnly ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+          Favorites
+        </Button>
 
         <ViewModeToggle value={aliasesViewMode} onChange={setAliasesViewMode} />
       </div>

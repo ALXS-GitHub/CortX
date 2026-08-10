@@ -18,6 +18,7 @@ import {
   Code,
   SquareTerminal,
   Plus,
+  Star,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { ToolForm } from './ToolForm';
@@ -123,6 +124,15 @@ export function ToolDetail() {
     }
   };
 
+  const handleToggleFavorite = async () => {
+    if (!tool) return;
+    try {
+      await updateTool(tool.id, { favorite: !tool.favorite });
+    } catch (e) {
+      toast.error('Failed to update favorite', { description: String(e) });
+    }
+  };
+
   if (!tool) {
     return (
       <div className="p-6">
@@ -154,10 +164,22 @@ export function ToolDetail() {
               )}
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)} className="flex-shrink-0">
-            <Pencil className="size-4 mr-2" />
-            Edit
-          </Button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={tool.favorite}
+              onClick={() => handleToggleFavorite()}
+              title={tool.favorite ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Star className={tool.favorite ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+              {tool.favorite ? 'Favorite' : 'Add to favorites'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
+              <Pencil className="size-4 mr-2" />
+              Edit
+            </Button>
+          </div>
         </div>
       </div>
 

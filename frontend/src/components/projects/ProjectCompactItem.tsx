@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { TruncatedText } from '@/components/ui/TruncatedText';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import { useAppStore } from '@/stores/appStore';
 import type { Project } from '@/types';
 import { Play, FolderOpen, MoreVertical, Circle, Code } from 'lucide-react';
@@ -18,9 +19,10 @@ interface ProjectCardProps {
   project: Project;
   onEdit: () => void;
   onDelete: () => void;
+  onToggleFavorite: () => void;
 }
 
-export function ProjectCompactItem({ project, onEdit, onDelete }: ProjectCardProps) {
+export function ProjectCompactItem({ project, onEdit, onDelete, onToggleFavorite }: ProjectCardProps) {
   const { selectProject, serviceRuntimes, startService, tagDefinitions } = useAppStore();
 
   const handleStartAll = async (e: React.MouseEvent) => {
@@ -83,6 +85,8 @@ export function ProjectCompactItem({ project, onEdit, onDelete }: ProjectCardPro
 
       {/* Spacer */}
       <div className="flex-1" />
+
+      <FavoriteButton favorite={project.favorite} onToggle={onToggleFavorite} size="sm" />
 
       {/* Right side: start button + dropdown (hover visible) */}
       <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">

@@ -15,6 +15,7 @@ import {
   Wrench,
   Settings,
   Globe,
+  Star,
 } from 'lucide-react';
 import type { AliasType } from '@/types';
 
@@ -60,6 +61,15 @@ export function AliasDetail() {
     () => aliases.find((a) => a.id === selectedAliasId),
     [aliases, selectedAliasId]
   );
+
+  const handleToggleFavorite = async () => {
+    if (!alias) return;
+    try {
+      await updateAlias(alias.id, { favorite: !alias.favorite });
+    } catch (e) {
+      toast.error('Failed to update favorite', { description: String(e) });
+    }
+  };
 
   const linkedTool = useMemo(
     () => (alias?.toolId ? tools.find((t) => t.id === alias.toolId) : undefined),
@@ -133,10 +143,22 @@ export function AliasDetail() {
               )}
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)} className="flex-shrink-0">
-            <Pencil className="size-4 mr-2" />
-            Edit
-          </Button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={alias.favorite}
+              onClick={handleToggleFavorite}
+              title={alias.favorite ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Star className={alias.favorite ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+              {alias.favorite ? 'Favorite' : 'Add to favorites'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
+              <Pencil className="size-4 mr-2" />
+              Edit
+            </Button>
+          </div>
         </div>
       </div>
 

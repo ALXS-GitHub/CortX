@@ -28,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Search, Loader2, Check, ScanSearch } from 'lucide-react';
+import { Plus, Search, Loader2, Check, ScanSearch, Star } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { ToolCard } from './ToolCard';
@@ -58,6 +58,7 @@ export function ToolsView() {
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [sort, setSort] = useState<SortOption>('name');
   const [showToolForm, setShowToolForm] = useState(false);
   const [editingTool, setEditingTool] = useState<Tool | undefined>(undefined);
@@ -118,6 +119,10 @@ export function ToolsView() {
       result = result.filter((t) => t.status === selectedStatus);
     }
 
+    if (favoritesOnly) {
+      result = result.filter((t) => t.favorite);
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -129,12 +134,14 @@ export function ToolsView() {
     }
 
     return result.slice().sort((a, b) => {
+      // Favorites float to the top of whatever sort is active.
+      if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
       switch (sort) {
         case 'created': return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         default: return a.name.localeCompare(b.name);
       }
     });
-  }, [tools, selectedTags, selectedStatus, search, sort]);
+  }, [tools, selectedTags, selectedStatus, favoritesOnly, search, sort]);
 
   const handleCreateTool = async (data: CreateToolInput | UpdateToolInput) => {
     await createTool(data as CreateToolInput);
@@ -217,7 +224,16 @@ export function ToolsView() {
     onEdit: () => { setEditingTool(tool); setShowToolForm(true); },
     onDelete: () => setDeletingTool(tool),
     onClick: () => selectTool(tool.id),
+    onToggleFavorite: () => handleToggleFavorite(tool),
   });
+
+  const handleToggleFavorite = async (tool: Tool) => {
+    try {
+      await updateTool(tool.id, { favorite: !tool.favorite });
+    } catch (e) {
+      toast.error('Failed to update favorite', { description: String(e) });
+    }
+  };
 
   const renderToolList = (toolList: Tool[]) => {
     if (toolList.length === 0) return null;
@@ -306,6 +322,17 @@ export function ToolsView() {
             <SelectItem value="created">Date Created</SelectItem>
           </SelectContent>
         </Select>
+
+        <Button
+          variant={favoritesOnly ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => setFavoritesOnly((v) => !v)}
+          aria-pressed={favoritesOnly}
+          title="Show favorites only"
+        >
+          <Star className={favoritesOnly ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+          Favorites
+        </Button>
 
         <ViewModeToggle value={toolsViewMode} onChange={setToolsViewMode} />
       </div>

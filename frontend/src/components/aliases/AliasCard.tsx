@@ -19,6 +19,7 @@ const aliasTypeIcon = (type: AliasType) => {
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import type { ShellAlias, TagDefinition } from '@/types';
 
 interface AliasCardProps {
@@ -27,9 +28,10 @@ interface AliasCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
+  onToggleFavorite: () => void;
 }
 
-export function AliasCard({ alias, tagDefinitions, onEdit, onDelete, onClick }: AliasCardProps) {
+export function AliasCard({ alias, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: AliasCardProps) {
   return (
     <Card className="group cursor-pointer hover:border-primary/50 transition-colors overflow-hidden" onClick={onClick}>
       <CardContent className="p-4">
@@ -62,6 +64,8 @@ export function AliasCard({ alias, tagDefinitions, onEdit, onDelete, onClick }: 
               </div>
             )}
           </div>
+
+          <FavoriteButton favorite={alias.favorite} onToggle={onToggleFavorite} />
 
           <div className={cn('flex items-center gap-1', 'opacity-0 group-hover:opacity-100 transition-opacity')} onClick={(e) => e.stopPropagation()}>
             <DropdownMenu>

@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
 import type { App, TagDefinition } from '@/types';
@@ -17,9 +18,10 @@ interface AppCompactItemProps {
   onEdit: () => void;
   onDelete: () => void;
   onClick: () => void;
+  onToggleFavorite: () => void;
 }
 
-export function AppCompactItem({ app, tagDefinitions, onEdit, onDelete, onClick }: AppCompactItemProps) {
+export function AppCompactItem({ app, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: AppCompactItemProps) {
   const { launchApp } = useAppStore();
 
   const handleLaunch = async (e: React.MouseEvent) => {
@@ -55,6 +57,7 @@ export function AppCompactItem({ app, tagDefinitions, onEdit, onDelete, onClick 
             <span>{app.configPaths.length}</span>
           </div>
         )}
+        <FavoriteButton favorite={app.favorite} onToggle={onToggleFavorite} size="sm" />
         <div
           className={cn('flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity')}
           onClick={(e) => e.stopPropagation()}
