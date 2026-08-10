@@ -43,6 +43,41 @@ export interface UtilityState {
   set(key: string, value: unknown): void;
 }
 
+export interface PickOptions {
+  title?: string;
+  multiple?: boolean;
+  /** e.g. `[{ name: 'Images', extensions: ['png', 'jpg'] }]` */
+  filters?: { name: string; extensions: string[] }[];
+}
+
+export interface RunResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+export interface RunOptions {
+  /** Streamed as the process writes, for long-running conversions. */
+  onLog?: (line: string, stream: 'stdout' | 'stderr') => void;
+  cwd?: string;
+}
+
+/** Filesystem access, funnelled so no module ever imports a Tauri plugin. */
+export interface UtilityFiles {
+  pick(options?: PickOptions): Promise<string[]>;
+  pickDirectory(title?: string): Promise<string | null>;
+  read(path: string): Promise<Uint8Array>;
+  write(path: string, data: Uint8Array): Promise<void>;
+  exists(path: string): Promise<boolean>;
+  mkdir(path: string): Promise<void>;
+  reveal(path: string): Promise<void>;
+  tempDir(): Promise<string>;
+  dirname(path: string): Promise<string>;
+  basename(path: string): Promise<string>;
+  extname(path: string): Promise<string>;
+  join(...parts: string[]): Promise<string>;
+}
+
 /**
  * The whole API surface a module gets. Grows deliberately: anything added here
  * becomes a contract every future module can rely on.
@@ -50,6 +85,9 @@ export interface UtilityState {
 export interface UtilityContext {
   state: UtilityState;
   copy(text: string): Promise<void>;
+  files: UtilityFiles;
+  /** Run an external CLI (ffmpeg, ghostscript…). Never a shell string. */
+  run(program: string, args: string[], options?: RunOptions): Promise<RunResult>;
 }
 
 export interface UtilityPanelProps {

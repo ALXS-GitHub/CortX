@@ -1,8 +1,21 @@
 import { useMemo } from 'react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { exists, mkdir, readFile, writeFile } from '@tauri-apps/plugin-fs';
+import { Command } from '@tauri-apps/plugin-shell';
+import { basename, dirname, extname, join, tempDir } from '@tauri-apps/api/path';
 import { toast } from 'sonner';
 
-import type { UtilityContext, UtilityState } from './types';
+import { openInExplorer } from '@/lib/tauri';
+
+import type {
+  PickOptions,
+  RunOptions,
+  RunResult,
+  UtilityContext,
+  UtilityFiles,
+  UtilityState,
+} from './types';
 
 const STATE_PREFIX = 'cortx:utility';
 
@@ -34,6 +47,67 @@ function makeState(moduleId: string): UtilityState {
   };
 }
 
+const files: UtilityFiles = {
+  async pick(options: PickOptions = {}) {
+    const selection = await openDialog({
+      title: options.title,
+      multiple: options.multiple ?? false,
+      directory: false,
+      filters: options.filters,
+    });
+    if (selection === null) return [];
+    return Array.isArray(selection) ? selection : [selection];
+  },
+
+  async pickDirectory(title?: string) {
+    const selection = await openDialog({ title, directory: true, multiple: false });
+    return typeof selection === 'string' ? selection : null;
+  },
+
+  read: (path) => readFile(path),
+  write: (path, data) => writeFile(path, data),
+  exists: (path) => exists(path),
+  mkdir: async (path) => {
+    await mkdir(path, { recursive: true });
+  },
+  reveal: (path) => openInExplorer(path),
+  tempDir: () => tempDir(),
+  dirname: (path) => dirname(path),
+  basename: (path) => basename(path),
+  extname: (path) => extname(path),
+  join: (...parts) => join(...parts),
+};
+
+/**
+ * Runs an external CLI with an argument array — never a shell string, so a
+ * space or a quote in a user-supplied path can't turn into extra arguments.
+ */
+async function run(program: string, args: string[], options: RunOptions = {}): Promise<RunResult> {
+  const command = Command.create(program, args, options.cwd ? { cwd: options.cwd } : undefined);
+
+  let stdout = '';
+  let stderr = '';
+
+  command.stdout.on('data', (line: string) => {
+    stdout += line + '\n';
+    options.onLog?.(line, 'stdout');
+  });
+  command.stderr.on('data', (line: string) => {
+    stderr += line + '\n';
+    options.onLog?.(line, 'stderr');
+  });
+
+  const child = await command.execute();
+
+  return {
+    code: child.code,
+    // `execute()` already collects the full output; the listeners above only
+    // exist to stream progress while it runs.
+    stdout: stdout || child.stdout,
+    stderr: stderr || child.stderr,
+  };
+}
+
 export function useUtilityContext(moduleId: string): UtilityContext {
   return useMemo<UtilityContext>(
     () => ({
@@ -46,6 +120,8 @@ export function useUtilityContext(moduleId: string): UtilityContext {
           toast.error('Could not copy to clipboard');
         }
       },
+      files,
+      run,
     }),
     [moduleId],
   );
