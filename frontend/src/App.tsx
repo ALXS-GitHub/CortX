@@ -18,6 +18,7 @@ import { AliasesView } from '@/components/aliases/AliasesView';
 import { AliasDetail } from '@/components/aliases/AliasDetail';
 import { AppsView } from '@/components/apps/AppsView';
 import { AppDetail } from '@/components/apps/AppDetail';
+import { UtilitiesView } from '@/components/utilities/UtilitiesView';
 import { RunScriptDialog } from '@/components/global-scripts/RunScriptDialog';
 import { CommandPalette } from '@/components/command-palette/CommandPalette';
 import { useCommandPaletteShortcut } from '@/components/command-palette/useCommandPaletteShortcut';
@@ -296,6 +297,8 @@ function App() {
         return <AppsView />;
       case 'app-detail':
         return <AppDetail />;
+      case 'utilities':
+        return <UtilitiesView />;
       case 'dashboard':
       default:
         return <Dashboard />;
@@ -324,6 +327,7 @@ function App() {
                   {currentView === 'alias-detail' && 'Shell Config Detail'}
                   {currentView === 'apps' && 'Apps'}
                   {currentView === 'app-detail' && 'App Detail'}
+                  {currentView === 'utilities' && 'Utilities'}
                 </div>
               </header>
               <MainContent>{renderView()}</MainContent>

@@ -508,7 +508,7 @@ export interface ExportSummary {
 }
 
 // View types
-export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail' | 'tools' | 'tool-detail' | 'aliases' | 'alias-detail' | 'apps' | 'app-detail';
+export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail' | 'tools' | 'tool-detail' | 'aliases' | 'alias-detail' | 'apps' | 'app-detail' | 'utilities';
 
 // Status Definition types
 export interface StatusDefinition {
