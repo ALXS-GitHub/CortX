@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
 import { useAppStore } from '@/stores/appStore';
-import { useViewPrefsStore, type AgentsGroupMode } from '@/stores/viewPrefsStore';
+import { useViewPrefsStore, type AgentsGroupMode, type AgentsScope } from '@/stores/viewPrefsStore';
 import { createProjectFromSession } from '@/lib/tauri';
 import { cn } from '@/lib/utils';
 import type { AgentSession } from '@/types';
@@ -19,7 +19,7 @@ import { AgentRenameDialog } from './AgentRenameDialog';
 import { AgentDetailSheet } from './AgentDetailSheet';
 import { useAgentActions } from './useAgentActions';
 import { useAgentSessions, useNow } from './useAgentSessions';
-import { collectTags, defaultFilters, filterSessions, sortSessions } from './agentUtils';
+import { collectTags, defaultFilters, filterSessions, isLive, sortSessions } from './agentUtils';
 
 const DEFAULT_RECENT_DAYS = 7;
 
@@ -36,7 +36,7 @@ export function AgentsView({ projectId }: AgentsViewProps) {
   } = useAppStore();
   const {
     agentsViewMode, setAgentsViewMode, agentsGroupMode, setAgentsGroupMode,
-    agentsCollapsedGroups, toggleAgentsGroupCollapsed,
+    agentsScope, setAgentsScope, agentsCollapsedGroups, toggleAgentsGroupCollapsed,
   } = useViewPrefsStore();
 
   const recentDays = settings?.agents?.recentDays ?? DEFAULT_RECENT_DAYS;
@@ -45,8 +45,11 @@ export function AgentsView({ projectId }: AgentsViewProps) {
   const [renaming, setRenaming] = useState<AgentSession | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
 
+  // "active" only needs the live sessions, which the backend always returns
+  // whatever the window; asking for the recent window keeps the switch to
+  // "recent" instant.
   const { changeToken } = useAgentSessions({
-    sinceDays: filters.showAll ? null : recentDays,
+    sinceDays: agentsScope === 'all' ? null : recentDays,
     includeHidden: filters.showHidden,
   });
   const now = useNow();
@@ -55,7 +58,8 @@ export function AgentsView({ projectId }: AgentsViewProps) {
   // Leaving the view closes the detail sheet.
   useEffect(() => () => selectAgentSession(null), [selectAgentSession]);
 
-  const scoped = embedded ? agentSessions.filter((s) => s.projectId === projectId) : agentSessions;
+  const inProject = embedded ? agentSessions.filter((s) => s.projectId === projectId) : agentSessions;
+  const scoped = agentsScope === 'active' ? inProject.filter(isLive) : inProject;
   const filtered = sortSessions(filterSessions(scoped, filters, search, projects));
   const selected = agentSessions.find((s) => s.id === selectedAgentSessionId) ?? null;
   const runningCount = scoped.filter((s) => s.state === 'running').length;
@@ -98,6 +102,20 @@ export function AgentsView({ projectId }: AgentsViewProps) {
       return (
         <div className="space-y-1.5">
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-11 w-full rounded-md" />)}
+        </div>
+      );
+    }
+    if (scoped.length === 0 && agentsScope === 'active' && inProject.length > 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground text-center">
+          <Bot className="size-8 mb-3 opacity-60" />
+          <p className="text-lg font-medium text-foreground">No active session{embedded ? ' for this project' : ''}</p>
+          <p className="text-sm mt-1 max-w-md">
+            Nothing is running or waiting for you right now. Switch to Recent or All to resume a finished session.
+          </p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => setAgentsScope('recent')}>
+            Show recent sessions
+          </Button>
         </div>
       );
     }
@@ -184,6 +202,13 @@ export function AgentsView({ projectId }: AgentsViewProps) {
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
+          <Tabs value={agentsScope} onValueChange={(v) => setAgentsScope(v as AgentsScope)}>
+            <TabsList className="h-8">
+              <TabsTrigger value="active" className="text-xs px-2.5" title="Running or waiting for you">Active</TabsTrigger>
+              <TabsTrigger value="recent" className="text-xs px-2.5" title={`Finished in the last ${recentDays} day${recentDays === 1 ? '' : 's'}`}>Recent</TabsTrigger>
+              <TabsTrigger value="all" className="text-xs px-2.5" title="Every session on this machine">All</TabsTrigger>
+            </TabsList>
+          </Tabs>
           {!embedded && (
             <Tabs value={agentsGroupMode} onValueChange={(v) => setAgentsGroupMode(v as AgentsGroupMode)}>
               <TabsList className="h-8">
@@ -197,7 +222,6 @@ export function AgentsView({ projectId }: AgentsViewProps) {
             onChange={setFilters}
             availableTags={collectTags(scoped, tagDefinitions)}
             tagDefinitions={tagDefinitions}
-            recentDays={recentDays}
           />
           <ViewModeToggle value={agentsViewMode} onChange={setAgentsViewMode} />
           {embedded && (

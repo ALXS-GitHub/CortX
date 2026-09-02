@@ -18,7 +18,6 @@ interface AgentFiltersProps {
   onChange: (next: AgentFilterState) => void;
   availableTags: string[];
   tagDefinitions: TagDefinition[];
-  recentDays: number;
 }
 
 function toggleInSet<T>(set: Set<T>, item: T): Set<T> {
@@ -29,7 +28,7 @@ function toggleInSet<T>(set: Set<T>, item: T): Set<T> {
 }
 
 /** Filters live behind one button (no permanent bar) — count badge shows how many are active. */
-export function AgentFilters({ value, onChange, availableTags, tagDefinitions, recentDays }: AgentFiltersProps) {
+export function AgentFilters({ value, onChange, availableTags, tagDefinitions }: AgentFiltersProps) {
   const active = activeFilterCount(value);
 
   return (
@@ -95,12 +94,6 @@ export function AgentFilters({ value, onChange, availableTags, tagDefinitions, r
         <Separator />
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="agents-show-all" className="text-xs font-normal">
-              {value.showAll ? 'Showing every session' : `Finished sessions: last ${recentDays} day${recentDays === 1 ? '' : 's'}`}
-            </Label>
-            <Switch id="agents-show-all" checked={value.showAll} onCheckedChange={(v) => onChange({ ...value, showAll: v })} />
-          </div>
           <div className="flex items-center justify-between">
             <Label htmlFor="agents-show-hidden" className="text-xs font-normal">Show hidden</Label>
             <Switch id="agents-show-hidden" checked={value.showHidden} onCheckedChange={(v) => onChange({ ...value, showHidden: v })} />

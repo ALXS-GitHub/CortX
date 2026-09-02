@@ -103,12 +103,10 @@ export interface AgentFilterState {
   states: Set<AgentState>;
   tags: Set<string>;
   showHidden: boolean;
-  /** true = every session; false = last `recentDays` days (live sessions always included). */
-  showAll: boolean;
 }
 
 export function defaultFilters(): AgentFilterState {
-  return { providers: new Set(), states: new Set(), tags: new Set(), showHidden: false, showAll: false };
+  return { providers: new Set(), states: new Set(), tags: new Set(), showHidden: false };
 }
 
 export function activeFilterCount(f: AgentFilterState): number {
@@ -116,8 +114,7 @@ export function activeFilterCount(f: AgentFilterState): number {
     (f.providers.size > 0 ? 1 : 0) +
     (f.states.size > 0 ? 1 : 0) +
     (f.tags.size > 0 ? 1 : 0) +
-    (f.showHidden ? 1 : 0) +
-    (f.showAll ? 1 : 0)
+    (f.showHidden ? 1 : 0)
   );
 }
 

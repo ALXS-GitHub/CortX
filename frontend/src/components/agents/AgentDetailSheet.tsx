@@ -7,6 +7,9 @@ import { AgentDetailHeader } from './AgentDetailHeader';
 import { AgentDetailAnnotations } from './AgentDetailAnnotations';
 import { projectLabel, type AgentActionHandlers } from './agentUtils';
 
+/** Height of `TitleBar` (`h-9`). */
+const TITLE_BAR_HEIGHT = '2.25rem';
+
 // The transcript pulls streamdown + shiki: keep them out of the main chunk.
 const AgentTranscript = lazy(() => import('./AgentTranscript'));
 
@@ -40,6 +43,9 @@ export function AgentDetailSheet({ session, onClose, actions, changeToken }: Age
       <SheetContent
         side="right"
         className="data-[side=right]:w-full data-[side=right]:sm:w-[60vw] data-[side=right]:sm:max-w-none p-0 gap-0 shadow-2xl"
+        // Stay below the custom title bar (h-9): the sheet must never cover the
+        // window controls / drag region.
+        style={{ top: TITLE_BAR_HEIGHT, height: `calc(100% - ${TITLE_BAR_HEIGHT})` }}
         onInteractOutside={(e) => {
           const target = e.target as HTMLElement | null;
           if (target?.closest(KEEP_OPEN_SELECTOR)) e.preventDefault();

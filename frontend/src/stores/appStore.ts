@@ -1387,7 +1387,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Agents (beta) actions
   loadAgentSessions: async (options) => {
     const opts = options ?? get().agentListOptions;
-    set({ isLoadingAgents: true, agentListOptions: opts });
+    // Only the first load shows a spinner: background reloads triggered by the
+    // watcher are frequent (every transcript append) and must stay silent.
+    set({ isLoadingAgents: !get().agentsLoaded, agentListOptions: opts });
     try {
       const agentSessions = await api.listAgentSessions(opts);
       set({ agentSessions, isLoadingAgents: false, agentsLoaded: true });

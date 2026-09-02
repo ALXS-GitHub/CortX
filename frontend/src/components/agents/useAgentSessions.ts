@@ -34,12 +34,21 @@ export function useAgentSessions({ sinceDays, includeHidden }: UseAgentSessionsO
 
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    onAgentSessionsChanged(() => {
+    let timer: number | undefined;
+    // A busy agent appends to its transcript several times per second; the
+    // backend already debounces, but coalesce further so the list re-renders
+    // at most once per second instead of flickering.
+    const reload = () => {
+      timer = undefined;
       if (cancelled) return;
       const store = useAppStore.getState();
       store.loadAgentSessions().catch(console.error);
       store.loadAgentsHealth().catch(console.error);
       setChangeToken((t) => t + 1);
+    };
+    onAgentSessionsChanged(() => {
+      if (cancelled || timer !== undefined) return;
+      timer = window.setTimeout(reload, 1000);
     })
       .then((u) => {
         if (cancelled) u();
@@ -49,6 +58,7 @@ export function useAgentSessions({ sinceDays, includeHidden }: UseAgentSessionsO
 
     return () => {
       cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
       unlisten?.();
     };
   }, [loadAgentsHealth]);

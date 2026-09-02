@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { ListViewMode } from '@/types';
 
 export type AgentsGroupMode = 'global' | 'project';
+export type AgentsScope = 'active' | 'recent' | 'all';
 
 interface ViewPrefsState {
   projectsViewMode: ListViewMode;
@@ -18,10 +19,13 @@ interface ViewPrefsState {
   // Agents (beta)
   agentsViewMode: ListViewMode;
   agentsGroupMode: AgentsGroupMode;
+  /** Which sessions to show: live only (default), finished within N days, or everything. */
+  agentsScope: AgentsScope;
   /** Group keys (project id, or `cwd:<path>` for the no-project buckets) the user collapsed. */
   agentsCollapsedGroups: string[];
   setAgentsViewMode: (mode: ListViewMode) => void;
   setAgentsGroupMode: (mode: AgentsGroupMode) => void;
+  setAgentsScope: (scope: AgentsScope) => void;
   toggleAgentsGroupCollapsed: (key: string) => void;
 }
 
@@ -40,9 +44,11 @@ export const useViewPrefsStore = create<ViewPrefsState>()(
       setAppsViewMode: (mode) => set({ appsViewMode: mode }),
       agentsViewMode: 'list',
       agentsGroupMode: 'global',
+      agentsScope: 'active',
       agentsCollapsedGroups: [],
       setAgentsViewMode: (mode) => set({ agentsViewMode: mode }),
       setAgentsGroupMode: (mode) => set({ agentsGroupMode: mode }),
+      setAgentsScope: (scope) => set({ agentsScope: scope }),
       toggleAgentsGroupCollapsed: (key) =>
         set((state) => ({
           agentsCollapsedGroups: state.agentsCollapsedGroups.includes(key)
