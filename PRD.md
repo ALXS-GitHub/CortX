@@ -306,6 +306,25 @@ Local App Launcher provides:
 | F7.5 | One-click "Add to PATH" + configurable shim directory in Settings | Must Have | Done |
 | F7.6 | TUI: display + toggle shim on selected alias | Could Have | Pending |
 
+#### F8: Agents (beta) — DEV-11
+
+Read-only dashboard of the coding-agent sessions (Claude Code, Codex) running on the machine,
+attached to CortX projects by their working directory. Plan of record: `plans/agents_section.md`.
+
+| ID | Requirement | Priority | Status |
+|----|-------------|----------|--------|
+| F8.1 | Discover Claude Code sessions (transcripts + live registry) and Codex threads (sqlite index + rollouts) | Must Have | Done |
+| F8.2 | Attach sessions to projects by longest-prefix cwd match; sub-folders roll up; "Create project from folder" | Must Have | Done |
+| F8.3 | One compact line per session: state, provider, title, project · branch, last exchange, relative time | Must Have | Done |
+| F8.4 | Global / By project grouping; card / list / compact views; filters; 7-day default window | Must Have | Done |
+| F8.5 | Detail sheet with paginated transcript (AI Elements), annotations (name, tags, status, pin, hide, notes) | Must Have | Done |
+| F8.6 | Resume / Fork in the configured external terminal (Warp via generated launch configuration) | Must Have | Done |
+| F8.7 | Live updates via filesystem watcher (`agent-sessions-changed`) | Must Have | Done |
+| F8.8 | Settings: provider directories, providers on/off, Codex live threshold, recent-days window | Must Have | Done |
+| F8.9 | Claude Code hooks (opt-in button) for precise waiting / failed / current-tool states | Should Have | Pending |
+| F8.10 | Batch relaunch of a project's sessions (one Warp launch config = N tabs) | Should Have | Pending |
+| F8.11 | TUI tab + MCP tools + AI summaries | Could Have | Pending |
+
 ---
 
 ### 4.3 Implementation Status Summary
