@@ -22,15 +22,27 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
-import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags, Copy, Check, TerminalSquare, ChevronDown, ChevronUp, CircleDot, GitBranch, Globe } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { BetaBadge } from '@/components/agents/BetaBadge';
+import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags, Copy, Check, TerminalSquare, ChevronDown, ChevronUp, CircleDot, GitBranch, Globe, Bot } from 'lucide-react';
 import { toast } from 'sonner';
 import { TagDefinitionManager } from '@/components/global-scripts/TagDefinitionManager';
 import { StatusDefinitionManager } from '@/components/settings/StatusDefinitionManager';
 import { generateShellInit, setGlobalHotkey as setGlobalHotkeyApi, getShimStatus, syncShims, installShimPath } from '@/lib/tauri';
 import { HotkeyInput } from '@/components/settings/HotkeyInput';
-import type { AppSettings, TerminalPreset, ExportSummary, ImportOptions, ShimStatus } from '@/types';
+import type { AppSettings, AgentsSettings, TerminalPreset, ExportSummary, ImportOptions, ShimStatus } from '@/types';
 
 const DEFAULT_GLOBAL_HOTKEY = 'CmdOrCtrl+Shift+Space';
+
+// Mirrors the Rust defaults (AgentsSettings::default()).
+const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
+  claudeConfigDir: undefined,
+  codexHome: undefined,
+  claudeEnabled: true,
+  codexEnabled: true,
+  codexLiveThresholdMinutes: 5,
+  recentDays: 7,
+};
 
 // Terminal preset labels and descriptions
 const TERMINAL_PRESETS: {
@@ -83,6 +95,13 @@ const TERMINAL_PRESETS: {
   },
 ];
 
+/** Parse a numeric field, falling back to `fallback` and clamping to [min, max]. */
+const clampInt = (raw: string, fallback: number, min: number, max: number): number => {
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.min(Math.max(n, min), max);
+};
+
 // Detect current platform
 const getPlatform = (): 'windows' | 'macos' | 'linux' => {
   const platform = navigator.platform.toLowerCase();
@@ -123,6 +142,13 @@ export function Settings() {
   const [shimStatus, setShimStatus] = useState<ShimStatus | null>(null);
   const [isInstallingPath, setIsInstallingPath] = useState(false);
   const [commandTemplates, setCommandTemplates] = useState<Record<string, string>>({});
+  // Agents (beta)
+  const [agentsClaudeDir, setAgentsClaudeDir] = useState('');
+  const [agentsCodexHome, setAgentsCodexHome] = useState('');
+  const [agentsClaudeEnabled, setAgentsClaudeEnabled] = useState(true);
+  const [agentsCodexEnabled, setAgentsCodexEnabled] = useState(true);
+  const [agentsCodexLiveMinutes, setAgentsCodexLiveMinutes] = useState('5');
+  const [agentsRecentDays, setAgentsRecentDays] = useState('7');
   const [newExtension, setNewExtension] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
 
@@ -145,6 +171,13 @@ export function Settings() {
       setGlobalHotkey(settings.globalHotkey ?? DEFAULT_GLOBAL_HOTKEY);
       setShimDir(settings.shimDir ?? '');
       setCommandTemplates(settings.scriptsConfig.commandTemplates ?? {});
+      const agents = settings.agents ?? DEFAULT_AGENTS_SETTINGS;
+      setAgentsClaudeDir(agents.claudeConfigDir ?? '');
+      setAgentsCodexHome(agents.codexHome ?? '');
+      setAgentsClaudeEnabled(agents.claudeEnabled);
+      setAgentsCodexEnabled(agents.codexEnabled);
+      setAgentsCodexLiveMinutes(String(agents.codexLiveThresholdMinutes));
+      setAgentsRecentDays(String(agents.recentDays));
       setHasChanges(false);
     }
   }, [settings]);
@@ -286,6 +319,23 @@ export function Settings() {
     }
   };
 
+  const handleBrowseAgentsDir = async (target: 'claude' | 'codex') => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: target === 'claude' ? 'Select the Claude Code config directory (~/.claude)' : 'Select the Codex home directory (~/.codex)',
+      });
+      if (selected && typeof selected === 'string') {
+        if (target === 'claude') setAgentsClaudeDir(selected);
+        else setAgentsCodexHome(selected);
+        setHasChanges(true);
+      }
+    } catch (e) {
+      console.error('Failed to open folder picker:', e);
+    }
+  };
+
   const handleBrowseBackupRepo = async () => {
     try {
       const selected = await open({
@@ -325,6 +375,14 @@ export function Settings() {
       backupRepoPath: backupRepoPath || undefined,
       globalHotkey: globalHotkey || undefined,
       shimDir: shimDir.trim() || undefined,
+      agents: {
+        claudeConfigDir: agentsClaudeDir.trim() || undefined,
+        codexHome: agentsCodexHome.trim() || undefined,
+        claudeEnabled: agentsClaudeEnabled,
+        codexEnabled: agentsCodexEnabled,
+        codexLiveThresholdMinutes: clampInt(agentsCodexLiveMinutes, DEFAULT_AGENTS_SETTINGS.codexLiveThresholdMinutes, 1, 1440),
+        recentDays: clampInt(agentsRecentDays, DEFAULT_AGENTS_SETTINGS.recentDays, 1, 3650),
+      },
     };
 
     try {
@@ -731,6 +789,113 @@ export function Settings() {
       </Card>
 
       <Separator />
+
+      {/* Agents (beta) */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Bot className="size-5 text-muted-foreground" />
+            <CardTitle className="flex items-center gap-2">Agents <BetaBadge /></CardTitle>
+          </div>
+          <CardDescription>
+            Where CortX reads Claude Code and Codex sessions from. Nothing is written to these folders.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label htmlFor="agents-claude-enabled">Claude Code</Label>
+              <p className="text-xs text-muted-foreground">Transcripts and live sessions from the config directory</p>
+            </div>
+            <Switch
+              id="agents-claude-enabled"
+              checked={agentsClaudeEnabled}
+              onCheckedChange={(v) => { setAgentsClaudeEnabled(v); setHasChanges(true); }}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="agents-claude-dir" className="text-xs text-muted-foreground">Claude config directory</Label>
+            <div className="flex gap-2">
+              <Input
+                id="agents-claude-dir"
+                value={agentsClaudeDir}
+                onChange={(e) => { setAgentsClaudeDir(e.target.value); setHasChanges(true); }}
+                placeholder="~/.claude (default)"
+                className="flex-1"
+                disabled={!agentsClaudeEnabled}
+              />
+              <Button variant="outline" onClick={() => handleBrowseAgentsDir('claude')} disabled={!agentsClaudeEnabled}>
+                <FolderOpen className="size-4" />
+              </Button>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label htmlFor="agents-codex-enabled">Codex</Label>
+              <p className="text-xs text-muted-foreground">Threads from the Codex home (state database and rollouts)</p>
+            </div>
+            <Switch
+              id="agents-codex-enabled"
+              checked={agentsCodexEnabled}
+              onCheckedChange={(v) => { setAgentsCodexEnabled(v); setHasChanges(true); }}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="agents-codex-home" className="text-xs text-muted-foreground">Codex home</Label>
+            <div className="flex gap-2">
+              <Input
+                id="agents-codex-home"
+                value={agentsCodexHome}
+                onChange={(e) => { setAgentsCodexHome(e.target.value); setHasChanges(true); }}
+                placeholder="~/.codex (default)"
+                className="flex-1"
+                disabled={!agentsCodexEnabled}
+              />
+              <Button variant="outline" onClick={() => handleBrowseAgentsDir('codex')} disabled={!agentsCodexEnabled}>
+                <FolderOpen className="size-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="agents-codex-live" className="text-xs text-muted-foreground">Codex "running" threshold (minutes)</Label>
+            <Input
+              id="agents-codex-live"
+              type="number"
+              min={1}
+              max={1440}
+              value={agentsCodexLiveMinutes}
+              onChange={(e) => { setAgentsCodexLiveMinutes(e.target.value); setHasChanges(true); }}
+              className="w-32"
+              disabled={!agentsCodexEnabled}
+            />
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              <Info className="size-3" />
+              Codex has no live registry: a thread updated within this window is shown as running.
+            </p>
+          </div>
+
+          <Separator />
+
+          <div className="grid gap-2">
+            <Label htmlFor="agents-recent-days" className="text-xs text-muted-foreground">Show finished sessions from the last (days)</Label>
+            <Input
+              id="agents-recent-days"
+              type="number"
+              min={1}
+              max={3650}
+              value={agentsRecentDays}
+              onChange={(e) => { setAgentsRecentDays(e.target.value); setHasChanges(true); }}
+              className="w-32"
+            />
+            <p className="text-xs text-muted-foreground">
+              Running and waiting sessions are always listed. "Show all" in the Agents filters overrides this.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Data Management: Import / Export / Git Backup */}
       <Card>

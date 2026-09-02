@@ -5,6 +5,7 @@ import { ServiceForm } from '@/components/projects/ServiceForm';
 import { ProjectForm } from '@/components/projects/ProjectForm';
 import { EnvironmentTab } from '@/components/env';
 import { ScriptsTab } from '@/components/scripts';
+import { AgentsView, BetaBadge } from '@/components/agents';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -29,6 +30,7 @@ import {
   Terminal,
   FileKey,
   FileCode,
+  Bot,
   ChevronDown,
   Star,
 } from 'lucide-react';
@@ -66,6 +68,7 @@ export function ProjectView() {
     serviceRuntimes,
     startService,
     stopService,
+    agentSessions,
   } = useAppStore();
 
   const [showServiceForm, setShowServiceForm] = useState(false);
@@ -92,6 +95,9 @@ export function ProjectView() {
       </div>
     );
   }
+
+  // Sessions are loaded lazily (Agents view / tab); 0 until then.
+  const projectAgentCount = agentSessions.filter((s) => s.projectId === project.id).length;
 
   const runningServices = project.services.filter((s) => {
     const runtime = serviceRuntimes.get(s.id);
@@ -308,6 +314,17 @@ export function ProjectView() {
               </span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="agents" className="flex items-center gap-2">
+            <Bot className="size-4" />
+            Agents
+            {projectAgentCount > 0 ? (
+              <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                {projectAgentCount}
+              </span>
+            ) : (
+              <BetaBadge />
+            )}
+          </TabsTrigger>
         </TabsList>
 
         {/* Services Tab */}
@@ -464,6 +481,11 @@ export function ProjectView() {
         {/* Scripts Tab */}
         <TabsContent value="scripts">
           <ScriptsTab project={project} />
+        </TabsContent>
+
+        {/* Agents Tab (beta) */}
+        <TabsContent value="agents">
+          <AgentsView projectId={project.id} />
         </TabsContent>
       </Tabs>
 

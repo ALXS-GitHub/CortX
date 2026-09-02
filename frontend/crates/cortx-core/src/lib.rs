@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod command_builder;
 pub mod error;
 pub mod file_watcher;

@@ -22,6 +22,8 @@ notify-debouncer-mini = "0.5"
 # Cross-platform OS-level listening-port lookup by PID (#12)
 netstat2 = "0.11"
 sysinfo = "0.32"
+# Read-only access to the Codex thread index (~/.codex/state_<N>.sqlite) for the Agents section (DEV-11)
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

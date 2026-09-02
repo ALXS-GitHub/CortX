@@ -53,6 +53,12 @@ import type {
   App,
   CreateAppInput,
   UpdateAppInput,
+  AgentSession,
+  AgentAnnotations,
+  AgentTranscriptPage,
+  AgentTranscriptQuery,
+  AgentsHealth,
+  ListAgentSessionsOptions,
 } from '@/types';
 
 // Project commands
@@ -588,4 +594,47 @@ export async function onGlobalScriptExit(
   return listen<ScriptExitPayload>('global-script-exit', (event) => {
     callback(event.payload);
   });
+}
+
+// ============================================================================
+// Agents (beta) — DEV-11
+// ============================================================================
+
+export async function listAgentSessions(options: ListAgentSessionsOptions = {}): Promise<AgentSession[]> {
+  return invoke('list_agent_sessions', { options });
+}
+
+/** Full rescan, then list with default options. */
+export async function refreshAgentSessions(): Promise<AgentSession[]> {
+  return invoke('refresh_agent_sessions');
+}
+
+export async function getAgentTranscript(sessionId: string, query: AgentTranscriptQuery): Promise<AgentTranscriptPage> {
+  return invoke('get_agent_transcript', { sessionId, query });
+}
+
+export async function updateAgentAnnotations(sessionId: string, annotations: AgentAnnotations): Promise<AgentSession> {
+  return invoke('update_agent_annotations', { sessionId, annotations });
+}
+
+/** Opens the external terminal (Settings preset) in the session cwd running the resume command. */
+export async function resumeAgentSession(sessionId: string, fork: boolean): Promise<void> {
+  return invoke('resume_agent_session', { sessionId, fork });
+}
+
+export async function getAgentResumeCommand(sessionId: string, fork: boolean): Promise<string> {
+  return invoke('get_agent_resume_command', { sessionId, fork });
+}
+
+export async function createProjectFromSession(sessionId: string): Promise<Project> {
+  return invoke('create_project_from_session', { sessionId });
+}
+
+export async function getAgentsHealth(): Promise<AgentsHealth> {
+  return invoke('get_agents_health');
+}
+
+/** Fired by the agents watcher (debounced). Payload is null: re-list. */
+export async function onAgentSessionsChanged(callback: () => void): Promise<UnlistenFn> {
+  return listen('agent-sessions-changed', () => callback());
 }

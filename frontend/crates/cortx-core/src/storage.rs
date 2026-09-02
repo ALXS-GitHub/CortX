@@ -1,4 +1,6 @@
+use crate::agents::AgentAnnotations;
 use crate::models::*;
+use std::collections::HashMap;
 use directories::ProjectDirs;
 use fs2::FileExt;
 use parking_lot::RwLock;
@@ -36,6 +38,13 @@ pub enum StorageError {
     AppNotFound(String),
 }
 
+/// On-disk shape of `agents.json`.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct AgentsFile {
+    #[serde(default)]
+    sessions: HashMap<String, AgentAnnotations>,
+}
+
 pub struct Storage {
     app_dir: PathBuf,
     projects: RwLock<Vec<Project>>,
@@ -47,6 +56,8 @@ pub struct Storage {
     aliases: RwLock<Vec<ShellAlias>>,
     status_definitions: RwLock<Vec<StatusDefinition>>,
     apps: RwLock<Vec<App>>,
+    /// Per-session annotations for the Agents section (`agents.json`).
+    agent_annotations: RwLock<HashMap<String, AgentAnnotations>>,
     suppress_watcher: AtomicBool,
 }
 
@@ -95,6 +106,7 @@ impl Storage {
             aliases: RwLock::new(Vec::new()),
             status_definitions: RwLock::new(Vec::new()),
             apps: RwLock::new(Vec::new()),
+            agent_annotations: RwLock::new(HashMap::new()),
             suppress_watcher: AtomicBool::new(false),
         };
 
@@ -108,6 +120,7 @@ impl Storage {
         storage.load_aliases()?;
         storage.load_status_definitions()?;
         storage.load_apps()?;
+        storage.load_agent_annotations()?;
 
         Ok(storage)
     }
@@ -170,6 +183,10 @@ impl Storage {
 
     fn apps_path(&self) -> PathBuf {
         self.app_dir.join("apps.json")
+    }
+
+    fn agents_path(&self) -> PathBuf {
+        self.app_dir.join("agents.json")
     }
 
     // ========================================================================
@@ -1053,6 +1070,57 @@ impl Storage {
     }
 
     // ========================================================================
+    // Agent annotations (agents.json — DEV-11)
+    // ========================================================================
+
+    fn load_agent_annotations(&self) -> Result<(), StorageError> {
+        let path = self.agents_path();
+        if path.exists() {
+            let file: AgentsFile = read_json_locked(&path)?;
+            *self.agent_annotations.write() = file.sessions;
+        }
+        Ok(())
+    }
+
+    fn save_agent_annotations(&self) -> Result<(), StorageError> {
+        self.set_suppress_watcher();
+        let file = AgentsFile {
+            sessions: self.agent_annotations.read().clone(),
+        };
+        let result = write_json_locked(&self.agents_path(), &file);
+        self.clear_suppress_watcher();
+        result
+    }
+
+    /// All annotations, keyed by session id.
+    pub fn get_agent_annotations(&self) -> HashMap<String, AgentAnnotations> {
+        self.agent_annotations.read().clone()
+    }
+
+    pub fn get_agent_annotation(&self, session_id: &str) -> Option<AgentAnnotations> {
+        self.agent_annotations.read().get(session_id).cloned()
+    }
+
+    /// Replace the annotations of one session (`updated_at` is stamped here).
+    pub fn update_agent_annotations(
+        &self,
+        session_id: &str,
+        mut annotations: AgentAnnotations,
+    ) -> Result<AgentAnnotations, StorageError> {
+        annotations.updated_at = chrono::Utc::now();
+        self.agent_annotations
+            .write()
+            .insert(session_id.to_string(), annotations.clone());
+        self.save_agent_annotations()?;
+        Ok(annotations)
+    }
+
+    pub fn delete_agent_annotations(&self, session_id: &str) -> Result<(), StorageError> {
+        self.agent_annotations.write().remove(session_id);
+        self.save_agent_annotations()
+    }
+
+    // ========================================================================
     // Reload (for MCP concurrent access)
     // ========================================================================
 
@@ -1069,6 +1137,7 @@ impl Storage {
         self.load_aliases()?;
         self.load_status_definitions()?;
         self.load_apps()?;
+        self.load_agent_annotations()?;
         Ok(())
     }
 

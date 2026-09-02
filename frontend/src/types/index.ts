@@ -121,6 +121,8 @@ export interface AppSettings {
   /** Directory where alias shims (real launcher files) are written. Empty/undefined
    *  means use the platform default (`%LOCALAPPDATA%\CortX\bin`, `~/.local/share/CortX/bin`). */
   shimDir?: string;
+  /** Agents (beta) section: provider roots, toggles and list defaults. */
+  agents: AgentsSettings;
 }
 
 export type ServiceStatus = 'stopped' | 'starting' | 'running' | 'error';
@@ -508,7 +510,7 @@ export interface ExportSummary {
 }
 
 // View types
-export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail' | 'tools' | 'tool-detail' | 'aliases' | 'alias-detail' | 'apps' | 'app-detail' | 'utilities';
+export type View = 'dashboard' | 'project' | 'settings' | 'scripts' | 'script-detail' | 'tools' | 'tool-detail' | 'aliases' | 'alias-detail' | 'apps' | 'app-detail' | 'utilities' | 'agents';
 
 // Status Definition types
 export interface StatusDefinition {
@@ -658,3 +660,108 @@ export type ShimInstallOutcome =
   | { status: 'added' }
   | { status: 'alreadyPresent' }
   | { status: 'manual'; instruction: string };
+
+// ============================================================================
+// Agents (beta) — DEV-11. Types mirror the Rust structs (camelCase / kebab-case enums).
+// ============================================================================
+
+export type AgentProvider = 'claude-code' | 'codex';
+export type AgentState = 'running' | 'waiting' | 'stopped' | 'unknown';
+export type AgentTitleSource = 'custom' | 'auto' | 'first-prompt';
+
+export interface AgentAnnotations {
+  customName?: string;
+  tags: string[];              // reuse existing tag definitions
+  status?: string;             // reuse existing status definitions (free label)
+  pinned: boolean;
+  hidden: boolean;
+  notes?: string;
+  projectIdOverride?: string;  // forces project attachment
+  updatedAt: string;
+}
+
+export interface AgentSession {
+  id: string;                  // Claude sessionId (uuid) | Codex thread id
+  provider: AgentProvider;
+  title: string;               // custom-title/customName > ai-title/codex title > first prompt (truncated 80 chars)
+  titleSource: AgentTitleSource;
+  cwd: string;                 // normalized absolute path, no `\\?\` prefix
+  projectId?: string;          // resolved by longest-prefix match against Project.rootPath, or annotations.projectIdOverride
+  gitBranch?: string;
+  state: AgentState;
+  pid?: number;
+  kind?: string;               // 'interactive' | 'background' | 'exec' | ...
+  startedAt: string;
+  lastActivityAt: string;
+  lastUserPrompt?: string;     // single line, max 200 chars
+  lastAssistantText?: string;  // single line, max 200 chars
+  currentTool?: string;        // last tool_use without tool_result (Claude), e.g. "Bash" or "Edit"
+  messageCount: number;
+  subagentCount: number;
+  model?: string;
+  version?: string;            // CLI version
+  transcriptPath: string;
+  ticketRefs: string[];        // regex [A-Z]{2,}-\d+ and #\d+ found in title / first prompt, deduped
+  annotations: AgentAnnotations;
+}
+
+export type AgentPart =
+  | { type: 'text'; text: string }
+  | { type: 'reasoning'; text: string }
+  | { type: 'tool-call'; toolId: string; name: string; input: unknown }
+  | { type: 'tool-result'; toolId: string; name?: string; output: string; isError: boolean }
+  | { type: 'attachment'; description: string };
+
+export interface AgentMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  timestamp: string;
+  parts: AgentPart[];
+  isSidechain: boolean;
+}
+
+export interface AgentTranscriptPage {
+  sessionId: string;
+  messages: AgentMessage[];    // chronological order
+  totalMessages: number;
+  offset: number;              // index of messages[0] in the full transcript
+  hasMore: boolean;            // true if offset > 0 (older messages exist)
+}
+
+export interface AgentProviderHealth {
+  provider: AgentProvider;
+  enabled: boolean;
+  detected: boolean;           // root dir exists
+  rootPath: string;
+  version?: string;
+  sessionCount: number;
+  liveCount: number;
+  unreadableCount: number;
+  liveSupported: boolean;      // true for claude-code, false for codex
+}
+
+export interface AgentsHealth {
+  providers: AgentProviderHealth[];
+  indexing: boolean;
+  lastScanAt?: string;
+}
+
+// AppSettings gets a new field `agents` (Rust: #[serde(default)] pub agents: AgentsSettings)
+export interface AgentsSettings {
+  claudeConfigDir?: string;        // default: ~/.claude  (empty/undefined => default)
+  codexHome?: string;              // default: ~/.codex
+  claudeEnabled: boolean;          // default true
+  codexEnabled: boolean;           // default true
+  codexLiveThresholdMinutes: number; // default 5 — Codex thread updated within N min => 'running' (best effort), else 'stopped'
+  recentDays: number;              // default 7 — UI default filter for finished sessions
+}
+
+export interface ListAgentSessionsOptions {
+  sinceDays?: number | null;   // null/undefined => all. Running/waiting sessions are ALWAYS included regardless of age
+  includeHidden?: boolean;     // default false
+}
+
+export interface AgentTranscriptQuery {
+  end?: number | null;         // exclusive end index; null => totalMessages
+  limit: number;               // e.g. 50
+}

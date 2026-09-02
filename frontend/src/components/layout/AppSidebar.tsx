@@ -16,7 +16,8 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { useAppStore } from '@/stores/appStore';
-import { FolderKanban, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode, ScrollText, Wrench, SquareTerminal, AppWindow, Wand2 } from 'lucide-react';
+import { FolderKanban, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode, ScrollText, Wrench, SquareTerminal, AppWindow, Wand2, Bot } from 'lucide-react';
+import { BetaBadge } from '@/components/agents/BetaBadge';
 import { cn } from '@/lib/utils';
 import type { View, ServiceStatus, ScriptStatus } from '@/types';
 import { getVersion } from '@tauri-apps/api/app';
@@ -262,6 +263,17 @@ export function AppSidebar() {
                 >
                   <Wand2 className="size-4" />
                   <span>Utilities</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={currentView === 'agents'}
+                  onClick={() => handleNavigate('agents')}
+                  tooltip="Agents (beta)"
+                >
+                  <Bot className="size-4" />
+                  <span>Agents</span>
+                  {!isCollapsed && <BetaBadge className="ml-auto" />}
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

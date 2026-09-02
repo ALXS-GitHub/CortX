@@ -15,6 +15,10 @@ use crate::process_manager::{ProcessEventEmitter, ProcessManager};
 use crate::storage::Storage;
 use crate::tauri_emitter::TauriEmitter;
 use chrono::Utc;
+use cortx_core::agents::{
+    launch as agent_launch, AgentAnnotations, AgentIndex, AgentSession, AgentTranscriptPage,
+    AgentTranscriptQuery, AgentsHealth, ListAgentSessionsOptions,
+};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -24,6 +28,8 @@ use walkdir::WalkDir;
 pub struct AppState {
     pub storage: Arc<Storage>,
     pub process_manager: Arc<ProcessManager>,
+    /// Agents section (DEV-11): discovered Claude Code / Codex sessions.
+    pub agents: Arc<AgentIndex>,
     /// Set to true to opt out of "close = hide-to-tray" and run the real
     /// quit cleanup flow when the next CloseRequested event fires.
     pub quitting: Arc<std::sync::atomic::AtomicBool>,
@@ -351,8 +357,6 @@ pub async fn launch_external_terminal(
     state: State<'_, AppState>,
     service_id: String,
 ) -> Result<(), String> {
-    use crate::models::TerminalPreset;
-
     let (project, service) = state
         .storage
         .get_service(&service_id)
@@ -367,6 +371,22 @@ pub async fn launch_external_terminal(
         path.to_string_lossy().to_string()
     };
 
+    spawn_in_terminal(&settings, &working_dir, &service.command)
+}
+
+/// Open the configured external terminal (Settings > Terminal preset) in
+/// `working_dir` and run `command` there. Shared by services and the Agents
+/// section (`resume_agent_session`).
+pub(crate) fn spawn_in_terminal(
+    settings: &AppSettings,
+    working_dir: &str,
+    command: &str,
+) -> Result<(), String> {
+    use crate::models::TerminalPreset;
+
+    let working_dir = working_dir.to_string();
+    let command = command.to_string();
+
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -376,7 +396,7 @@ pub async fn launch_external_terminal(
             TerminalPreset::WindowsTerminal => {
                 // Windows Terminal - use -d for directory and pass the command
                 std::process::Command::new("wt.exe")
-                    .args(["-d", &working_dir, "cmd", "/k", &service.command])
+                    .args(["-d", &working_dir, "cmd", "/k", &command])
                     .spawn()
                     .map_err(|e| format!("Failed to launch Windows Terminal: {}", e))?;
             }
@@ -385,7 +405,7 @@ pub async fn launch_external_terminal(
                 let ps_command = format!(
                     "Set-Location '{}'; {}",
                     working_dir.replace("'", "''"),
-                    service.command
+                    command
                 );
                 std::process::Command::new("powershell.exe")
                     .args(["-NoExit", "-Command", &ps_command])
@@ -395,7 +415,7 @@ pub async fn launch_external_terminal(
             }
             TerminalPreset::Cmd => {
                 // cmd.exe - needs CREATE_NEW_CONSOLE to show window
-                let cmd_str = format!("cd /d \"{}\" && {}", working_dir, service.command);
+                let cmd_str = format!("cd /d \"{}\" && {}", working_dir, command);
                 std::process::Command::new("cmd.exe")
                     .args(["/k", &cmd_str])
                     .creation_flags(CREATE_NEW_CONSOLE)
@@ -418,7 +438,7 @@ pub async fn launch_external_terminal(
                     return Err("Custom terminal path is not configured".to_string());
                 }
 
-                let full_command = format!("cd /d \"{}\" && {}", working_dir, service.command);
+                let full_command = format!("cd /d \"{}\" && {}", working_dir, command);
                 let mut cmd = std::process::Command::new(&settings.terminal.custom_path);
 
                 if settings.terminal.custom_args.is_empty() {
@@ -426,7 +446,7 @@ pub async fn launch_external_terminal(
                 } else {
                     for arg in &settings.terminal.custom_args {
                         let replaced = arg
-                            .replace("{command}", &service.command)
+                            .replace("{command}", &command)
                             .replace("{dir}", &working_dir)
                             .replace("{full_command}", &full_command);
                         cmd.arg(replaced);
@@ -440,7 +460,7 @@ pub async fn launch_external_terminal(
             // macOS presets on Windows - fallback to Windows Terminal
             TerminalPreset::MacTerminal | TerminalPreset::ITerm2 => {
                 std::process::Command::new("wt.exe")
-                    .args(["-d", &working_dir, "cmd", "/k", &service.command])
+                    .args(["-d", &working_dir, "cmd", "/k", &command])
                     .spawn()
                     .map_err(|e| format!("Failed to launch Windows Terminal: {}", e))?;
             }
@@ -457,7 +477,7 @@ pub async fn launch_external_terminal(
                         do script "cd '{}' && {}"
                     end tell"#,
                     working_dir.replace("'", "'\\''"),
-                    service.command.replace("\"", "\\\"")
+                    command.replace("\"", "\\\"")
                 );
                 std::process::Command::new("osascript")
                     .args(["-e", &script])
@@ -474,7 +494,7 @@ pub async fn launch_external_terminal(
                         end tell
                     end tell"#,
                     working_dir.replace("'", "'\\''"),
-                    service.command.replace("\"", "\\\"")
+                    command.replace("\"", "\\\"")
                 );
                 std::process::Command::new("osascript")
                     .args(["-e", &script])
@@ -492,7 +512,7 @@ pub async fn launch_external_terminal(
                         key code 36
                     end tell"#,
                     working_dir.replace("'", "'\\''"),
-                    service.command.replace("\"", "\\\"")
+                    command.replace("\"", "\\\"")
                 );
                 std::process::Command::new("osascript")
                     .args(["-e", &script])
@@ -517,7 +537,7 @@ pub async fn launch_external_terminal(
                         do script "cd '{}' && {}"
                     end tell"#,
                     working_dir.replace("'", "'\\''"),
-                    service.command.replace("\"", "\\\"")
+                    command.replace("\"", "\\\"")
                 );
                 std::process::Command::new("osascript")
                     .args(["-e", &script])
@@ -529,7 +549,7 @@ pub async fn launch_external_terminal(
 
     #[cfg(target_os = "linux")]
     {
-        let full_command = format!("cd \"{}\" && {}; exec $SHELL", working_dir, service.command);
+        let full_command = format!("cd \"{}\" && {}; exec $SHELL", working_dir, command);
 
         match settings.terminal.preset {
             TerminalPreset::Custom => {
@@ -568,7 +588,7 @@ pub async fn launch_external_terminal(
                     } else {
                         for arg in &settings.terminal.custom_args {
                             let replaced = arg
-                                .replace("{command}", &service.command)
+                                .replace("{command}", &command)
                                 .replace("{dir}", &working_dir)
                                 .replace("{full_command}", &full_command);
                             cmd.arg(replaced);
@@ -777,6 +797,7 @@ pub fn get_settings(state: State<AppState>) -> AppSettings {
 
 #[tauri::command]
 pub fn update_settings(state: State<AppState>, settings: AppSettings) -> Result<(), String> {
+    state.agents.set_settings(settings.agents.clone());
     state
         .storage
         .update_settings(settings)
@@ -2427,3 +2448,235 @@ pub fn open_app_url(url: String) -> Result<(), String> {
     Ok(())
 }
 
+
+// ============================================================================
+// Agents section (DEV-11) — see plans/agents_section.md
+// ============================================================================
+
+fn agent_projects(storage: &Storage) -> Vec<(String, String)> {
+    storage
+        .get_all_projects()
+        .into_iter()
+        .map(|p| (p.id, p.root_path))
+        .collect()
+}
+
+fn agent_session(state: &AppState, session_id: &str) -> Result<AgentSession, String> {
+    state
+        .agents
+        .session(
+            session_id,
+            &agent_projects(&state.storage),
+            &state.storage.get_agent_annotations(),
+        )
+        .ok_or_else(|| format!("Agent session not found: {}", session_id))
+}
+
+#[tauri::command]
+pub fn list_agent_sessions(
+    state: State<AppState>,
+    options: Option<ListAgentSessionsOptions>,
+) -> Result<Vec<AgentSession>, String> {
+    let options = options.unwrap_or_default();
+    Ok(state.agents.list(
+        &options,
+        &agent_projects(&state.storage),
+        &state.storage.get_agent_annotations(),
+    ))
+}
+
+/// Full rescan (blocking work runs off the async runtime), then the default list.
+#[tauri::command]
+pub async fn refresh_agent_sessions(
+    state: State<'_, AppState>,
+) -> Result<Vec<AgentSession>, String> {
+    let index = state.agents.clone();
+    let storage = state.storage.clone();
+    tokio::task::spawn_blocking(move || {
+        index.refresh_all();
+        index.list(
+            &ListAgentSessionsOptions::default(),
+            &agent_projects(&storage),
+            &storage.get_agent_annotations(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_agent_transcript(
+    state: State<'_, AppState>,
+    session_id: String,
+    query: Option<AgentTranscriptQuery>,
+) -> Result<AgentTranscriptPage, String> {
+    let index = state.agents.clone();
+    let query = query.unwrap_or_default();
+    tokio::task::spawn_blocking(move || index.transcript(&session_id, &query))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn update_agent_annotations(
+    state: State<AppState>,
+    session_id: String,
+    annotations: AgentAnnotations,
+) -> Result<AgentSession, String> {
+    if session_id.trim().is_empty() {
+        return Err("Session id is required".to_string());
+    }
+    state
+        .storage
+        .update_agent_annotations(&session_id, annotations)
+        .map_err(|e| e.to_string())?;
+    agent_session(&state, &session_id)
+}
+
+#[tauri::command]
+pub fn get_agent_resume_command(
+    state: State<AppState>,
+    session_id: String,
+    fork: bool,
+) -> Result<String, String> {
+    Ok(state
+        .agents
+        .resume_command(&session_id, fork)?
+        .command_line())
+}
+
+/// Open the external terminal in the session folder running the resume
+/// command. Warp on Windows cannot run a command through its URI scheme, so a
+/// launch configuration is generated and opened instead.
+#[tauri::command]
+pub async fn resume_agent_session(
+    state: State<'_, AppState>,
+    session_id: String,
+    fork: bool,
+) -> Result<(), String> {
+    let session = agent_session(&state, &session_id)?;
+    let cmd = state.agents.resume_command(&session_id, fork)?;
+    if cmd.cwd.is_empty() || !Path::new(&cmd.cwd).is_dir() {
+        return Err(format!(
+            "The session folder no longer exists: {}",
+            if cmd.cwd.is_empty() { "(unknown)" } else { &cmd.cwd }
+        ));
+    }
+    let settings = state.storage.get_settings();
+
+    #[cfg(target_os = "windows")]
+    {
+        use crate::models::TerminalPreset;
+        use std::os::windows::process::CommandExt;
+        if matches!(settings.terminal.preset, TerminalPreset::Warp) {
+            let name = agent_launch::warp_config_name(&session_id);
+            let path = agent_launch::write_warp_launch_config(
+                &name,
+                &[agent_launch::WarpTab {
+                    title: &session.title,
+                    cwd: &cmd.cwd,
+                    exec: &cmd.command_line(),
+                }],
+            )?;
+            log::info!("Warp launch configuration written: {}", path.display());
+            let uri = format!("warp://launch/{}", name);
+            std::process::Command::new("cmd")
+                .args(["/c", "start", "", &uri])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .spawn()
+                .map_err(|e| format!("Failed to launch Warp: {}", e))?;
+            return Ok(());
+        }
+    }
+
+    let _ = &session;
+    spawn_in_terminal(&settings, &cmd.cwd, &cmd.command_line())
+}
+
+/// `git rev-parse --show-toplevel` in `cwd`, with a timeout and no console
+/// window. `None` when not a git repo / git missing / too slow.
+fn git_toplevel(cwd: &str) -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new("git");
+    cmd.args(["-C", cwd, "rev-parse", "--show-toplevel"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let mut child = cmd.spawn().ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return None;
+                }
+                break;
+            }
+            Ok(None) => {
+                if std::time::Instant::now() > deadline {
+                    let _ = child.kill();
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(_) => return None,
+        }
+    }
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    let line = out.lines().next()?.trim();
+    if line.is_empty() {
+        return None;
+    }
+    Some(cortx_core::agents::display_path(line))
+}
+
+/// Create a CortX project from a session's folder (git toplevel when
+/// available). Returns the existing project if one already covers that root.
+#[tauri::command]
+pub fn create_project_from_session(
+    state: State<AppState>,
+    session_id: String,
+) -> Result<Project, String> {
+    let (_, cwd) = state
+        .agents
+        .session_cwd(&session_id)
+        .ok_or_else(|| format!("Agent session not found: {}", session_id))?;
+    if cwd.is_empty() || !Path::new(&cwd).is_dir() {
+        return Err(format!("The session folder no longer exists: {}", cwd));
+    }
+    let root = git_toplevel(&cwd).unwrap_or_else(|| cwd.clone());
+    let root = if Path::new(&root).is_dir() { root } else { cwd.clone() };
+
+    let normalized = cortx_core::agents::normalize_path(&root);
+    if let Some(existing) = state
+        .storage
+        .get_all_projects()
+        .into_iter()
+        .find(|p| cortx_core::agents::normalize_path(&p.root_path) == normalized)
+    {
+        return Ok(existing);
+    }
+
+    let name = Path::new(&root)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| root.clone());
+    let project = Project::new(name, root);
+    state
+        .storage
+        .create_project(project)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_agents_health(state: State<AppState>) -> Result<AgentsHealth, String> {
+    Ok(state.agents.health())
+}

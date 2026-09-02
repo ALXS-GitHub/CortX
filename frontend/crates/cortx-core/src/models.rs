@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Re-exported so `models::AgentsSettings` works alongside `agents::AgentsSettings`.
+pub use crate::agents::AgentsSettings;
+
 // ============================================================================
 // Optional-text helpers
 // ============================================================================
@@ -415,6 +418,9 @@ pub struct AppSettings {
     /// Empty/None means use the platform default (see `shim::resolve_shim_dir`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shim_dir: Option<String>,
+    /// Agents section (DEV-11): provider roots, toggles, live threshold.
+    #[serde(default)]
+    pub agents: AgentsSettings,
 }
 
 // Input types for commands

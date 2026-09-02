@@ -237,12 +237,40 @@ enum Command {
         action: McpAction,
     },
 
+    /// Coding-agent sessions (Claude Code, Codex) discovered on this machine — beta
+    Agents {
+        #[command(subcommand)]
+        action: AgentsAction,
+    },
+
     /// Print full CLI documentation — if you're an AI agent, read this first
     Docs,
 
     /// Fallback: bare `cortx <name>` still runs a script
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+// ---------------------------------------------------------------------------
+// Agents subcommands (DEV-11)
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum AgentsAction {
+    /// List discovered agent sessions (running / waiting first)
+    List {
+        /// Include finished sessions older than `agents.recentDays` and hidden ones
+        #[arg(long)]
+        all: bool,
+    },
+    /// Show the last messages of a session's transcript
+    Show {
+        /// Session id (Claude sessionId / Codex thread id); a unique prefix works
+        id: String,
+        /// Number of messages to show (from the end)
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1190,6 +1218,10 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
         Some(Command::Import { file, all }) => cmd_import(&storage, &file, all),
         Some(Command::Backup) => cmd_backup(&storage),
         Some(Command::Docs) => cmd_docs(),
+        Some(Command::Agents { action }) => match action {
+            AgentsAction::List { all } => cmd_agents_list(&storage, all, json),
+            AgentsAction::Show { id, limit } => cmd_agents_show(&storage, &id, limit, json),
+        },
         Some(Command::Ps) => cmd_ps(&storage, json),
         Some(Command::Mcp { action }) => match action {
             McpAction::Serve => cmd_mcp_serve(),
@@ -2346,6 +2378,157 @@ fn cmd_project_script_logs(
     print_log_tail(&log_path, tail)?;
     if follow {
         follow_log(&log_path)?;
+    }
+    Ok(())
+}
+
+// ============================================================================
+// Agents (DEV-11)
+// ============================================================================
+
+fn cmd_agents_list(storage: &Storage, all: bool, json: bool) -> anyhow::Result<()> {
+    use cortx_core::agents::{AgentIndex, AgentState, ListAgentSessionsOptions};
+
+    let settings = storage.get_settings().agents;
+    let index = AgentIndex::new(settings.clone(), &storage.app_dir().join("runtime"));
+    let started = std::time::Instant::now();
+    index.refresh_all();
+    let scan_ms = started.elapsed().as_millis();
+
+    let projects = storage.get_all_projects();
+    let project_pairs: Vec<(String, String)> = projects
+        .iter()
+        .map(|p| (p.id.clone(), p.root_path.clone()))
+        .collect();
+    let annotations = storage.get_agent_annotations();
+    let options = ListAgentSessionsOptions {
+        since_days: if all { None } else { Some(settings.recent_days) },
+        include_hidden: all,
+    };
+    let mut sessions = index.list(&options, &project_pairs, &annotations);
+    let rank = |s: &AgentState| match s {
+        AgentState::Running => 0,
+        AgentState::Waiting => 1,
+        AgentState::Unknown => 2,
+        AgentState::Stopped => 3,
+    };
+    sessions.sort_by(|a, b| {
+        rank(&a.state)
+            .cmp(&rank(&b.state))
+            .then_with(|| b.last_activity_at.cmp(&a.last_activity_at))
+    });
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&sessions)?);
+        eprintln!("(scanned in {} ms, {} sessions)", scan_ms, sessions.len());
+        return Ok(());
+    }
+
+    if sessions.is_empty() {
+        println!("No agent sessions found (scanned in {} ms).", scan_ms);
+        return Ok(());
+    }
+
+    println!(
+        "{:<9} {:<12} {:<40} {:<28} {:<10} {}",
+        "STATE", "PROVIDER", "TITLE", "PROJECT / CWD", "LAST", "ID"
+    );
+    println!("{}", "-".repeat(120));
+    for s in &sessions {
+        let project = s
+            .project_id
+            .as_ref()
+            .and_then(|id| projects.iter().find(|p| &p.id == id))
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| {
+                std::path::Path::new(&s.cwd)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| s.cwd.clone())
+            });
+        let age = chrono::Utc::now().signed_duration_since(s.last_activity_at);
+        let age = if age.num_minutes() < 1 {
+            "now".to_string()
+        } else if age.num_hours() < 1 {
+            format!("{}m ago", age.num_minutes())
+        } else if age.num_days() < 1 {
+            format!("{}h ago", age.num_hours())
+        } else {
+            format!("{}d ago", age.num_days())
+        };
+        println!(
+            "{:<9} {:<12} {:<40} {:<28} {:<10} {}",
+            s.state.as_str(),
+            s.provider.as_str(),
+            cortx_core::agents::truncate_chars(&s.title, 38),
+            cortx_core::agents::truncate_chars(&project, 26),
+            age,
+            &s.id[..s.id.len().min(8)]
+        );
+    }
+    eprintln!("(scanned in {} ms)", scan_ms);
+    Ok(())
+}
+
+fn cmd_agents_show(storage: &Storage, id: &str, limit: usize, json: bool) -> anyhow::Result<()> {
+    use cortx_core::agents::{AgentIndex, AgentPart, AgentTranscriptQuery, ListAgentSessionsOptions};
+
+    let settings = storage.get_settings().agents;
+    let index = AgentIndex::new(settings, &storage.app_dir().join("runtime"));
+    index.refresh_all();
+
+    // Accept a unique id prefix.
+    let all = index.list(&ListAgentSessionsOptions { since_days: None, include_hidden: true }, &[], &Default::default());
+    let matches: Vec<_> = all.iter().filter(|s| s.id.starts_with(id)).collect();
+    let session = match matches.as_slice() {
+        [one] => (*one).clone(),
+        [] => anyhow::bail!("No agent session matches '{}'", id),
+        _ => anyhow::bail!("Ambiguous id prefix '{}' ({} matches)", id, matches.len()),
+    };
+
+    let page = index
+        .transcript(&session.id, &AgentTranscriptQuery { end: None, limit })
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&page)?);
+        return Ok(());
+    }
+
+    println!(
+        "{} [{}] {} — {} messages total, showing {}..{}",
+        session.provider.as_str(),
+        session.state.as_str(),
+        session.title,
+        page.total_messages,
+        page.offset,
+        page.offset + page.messages.len()
+    );
+    println!("{}", "-".repeat(100));
+    for m in &page.messages {
+        let role = match m.role {
+            cortx_core::agents::AgentRole::User => "user",
+            cortx_core::agents::AgentRole::Assistant => "assistant",
+            cortx_core::agents::AgentRole::System => "system",
+        };
+        println!("[{}] {}", m.timestamp.format("%H:%M:%S"), role);
+        for p in &m.parts {
+            let line = match p {
+                AgentPart::Text { text } => format!("  text: {}", cortx_core::agents::single_line(text, 110)),
+                AgentPart::Reasoning { text } => format!("  reasoning: {}", cortx_core::agents::single_line(text, 100)),
+                AgentPart::ToolCall { name, input, .. } => {
+                    format!("  tool-call {}: {}", name, cortx_core::agents::single_line(&input.to_string(), 90))
+                }
+                AgentPart::ToolResult { name, output, is_error, .. } => format!(
+                    "  tool-result {}{}: {}",
+                    name.as_deref().unwrap_or("?"),
+                    if *is_error { " (error)" } else { "" },
+                    cortx_core::agents::single_line(output, 90)
+                ),
+                AgentPart::Attachment { description } => format!("  attachment: {}", description),
+            };
+            println!("{}", line);
+        }
     }
     Ok(())
 }

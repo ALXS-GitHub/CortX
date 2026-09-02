@@ -27,6 +27,7 @@ const CATEGORY_ORDER: EntityCategory[] = [
   'Apps',
   'Projects',
   'Services',
+  'Agents',
   'Scripts',
   'Tools',
   'Shell Config',

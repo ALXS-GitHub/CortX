@@ -17,6 +17,11 @@ export default defineConfig({
   ],
   server: {
     port: 12321,
+    watch: {
+      // Cargo's output is rewritten while `tauri dev` compiles; watching it
+      // makes Vite crash with EBUSY on Windows.
+      ignored: ['**/target/**', '**/src-tauri/**'],
+    },
   },
   resolve: {
     alias: {

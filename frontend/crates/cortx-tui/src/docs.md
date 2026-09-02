@@ -73,6 +73,7 @@ CortX manages ten types of entities:
 | `cortx import <file> [--all]` | Import from export file. `--all` imports every category without prompting. |
 | `cortx backup` | Git-backup all data files to the configured `backupRepoPath` (add + commit + push). |
 | `cortx docs` | Print this documentation to stdout. |
+| `cortx agents list [--all] [--json]` | List coding-agent sessions (Claude Code, Codex) discovered from `~/.claude` / `~/.codex` — beta. `--all` includes old and hidden sessions. `cortx agents show <id> [--limit N]` prints the end of a transcript. |
 
 ### `cortx script` — global scripts
 

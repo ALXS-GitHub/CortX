@@ -19,6 +19,7 @@ import { AliasDetail } from '@/components/aliases/AliasDetail';
 import { AppsView } from '@/components/apps/AppsView';
 import { AppDetail } from '@/components/apps/AppDetail';
 import { UtilitiesView } from '@/components/utilities/UtilitiesView';
+import { AgentsView, BetaBadge } from '@/components/agents';
 import { RunScriptDialog } from '@/components/global-scripts/RunScriptDialog';
 import { CommandPalette } from '@/components/command-palette/CommandPalette';
 import { useCommandPaletteShortcut } from '@/components/command-palette/useCommandPaletteShortcut';
@@ -299,6 +300,8 @@ function App() {
         return <AppDetail />;
       case 'utilities':
         return <UtilitiesView />;
+      case 'agents':
+        return <AgentsView />;
       case 'dashboard':
       default:
         return <Dashboard />;
@@ -328,6 +331,9 @@ function App() {
                   {currentView === 'apps' && 'Apps'}
                   {currentView === 'app-detail' && 'App Detail'}
                   {currentView === 'utilities' && 'Utilities'}
+                  {currentView === 'agents' && (
+                    <span className="inline-flex items-center gap-2">Agents <BetaBadge /></span>
+                  )}
                 </div>
               </header>
               <MainContent>{renderView()}</MainContent>

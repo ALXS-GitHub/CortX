@@ -15,6 +15,7 @@ pub enum DataFile {
     Aliases,
     StatusDefinitions,
     Apps,
+    Agents,
     Unknown(String),
 }
 
@@ -30,6 +31,7 @@ impl DataFile {
             "aliases.json" => DataFile::Aliases,
             "status_definitions.json" => DataFile::StatusDefinitions,
             "apps.json" => DataFile::Apps,
+            "agents.json" => DataFile::Agents,
             other => DataFile::Unknown(other.to_string()),
         }
     }

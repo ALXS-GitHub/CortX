@@ -41,6 +41,10 @@ import type {
   App,
   CreateAppInput,
   UpdateAppInput,
+  AgentSession,
+  AgentAnnotations,
+  AgentsHealth,
+  ListAgentSessionsOptions,
 } from '@/types';
 import * as api from '@/lib/tauri';
 
@@ -234,6 +238,16 @@ interface AppState {
   selectedAppId: string | null;
   isLoadingApps: boolean;
 
+  // Agents (beta) — loaded lazily when the Agents view / project tab mounts
+  agentSessions: AgentSession[];
+  isLoadingAgents: boolean;
+  /** True once the first list call resolved (tells "empty" from "not loaded yet"). */
+  agentsLoaded: boolean;
+  agentsHealth: AgentsHealth | null;
+  /** Options used by the last list call; event-driven reloads reuse them. */
+  agentListOptions: ListAgentSessionsOptions;
+  selectedAgentSessionId: string | null;
+
   // Run Script Dialog
   runScriptDialogTarget: GlobalScript | null;
 
@@ -379,6 +393,13 @@ interface AppState {
   openRunScriptDialog: (script: GlobalScript) => void;
   closeRunScriptDialog: () => void;
 
+  // Actions - Agents (beta)
+  loadAgentSessions: (options?: ListAgentSessionsOptions) => Promise<void>;
+  refreshAgentSessions: () => Promise<void>;
+  loadAgentsHealth: () => Promise<void>;
+  updateAgentAnnotations: (id: string, annotations: AgentAnnotations) => Promise<AgentSession>;
+  selectAgentSession: (id: string | null) => void;
+
   // Actions - UI
   setCurrentView: (view: View) => void;
   toggleTerminalPanel: () => void;
@@ -441,6 +462,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   apps: [],
   selectedAppId: null,
   isLoadingApps: false,
+  agentSessions: [],
+  isLoadingAgents: false,
+  agentsLoaded: false,
+  agentsHealth: null,
+  agentListOptions: {},
+  selectedAgentSessionId: null,
   runScriptDialogTarget: null,
   currentView: 'dashboard',
   terminalPanelOpen: false,
@@ -1356,6 +1383,64 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Run Script Dialog actions
   openRunScriptDialog: (script) => set({ runScriptDialogTarget: script }),
   closeRunScriptDialog: () => set({ runScriptDialogTarget: null }),
+
+  // Agents (beta) actions
+  loadAgentSessions: async (options) => {
+    const opts = options ?? get().agentListOptions;
+    set({ isLoadingAgents: true, agentListOptions: opts });
+    try {
+      const agentSessions = await api.listAgentSessions(opts);
+      set({ agentSessions, isLoadingAgents: false, agentsLoaded: true });
+    } catch (error) {
+      console.error('Failed to load agent sessions:', error);
+      set({ isLoadingAgents: false, agentsLoaded: true });
+      throw error;
+    }
+  },
+
+  refreshAgentSessions: async () => {
+    set({ isLoadingAgents: true });
+    try {
+      // Full rescan (returns the default listing); re-list with the current options
+      // so the active "last N days" / hidden filters are honoured.
+      await api.refreshAgentSessions();
+      const agentSessions = await api.listAgentSessions(get().agentListOptions);
+      set({ agentSessions, isLoadingAgents: false, agentsLoaded: true });
+    } catch (error) {
+      set({ isLoadingAgents: false });
+      throw error;
+    }
+    get().loadAgentsHealth().catch(console.error);
+  },
+
+  loadAgentsHealth: async () => {
+    try {
+      const agentsHealth = await api.getAgentsHealth();
+      set({ agentsHealth });
+    } catch (error) {
+      console.error('Failed to load agents health:', error);
+    }
+  },
+
+  updateAgentAnnotations: async (id, annotations) => {
+    // Optimistic: patch the annotations locally, then replace with the recomputed session.
+    set((state) => ({
+      agentSessions: state.agentSessions.map((s) => (s.id === id ? { ...s, annotations } : s)),
+    }));
+    try {
+      const updated = await api.updateAgentAnnotations(id, annotations);
+      set((state) => ({
+        agentSessions: state.agentSessions.map((s) => (s.id === id ? updated : s)),
+      }));
+      return updated;
+    } catch (error) {
+      // Roll back by re-listing.
+      get().loadAgentSessions().catch(console.error);
+      throw error;
+    }
+  },
+
+  selectAgentSession: (id) => set({ selectedAgentSessionId: id }),
 
   // UI actions
   setCurrentView: (view) => {

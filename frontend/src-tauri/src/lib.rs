@@ -5,6 +5,7 @@ mod storage;
 mod tauri_emitter;
 
 use commands::AppState;
+use cortx_core::agents::{watcher as agent_watcher, AgentIndex};
 use cortx_core::file_watcher;
 use cortx_core::runtime_state::RuntimeStore;
 use process_manager::ProcessManager;
@@ -83,10 +84,17 @@ pub fn run() {
         RuntimeStore::new(storage.app_dir()).expect("Failed to initialize runtime store"),
     );
     let process_manager = ProcessManager::new(runtime_store);
+    // Agents section (DEV-11): index of Claude Code / Codex sessions. The
+    // first scan runs in a background thread from `setup` so the UI never waits.
+    let agent_index = Arc::new(AgentIndex::new(
+        storage.get_settings().agents,
+        &storage.app_dir().join("runtime"),
+    ));
 
     let app_state = AppState {
         storage: Arc::new(storage),
         process_manager: Arc::new(process_manager),
+        agents: agent_index,
         quitting: Arc::new(AtomicBool::new(false)),
     };
 
@@ -164,6 +172,33 @@ pub fn run() {
 
             // Keep watcher alive for the lifetime of the app
             app.manage(watcher_handle);
+
+            // Agents section: watch the provider roots (transcripts, live
+            // registry, Codex sqlite) and refresh incrementally.
+            let agents = state.agents.clone();
+            let agents_app = app.handle().clone();
+            match agent_watcher::start_agent_watching(agents.watch_roots(), move |changed| {
+                if agents.refresh_paths(&changed) {
+                    let _ = agents_app.emit("agent-sessions-changed", ());
+                }
+            }) {
+                Ok(handle) => {
+                    app.manage(handle);
+                }
+                Err(e) => log::warn!("Agent watcher could not start: {}", e),
+            }
+
+            // First full scan in the background (cheap when the index cache
+            // is warm; a few seconds on a cold cache with GBs of transcripts).
+            let agents = state.agents.clone();
+            let agents_app = app.handle().clone();
+            std::thread::Builder::new()
+                .name("cortx-agents-scan".into())
+                .spawn(move || {
+                    agents.refresh_all();
+                    let _ = agents_app.emit("agent-sessions-changed", ());
+                })
+                .ok();
 
             // Register the global hotkey from persisted settings (or default).
             let combo = state
@@ -376,6 +411,15 @@ pub fn run() {
             commands::launch_app,
             commands::open_app_config,
             commands::open_app_url,
+            // Agents section (DEV-11)
+            commands::list_agent_sessions,
+            commands::refresh_agent_sessions,
+            commands::get_agent_transcript,
+            commands::update_agent_annotations,
+            commands::resume_agent_session,
+            commands::get_agent_resume_command,
+            commands::create_project_from_session,
+            commands::get_agents_health,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

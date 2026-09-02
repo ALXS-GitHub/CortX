@@ -1,6 +1,7 @@
 import {
   AppWindow,
   ArrowRight,
+  Bot,
   Code,
   ExternalLink,
   FileCode,
@@ -17,9 +18,10 @@ import {
 } from 'lucide-react';
 import { createElement, type ReactNode } from 'react';
 
+import { STATE_LABEL, folderName, sortSessions } from '@/components/agents/agentUtils';
 import { UTILITIES } from '@/components/utilities/registry';
 import { useUtilitySelection } from '@/components/utilities/selection';
-import { openAppUrl, openInExplorer, openInVscode, openToolUrl } from '@/lib/tauri';
+import { openAppUrl, openInExplorer, openInVscode, openToolUrl, resumeAgentSession } from '@/lib/tauri';
 import type { useAppStore } from '@/stores/appStore';
 
 import { SHORTCUTS } from './shortcuts';
@@ -51,6 +53,7 @@ export function buildEntities(store: Store): CommandEntity[] {
     { view: 'scripts', label: 'Go to Scripts', icon: FileCode },
     { view: 'tools', label: 'Go to Tools', icon: Wrench },
     { view: 'utilities', label: 'Go to Utilities', icon: Wand2 },
+    { view: 'agents', label: 'Go to Agents (beta)', icon: Bot },
     { view: 'aliases', label: 'Go to Shell Config', icon: SquareTerminal },
     { view: 'apps', label: 'Go to Apps', icon: AppWindow },
     { view: 'settings', label: 'Go to Settings', icon: SettingsIcon },
@@ -347,6 +350,48 @@ export function buildEntities(store: Store): CommandEntity[] {
           },
         },
       ],
+    });
+  }
+
+  // -- Agents (beta) -------------------------------------------------------
+  // Only sessions already in the store: the list is fetched lazily by the
+  // Agents view, so this is empty until it has been opened once.
+  for (const session of sortSessions(store.agentSessions)) {
+    const project = store.projects.find((p) => p.id === session.projectId);
+    const actions: EntityAction[] = [
+      {
+        id: 'open-in-cortx',
+        label: 'Open in CortX',
+        icon: createElement(ArrowRight, { className: iconSize }),
+        shortcut: SHORTCUTS.primary,
+        run: () => {
+          store.selectAgentSession(session.id);
+          store.setCurrentView('agents');
+        },
+      },
+      {
+        id: 'resume',
+        label: 'Resume in terminal',
+        icon: createElement(Play, { className: iconSize }),
+        shortcut: SHORTCUTS.openInCortx,
+        run: () => resumeAgentSession(session.id, false),
+      },
+      {
+        id: 'open-folder',
+        label: 'Open Folder',
+        icon: createElement(FolderOpen, { className: iconSize }),
+        shortcut: SHORTCUTS.openFolder,
+        run: () => openInExplorer(session.cwd),
+      },
+    ];
+    entities.push({
+      id: `agent:${session.id}`,
+      category: 'Agents',
+      label: session.title,
+      subtitle: `${project?.name ?? folderName(session.cwd)}${session.gitBranch ? ` · ${session.gitBranch}` : ''} · ${STATE_LABEL[session.state]}`,
+      icon: createElement(Bot, { className: iconSize }),
+      keywords: `agent session ${session.provider} ${session.state} ${session.ticketRefs.join(' ')} ${session.annotations.tags.join(' ')} ${session.cwd} ${actionLabels(actions)}`,
+      actions,
     });
   }
 
