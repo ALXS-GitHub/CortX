@@ -23,7 +23,7 @@ import {
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { StatusDot } from '@/components/ui/StatusDot';
-import { BetaBadge } from '@/components/agents/BetaBadge';
+import { BetaBadge } from '@/components/ui/BetaBadge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { applyThemeMode, type ThemeMode } from '@/lib/theme';

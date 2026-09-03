@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Chip } from '@/components/ui/Chip';
-import { Segmented } from '@/components/ui/Segmented';
+import { Segmented, type SegOption } from '@/components/ui/Segmented';
+import { BetaBadge } from '@/components/ui/BetaBadge';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
@@ -27,7 +28,6 @@ import {
 } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
-import { BetaBadge } from '@/components/agents/BetaBadge';
 import {
   FolderOpen,
   Save,
@@ -96,12 +96,12 @@ const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
 // Terminal preset labels and descriptions
 type SettingsTab = 'general' | 'appearance' | 'terminal' | 'scripts' | 'agents';
 
-const SETTINGS_TABS: { value: SettingsTab; label: string }[] = [
+const SETTINGS_TABS: SegOption<SettingsTab>[] = [
   { value: 'general', label: 'General' },
   { value: 'appearance', label: 'Appearance' },
-  { value: 'terminal', label: 'Terminal' },
+  { value: 'terminal', label: 'Terminal', badge: <BetaBadge /> },
   { value: 'scripts', label: 'Scripts' },
-  { value: 'agents', label: 'Agents' },
+  { value: 'agents', label: 'Agents', badge: <BetaBadge /> },
 ];
 
 const SETTINGS_TAB_KEY = 'cortx-settings-tab';
@@ -260,7 +260,10 @@ function Field({
   className?: string;
 }) {
   return (
-    <div className={cn('grid gap-2', className)}>
+    // `content-start`: in a multi-column row the tallest field (the one with
+    // a hint) sets the height, and without it the shorter fields stretch
+    // their rows and drop their label to the middle.
+    <div className={cn('grid content-start gap-2', className)}>
       <Label htmlFor={htmlFor}>{label}</Label>
       {children}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}

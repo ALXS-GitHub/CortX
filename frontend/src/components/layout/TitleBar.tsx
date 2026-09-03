@@ -93,6 +93,8 @@ interface TitleBarProps {
   onOpenPalette?: () => void;
   /** Text after the logo (default "CortX"). */
   title?: string;
+  /** Pill rendered right after the title (the Terminal window flags itself beta). */
+  badge?: ReactNode;
   /** Rendered in the middle of the bar (the Terminal window puts its scope switcher here). */
   center?: ReactNode;
   /** Rendered just before the app menu. */
@@ -102,7 +104,7 @@ interface TitleBarProps {
   onClose?: () => void;
 }
 
-export function TitleBar({ onOpenPalette, title = 'CortX', center, trailing, closeLabel = 'Hide to tray', onClose }: TitleBarProps) {
+export function TitleBar({ onOpenPalette, title = 'CortX', badge, center, trailing, closeLabel = 'Hide to tray', onClose }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
   const paletteShortcut = useAppStore((s) => s.settings?.globalHotkey);
@@ -141,6 +143,7 @@ export function TitleBar({ onOpenPalette, title = 'CortX', center, trailing, clo
         <span data-tauri-drag-region className="truncate font-display text-xs font-medium tracking-tight text-muted-foreground">
           {title}
         </span>
+        {badge}
         {appVersion && (
           <span data-tauri-drag-region className="shrink-0 font-mono text-[10px] text-muted-foreground/60">
             v{appVersion}

@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface SegOption<T extends string> {
@@ -6,6 +6,8 @@ export interface SegOption<T extends string> {
   label?: string;
   icon?: ComponentType<{ className?: string }>;
   title?: string;
+  /** Pill rendered after the label (e.g. a beta flag). */
+  badge?: ReactNode;
 }
 
 /** Segmented control (iOS-style) to switch between a few options. */
@@ -53,6 +55,7 @@ export function Segmented<T extends string>({
           >
             {Icon && <Icon className="size-4" />}
             {o.label}
+            {o.badge}
           </button>
         );
       })}

@@ -66,7 +66,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       {
         id: 'terminal:open-window',
         category: 'Navigation',
-        label: 'Open the Terminal window',
+        label: 'Open the Terminal window (beta)',
         icon: <SquareTerminal className="size-4" />,
         keywords: 'terminal window shell sessions',
         actions: [

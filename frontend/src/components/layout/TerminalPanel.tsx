@@ -566,7 +566,7 @@ export function TerminalPanel() {
           )}
           <ChevronUp className="ml-auto size-3.5" />
         </button>
-        <DockButton label="Open the Terminal window" onClick={handleOpenWindow}>
+        <DockButton label="Open the Terminal window (beta)" onClick={handleOpenWindow}>
           <AppWindow className="size-3.5" />
         </DockButton>
         <DockButton label={newShellLabel} onClick={handleNewShell}>
@@ -609,7 +609,7 @@ export function TerminalPanel() {
             <DockButton label={newShellLabel} onClick={handleNewShell}>
               <Plus className="size-3.5" />
             </DockButton>
-            <DockButton label="Open the Terminal window" onClick={handleOpenWindow}>
+            <DockButton label="Open the Terminal window (beta)" onClick={handleOpenWindow}>
               <AppWindow className="size-3.5" />
             </DockButton>
 

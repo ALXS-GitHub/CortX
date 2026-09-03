@@ -13,6 +13,7 @@ import { SplitTree } from '@/components/terminal/SplitTree';
 import { TerminalPalette } from '@/components/terminal/TerminalPalette';
 import { FindBar } from '@/components/terminal/FindBar';
 import { TerminalThemeRoot } from '@/components/terminal/theme/TerminalThemeLayer';
+import { BetaBadge } from '@/components/ui/BetaBadge';
 import { ThemePicker } from '@/components/terminal/theme/ThemePicker';
 import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { TERMINAL_EVENTS, openNewTerminal } from '@/components/terminal/actions';
@@ -152,6 +153,7 @@ export function TerminalWindow() {
       <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
         <TitleBar
           title="Terminal"
+          badge={<BetaBadge />}
           center={loaded ? <ScopeSwitcher /> : undefined}
           trailing={
             <>
