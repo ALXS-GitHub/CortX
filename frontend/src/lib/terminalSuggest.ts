@@ -226,7 +226,10 @@ class SuggestionController {
     if (!decoration) return;
     decoration.onRender((el) => {
       el.textContent = visible;
-      el.className = 'cortx-ghost';
+      // Add, never replace: xterm's own `xterm-decoration` class carries the
+      // `position: absolute` that puts the element at the cursor cell. Wiping
+      // it dropped the ghost into the flow at the top-left of the screen.
+      el.classList.add('cortx-ghost');
     });
     this.decoration = decoration;
   }

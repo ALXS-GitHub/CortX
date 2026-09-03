@@ -165,6 +165,7 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
   };
 
   let retries = 0;
+  let retryTimer: number | null = null;
   const resolveActive = async () => {
     if (!initialised) return;
     const settings = currentSettings();
@@ -181,15 +182,23 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
     const now = resolveActiveThemeName(currentSettings()?.terminal, isAppDark(currentSettings()));
     if (now !== key) return;
     if (!theme) {
-      // The backend was not ready (app start, dev restart): keep whatever we
-      // had rather than dropping to no theme, and try again shortly.
-      if (retries < 5) {
-        retries += 1;
-        window.setTimeout(() => void resolveActive(), 700 * retries);
-      }
+      // The backend was not ready (app start, dev restart, settings being
+      // rewritten): keep whatever we had and keep trying — giving up would
+      // leave the window with no theme and no wallpaper until a reload.
+      retries += 1;
+      const delay = Math.min(8000, 600 * retries);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        void resolveActive();
+      }, delay);
       return;
     }
     retries = 0;
+    if (retryTimer !== null) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
     set({ activeTheme: theme });
     apply();
   };
@@ -398,4 +407,14 @@ export function initTerminalThemeStore(opts: { windowChrome?: boolean } = {}): (
 // Dev-only escape hatch for CDP-driven checks (see terminalSessions.ts).
 if (import.meta.env.DEV) {
   (window as unknown as { __cortxThemeStore?: typeof useTerminalThemeStore }).__cortxThemeStore = useTerminalThemeStore;
+}
+
+// This module owns singleton state: the resolved theme, the wallpaper cache
+// and the `initialised` flag that `initTerminalThemeStore` sets from an effect
+// that only ever runs on mount. A hot update swaps the module while React
+// keeps the old effect, so the new instance stays uninitialised: the window
+// keeps its colours (already written on <html>) but loses its theme object,
+// and with it the wallpaper — the "my background disappeared" bug. Reload.
+if (import.meta.hot) {
+  import.meta.hot.accept(() => window.location.reload());
 }

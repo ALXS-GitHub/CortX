@@ -2,6 +2,9 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import './index.css'
+// Terminal styles are kept out of index.css (which the design system
+// regenerates and truncates); importing here guarantees they load.
+import './styles/terminal-window.css'
 import App from './App.tsx'
 import { TerminalWindow } from './windows/TerminalWindow.tsx'
 

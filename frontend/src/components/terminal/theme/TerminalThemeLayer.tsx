@@ -25,21 +25,40 @@ export function TerminalThemeLayer() {
     if (!key || !imagePath) return;
     let cancelled = false;
     let retry: number | null = null;
-    const load = (attempt: number) => {
+    let attempt = 0;
+    const load = () => {
+      retry = null;
       loadThemeImage(key).then((url) => {
         if (cancelled) return;
         if (url) {
+          attempt = 0;
           setSrc({ key, url });
           return;
         }
-        // The backend may not have been ready (dev restart, file being
-        // written): try again a few times before giving up.
-        if (attempt < 3) retry = window.setTimeout(() => load(attempt + 1), 1500 * (attempt + 1));
+        // The backend may not be ready yet (app start, dev restart, the file
+        // being written). Never give up: giving up leaves the window with its
+        // theme colour but no picture until the user reloads by hand, which
+        // reads as "my wallpaper disappeared".
+        attempt += 1;
+        retry = window.setTimeout(load, Math.min(10_000, 600 * attempt));
       });
     };
-    load(0);
+    load();
+    // A failed read often means the backend was busy; coming back to the
+    // window is a good moment to try again immediately.
+    const onWake = () => {
+      if (cancelled || document.visibilityState !== 'visible') return;
+      if (retry !== null) {
+        window.clearTimeout(retry);
+        load();
+      }
+    };
+    window.addEventListener('focus', onWake);
+    document.addEventListener('visibilitychange', onWake);
     return () => {
       cancelled = true;
+      window.removeEventListener('focus', onWake);
+      document.removeEventListener('visibilitychange', onWake);
       if (retry !== null) window.clearTimeout(retry);
     };
   }, [key, imagePath]);
