@@ -298,6 +298,25 @@ pub struct EnvComparison {
     pub common_keys: Vec<String>,
 }
 
+/// Deserialize a string-valued enum without letting an unknown value take the
+/// whole settings file down.
+///
+/// The app and the `cortx` CLI are installed separately and a newer CortX may
+/// write a variant an older binary has never heard of. Refusing to parse then
+/// stops the app from starting and breaks every shell whose profile calls
+/// `cortx init` — which is exactly what `preset: cortxterminal` did. An
+/// unknown value falls back to the default instead; the next save rewrites it.
+fn lenient_enum<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    use serde::de::IntoDeserializer;
+    let raw = String::deserialize(deserializer)?;
+    let value: serde::de::value::StringDeserializer<serde::de::value::Error> = raw.into_deserializer();
+    Ok(T::deserialize(value).unwrap_or_default())
+}
+
 // Terminal configuration
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -336,6 +355,7 @@ impl Default for TerminalPreset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TerminalConfig {
+    #[serde(deserialize_with = "lenient_enum")]
     pub preset: TerminalPreset,
     #[serde(default)]
     pub custom_path: String,
@@ -358,6 +378,7 @@ pub struct TerminalConfig {
     pub long_command_seconds: u32,
     /// Terminal window: where the tab list lives. One or the other, never both.
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
     pub tabs_placement: TabsPlacement,
     /// Font of every terminal (dock and window). None = bundled default stack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -381,6 +402,7 @@ pub struct TerminalConfig {
     /// output; the DOM one uses the browser's own text rendering, whose
     /// glyphs are noticeably finer.
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
     pub renderer: TerminalRenderer,
     /// Selection colour of the terminals (any CSS colour). None = the theme's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -396,9 +418,11 @@ pub struct TerminalConfig {
     pub restore_scrollback_lines: u32,
     /// Where a started service / script shows up.
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
     pub open_processes_in: TerminalTarget,
     /// Where "open a dev session" (launch configuration) opens its tabs.
     #[serde(default = "default_dev_sessions_target")]
+    #[serde(deserialize_with = "lenient_enum")]
     pub open_dev_sessions_in: TerminalTarget,
     /// Terminal window shortcuts: action id → key combo (e.g. `"split.right": "Ctrl+Shift+D"`).
     /// Missing ids use the built-in defaults (`keybindings.ts`).
@@ -415,6 +439,7 @@ pub struct TerminalConfig {
     #[serde(default = "default_true")]
     pub theme_follows_app: bool,
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
     pub cursor_style: CursorStyle,
     #[serde(default = "default_true")]
     pub cursor_blink: bool,
@@ -426,6 +451,7 @@ pub struct TerminalConfig {
     pub window_opacity: u8,
     /// Terminal window backdrop effect (Windows: acrylic / mica; macOS: vibrancy).
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
     pub window_effect: WindowEffect,
     /// Ghost-text completions from the command history (→ to accept). When
     /// on, `cortx init` turns PSReadLine's own prediction off so only one
@@ -586,6 +612,7 @@ impl Default for TerminalConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppearanceConfig {
+    #[serde(deserialize_with = "lenient_enum")]
     pub theme: Theme,
 }
 
@@ -597,17 +624,19 @@ impl Default for AppearanceConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     Light,
     Dark,
+    #[default]
     System,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DefaultsConfig {
+    #[serde(deserialize_with = "lenient_enum")]
     pub launch_method: LaunchMethod,
 }
 
@@ -619,11 +648,12 @@ impl Default for DefaultsConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LaunchMethod {
     Clipboard,
     External,
+    #[default]
     Integrated,
 }
 
@@ -1637,4 +1667,42 @@ pub struct UpdateAppInput {
     pub notes: Option<String>,
     pub color: Option<String>,
     pub favorite: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A settings file written by a newer CortX must still load: the unknown
+    /// value falls back to the default instead of failing the whole parse and
+    /// taking the app (and every shell running `cortx init`) down with it.
+    #[test]
+    fn unknown_enum_values_fall_back_to_the_default() {
+        let json = r#"{
+            "terminal": { "preset": "somethingnew", "renderer": "nextgen", "cursorStyle": "beam" },
+            "appearance": { "theme": "midnight" },
+            "defaults": { "launchMethod": "teleport" }
+        }"#;
+        let settings: AppSettings = serde_json::from_str(json).expect("unknown values must not fail the parse");
+        assert_eq!(settings.terminal.preset, TerminalPreset::default());
+        assert_eq!(settings.terminal.renderer, TerminalRenderer::default());
+        assert_eq!(settings.terminal.cursor_style, CursorStyle::default());
+        assert!(matches!(settings.appearance.theme, Theme::System));
+        assert!(matches!(settings.defaults.launch_method, LaunchMethod::Integrated));
+    }
+
+    /// Known values still parse exactly as before.
+    #[test]
+    fn known_enum_values_still_parse() {
+        let json = r#"{
+            "terminal": { "preset": "warp", "renderer": "webgl" },
+            "appearance": { "theme": "dark" },
+            "defaults": { "launchMethod": "external" }
+        }"#;
+        let settings: AppSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.terminal.preset, TerminalPreset::Warp);
+        assert_eq!(settings.terminal.renderer, TerminalRenderer::Webgl);
+        assert!(matches!(settings.appearance.theme, Theme::Dark));
+        assert!(matches!(settings.defaults.launch_method, LaunchMethod::External));
+    }
 }
