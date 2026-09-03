@@ -124,7 +124,7 @@ export interface TerminalConfig {
   /** Weight of normal / bold text (100–900). Undefined = 400 / 700. */
   fontWeight?: number;
   fontWeightBold?: number;
-  /** `dom` (finest glyphs, default) or `webgl` (fastest on heavy output). */
+  /** `webgl` (default: glyphs scaled to the cell) or `dom` (thinner text). */
   renderer?: 'dom' | 'webgl';
   /** Selection colour (any CSS colour). Undefined = the theme's. */
   selectionColor?: string;

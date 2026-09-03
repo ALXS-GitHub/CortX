@@ -506,11 +506,13 @@ fn default_dev_sessions_target() -> TerminalTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TerminalRenderer {
-    /// Browser text rendering: finest glyphs (default).
+    /// GPU atlas (default): scales glyphs to the cell, so powerline /
+    /// Nerd Font separators line up exactly.
     #[default]
-    Dom,
-    /// GPU atlas: fastest on very heavy output, slightly heavier glyphs.
     Webgl,
+    /// Browser text rendering: thinner glyphs, but block glyphs keep their
+    /// own height and can leave gaps in a powerline prompt.
+    Dom,
 }
 
 /// A surface terminals can be shown in.

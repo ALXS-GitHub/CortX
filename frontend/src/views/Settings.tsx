@@ -344,7 +344,7 @@ export function Settings() {
   const [terminalLetterSpacing, setTerminalLetterSpacing] = useState<string>('');
   const [terminalFontWeight, setTerminalFontWeight] = useState(400);
   const [terminalFontWeightBold, setTerminalFontWeightBold] = useState(700);
-  const [terminalRenderer, setTerminalRenderer] = useState<'dom' | 'webgl'>('dom');
+  const [terminalRenderer, setTerminalRenderer] = useState<'dom' | 'webgl'>('webgl');
   const [terminalSelectionColor, setTerminalSelectionColor] = useState('');
   const [dockUsesTerminalTheme, setDockUsesTerminalTheme] = useState(false);
   // Hydrate from the store only when its content actually changed (the
@@ -374,7 +374,7 @@ export function Settings() {
       setTerminalLetterSpacing(settings.terminal.letterSpacing === undefined ? '' : String(settings.terminal.letterSpacing));
       setTerminalFontWeight(settings.terminal.fontWeight ?? 400);
       setTerminalFontWeightBold(settings.terminal.fontWeightBold ?? 700);
-      setTerminalRenderer(settings.terminal.renderer ?? 'dom');
+      setTerminalRenderer(settings.terminal.renderer ?? 'webgl');
       setTerminalSelectionColor(settings.terminal.selectionColor ?? '');
       setDockUsesTerminalTheme(settings.terminal.dockUsesTerminalTheme ?? false);
       setTabsPlacement(settings.terminal.tabsPlacement ?? 'sidebar');
@@ -1087,15 +1087,15 @@ export function Settings() {
             <Field
               label="Renderer"
               htmlFor="terminal-renderer"
-              hint="The browser renderer draws the finest glyphs (what CortX uses by default). The GPU one is faster on very heavy output but its letters look heavier."
+              hint="The GPU renderer scales glyphs to the cell, so powerline separators line up; the browser one draws thinner text but block glyphs keep their own height."
             >
               <Select value={terminalRenderer} onValueChange={(v: 'dom' | 'webgl') => { setTerminalRenderer(v); setHasChanges(true); }}>
                 <SelectTrigger id="terminal-renderer" className="w-[260px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="dom">Browser (finest text)</SelectItem>
-                  <SelectItem value="webgl">GPU (fastest)</SelectItem>
+                  <SelectItem value="webgl">GPU (default, glyphs fit the cell)</SelectItem>
+                  <SelectItem value="dom">Browser (thinner text, powerline glyphs may not join)</SelectItem>
                 </SelectContent>
               </Select>
             </Field>

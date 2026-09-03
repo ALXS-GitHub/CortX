@@ -145,21 +145,6 @@ function isDarkTheme(): boolean {
 }
 
 /**
- * Does the Terminal window actually need see-through panes? Only when
- * something is meant to show behind the text: a wallpaper, a window opacity
- * below 100, or a backdrop effect. It matters because xterm's
- * `allowTransparency` disables the opaque glyph path — text is alpha-blended
- * and comes out visibly heavier — so a plain theme keeps crisp letters.
- */
-export function needsTransparentPanes(): boolean {
-  if (!IS_TERMINAL_WINDOW) return false;
-  const cfg = useAppStore.getState().settings?.terminal;
-  if ((cfg?.windowOpacity ?? 100) < 100) return true;
-  if ((cfg?.windowEffect ?? 'none') !== 'none') return true;
-  return !!getXtermThemeOverride()?.background_image?.path;
-}
-
-/**
  * xterm palette: the active / previewed terminal theme when the theme store
  * has one (see `stores/terminalThemeStore`), else derived from the app's
  * CSS tokens.
@@ -168,7 +153,7 @@ export function buildTerminalTheme(): ITheme {
   const override = getXtermThemeOverride();
   const selectionColor = useAppStore.getState().settings?.terminal.selectionColor;
   if (override) {
-    return themeToXterm(override, { transparentBackground: needsTransparentPanes(), selectionColor });
+    return themeToXterm(override, { transparentBackground: IS_TERMINAL_WINDOW, selectionColor });
   }
   const dark = isDarkTheme();
   // Panes of the Terminal window are always see-through: the window itself
@@ -178,9 +163,8 @@ export function buildTerminalTheme(): ITheme {
   // wallpaper with an opaque canvas either.
   if (IS_TERMINAL_WINDOW) {
     const fgOnly = resolveCssColor('--terminal-fg') ?? resolveCssColor('--foreground') ?? (dark ? [229, 229, 229] : [36, 36, 36]);
-    const solid = getComputedStyle(document.documentElement).getPropertyValue('--terminal-window-solid').trim();
     return {
-      background: needsTransparentPanes() || !solid ? 'rgba(0, 0, 0, 0)' : solid,
+      background: 'rgba(0, 0, 0, 0)',
       foreground: toHex(fgOnly),
       cursor: toHex(fgOnly),
       cursorAccent: 'rgba(0, 0, 0, 0)',
@@ -250,34 +234,16 @@ export function terminalFontOptions(): {
 }
 
 const DEFAULT_LINE_HEIGHT = 1.2;
-let advanceCanvas: CanvasRenderingContext2D | null | undefined;
-const advanceCache = new Map<string, number>();
-
-/** Horizontal advance of one glyph of `fontFamily` at `fontSize`, in CSS px. */
-function glyphAdvance(fontFamily: string, fontSize: number): number {
-  const key = `${fontSize}|${fontFamily}`;
-  const cached = advanceCache.get(key);
-  if (cached !== undefined) return cached;
-  if (advanceCanvas === undefined) advanceCanvas = document.createElement('canvas').getContext('2d');
-  if (!advanceCanvas) return fontSize * 0.6;
-  advanceCanvas.font = `${fontSize}px ${fontFamily}`;
-  const width = advanceCanvas.measureText('WWWWWWWWWW').width / 10;
-  advanceCache.set(key, width);
-  return width;
-}
-
 /**
- * xterm truncates the cell width to whole pixels, so a font whose advance is
- * 8.43 px is drawn in 8 px cells: glyphs overlap and look bold and cramped
- * (Hack at 14 px, for one). One pixel of letter spacing when the fraction is
- * large restores the spacing the font was designed with.
+ * Extra spacing is **off** by default: powerline / Nerd Font glyphs are
+ * designed to touch cell to cell, and a spacing of even one pixel tears the
+ * prompt's separators apart. The heavy look this used to compensate for
+ * came from the GPU renderer, which is no longer the default (see the
+ * `renderer` setting). The Settings field
+ * still lets a font be tuned by hand.
  */
-export function autoLetterSpacing(fontFamily: string, fontSize: number): number {
-  const advance = glyphAdvance(fontFamily, fontSize);
-  const fraction = advance - Math.floor(advance);
-  // Anything but a near-integral advance gets the extra pixel: a hair of air
-  // between glyphs beats clipped, overlapping strokes.
-  return fraction >= 0.15 ? 1 : 0;
+export function autoLetterSpacing(_fontFamily: string, _fontSize: number): number {
+  return 0;
 }
 
 /** Push family, size (with the window zoom), line height and letter spacing to one terminal. */
@@ -361,9 +327,10 @@ function ensureSettingsSubscription() {
 
 export function applyThemeToAll() {
   const theme = buildTerminalTheme();
-  const transparent = needsTransparentPanes();
   for (const s of sessions.values()) {
-    s.term.options.allowTransparency = transparent;
+    // Panes of the Terminal window are always see-through: the window paints
+    // the theme colour and the wallpaper behind them.
+    s.term.options.allowTransparency = IS_TERMINAL_WINDOW;
     s.term.options.theme = theme;
   }
 }
@@ -517,7 +484,7 @@ function createSession(id: string): TerminalSession {
 
 /** GPU renderer only when the setting asks for it (see `renderer`). */
 function wantsWebgl(): boolean {
-  return useAppStore.getState().settings?.terminal.renderer === 'webgl';
+  return (useAppStore.getState().settings?.terminal.renderer ?? 'webgl') !== 'dom';
 }
 
 /** Add / drop the WebGL addon of every open session to match the setting. */
