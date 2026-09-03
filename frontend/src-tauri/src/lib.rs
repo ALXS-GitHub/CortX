@@ -321,6 +321,17 @@ pub fn run() {
             commands::stop_integrated_service,
             commands::is_service_running,
             commands::get_running_services,
+            // Integrated terminal (PTY) commands
+            commands::get_terminal_capabilities,
+            commands::attach_terminal,
+            commands::detach_terminal,
+            commands::write_terminal,
+            commands::resize_terminal,
+            commands::clear_terminal_scrollback,
+            commands::remove_terminal,
+            commands::spawn_shell,
+            commands::kill_shell,
+            commands::list_shells,
             // Settings commands
             commands::get_settings,
             commands::update_settings,

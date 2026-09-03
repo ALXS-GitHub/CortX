@@ -37,11 +37,13 @@ Create projects that group related services together. Each project points to a r
 
 ### Integrated Terminal
 
-View real-time logs from all your running services in a resizable terminal panel. Features include:
+Every service, script and shell tab runs in a real terminal (a PTY rendered with xterm.js), not a log viewer. Features include:
 
-- **Tabbed interface** - Switch between service logs easily
+- **Real terminal** - Colors, progress bars, interactive prompts and TUIs behave exactly as in a standalone terminal; type into any tab to answer a prompt
+- **Inline images** - Sixel and iTerm2 (`imgcat`-style) images render in place, on Windows too
+- **Shell tabs** - Open a shell in the current project with the `+` button; pick the shell in Settings
+- **Tabbed interface** - Switch between tabs, split into panes, hide tabs without stopping the process
 - **Clickable URLs** - Links in terminal output open in your browser
-- **Auto-scroll** - Follows new output, pauses when you scroll up
 - **Port detection** - Automatically detects and displays running ports
 
 ![Terminal Panel](images/2025-12-15-20-36-40.png)
@@ -151,10 +153,12 @@ npm run tauri:build
 The terminal panel at the bottom shows output from all running services:
 
 - Click a tab to switch between services
-- The panel auto-scrolls to show new output
-- Scroll up to pause auto-scroll (scroll to bottom to resume)
+- The panel follows new output; scroll up to read back, scroll down to resume
+- Type in a tab to send keystrokes to the process (answer `y/n` prompts, use `Ctrl+C`)
+- Select text and press `Ctrl+C` (or `Ctrl+Shift+C`) to copy; `Ctrl+V` or right-click to paste
 - Click any URL in the output to open it in your browser
 - Detected ports are shown as badges in the tab
+- Stopping a service sends `Ctrl+C` first so dev servers shut down cleanly, then kills what's left
 
 **Resize the terminal:**
 - Drag the top edge of the terminal panel up or down
@@ -167,6 +171,7 @@ The terminal panel at the bottom shows output from all running services:
 Access settings from the sidebar to configure:
 
 - **Default terminal** - Choose between integrated or external terminal
+- **Integrated terminal shell** - Command line of the shell used by "new terminal" tabs (auto-detects PowerShell 7 / `$SHELL`)
 - **Theme** - Light or dark mode
 
 ## Tech Stack

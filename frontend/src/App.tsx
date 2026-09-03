@@ -38,6 +38,7 @@ import {
   onDataChanged,
   onOpenCommandPalette,
   getRunningServices,
+  onShellExit,
 } from '@/lib/tauri';
 import type { LogEntry } from '@/types';
 
@@ -109,6 +110,9 @@ function App() {
     loadStatusDefinitions();
     loadApps();
 
+    // Shell tabs still alive in the backend (e.g. after a webview reload)
+    useAppStore.getState().loadShells();
+
     // Check for running services on startup
     getRunningServices().then((serviceIds) => {
       const { updateServiceStatus } = useAppStore.getState();
@@ -137,6 +141,8 @@ function App() {
     let unlistenGlobalScriptLog: (() => void) | undefined;
     let unlistenGlobalScriptStatus: (() => void) | undefined;
     let unlistenGlobalScriptExit: (() => void) | undefined;
+    // Shell (integrated terminal tab) listener
+    let unlistenShellExit: (() => void) | undefined;
     // Data change listener (file watcher)
     let unlistenDataChanged: (() => void) | undefined;
     let isCancelled = false;
@@ -222,6 +228,12 @@ function App() {
         updateExecutionRecordOnExit(payload.scriptId, payload.exitCode ?? null, payload.success);
       });
 
+      unlistenShellExit = await onShellExit((payload) => {
+        if (isCancelled) return;
+        const { markShellExited } = useAppStore.getState();
+        markShellExited(payload.shellId, payload.exitCode);
+      });
+
       // File watcher: reload all data when external changes detected
       unlistenDataChanged = await onDataChanged(() => {
         if (isCancelled) return;
@@ -251,6 +263,7 @@ function App() {
       unlistenGlobalScriptLog?.();
       unlistenGlobalScriptStatus?.();
       unlistenGlobalScriptExit?.();
+      unlistenShellExit?.();
       unlistenDataChanged?.();
       listenersSetUp.current = false;
     };

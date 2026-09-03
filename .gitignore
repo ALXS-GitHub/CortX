@@ -177,3 +177,6 @@ nul
 
 # Audit reports
 AUDIT*.md
+
+# Private notes
+private/

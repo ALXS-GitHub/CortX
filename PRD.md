@@ -254,8 +254,14 @@ Local App Launcher provides:
 | F4.3.16 | Port badge display in terminal tabs | Must Have | Done |
 | F4.3.17 | Terminal scroll persists on tab switch | Must Have | Done |
 | F4.3.18 | Search within terminal output | Should Have | Pending |
-| F4.3.19 | Copy output to clipboard | Should Have | Pending |
-| F4.3.20 | Terminal input (send commands to running process) | Could Have | Pending |
+| F4.3.19 | Copy output to clipboard (selection + Ctrl+C / Ctrl+Shift+C, right-click) | Should Have | Done |
+| F4.3.20 | Terminal input (send keystrokes to the running process, answer prompts) | Could Have | Done |
+| F4.3.21 | Real PTY behind every service / script / shell (ConPTY on Windows, openpty elsewhere): colors, `` progress bars, TUIs | Must Have | Done |
+| F4.3.22 | xterm.js renderer (WebGL) with persistent per-tab session; buffer survives hide / restore / tab switch | Must Have | Done |
+| F4.3.23 | Inline images: Sixel and iTerm2 (OSC 1337). Windows ships Windows Terminal's `conpty.dll` so the sequences pass through. Kitty graphics: not yet (addon alpha, ConPTY drops APC) | Should Have | Done |
+| F4.3.24 | "New terminal" tab: interactive shell in the current project's root (shell configurable in Settings) | Should Have | Done |
+| F4.3.25 | Graceful stop: Ctrl+C through the PTY, then kill the process tree after a short grace period | Should Have | Done |
+| F4.3.26 | Plain-text line log (`<id>.log`, MCP `get_logs`, TUI) kept in sync from the PTY stream with escape sequences stripped | Must Have | Done |
 
 ---
 

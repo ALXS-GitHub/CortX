@@ -229,3 +229,17 @@ body, #root {
 .terminal-link:hover {
   color: #7cb3f0;
 }
+/* Integrated terminal (xterm.js). The session container is re-parented between
+   panes; give it the full pane and a little breathing room around the grid. */
+.cortx-xterm {
+  height: 100%;
+  width: 100%;
+  padding: 4px 0 0 6px;
+  box-sizing: border-box;
+}
+.cortx-xterm .xterm {
+  height: 100%;
+}
+.cortx-xterm .xterm .xterm-viewport {
+  scrollbar-width: thin;
+}

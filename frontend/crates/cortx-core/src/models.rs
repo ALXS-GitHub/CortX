@@ -337,6 +337,11 @@ pub struct TerminalConfig {
     pub custom_path: String,
     #[serde(default)]
     pub custom_args: Vec<String>,
+    /// Shell launched by the integrated terminal's "new terminal" tabs, as a
+    /// command line (e.g. `pwsh -NoLogo`, `/bin/zsh -l`). None/empty =
+    /// auto-detect (see `process_manager::resolve_shell`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrated_shell: Option<String>,
 }
 
 impl Default for TerminalConfig {
@@ -345,6 +350,7 @@ impl Default for TerminalConfig {
             preset: TerminalPreset::default(),
             custom_path: String::new(),
             custom_args: Vec::new(),
+            integrated_shell: None,
         }
     }
 }
@@ -604,6 +610,14 @@ pub enum ScriptStatus {
     Running,
     Completed,
     Failed,
+}
+
+/// Emitted when an interactive shell tab's process exits (or is killed).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellExitPayload {
+    pub shell_id: String,
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize)]

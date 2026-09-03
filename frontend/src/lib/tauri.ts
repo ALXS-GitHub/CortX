@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, Channel } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import type {
@@ -14,6 +14,9 @@ import type {
   UpdateScriptInput,
   ServiceLogPayload,
   ServiceStatusPayload,
+  ShellInfo,
+  ShellExitPayload,
+  TerminalCapabilities,
   ServiceExitPayload,
   ServicePortsPayload,
   ScriptLogPayload,
@@ -637,4 +640,85 @@ export async function getAgentsHealth(): Promise<AgentsHealth> {
 /** Fired by the agents watcher (debounced). Payload is null: re-list. */
 export async function onAgentSessionsChanged(callback: () => void): Promise<UnlistenFn> {
   return listen('agent-sessions-changed', () => callback());
+}
+
+// ============================================================================
+// Integrated terminal (PTY)
+// ============================================================================
+
+/** Normalise whatever the Channel hands us (ArrayBuffer for raw bodies, but be
+ *  lenient) into a Uint8Array xterm.js can write directly. */
+function toBytes(message: unknown): Uint8Array {
+  if (message instanceof Uint8Array) return message;
+  if (message instanceof ArrayBuffer) return new Uint8Array(message);
+  if (Array.isArray(message)) return Uint8Array.from(message as number[]);
+  if (typeof message === 'string') return new TextEncoder().encode(message);
+  return new Uint8Array();
+}
+
+/**
+ * Subscribe to a terminal's output. The stored scrollback arrives as the first
+ * message, then live bytes in order. Resolves with a token for detachTerminal.
+ */
+export async function attachTerminal(
+  terminalId: string,
+  onData: (bytes: Uint8Array) => void
+): Promise<number> {
+  const channel = new Channel<unknown>();
+  channel.onmessage = (message) => onData(toBytes(message));
+  return invoke('attach_terminal', { terminalId, onData: channel });
+}
+
+export async function detachTerminal(terminalId: string, token: number): Promise<void> {
+  return invoke('detach_terminal', { terminalId, token });
+}
+
+export async function writeTerminal(terminalId: string, data: string): Promise<void> {
+  return invoke('write_terminal', { terminalId, data });
+}
+
+export async function resizeTerminal(terminalId: string, cols: number, rows: number): Promise<void> {
+  return invoke('resize_terminal', { terminalId, cols, rows });
+}
+
+export async function clearTerminalScrollback(terminalId: string): Promise<void> {
+  return invoke('clear_terminal_scrollback', { terminalId });
+}
+
+export async function removeTerminal(terminalId: string): Promise<void> {
+  return invoke('remove_terminal', { terminalId });
+}
+
+export async function spawnShell(options: {
+  cwd?: string;
+  projectId?: string;
+  cols?: number;
+  rows?: number;
+}): Promise<ShellInfo> {
+  return invoke('spawn_shell', {
+    cwd: options.cwd ?? null,
+    projectId: options.projectId ?? null,
+    cols: options.cols ?? null,
+    rows: options.rows ?? null,
+  });
+}
+
+export async function killShell(shellId: string): Promise<void> {
+  return invoke('kill_shell', { shellId });
+}
+
+export async function listShells(): Promise<ShellInfo[]> {
+  return invoke('list_shells');
+}
+
+export async function getTerminalCapabilities(): Promise<TerminalCapabilities> {
+  return invoke('get_terminal_capabilities');
+}
+
+export async function onShellExit(
+  callback: (payload: ShellExitPayload) => void
+): Promise<UnlistenFn> {
+  return listen<ShellExitPayload>('shell-exit', (event) => {
+    callback(event.payload);
+  });
 }

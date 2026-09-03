@@ -1,19 +1,41 @@
+//! Process lifecycle for everything CortX runs on the user's behalf: services,
+//! project scripts, global scripts and interactive shells.
+//!
+//! Every process is spawned inside a real PTY (ConPTY on Windows, openpty
+//! elsewhere) so it behaves exactly as it would in a terminal: colours, `\r`
+//! progress bars, interactive prompts, TUIs and inline images all work. The
+//! raw byte stream goes to the [`TerminalHub`] (consumed by the GUI's xterm.js
+//! views) while a de-ANSI'd, line-based copy feeds the on-disk `<id>.log` file
+//! and the `emit_*_log` events used by the TUI, the MCP server and the sidebar.
+
 use crate::models::{LogStream, ScriptStatus, ServiceStatus};
-use crate::runtime_state::{
-    self, EntityKind, RuntimeEntry, RuntimeStore,
-};
+use crate::runtime_state::{self, EntityKind, RuntimeEntry, RuntimeStore};
+use crate::terminal::{terminal_id, AnsiLineSplitter, TerminalHub, TerminalKind};
 use parking_lot::Mutex;
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader, Write as IoWrite};
-use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::io::{Read, Write as IoWrite};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+
+/// Size a PTY starts with before the GUI view attaches and sends its real
+/// dimensions. Wide enough that early output isn't wrapped awkwardly.
+pub const DEFAULT_PTY_COLS: u16 = 120;
+pub const DEFAULT_PTY_ROWS: u16 = 30;
+
+/// How long `stop_*` waits after sending Ctrl+C before force-killing the
+/// process tree. Long enough for a dev server to release its port cleanly,
+/// short enough that "Stop" still feels immediate.
+const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_millis(800);
 
 /// Display-only metadata that the caller knows but ProcessManager doesn't,
 /// passed through to the RuntimeStore entry written on spawn.
@@ -40,24 +62,8 @@ impl RuntimeMeta {
     }
 }
 
-/// Apply platform-specific spawn config that must be set on every spawned process:
-/// - Windows: hide the console window (CREATE_NO_WINDOW).
-/// - Unix:   put the child in its own process group so `kill -PGID` reaches the
-///           whole tree (the shell wrapper from `parse_command` and any descendants).
-fn apply_spawn_flags(cmd: &mut Command) {
-    #[cfg(target_os = "windows")]
-    {
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
-}
-
 /// Trait for emitting process events.
-/// Implemented by TauriEmitter (GUI) and TuiEmitter (TUI).
+/// Implemented by TauriEmitter (GUI), TuiEmitter (TUI) and McpEmitter (MCP).
 pub trait ProcessEventEmitter: Send + Sync {
     fn emit_service_log(&self, service_id: &str, stream: LogStream, content: String);
     fn emit_service_status(
@@ -83,14 +89,55 @@ pub trait ProcessEventEmitter: Send + Sync {
     ///
     /// Default no-op for emitters that don't surface port info (TUI / MCP).
     fn emit_service_ports(&self, _service_id: &str, _ports: Vec<u16>) {}
+
+    /// An interactive shell opened from the GUI exited (or was killed).
+    /// Default no-op: only the GUI hosts shells.
+    fn emit_shell_exit(&self, _shell_id: &str, _exit_code: Option<i32>) {}
 }
 
 pub struct ProcessInfo {
-    pub child: Child,
+    pub child: Box<dyn Child + Send + Sync>,
     pub service_id: String,
     pub pid: u32,
     pub active_mode: Option<String>,
     pub active_arg_preset: Option<String>,
+}
+
+/// Public description of an interactive shell session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellInfo {
+    pub id: String,
+    pub pid: u32,
+    pub cwd: String,
+    pub project_id: Option<String>,
+    /// Program that was launched (e.g. `pwsh.exe`, `/bin/zsh`).
+    pub program: String,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// What the GUI asks for when opening a new shell tab.
+#[derive(Debug, Clone, Default)]
+pub struct ShellSpawnRequest {
+    pub cwd: String,
+    pub project_id: Option<String>,
+    /// Explicit shell command line from settings (`pwsh -NoLogo`, `/bin/zsh -l`).
+    /// `None`/empty = auto-detect.
+    pub shell: Option<String>,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+struct ShellEntry {
+    child: Box<dyn Child + Send + Sync>,
+    info: ShellInfo,
+}
+
+/// The two halves of a PTY we keep after spawning: the master (for resize)
+/// and its writer (for keyboard input). The reader lives in its own thread.
+struct PtyIo {
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn IoWrite + Send>,
 }
 
 pub struct ProcessManager {
@@ -100,6 +147,11 @@ pub struct ProcessManager {
     processes: Arc<Mutex<HashMap<String, ProcessInfo>>>,
     scripts: Arc<Mutex<HashMap<String, ProcessInfo>>>,
     global_scripts: Arc<Mutex<HashMap<String, ProcessInfo>>>,
+    /// Interactive shells are GUI-only and never enter the runtime store.
+    shells: Arc<Mutex<HashMap<String, ShellEntry>>>,
+    /// PTY master + writer per terminal id (`service:<id>`, `shell:<id>`, ...).
+    ptys: Arc<Mutex<HashMap<String, PtyIo>>>,
+    terminal_hub: Arc<TerminalHub>,
     shutdown_flag: Arc<AtomicBool>,
     runtime_store: Arc<RuntimeStore>,
 }
@@ -110,6 +162,9 @@ impl ProcessManager {
             processes: Arc::new(Mutex::new(HashMap::new())),
             scripts: Arc::new(Mutex::new(HashMap::new())),
             global_scripts: Arc::new(Mutex::new(HashMap::new())),
+            shells: Arc::new(Mutex::new(HashMap::new())),
+            ptys: Arc::new(Mutex::new(HashMap::new())),
+            terminal_hub: Arc::new(TerminalHub::new()),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             runtime_store,
         }
@@ -121,9 +176,134 @@ impl ProcessManager {
         &self.runtime_store
     }
 
+    /// Raw scrollback + live subscribers for every terminal this manager runs.
+    pub fn terminal_hub(&self) -> &Arc<TerminalHub> {
+        &self.terminal_hub
+    }
+
     /// Get a clone of the shutdown flag for monitoring threads
     pub fn get_shutdown_flag(&self) -> Arc<AtomicBool> {
         self.shutdown_flag.clone()
+    }
+
+    // ========================================================================
+    // Terminal I/O (used by the GUI's xterm.js views)
+    // ========================================================================
+
+    /// Send keyboard input to the process behind `terminal_id`.
+    pub fn write_terminal(&self, terminal_id: &str, data: &[u8]) -> Result<(), String> {
+        let mut ptys = self.ptys.lock();
+        let io = ptys
+            .get_mut(terminal_id)
+            .ok_or_else(|| format!("No running terminal for {}", terminal_id))?;
+        io.writer
+            .write_all(data)
+            .and_then(|_| io.writer.flush())
+            .map_err(|e| format!("Failed to write to terminal: {}", e))
+    }
+
+    /// Tell the PTY (and therefore the child) that the view has a new size.
+    pub fn resize_terminal(&self, terminal_id: &str, cols: u16, rows: u16) -> Result<(), String> {
+        if cols == 0 || rows == 0 {
+            return Ok(());
+        }
+        let ptys = self.ptys.lock();
+        let io = ptys
+            .get(terminal_id)
+            .ok_or_else(|| format!("No running terminal for {}", terminal_id))?;
+        io.master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("Failed to resize terminal: {}", e))
+    }
+
+    /// Is there a live PTY behind this terminal id?
+    pub fn has_terminal(&self, terminal_id: &str) -> bool {
+        self.ptys.lock().contains_key(terminal_id)
+    }
+
+    // ========================================================================
+    // Shared spawn / watch machinery
+    // ========================================================================
+
+    /// Spawn `cmd` inside a fresh PTY. Starts the reader thread that fans raw
+    /// bytes out to the hub and de-ANSI'd lines to the log file + `on_line`.
+    fn spawn_in_pty(
+        &self,
+        terminal_id: &str,
+        cmd: CommandBuilder,
+        size: PtySize,
+        log_path: Option<PathBuf>,
+        on_line: Box<dyn Fn(String) + Send>,
+    ) -> Result<Box<dyn Child + Send + Sync>, String> {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(size)
+            .map_err(|e| format!("Failed to open PTY: {}", e))?;
+        let child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| format!("Failed to start process: {}", e))?;
+        // The slave end must be closed in this process so the reader sees EOF
+        // when the child (and its descendants) go away.
+        drop(pair.slave);
+
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| format!("Failed to open PTY reader: {}", e))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| format!("Failed to open PTY writer: {}", e))?;
+
+        // Replace any stale I/O for this id (e.g. a service restarted after a
+        // crash whose watcher hasn't cleaned up yet).
+        let stale = self.ptys.lock().insert(
+            terminal_id.to_string(),
+            PtyIo {
+                master: pair.master,
+                writer,
+            },
+        );
+        drop(stale);
+
+        spawn_pty_reader(
+            reader,
+            self.terminal_hub.clone(),
+            terminal_id.to_string(),
+            log_path,
+            on_line,
+        );
+
+        Ok(child)
+    }
+
+    /// Ctrl+C first, then a bounded wait, then the hammer.
+    fn terminate(&self, terminal_id: &str, child: &mut Box<dyn Child + Send + Sync>, pid: u32) {
+        let _ = self.write_terminal(terminal_id, b"\x03");
+        let deadline = Instant::now() + GRACEFUL_STOP_TIMEOUT;
+        while Instant::now() < deadline {
+            if matches!(child.try_wait(), Ok(Some(_)) | Err(_)) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        let _ = kill_process_tree(pid);
+        let _ = child.kill();
+        let _ = child.wait();
+        self.drop_pty(terminal_id);
+    }
+
+    /// Close the PTY behind `terminal_id`. On Windows this is what makes the
+    /// reader thread see EOF, so it must happen once the child is gone.
+    fn drop_pty(&self, terminal_id: &str) {
+        let io = self.ptys.lock().remove(terminal_id);
+        drop(io);
     }
 
     // ========================================================================
@@ -153,7 +333,6 @@ impl ProcessManager {
             // Stale entry from a crashed instance — let register() overwrite it.
         }
 
-        // Emit starting status
         emitter.emit_service_status(
             &service_id,
             ServiceStatus::Starting,
@@ -162,68 +341,21 @@ impl ProcessManager {
             arg_preset.clone(),
         );
 
-        // Parse command
-        let (program, args) = parse_command(&command);
-
-        // Build command
-        let mut cmd = Command::new(&program);
-        cmd.args(&args)
-            .current_dir(&working_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        // Force UTF-8 output on Windows to avoid cp1252 encoding errors
-        #[cfg(target_os = "windows")]
-        {
-            cmd.env("PYTHONUTF8", "1");
-            cmd.env("PYTHONIOENCODING", "utf-8");
-        }
-
-        // Set environment variables
-        if let Some(env) = env_vars {
-            for (key, value) in env {
-                cmd.env(key, value);
-            }
-        }
-
-        apply_spawn_flags(&mut cmd);
-
-        // Spawn the process
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("Failed to start process: {}", e))?;
-
-        let pid = child.id();
-
-        // Set up stdout/stderr readers
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-
+        let tid = terminal_id(TerminalKind::Service, &service_id);
+        let cmd = build_shell_command(&command, &working_dir, env_vars.as_ref());
         let log_path = self.runtime_store.log_path(&service_id);
-
-        // Spawn thread to read stdout (tee → log file + emitter)
-        if let Some(stdout) = stdout {
-            spawn_tee_reader(
-                stdout,
-                log_path.clone(),
-                emitter.clone(),
-                service_id.clone(),
-                LogStream::Stdout,
-                LogTarget::Service,
-            );
-        }
-
-        // Spawn thread to read stderr
-        if let Some(stderr) = stderr {
-            spawn_tee_reader(
-                stderr,
-                log_path.clone(),
-                emitter.clone(),
-                service_id.clone(),
-                LogStream::Stderr,
-                LogTarget::Service,
-            );
-        }
+        let line_emitter = emitter.clone();
+        let line_id = service_id.clone();
+        let child = self.spawn_in_pty(
+            &tid,
+            cmd,
+            default_size(),
+            Some(log_path),
+            Box::new(move |line| {
+                line_emitter.emit_service_log(&line_id, LogStream::Stdout, line)
+            }),
+        )?;
+        let pid = child.process_id().unwrap_or(0);
 
         // Register the canonical runtime entry BEFORE storing the Child
         // handle, so even if the wait-thread races us we never observe a
@@ -245,22 +377,17 @@ impl ProcessManager {
             log::warn!("Failed to register service {} in runtime store: {}", service_id, e);
         }
 
-        // Store the process
-        {
-            let mut processes = self.processes.lock();
-            processes.insert(
-                service_id.clone(),
-                ProcessInfo {
-                    child,
-                    service_id: service_id.clone(),
-                    pid,
-                    active_mode: mode.clone(),
-                    active_arg_preset: arg_preset.clone(),
-                },
-            );
-        }
+        self.processes.lock().insert(
+            service_id.clone(),
+            ProcessInfo {
+                child,
+                service_id: service_id.clone(),
+                pid,
+                active_mode: mode.clone(),
+                active_arg_preset: arg_preset.clone(),
+            },
+        );
 
-        // Emit running status
         emitter.emit_service_status(
             &service_id,
             ServiceStatus::Running,
@@ -269,119 +396,75 @@ impl ProcessManager {
             arg_preset.clone(),
         );
 
-        // Spawn port poller — queries the OS for TCP ports the service (and its
-        // descendants) are listening on, emits when the set changes. Fast cadence
-        // for the first 15 seconds (catch services that bind shortly after spawn),
-        // then slower cadence (catch rebinds / late-bound ports without burning CPU).
-        {
-            let processes_pp = self.processes.clone();
-            let shutdown_pp = self.shutdown_flag.clone();
-            let emitter_pp = emitter.clone();
-            let service_id_pp = service_id.clone();
-            thread::spawn(move || {
-                let start = std::time::Instant::now();
-                let mut last_ports: Vec<u16> = Vec::new();
-                let mut emitted_at_least_once = false;
-                loop {
-                    if shutdown_pp.load(Ordering::SeqCst) {
-                        break;
-                    }
+        self.spawn_port_poller(emitter.clone(), service_id.clone());
 
-                    // If the service is gone from the processes map, the wait-thread
-                    // already cleaned up — exit silently and emit empty ports below.
-                    let pid_opt = {
-                        let processes = processes_pp.lock();
-                        processes.get(&service_id_pp).map(|p| p.pid)
-                    };
-                    let Some(pid) = pid_opt else {
-                        break;
-                    };
-
-                    let ports = crate::port_detector::get_listening_ports_for_pid_tree(pid)
-                        .unwrap_or_default();
-
-                    if !emitted_at_least_once || ports != last_ports {
-                        emitter_pp.emit_service_ports(&service_id_pp, ports.clone());
-                        last_ports = ports;
-                        emitted_at_least_once = true;
-                    }
-
-                    let elapsed_secs = start.elapsed().as_secs();
-                    let interval_ms = if elapsed_secs < 15 { 1500 } else { 5000 };
-                    thread::sleep(std::time::Duration::from_millis(interval_ms));
-                }
-                // Service is no longer running — emit an empty port list to clear UI.
-                if !shutdown_pp.load(Ordering::SeqCst) {
-                    emitter_pp.emit_service_ports(&service_id_pp, Vec::new());
-                }
-            });
-        }
-
-        // Spawn thread to wait for process exit
-        let processes = self.processes.clone();
-        let shutdown_flag = self.shutdown_flag.clone();
-        let service_id_exit = service_id.clone();
+        // Exit watcher
+        let exit_emitter = emitter.clone();
         let exit_mode = mode.clone();
         let exit_arg_preset = arg_preset.clone();
-        let runtime_store = self.runtime_store.clone();
-        thread::spawn(move || {
-            loop {
-                if shutdown_flag.load(Ordering::SeqCst) {
-                    break;
-                }
-
-                thread::sleep(std::time::Duration::from_millis(100));
-
-                let mut should_remove = false;
-                let mut exit_code = None;
-
-                {
-                    let mut processes_guard = processes.lock();
-                    if let Some(info) = processes_guard.get_mut(&service_id_exit) {
-                        match info.child.try_wait() {
-                            Ok(Some(status)) => {
-                                exit_code = status.code();
-                                should_remove = true;
-                            }
-                            Ok(None) => {
-                                // Still running
-                            }
-                            Err(_) => {
-                                should_remove = true;
-                            }
-                        }
-                    } else {
-                        // Process was removed (stopped manually or during shutdown)
-                        break;
-                    }
-                }
-
-                if should_remove {
-                    {
-                        let mut processes_guard = processes.lock();
-                        processes_guard.remove(&service_id_exit);
-                    }
-                    let _ = runtime_store.unregister(&service_id_exit);
-
-                    // Don't emit events during shutdown
-                    if !shutdown_flag.load(Ordering::SeqCst) {
-                        emitter.emit_service_status(
-                            &service_id_exit,
-                            ServiceStatus::Stopped,
-                            None,
-                            exit_mode.clone(),
-                            exit_arg_preset.clone(),
-                        );
-
-                        emitter.emit_service_exit(&service_id_exit, exit_code);
-                    }
-
-                    break;
-                }
-            }
-        });
+        let exit_id = service_id.clone();
+        watch_exit(
+            self.processes.clone(),
+            service_id.clone(),
+            |info| &mut info.child,
+            self.ptys.clone(),
+            tid,
+            self.shutdown_flag.clone(),
+            Some(self.runtime_store.clone()),
+            Box::new(move |exit_code| {
+                exit_emitter.emit_service_status(
+                    &exit_id,
+                    ServiceStatus::Stopped,
+                    None,
+                    exit_mode,
+                    exit_arg_preset,
+                );
+                exit_emitter.emit_service_exit(&exit_id, exit_code);
+            }),
+        );
 
         Ok(pid)
+    }
+
+    /// Queries the OS for TCP ports the service (and its descendants) are
+    /// listening on, emits when the set changes. Fast cadence for the first 15
+    /// seconds (catch services that bind shortly after spawn), then slower
+    /// cadence (catch rebinds / late-bound ports without burning CPU).
+    fn spawn_port_poller(&self, emitter: Arc<dyn ProcessEventEmitter>, service_id: String) {
+        let processes = self.processes.clone();
+        let shutdown = self.shutdown_flag.clone();
+        thread::spawn(move || {
+            let start = Instant::now();
+            let mut last_ports: Vec<u16> = Vec::new();
+            let mut emitted_at_least_once = false;
+            loop {
+                if shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
+                // If the service is gone from the processes map, the wait-thread
+                // already cleaned up — exit silently and emit empty ports below.
+                let pid_opt = processes.lock().get(&service_id).map(|p| p.pid);
+                let Some(pid) = pid_opt else {
+                    break;
+                };
+
+                let ports = crate::port_detector::get_listening_ports_for_pid_tree(pid)
+                    .unwrap_or_default();
+
+                if !emitted_at_least_once || ports != last_ports {
+                    emitter.emit_service_ports(&service_id, ports.clone());
+                    last_ports = ports;
+                    emitted_at_least_once = true;
+                }
+
+                let interval_ms = if start.elapsed().as_secs() < 15 { 1500 } else { 5000 };
+                thread::sleep(Duration::from_millis(interval_ms));
+            }
+            // Service is no longer running — emit an empty port list to clear UI.
+            if !shutdown.load(Ordering::SeqCst) {
+                emitter.emit_service_ports(&service_id, Vec::new());
+            }
+        });
     }
 
     pub fn stop_service(
@@ -390,17 +473,13 @@ impl ProcessManager {
         service_id: &str,
     ) -> Result<(), String> {
         // First, try the in-memory path (we spawned this process).
-        let owned = {
-            let mut processes = self.processes.lock();
-            processes.remove(service_id)
-        };
+        let owned = self.processes.lock().remove(service_id);
 
         let (stopped_mode, stopped_arg_preset) = if let Some(mut info) = owned {
             let mode = info.active_mode.clone();
             let preset = info.active_arg_preset.clone();
-            let _ = kill_process_tree(info.pid);
-            let _ = info.child.kill();
-            let _ = info.child.wait();
+            let tid = terminal_id(TerminalKind::Service, service_id);
+            self.terminate(&tid, &mut info.child, info.pid);
             (mode, preset)
         } else {
             // Not in our in-memory map — maybe started by another CortX
@@ -468,58 +547,23 @@ impl ProcessManager {
             }
         }
 
-        // Emit running status
         emitter.emit_script_status(&script_id, ScriptStatus::Running, None);
 
-        // Parse command
-        let (program, args) = parse_command(&command);
-
-        // Build command
-        let mut cmd = Command::new(&program);
-        cmd.args(&args)
-            .current_dir(&working_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        // Force UTF-8 output on Windows to avoid cp1252 encoding errors
-        #[cfg(target_os = "windows")]
-        {
-            cmd.env("PYTHONUTF8", "1");
-            cmd.env("PYTHONIOENCODING", "utf-8");
-        }
-
-        apply_spawn_flags(&mut cmd);
-
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("Failed to start script: {}", e))?;
-
-        let pid = child.id();
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-
+        let tid = terminal_id(TerminalKind::Script, &script_id);
+        let cmd = build_shell_command(&command, &working_dir, None);
         let log_path = self.runtime_store.log_path(&script_id);
-
-        if let Some(stdout) = stdout {
-            spawn_tee_reader(
-                stdout,
-                log_path.clone(),
-                emitter.clone(),
-                script_id.clone(),
-                LogStream::Stdout,
-                LogTarget::ProjectScript,
-            );
-        }
-        if let Some(stderr) = stderr {
-            spawn_tee_reader(
-                stderr,
-                log_path.clone(),
-                emitter.clone(),
-                script_id.clone(),
-                LogStream::Stderr,
-                LogTarget::ProjectScript,
-            );
-        }
+        let line_emitter = emitter.clone();
+        let line_id = script_id.clone();
+        let child = self.spawn_in_pty(
+            &tid,
+            cmd,
+            default_size(),
+            Some(log_path),
+            Box::new(move |line| {
+                line_emitter.emit_script_log(&line_id, LogStream::Stdout, line)
+            }),
+        )?;
+        let pid = child.process_id().unwrap_or(0);
 
         let entry = RuntimeEntry {
             id: script_id.clone(),
@@ -538,85 +582,39 @@ impl ProcessManager {
             log::warn!("Failed to register project script {} in runtime store: {}", script_id, e);
         }
 
-        // Store the process
-        {
-            let mut scripts = self.scripts.lock();
-            scripts.insert(
-                script_id.clone(),
-                ProcessInfo {
-                    child,
-                    service_id: script_id.clone(),
-                    pid,
-                    active_mode: None,
-                    active_arg_preset: None,
-                },
-            );
-        }
+        self.scripts.lock().insert(
+            script_id.clone(),
+            ProcessInfo {
+                child,
+                service_id: script_id.clone(),
+                pid,
+                active_mode: None,
+                active_arg_preset: None,
+            },
+        );
 
-        // Update status with PID
         emitter.emit_script_status(&script_id, ScriptStatus::Running, Some(pid));
 
-        // Spawn exit watcher
-        let scripts = self.scripts.clone();
-        let shutdown_flag = self.shutdown_flag.clone();
-        let script_id_exit = script_id.clone();
-        let runtime_store = self.runtime_store.clone();
-        thread::spawn(move || {
-            loop {
-                if shutdown_flag.load(Ordering::SeqCst) {
-                    break;
-                }
-
-                thread::sleep(std::time::Duration::from_millis(100));
-
-                let mut should_remove = false;
-                let mut exit_code = None;
-
-                {
-                    let mut scripts_guard = scripts.lock();
-                    if let Some(info) = scripts_guard.get_mut(&script_id_exit) {
-                        match info.child.try_wait() {
-                            Ok(Some(status)) => {
-                                exit_code = status.code();
-                                should_remove = true;
-                            }
-                            Ok(None) => {}
-                            Err(_) => {
-                                should_remove = true;
-                            }
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                if should_remove {
-                    {
-                        let mut scripts_guard = scripts.lock();
-                        scripts_guard.remove(&script_id_exit);
-                    }
-                    let _ = runtime_store.unregister(&script_id_exit);
-
-                    if !shutdown_flag.load(Ordering::SeqCst) {
-                        let success = exit_code.map(|c| c == 0).unwrap_or(false);
-
-                        emitter.emit_script_status(
-                            &script_id_exit,
-                            if success {
-                                ScriptStatus::Completed
-                            } else {
-                                ScriptStatus::Failed
-                            },
-                            None,
-                        );
-
-                        emitter.emit_script_exit(&script_id_exit, exit_code, success);
-                    }
-
-                    break;
-                }
-            }
-        });
+        let exit_emitter = emitter.clone();
+        let exit_id = script_id.clone();
+        watch_exit(
+            self.scripts.clone(),
+            script_id.clone(),
+            |info| &mut info.child,
+            self.ptys.clone(),
+            tid,
+            self.shutdown_flag.clone(),
+            Some(self.runtime_store.clone()),
+            Box::new(move |exit_code| {
+                let success = exit_code.map(|c| c == 0).unwrap_or(false);
+                exit_emitter.emit_script_status(
+                    &exit_id,
+                    if success { ScriptStatus::Completed } else { ScriptStatus::Failed },
+                    None,
+                );
+                exit_emitter.emit_script_exit(&exit_id, exit_code, success);
+            }),
+        );
 
         Ok(pid)
     }
@@ -626,15 +624,11 @@ impl ProcessManager {
         emitter: &dyn ProcessEventEmitter,
         script_id: &str,
     ) -> Result<(), String> {
-        let owned = {
-            let mut scripts = self.scripts.lock();
-            scripts.remove(script_id)
-        };
+        let owned = self.scripts.lock().remove(script_id);
 
         if let Some(mut info) = owned {
-            let _ = kill_process_tree(info.pid);
-            let _ = info.child.kill();
-            let _ = info.child.wait();
+            let tid = terminal_id(TerminalKind::Script, script_id);
+            self.terminate(&tid, &mut info.child, info.pid);
         } else {
             // Cross-instance fallback: kill by PID from the store.
             let entry = self
@@ -686,57 +680,26 @@ impl ProcessManager {
 
         emitter.emit_global_script_status(&script_id, ScriptStatus::Running, None);
 
-        let mut cmd = Command::new(&program);
-        cmd.args(&args)
-            .current_dir(&working_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        // Force UTF-8 output on Windows to avoid cp1252 encoding errors
-        #[cfg(target_os = "windows")]
-        {
-            cmd.env("PYTHONUTF8", "1");
-            cmd.env("PYTHONIOENCODING", "utf-8");
-        }
-
-        if let Some(env) = env_vars {
-            for (key, value) in env {
-                cmd.env(key, value);
-            }
-        }
-
-        apply_spawn_flags(&mut cmd);
-
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("Failed to start global script: {}", e))?;
-
-        let pid = child.id();
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-
+        let tid = terminal_id(TerminalKind::GlobalScript, &script_id);
+        let mut cmd = CommandBuilder::new(&program);
+        cmd.args(&args);
+        cmd.cwd(&working_dir);
+        apply_pty_env(&mut cmd, env_vars.as_ref());
         let log_path = self.runtime_store.log_path(&script_id);
-
-        if let Some(stdout) = stdout {
-            spawn_tee_reader(
-                stdout,
-                log_path.clone(),
-                emitter.clone(),
-                script_id.clone(),
-                LogStream::Stdout,
-                LogTarget::GlobalScript,
-            );
-        }
-        if let Some(stderr) = stderr {
-            spawn_tee_reader(
-                stderr,
-                log_path.clone(),
-                emitter.clone(),
-                script_id.clone(),
-                LogStream::Stderr,
-                LogTarget::GlobalScript,
-            );
-        }
+        let line_emitter = emitter.clone();
+        let line_id = script_id.clone();
+        let child = self
+            .spawn_in_pty(
+                &tid,
+                cmd,
+                default_size(),
+                Some(log_path),
+                Box::new(move |line| {
+                    line_emitter.emit_global_script_log(&line_id, LogStream::Stdout, line)
+                }),
+            )
+            .map_err(|e| e.replace("Failed to start process", "Failed to start global script"))?;
+        let pid = child.process_id().unwrap_or(0);
 
         let command_display = format!("{} {}", program, args.join(" "));
         let entry = RuntimeEntry {
@@ -756,82 +719,39 @@ impl ProcessManager {
             log::warn!("Failed to register global script {} in runtime store: {}", script_id, e);
         }
 
-        {
-            let mut global = self.global_scripts.lock();
-            global.insert(
-                script_id.clone(),
-                ProcessInfo {
-                    child,
-                    service_id: script_id.clone(),
-                    pid,
-                    active_mode: None,
-                    active_arg_preset: None,
-                },
-            );
-        }
+        self.global_scripts.lock().insert(
+            script_id.clone(),
+            ProcessInfo {
+                child,
+                service_id: script_id.clone(),
+                pid,
+                active_mode: None,
+                active_arg_preset: None,
+            },
+        );
 
         emitter.emit_global_script_status(&script_id, ScriptStatus::Running, Some(pid));
 
-        let global = self.global_scripts.clone();
-        let shutdown_flag = self.shutdown_flag.clone();
-        let script_id_exit = script_id.clone();
-        let runtime_store = self.runtime_store.clone();
-        thread::spawn(move || {
-            loop {
-                if shutdown_flag.load(Ordering::SeqCst) {
-                    break;
-                }
-
-                thread::sleep(std::time::Duration::from_millis(100));
-
-                let mut should_remove = false;
-                let mut exit_code = None;
-
-                {
-                    let mut global_guard = global.lock();
-                    if let Some(info) = global_guard.get_mut(&script_id_exit) {
-                        match info.child.try_wait() {
-                            Ok(Some(status)) => {
-                                exit_code = status.code();
-                                should_remove = true;
-                            }
-                            Ok(None) => {}
-                            Err(_) => {
-                                should_remove = true;
-                            }
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                if should_remove {
-                    {
-                        let mut global_guard = global.lock();
-                        global_guard.remove(&script_id_exit);
-                    }
-                    let _ = runtime_store.unregister(&script_id_exit);
-
-                    if !shutdown_flag.load(Ordering::SeqCst) {
-                        let success = exit_code.map(|c| c == 0).unwrap_or(false);
-
-                        emitter.emit_global_script_status(
-                            &script_id_exit,
-                            if success {
-                                ScriptStatus::Completed
-                            } else {
-                                ScriptStatus::Failed
-                            },
-                            None,
-                        );
-
-                        emitter.emit_global_script_exit(&script_id_exit, exit_code, success);
-                    }
-
-                    break;
-                }
-            }
-        });
+        let exit_emitter = emitter.clone();
+        let exit_id = script_id.clone();
+        watch_exit(
+            self.global_scripts.clone(),
+            script_id.clone(),
+            |info| &mut info.child,
+            self.ptys.clone(),
+            tid,
+            self.shutdown_flag.clone(),
+            Some(self.runtime_store.clone()),
+            Box::new(move |exit_code| {
+                let success = exit_code.map(|c| c == 0).unwrap_or(false);
+                exit_emitter.emit_global_script_status(
+                    &exit_id,
+                    if success { ScriptStatus::Completed } else { ScriptStatus::Failed },
+                    None,
+                );
+                exit_emitter.emit_global_script_exit(&exit_id, exit_code, success);
+            }),
+        );
 
         Ok(pid)
     }
@@ -841,15 +761,11 @@ impl ProcessManager {
         emitter: &dyn ProcessEventEmitter,
         script_id: &str,
     ) -> Result<(), String> {
-        let owned = {
-            let mut global = self.global_scripts.lock();
-            global.remove(script_id)
-        };
+        let owned = self.global_scripts.lock().remove(script_id);
 
         if let Some(mut info) = owned {
-            let _ = kill_process_tree(info.pid);
-            let _ = info.child.kill();
-            let _ = info.child.wait();
+            let tid = terminal_id(TerminalKind::GlobalScript, script_id);
+            self.terminate(&tid, &mut info.child, info.pid);
         } else {
             let entry = self
                 .runtime_store
@@ -876,6 +792,104 @@ impl ProcessManager {
     }
 
     // ========================================================================
+    // Interactive shells (GUI terminal tabs)
+    // ========================================================================
+
+    /// Open an interactive shell in a PTY. Returns its description; output
+    /// flows through the hub under `shell:<id>`.
+    pub fn spawn_shell(
+        &self,
+        emitter: Arc<dyn ProcessEventEmitter>,
+        request: ShellSpawnRequest,
+    ) -> Result<ShellInfo, String> {
+        let cwd = if request.cwd.trim().is_empty() {
+            home_dir_string()
+        } else {
+            request.cwd.clone()
+        };
+        if !Path::new(&cwd).is_dir() {
+            return Err(format!("Directory does not exist: {}", cwd));
+        }
+
+        let (program, args) = resolve_shell(request.shell.as_deref());
+        let mut cmd = CommandBuilder::new(&program);
+        cmd.args(&args);
+        cmd.cwd(&cwd);
+        apply_pty_env(&mut cmd, None);
+
+        let shell_id = uuid::Uuid::new_v4().to_string();
+        let tid = terminal_id(TerminalKind::Shell, &shell_id);
+        let size = PtySize {
+            rows: if request.rows == 0 { DEFAULT_PTY_ROWS } else { request.rows },
+            cols: if request.cols == 0 { DEFAULT_PTY_COLS } else { request.cols },
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+        let child = self
+            .spawn_in_pty(&tid, cmd, size, None, Box::new(|_| {}))
+            .map_err(|e| format!("{} ({})", e, program))?;
+        let pid = child.process_id().unwrap_or(0);
+
+        let info = ShellInfo {
+            id: shell_id.clone(),
+            pid,
+            cwd,
+            project_id: request.project_id,
+            program,
+            started_at: chrono::Utc::now(),
+        };
+
+        self.shells.lock().insert(
+            shell_id.clone(),
+            ShellEntry {
+                child,
+                info: info.clone(),
+            },
+        );
+
+        let exit_id = shell_id.clone();
+        watch_exit(
+            self.shells.clone(),
+            shell_id,
+            |entry| &mut entry.child,
+            self.ptys.clone(),
+            tid,
+            self.shutdown_flag.clone(),
+            None,
+            Box::new(move |exit_code| emitter.emit_shell_exit(&exit_id, exit_code)),
+        );
+
+        Ok(info)
+    }
+
+    /// Kill a shell (the tab was closed). No-op if it already exited.
+    pub fn kill_shell(&self, emitter: &dyn ProcessEventEmitter, shell_id: &str) -> Result<(), String> {
+        let owned = self.shells.lock().remove(shell_id);
+        if let Some(mut entry) = owned {
+            let tid = terminal_id(TerminalKind::Shell, shell_id);
+            let pid = entry.info.pid;
+            let _ = kill_process_tree(pid);
+            let _ = entry.child.kill();
+            let _ = entry.child.wait();
+            self.drop_pty(&tid);
+            emitter.emit_shell_exit(shell_id, None);
+        }
+        Ok(())
+    }
+
+    /// Shells still alive (for the GUI to re-attach after a reload).
+    pub fn list_shells(&self) -> Vec<ShellInfo> {
+        let mut shells: Vec<ShellInfo> = self
+            .shells
+            .lock()
+            .values()
+            .map(|e| e.info.clone())
+            .collect();
+        shells.sort_by(|a, b| a.started_at.cmp(&b.started_at));
+        shells
+    }
+
+    // ========================================================================
     // Shutdown
     // ========================================================================
 
@@ -884,32 +898,33 @@ impl ProcessManager {
         self.shutdown_flag.store(true, Ordering::SeqCst);
 
         // Give monitoring threads a moment to see the flag
-        thread::sleep(std::time::Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(50));
 
         // Collect all processes to kill
-        let processes_to_kill: Vec<(String, u32)> = {
-            let processes = self.processes.lock();
-            processes
-                .iter()
-                .map(|(id, info)| (id.clone(), info.pid))
-                .collect()
-        };
-
-        let scripts_to_kill: Vec<(String, u32)> = {
-            let scripts = self.scripts.lock();
-            scripts
-                .iter()
-                .map(|(id, info)| (id.clone(), info.pid))
-                .collect()
-        };
-
-        let global_scripts_to_kill: Vec<(String, u32)> = {
-            let global = self.global_scripts.lock();
-            global
-                .iter()
-                .map(|(id, info)| (id.clone(), info.pid))
-                .collect()
-        };
+        let processes_to_kill: Vec<(String, u32)> = self
+            .processes
+            .lock()
+            .iter()
+            .map(|(id, info)| (id.clone(), info.pid))
+            .collect();
+        let scripts_to_kill: Vec<(String, u32)> = self
+            .scripts
+            .lock()
+            .iter()
+            .map(|(id, info)| (id.clone(), info.pid))
+            .collect();
+        let global_scripts_to_kill: Vec<(String, u32)> = self
+            .global_scripts
+            .lock()
+            .iter()
+            .map(|(id, info)| (id.clone(), info.pid))
+            .collect();
+        let shells_to_kill: Vec<(String, u32)> = self
+            .shells
+            .lock()
+            .iter()
+            .map(|(id, e)| (id.clone(), e.info.pid))
+            .collect();
 
         // Unregister everything we own from the canonical store so a fresh
         // `cortx ps` doesn't see stale entries pointing at our soon-to-die
@@ -923,23 +938,18 @@ impl ProcessManager {
             let _ = self.runtime_store.unregister(id);
         }
 
-        // Kill all service processes
         for (service_id, pid) in &processes_to_kill {
             log::info!("Stopping service {} (PID: {})", service_id, pid);
             if let Err(e) = kill_process_tree_robust(*pid) {
                 log::error!("Failed to kill process tree for PID {}: {}", pid, e);
             }
         }
-
-        // Kill all script processes
         for (script_id, pid) in &scripts_to_kill {
             log::info!("Stopping script {} (PID: {})", script_id, pid);
             if let Err(e) = kill_process_tree_robust(*pid) {
                 log::error!("Failed to kill script process tree for PID {}: {}", pid, e);
             }
         }
-
-        // Kill all global script processes
         for (script_id, pid) in &global_scripts_to_kill {
             log::info!("Stopping global script {} (PID: {})", script_id, pid);
             if let Err(e) = kill_process_tree_robust(*pid) {
@@ -950,52 +960,55 @@ impl ProcessManager {
                 );
             }
         }
+        for (shell_id, pid) in &shells_to_kill {
+            log::info!("Closing shell {} (PID: {})", shell_id, pid);
+            if let Err(e) = kill_process_tree_robust(*pid) {
+                log::error!("Failed to kill shell process tree for PID {}: {}", pid, e);
+            }
+        }
 
         // Drain and cleanup child handles
-        {
-            let mut processes = self.processes.lock();
-            for (_, mut info) in processes.drain() {
-                let _ = info.child.kill();
-                let _ = info.child.wait();
-            }
+        for (_, mut info) in self.processes.lock().drain() {
+            let _ = info.child.kill();
+            let _ = info.child.wait();
+        }
+        for (_, mut info) in self.scripts.lock().drain() {
+            let _ = info.child.kill();
+            let _ = info.child.wait();
+        }
+        for (_, mut info) in self.global_scripts.lock().drain() {
+            let _ = info.child.kill();
+            let _ = info.child.wait();
+        }
+        for (_, mut entry) in self.shells.lock().drain() {
+            let _ = entry.child.kill();
+            let _ = entry.child.wait();
         }
 
-        {
-            let mut scripts = self.scripts.lock();
-            for (_, mut info) in scripts.drain() {
-                let _ = info.child.kill();
-                let _ = info.child.wait();
-            }
-        }
-
-        {
-            let mut global = self.global_scripts.lock();
-            for (_, mut info) in global.drain() {
-                let _ = info.child.kill();
-                let _ = info.child.wait();
-            }
-        }
+        // Close every PTY now that the children are gone. Take them out of
+        // the map first so the lock isn't held while ConPTY tears down.
+        let ptys: Vec<PtyIo> = self.ptys.lock().drain().map(|(_, io)| io).collect();
+        drop(ptys);
 
         // Final verification - try to kill any remaining processes
-        for (_, pid) in &processes_to_kill {
-            let _ = kill_process_tree_robust(*pid);
-        }
-        for (_, pid) in &scripts_to_kill {
-            let _ = kill_process_tree_robust(*pid);
-        }
-        for (_, pid) in &global_scripts_to_kill {
+        for (_, pid) in processes_to_kill
+            .iter()
+            .chain(scripts_to_kill.iter())
+            .chain(global_scripts_to_kill.iter())
+            .chain(shells_to_kill.iter())
+        {
             let _ = kill_process_tree_robust(*pid);
         }
 
-        log::info!("All services and scripts stopped");
+        log::info!("All services, scripts and shells stopped");
     }
 
     /// Check if any processes are still running
     pub fn has_running_processes(&self) -> bool {
-        let processes = self.processes.lock();
-        let scripts = self.scripts.lock();
-        let global = self.global_scripts.lock();
-        !processes.is_empty() || !scripts.is_empty() || !global.is_empty()
+        !self.processes.lock().is_empty()
+            || !self.scripts.lock().is_empty()
+            || !self.global_scripts.lock().is_empty()
+            || !self.shells.lock().is_empty()
     }
 }
 
@@ -1005,6 +1018,232 @@ impl Drop for ProcessManager {
             self.stop_all();
         }
     }
+}
+
+// ============================================================================
+// Exit watcher (shared by every kind of process)
+// ============================================================================
+
+/// Poll `try_wait` on the entry stored under `key` in `map`. When it exits:
+/// remove it from the map, unregister it from the runtime store, close its
+/// PTY, and run `on_exit` (unless we're shutting down). If the entry vanishes
+/// from the map first (stopped manually or during shutdown) the watcher just
+/// ends.
+#[allow(clippy::too_many_arguments)]
+fn watch_exit<T: Send + 'static>(
+    map: Arc<Mutex<HashMap<String, T>>>,
+    key: String,
+    child_of: fn(&mut T) -> &mut Box<dyn Child + Send + Sync>,
+    ptys: Arc<Mutex<HashMap<String, PtyIo>>>,
+    terminal_id: String,
+    shutdown_flag: Arc<AtomicBool>,
+    runtime_store: Option<Arc<RuntimeStore>>,
+    on_exit: Box<dyn FnOnce(Option<i32>) + Send>,
+) {
+    thread::spawn(move || loop {
+        if shutdown_flag.load(Ordering::SeqCst) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+
+        let outcome = {
+            let mut guard = map.lock();
+            match guard.get_mut(&key) {
+                Some(entry) => match child_of(entry).try_wait() {
+                    Ok(Some(status)) => Some(Some(status.exit_code() as i32)),
+                    Ok(None) => None,
+                    Err(_) => Some(None),
+                },
+                // Removed by stop_* / stop_all — nothing left to do.
+                None => break,
+            }
+        };
+
+        if let Some(exit_code) = outcome {
+            map.lock().remove(&key);
+            if let Some(store) = &runtime_store {
+                let _ = store.unregister(&key);
+            }
+            // Closing the PTY is what lets the reader thread finish on
+            // Windows; do it outside the map lock.
+            let io = ptys.lock().remove(&terminal_id);
+            drop(io);
+
+            if !shutdown_flag.load(Ordering::SeqCst) {
+                on_exit(exit_code);
+            }
+            break;
+        }
+    });
+}
+
+// ============================================================================
+// PTY reader: raw bytes → hub, de-ANSI'd lines → log file + emitter
+// ============================================================================
+
+fn spawn_pty_reader(
+    mut reader: Box<dyn Read + Send>,
+    hub: Arc<TerminalHub>,
+    terminal_id: String,
+    log_path: Option<PathBuf>,
+    on_line: Box<dyn Fn(String) + Send>,
+) {
+    thread::spawn(move || {
+        let mut log = log_path.and_then(|p| {
+            OpenOptions::new().create(true).append(true).open(p).ok()
+        });
+        let mut splitter = AnsiLineSplitter::new();
+        let mut buf = vec![0u8; 64 * 1024];
+
+        let deliver = |line: String, log: &mut Option<std::fs::File>| {
+            if let Some(file) = log.as_mut() {
+                let _ = writeln!(file, "{}", line);
+            }
+            on_line(line);
+        };
+
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let chunk = &buf[..n];
+                    hub.push(&terminal_id, chunk);
+                    for line in splitter.feed(chunk) {
+                        deliver(line, &mut log);
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+        if let Some(rest) = splitter.finish() {
+            deliver(rest, &mut log);
+        }
+    });
+}
+
+// ============================================================================
+// Command construction
+// ============================================================================
+
+fn default_size() -> PtySize {
+    PtySize {
+        rows: DEFAULT_PTY_ROWS,
+        cols: DEFAULT_PTY_COLS,
+        pixel_width: 0,
+        pixel_height: 0,
+    }
+}
+
+/// Wrap a free-form command line in the platform shell (`cmd /C` or `sh -c`)
+/// so pipes, `&&`, env expansion etc. keep working.
+fn build_shell_command(
+    command: &str,
+    working_dir: &str,
+    env_vars: Option<&HashMap<String, String>>,
+) -> CommandBuilder {
+    let (program, args) = parse_command(command);
+    let mut cmd = CommandBuilder::new(program);
+    cmd.args(args);
+    cmd.cwd(working_dir);
+    apply_pty_env(&mut cmd, env_vars);
+    cmd
+}
+
+/// Environment every PTY child gets: terminal identification so programs
+/// enable colours / truecolor, UTF-8 on Windows, plus the caller's own vars.
+fn apply_pty_env(cmd: &mut CommandBuilder, env_vars: Option<&HashMap<String, String>>) {
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("TERM_PROGRAM", "CortX");
+    // Force UTF-8 output on Windows to avoid cp1252 encoding errors
+    #[cfg(target_os = "windows")]
+    {
+        cmd.env("PYTHONUTF8", "1");
+        cmd.env("PYTHONIOENCODING", "utf-8");
+    }
+    if let Some(env) = env_vars {
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
+    }
+}
+
+fn parse_command(command: &str) -> (String, Vec<String>) {
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, run through cmd
+        (
+            "cmd".to_string(),
+            vec!["/C".to_string(), command.to_string()],
+        )
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // On Unix, run through sh
+        (
+            "sh".to_string(),
+            vec!["-c".to_string(), command.to_string()],
+        )
+    }
+}
+
+/// Pick the interactive shell for a new terminal tab.
+///
+/// An explicit command line from settings wins. Otherwise: PowerShell 7 if
+/// installed, else Windows PowerShell; `$SHELL` (login shell on macOS so PATH
+/// matches Terminal.app) else bash/sh.
+pub fn resolve_shell(explicit: Option<&str>) -> (String, Vec<String>) {
+    if let Some(spec) = explicit.map(str::trim).filter(|s| !s.is_empty()) {
+        let mut parts = crate::command_builder::split_args(spec);
+        if !parts.is_empty() {
+            let program = parts.remove(0);
+            return (program, parts);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if find_on_path("pwsh.exe").is_some() {
+            return ("pwsh.exe".to_string(), vec!["-NoLogo".to_string()]);
+        }
+        ("powershell.exe".to_string(), vec!["-NoLogo".to_string()])
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let shell = std::env::var("SHELL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| {
+                if Path::new("/bin/bash").exists() {
+                    "/bin/bash".to_string()
+                } else {
+                    "/bin/sh".to_string()
+                }
+            });
+        let args = if cfg!(target_os = "macos") {
+            vec!["-l".to_string()]
+        } else {
+            Vec::new()
+        };
+        (shell, args)
+    }
+}
+
+/// Locate an executable on PATH.
+pub fn find_on_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+fn home_dir_string() -> String {
+    directories::UserDirs::new()
+        .map(|u| u.home_dir().to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".to_string())
 }
 
 // ============================================================================
@@ -1032,7 +1271,7 @@ fn kill_process_tree_robust(pid: u32) -> Result<(), String> {
         .map_err(|e| format!("Failed to execute taskkill: {}", e))?;
 
     // Give Windows time to actually terminate the processes
-    thread::sleep(std::time::Duration::from_millis(100));
+    thread::sleep(Duration::from_millis(100));
 
     // Check if process still exists using tasklist
     let check = Command::new("tasklist")
@@ -1048,14 +1287,12 @@ fn kill_process_tree_robust(pid: u32) -> Result<(), String> {
                 "Process {} still running after first kill attempt, retrying...",
                 pid
             );
-            thread::sleep(std::time::Duration::from_millis(200));
-
+            thread::sleep(Duration::from_millis(200));
             let _ = Command::new("taskkill")
                 .args(["/F", "/T", "/PID", &pid.to_string()])
                 .creation_flags(0x08000000)
                 .output();
-
-            thread::sleep(std::time::Duration::from_millis(100));
+            thread::sleep(Duration::from_millis(100));
         }
     }
 
@@ -1084,13 +1321,13 @@ fn kill_process_tree_robust(pid: u32) -> Result<(), String> {
 /// Kill a process and all its child processes on Unix (basic version)
 #[cfg(not(target_os = "windows"))]
 fn kill_process_tree(pid: u32) -> Result<(), std::io::Error> {
-    // Try to kill the process group
+    // The PTY child is a session leader, so its pid is also its pgid.
     let _ = Command::new("kill")
         .args(["-TERM", &format!("-{}", pid)])
         .output();
 
     // Give it a moment, then force kill
-    thread::sleep(std::time::Duration::from_millis(100));
+    thread::sleep(Duration::from_millis(100));
 
     let _ = Command::new("kill")
         .args(["-KILL", &format!("-{}", pid)])
@@ -1107,7 +1344,7 @@ fn kill_process_tree_robust(pid: u32) -> Result<(), String> {
         .args(["-TERM", &format!("-{}", pid)])
         .output();
 
-    thread::sleep(std::time::Duration::from_millis(100));
+    thread::sleep(Duration::from_millis(100));
 
     // Check if still running
     let check = Command::new("kill")
@@ -1130,7 +1367,7 @@ fn kill_process_tree_robust(pid: u32) -> Result<(), String> {
             .args(["-KILL", &pid.to_string()])
             .output();
 
-        thread::sleep(std::time::Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(100));
     }
 
     // Use pkill as a fallback to kill any children that might have escaped
@@ -1141,74 +1378,232 @@ fn kill_process_tree_robust(pid: u32) -> Result<(), String> {
     Ok(())
 }
 
-// ============================================================================
-// Tee reader: write each child output line to the log file AND emit it via
-// the emitter for live UI consumers. Two writers (stdout + stderr threads)
-// each hold their own File handle so they don't share a Mutex.
-// ============================================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[derive(Clone, Copy)]
-enum LogTarget {
-    Service,
-    ProjectScript,
-    GlobalScript,
+    #[test]
+    fn resolve_shell_honours_explicit_command_line() {
+        let (program, args) = resolve_shell(Some("  /usr/bin/fish --login  "));
+        assert_eq!(program, "/usr/bin/fish");
+        assert_eq!(args, vec!["--login".to_string()]);
+    }
+
+    #[test]
+    fn resolve_shell_falls_back_when_explicit_is_blank() {
+        let (program, _) = resolve_shell(Some("   "));
+        assert!(!program.is_empty());
+    }
+
+    #[test]
+    fn build_shell_command_sets_terminal_env_and_cwd() {
+        let mut env = HashMap::new();
+        env.insert("FOO".to_string(), "bar".to_string());
+        let cmd = build_shell_command("echo hi", ".", Some(&env));
+        assert_eq!(cmd.get_env("TERM").unwrap(), "xterm-256color");
+        assert_eq!(cmd.get_env("FOO").unwrap(), "bar");
+        assert_eq!(cmd.get_cwd().unwrap(), ".");
+    }
 }
 
-fn spawn_tee_reader<R: std::io::Read + Send + 'static>(
-    source: R,
-    log_path: PathBuf,
-    emitter: Arc<dyn ProcessEventEmitter>,
-    id: String,
-    stream: LogStream,
-    target: LogTarget,
-) {
-    thread::spawn(move || {
-        let mut log = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-            .ok();
-        let reader = BufReader::new(source);
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-            if let Some(file) = log.as_mut() {
-                let _ = writeln!(file, "{}", line);
-            }
-            match target {
-                LogTarget::Service => emitter.emit_service_log(&id, stream.clone(), line),
-                LogTarget::ProjectScript => emitter.emit_script_log(&id, stream.clone(), line),
-                LogTarget::GlobalScript => {
-                    emitter.emit_global_script_log(&id, stream.clone(), line)
-                }
-            }
+/// End-to-end: spawn a real process in a real PTY on this machine and check
+/// the three outputs (raw hub scrollback, de-ANSI'd line events, log file).
+#[cfg(test)]
+mod pty_integration_tests {
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    #[derive(Default)]
+    struct RecordingEmitter {
+        script_lines: StdMutex<Vec<String>>,
+        script_exits: StdMutex<Vec<(Option<i32>, bool)>>,
+        shell_exits: StdMutex<Vec<Option<i32>>>,
+    }
+
+    impl ProcessEventEmitter for RecordingEmitter {
+        fn emit_service_log(&self, _: &str, _: LogStream, _: String) {}
+        fn emit_service_status(&self, _: &str, _: ServiceStatus, _: Option<u32>, _: Option<String>, _: Option<String>) {}
+        fn emit_service_exit(&self, _: &str, _: Option<i32>) {}
+        fn emit_script_log(&self, _: &str, _: LogStream, content: String) {
+            self.script_lines.lock().unwrap().push(content);
         }
-    });
-}
-
-// ============================================================================
-// Command parsing
-// ============================================================================
-
-fn parse_command(command: &str) -> (String, Vec<String>) {
-    #[cfg(target_os = "windows")]
-    {
-        // On Windows, run through cmd
-        (
-            "cmd".to_string(),
-            vec!["/C".to_string(), command.to_string()],
-        )
+        fn emit_script_status(&self, _: &str, _: ScriptStatus, _: Option<u32>) {}
+        fn emit_script_exit(&self, _: &str, exit_code: Option<i32>, success: bool) {
+            self.script_exits.lock().unwrap().push((exit_code, success));
+        }
+        fn emit_global_script_log(&self, _: &str, _: LogStream, _: String) {}
+        fn emit_global_script_status(&self, _: &str, _: ScriptStatus, _: Option<u32>) {}
+        fn emit_global_script_exit(&self, _: &str, _: Option<i32>, _: bool) {}
+        fn emit_shell_exit(&self, _: &str, exit_code: Option<i32>) {
+            self.shell_exits.lock().unwrap().push(exit_code);
+        }
     }
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        // On Unix, run through sh
-        (
-            "sh".to_string(),
-            vec!["-c".to_string(), command.to_string()],
-        )
+    fn wait_until(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if cond() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        cond()
+    }
+
+    #[test]
+    fn script_runs_in_a_pty_and_feeds_hub_lines_and_log_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::new(dir.path()).unwrap());
+        let pm = ProcessManager::new(store.clone());
+        let emitter = Arc::new(RecordingEmitter::default());
+
+        let pid = pm
+            .run_script(
+                emitter.clone(),
+                "script-1".to_string(),
+                dir.path().to_string_lossy().into_owned(),
+                "echo hello-from-pty".to_string(),
+                RuntimeMeta::new("test"),
+            )
+            .expect("spawn in pty");
+        assert!(pid > 0);
+
+        assert!(
+            wait_until(Duration::from_secs(15), || !emitter.script_exits.lock().unwrap().is_empty()),
+            "script never reported exit"
+        );
+        let (code, success) = emitter.script_exits.lock().unwrap()[0];
+        assert_eq!(code, Some(0));
+        assert!(success);
+
+        // Raw bytes reached the hub under the canonical terminal id...
+        let tid = terminal_id(TerminalKind::Script, "script-1");
+        assert!(
+            wait_until(Duration::from_secs(5), || String::from_utf8_lossy(&pm.terminal_hub().scrollback(&tid)).contains("hello-from-pty")),
+            "hub scrollback: {:?}",
+            String::from_utf8_lossy(&pm.terminal_hub().scrollback(&tid))
+        );
+        // ...the line splitter produced a clean line for the TUI / MCP...
+        assert!(
+            wait_until(Duration::from_secs(5), || emitter.script_lines.lock().unwrap().iter().any(|l| l.trim() == "hello-from-pty")),
+            "lines: {:?}",
+            emitter.script_lines.lock().unwrap()
+        );
+        // ...and the on-disk log has it too, without escape sequences.
+        let log = std::fs::read_to_string(store.log_path("script-1")).unwrap();
+        assert!(log.contains("hello-from-pty"), "log: {log:?}");
+        assert!(!log.contains('\x1b'), "log has escapes: {log:?}");
+
+        // The PTY is closed once the process is gone.
+        assert!(wait_until(Duration::from_secs(5), || !pm.has_terminal(&tid)));
+        assert!(!pm.is_script_running("script-1"));
+        pm.stop_all();
+    }
+
+    #[test]
+    fn shell_accepts_input_and_dies_on_kill() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::new(dir.path()).unwrap());
+        let pm = ProcessManager::new(store);
+        let emitter = Arc::new(RecordingEmitter::default());
+
+        // A plain `cmd` / `sh` is the most portable interactive shell.
+        let shell = if cfg!(windows) { "cmd.exe" } else { "sh" };
+        let info = pm
+            .spawn_shell(
+                emitter.clone(),
+                ShellSpawnRequest {
+                    cwd: dir.path().to_string_lossy().into_owned(),
+                    project_id: None,
+                    shell: Some(shell.to_string()),
+                    cols: 100,
+                    rows: 30,
+                },
+            )
+            .expect("spawn shell");
+        let tid = terminal_id(TerminalKind::Shell, &info.id);
+        assert!(pm.has_terminal(&tid));
+        assert_eq!(pm.list_shells().len(), 1);
+
+        pm.write_terminal(&tid, b"echo marker-42\r\n").unwrap();
+        assert!(
+            wait_until(Duration::from_secs(15), || {
+                // The echoed command line also contains the marker; require the
+                // output line itself (a whole line, once titles/colours are gone).
+                let out = crate::terminal::strip_ansi(&String::from_utf8_lossy(&pm.terminal_hub().scrollback(&tid)));
+                out.lines().any(|l| l.trim() == "marker-42")
+            }),
+            "scrollback: {:?}",
+            String::from_utf8_lossy(&pm.terminal_hub().scrollback(&tid))
+        );
+        pm.resize_terminal(&tid, 80, 24).unwrap();
+
+        pm.kill_shell(&*emitter, &info.id).unwrap();
+        assert!(!pm.has_terminal(&tid));
+        assert!(pm.list_shells().is_empty());
+        assert_eq!(emitter.shell_exits.lock().unwrap().len(), 1);
+        assert!(pm.write_terminal(&tid, b"x").is_err());
+        pm.stop_all();
     }
 }
 
+/// Windows-only probe: does the ConPTY in use pass an iTerm2 OSC 1337 image
+/// sequence through unchanged? (The inbox conhost drops it; the sideloaded
+/// Windows Terminal `conpty.dll` keeps it.) Ignored by default because the
+/// answer depends on which DLL sits next to the test binary.
+#[cfg(all(test, target_os = "windows"))]
+mod conpty_passthrough_probe {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn osc_1337_survives_conpty() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::new(dir.path()).unwrap());
+        let pm = ProcessManager::new(store);
+        struct Nop;
+        impl ProcessEventEmitter for Nop {
+            fn emit_service_log(&self, _: &str, _: LogStream, _: String) {}
+            fn emit_service_status(&self, _: &str, _: ServiceStatus, _: Option<u32>, _: Option<String>, _: Option<String>) {}
+            fn emit_service_exit(&self, _: &str, _: Option<i32>) {}
+            fn emit_script_log(&self, _: &str, _: LogStream, _: String) {}
+            fn emit_script_status(&self, _: &str, _: ScriptStatus, _: Option<u32>) {}
+            fn emit_script_exit(&self, _: &str, _: Option<i32>, _: bool) {}
+            fn emit_global_script_log(&self, _: &str, _: LogStream, _: String) {}
+            fn emit_global_script_status(&self, _: &str, _: ScriptStatus, _: Option<u32>) {}
+            fn emit_global_script_exit(&self, _: &str, _: Option<i32>, _: bool) {}
+        }
+        // Quoting through `cmd /C` is hopeless; use a script file instead.
+        let script = dir.path().join("probe.ps1");
+        std::fs::write(
+            &script,
+            // Windows PowerShell 5.1 has no `e escape; build ESC from its code.
+            "$e=[char]27
+[Console]::Write(\"$e]1337;File=inline=1:AAAA`a\")
+[Console]::Write(\"${e}Pq#0;2;0;0;0#0~~@@vv@@~~@@~~-$e\\\")
+'done'
+",
+        )
+        .unwrap();
+        pm.run_global_script(
+            Arc::new(Nop),
+            "probe".into(),
+            dir.path().to_string_lossy().into_owned(),
+            "powershell".into(),
+            vec!["-NoProfile".into(), "-ExecutionPolicy".into(), "Bypass".into(), "-File".into(), script.to_string_lossy().into_owned()],
+            None,
+            RuntimeMeta::new("p"),
+        )
+        .unwrap();
+        let tid = terminal_id(TerminalKind::GlobalScript, "probe");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline && pm.has_terminal(&tid) {
+            thread::sleep(Duration::from_millis(100));
+        }
+        let out = String::from_utf8_lossy(&pm.terminal_hub().scrollback(&tid)).into_owned();
+        eprintln!("PROBE OUTPUT: {:?}", out);
+        eprintln!("OSC1337 passed: {}", out.contains("1337;File=inline=1:AAAA"));
+        eprintln!("SIXEL passed: {}", out.contains("\x1bPq"));
+        assert!(out.contains("done"));
+    }
+}

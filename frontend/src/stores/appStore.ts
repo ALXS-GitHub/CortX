@@ -47,6 +47,7 @@ import type {
   ListAgentSessionsOptions,
 } from '@/types';
 import * as api from '@/lib/tauri';
+import { disposeTerminal } from '@/lib/terminalSessions';
 
 interface ServiceRuntime {
   status: ServiceStatus;
@@ -68,8 +69,19 @@ interface ScriptRuntime {
   lastSuccess?: boolean;
 }
 
+/** An interactive shell tab in the integrated terminal (PTY-backed). */
+export interface ShellRuntime {
+  status: 'running' | 'exited';
+  pid?: number;
+  cwd: string;
+  projectId?: string;
+  /** Program launched (`pwsh.exe`, `/bin/zsh`, ...). */
+  program: string;
+  exitCode?: number | null;
+}
+
 // Terminal entity — single source of truth for "which terminal is where, what state is it in"
-export type TerminalKind = 'service' | 'script' | 'global-script';
+export type TerminalKind = 'service' | 'script' | 'global-script' | 'shell';
 export type TerminalVisibility = 'visible' | 'hidden' | 'closed';
 
 export interface Terminal {
@@ -107,6 +119,9 @@ function parseTerminalId(id: string): { kind: TerminalKind; runtimeKey: string }
   }
   if (id.startsWith('script:')) {
     return { kind: 'script', runtimeKey: id.slice('script:'.length) };
+  }
+  if (id.startsWith('shell:')) {
+    return { kind: 'shell', runtimeKey: id.slice('shell:'.length) };
   }
   return null;
 }
@@ -216,6 +231,7 @@ interface AppState {
   globalScripts: GlobalScript[];
   tagDefinitions: TagDefinition[];
   globalScriptRuntimes: Map<string, ScriptRuntime>;
+  shellRuntimes: Map<string, ShellRuntime>;
   scriptsConfig: ScriptsConfig | null;
   selectedGlobalScriptId: string | null;
   isLoadingGlobalScripts: boolean;
@@ -287,6 +303,14 @@ interface AppState {
   deleteScript: (scriptId: string) => Promise<void>;
   runScript: (scriptId: string) => Promise<void>;
   stopScript: (scriptId: string) => Promise<void>;
+
+  // Actions - Interactive shells (integrated terminal tabs)
+  /** Spawn a shell (in the project's root when projectId is given) and open its tab. Resolves with the shell id. */
+  openShell: (options?: { projectId?: string; cwd?: string }) => Promise<string>;
+  killShell: (shellId: string) => Promise<void>;
+  markShellExited: (shellId: string, exitCode?: number | null) => void;
+  /** Re-discover shells still alive in the backend (after a reload). */
+  loadShells: () => Promise<void>;
 
   // Actions - Script runtime updates
   updateScriptStatus: (scriptId: string, status: ScriptStatus, pid?: number) => void;
@@ -448,6 +472,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   globalScripts: [],
   tagDefinitions: [],
   globalScriptRuntimes: new Map(),
+  shellRuntimes: new Map(),
   scriptsConfig: null,
   selectedGlobalScriptId: null,
   isLoadingGlobalScripts: false,
@@ -654,6 +679,64 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
+  // Interactive shells
+  openShell: async (options = {}) => {
+    const info = await api.spawnShell({ projectId: options.projectId, cwd: options.cwd });
+    set((state) => {
+      const shellRuntimes = new Map(state.shellRuntimes);
+      shellRuntimes.set(info.id, {
+        status: 'running',
+        pid: info.pid,
+        cwd: info.cwd,
+        projectId: info.projectId ?? undefined,
+        program: info.program,
+      });
+      return { shellRuntimes };
+    });
+    get().openTerminal('shell', info.id);
+    return info.id;
+  },
+
+  killShell: async (shellId) => {
+    await api.killShell(shellId);
+    // Status flips to 'exited' via the shell-exit event.
+  },
+
+  markShellExited: (shellId, exitCode) => {
+    set((state) => {
+      const existing = state.shellRuntimes.get(shellId);
+      if (!existing) return state;
+      const shellRuntimes = new Map(state.shellRuntimes);
+      shellRuntimes.set(shellId, { ...existing, status: 'exited', pid: undefined, exitCode });
+      return { shellRuntimes };
+    });
+  },
+
+  loadShells: async () => {
+    try {
+      const shells = await api.listShells();
+      set((state) => {
+        const shellRuntimes = new Map(state.shellRuntimes);
+        let terminals = state.terminals;
+        for (const info of shells) {
+          if (!shellRuntimes.has(info.id)) {
+            shellRuntimes.set(info.id, {
+              status: 'running',
+              pid: info.pid,
+              cwd: info.cwd,
+              projectId: info.projectId ?? undefined,
+              program: info.program,
+            });
+          }
+          terminals = ensureTerminal(terminals, 'shell', info.id);
+        }
+        return { shellRuntimes, terminals };
+      });
+    } catch (error) {
+      console.error('Failed to list shells:', error);
+    }
+  },
+
   // Launch actions
   startService: async (serviceId, mode, argPreset) => {
     try {
@@ -842,6 +925,15 @@ export const useAppStore = create<AppState>((set, get) => ({
    * is deleted (logs gone — matches the old "close = logs gone" behavior).
    */
   closeTerminal: (id) => {
+    // Side effects first: kill the shell process (if any), forget the backend
+    // scrollback and tear down the xterm session.
+    const current = get().terminals.get(id);
+    if (current?.kind === 'shell') {
+      api.killShell(current.runtimeKey).catch(() => {});
+    }
+    api.removeTerminal(id).catch(() => {});
+    disposeTerminal(id);
+
     set((state) => {
       const existing = state.terminals.get(id);
       if (!existing) return state;
@@ -854,9 +946,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       const serviceRuntimes = existing.kind === 'service' ? new Map(state.serviceRuntimes) : state.serviceRuntimes;
       const scriptRuntimes = existing.kind === 'script' ? new Map(state.scriptRuntimes) : state.scriptRuntimes;
       const globalScriptRuntimes = existing.kind === 'global-script' ? new Map(state.globalScriptRuntimes) : state.globalScriptRuntimes;
+      const shellRuntimes = existing.kind === 'shell' ? new Map(state.shellRuntimes) : state.shellRuntimes;
       if (existing.kind === 'service') (serviceRuntimes as Map<string, ServiceRuntime>).delete(existing.runtimeKey);
       else if (existing.kind === 'script') (scriptRuntimes as Map<string, ScriptRuntime>).delete(existing.runtimeKey);
       else if (existing.kind === 'global-script') (globalScriptRuntimes as Map<string, ScriptRuntime>).delete(existing.runtimeKey);
+      else if (existing.kind === 'shell') (shellRuntimes as Map<string, ShellRuntime>).delete(existing.runtimeKey);
 
       // Reassign pane active if needed
       let terminalPanes = state.terminalPanes;
@@ -880,9 +974,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           serviceRuntimes,
           scriptRuntimes,
           globalScriptRuntimes,
+          shellRuntimes,
         };
       }
-      return { terminals, terminalPanes, serviceRuntimes, scriptRuntimes, globalScriptRuntimes };
+      return { terminals, terminalPanes, serviceRuntimes, scriptRuntimes, globalScriptRuntimes, shellRuntimes };
     });
   },
 

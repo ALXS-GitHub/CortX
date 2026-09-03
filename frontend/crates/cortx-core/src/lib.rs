@@ -11,4 +11,5 @@ pub mod script_discovery;
 pub mod shell_init;
 pub mod shim;
 pub mod storage;
+pub mod terminal;
 pub mod tool_discovery;

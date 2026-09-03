@@ -2680,3 +2680,145 @@ pub fn create_project_from_session(
 pub fn get_agents_health(state: State<AppState>) -> Result<AgentsHealth, String> {
     Ok(state.agents.health())
 }
+
+// ============================================================================
+// Integrated terminal (PTY) commands
+// ============================================================================
+//
+// Every process the GUI starts runs in a PTY (see cortx_core::process_manager).
+// The xterm.js view for a terminal id (`service:<id>`, `script:<id>`,
+// `global-script:<id>`, `shell:<id>`) attaches a Channel here, receives the
+// raw scrollback as its first message, then live bytes as they arrive.
+
+use tauri::ipc::{Channel, InvokeResponseBody};
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalCapabilities {
+    /// Windows only: true when the bundled `conpty.dll` (Windows Terminal's
+    /// ConPTY, which passes Sixel / iTerm2 image sequences through) sits next
+    /// to the executable and will be picked over the inbox one.
+    pub conpty_sideloaded: bool,
+    pub platform: &'static str,
+}
+
+#[tauri::command]
+pub fn get_terminal_capabilities() -> TerminalCapabilities {
+    let conpty_sideloaded = if cfg!(target_os = "windows") {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|d| d.join("conpty.dll").is_file()))
+            .unwrap_or(false)
+    } else {
+        false
+    };
+    TerminalCapabilities {
+        conpty_sideloaded,
+        platform: std::env::consts::OS,
+    }
+}
+
+/// Subscribe a view to a terminal's output. The current scrollback is sent
+/// through `on_data` before any live bytes, so the view can simply write
+/// everything it receives in order. Returns a token for `detach_terminal`.
+#[tauri::command]
+pub fn attach_terminal(
+    state: State<AppState>,
+    terminal_id: String,
+    on_data: Channel<InvokeResponseBody>,
+) -> u64 {
+    let hub = state.process_manager.terminal_hub();
+    hub.attach(
+        &terminal_id,
+        Box::new(move |bytes: &[u8]| {
+            on_data
+                .send(InvokeResponseBody::Raw(bytes.to_vec()))
+                .is_ok()
+        }),
+    )
+}
+
+#[tauri::command]
+pub fn detach_terminal(state: State<AppState>, terminal_id: String, token: u64) {
+    state.process_manager.terminal_hub().detach(&terminal_id, token);
+}
+
+/// Keyboard input from the view. `data` is whatever xterm.js produced
+/// (UTF-8 text, control bytes, escape sequences for special keys).
+#[tauri::command]
+pub fn write_terminal(state: State<AppState>, terminal_id: String, data: String) -> Result<(), String> {
+    state
+        .process_manager
+        .write_terminal(&terminal_id, data.as_bytes())
+}
+
+#[tauri::command]
+pub fn resize_terminal(
+    state: State<AppState>,
+    terminal_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    // A view can exist for a process that already exited (or hasn't started
+    // yet); resizing then is meaningless, not an error.
+    if !state.process_manager.has_terminal(&terminal_id) {
+        return Ok(());
+    }
+    state.process_manager.resize_terminal(&terminal_id, cols, rows)
+}
+
+/// Drop the stored scrollback (the "Clear" button). Live output keeps flowing.
+#[tauri::command]
+pub fn clear_terminal_scrollback(state: State<AppState>, terminal_id: String) {
+    state.process_manager.terminal_hub().clear(&terminal_id);
+}
+
+/// Forget a terminal completely (tab closed for good).
+#[tauri::command]
+pub fn remove_terminal(state: State<AppState>, terminal_id: String) {
+    state.process_manager.terminal_hub().remove(&terminal_id);
+}
+
+#[tauri::command]
+pub fn spawn_shell(
+    app_handle: AppHandle,
+    state: State<AppState>,
+    cwd: Option<String>,
+    project_id: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+) -> Result<cortx_core::process_manager::ShellInfo, String> {
+    // Default cwd: the project's root when a project is given.
+    let cwd = match (cwd, &project_id) {
+        (Some(c), _) if !c.trim().is_empty() => c,
+        (_, Some(pid)) => state
+            .storage
+            .get_project(pid)
+            .map(|p| p.root_path)
+            .unwrap_or_default(),
+        _ => String::new(),
+    };
+    let shell = state.storage.get_settings().terminal.integrated_shell;
+    let emitter: Arc<dyn ProcessEventEmitter> = Arc::new(TauriEmitter::new(app_handle));
+    state.process_manager.spawn_shell(
+        emitter,
+        cortx_core::process_manager::ShellSpawnRequest {
+            cwd,
+            project_id,
+            shell,
+            cols: cols.unwrap_or(0),
+            rows: rows.unwrap_or(0),
+        },
+    )
+}
+
+#[tauri::command]
+pub fn kill_shell(app_handle: AppHandle, state: State<AppState>, shell_id: String) -> Result<(), String> {
+    let emitter = TauriEmitter::new(app_handle);
+    state.process_manager.kill_shell(&emitter, &shell_id)
+}
+
+#[tauri::command]
+pub fn list_shells(state: State<AppState>) -> Vec<cortx_core::process_manager::ShellInfo> {
+    state.process_manager.list_shells()
+}

@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Circle, FileCode, Terminal, X } from 'lucide-react';
+import { Circle, FileCode, SquareTerminal, Terminal, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { TerminalItem, TerminalType } from './types';
@@ -20,7 +20,7 @@ function StatusIndicator({ status, type }: { status: string; type?: TerminalType
     failed: 'text-red-500',
   };
 
-  const colors = type === 'script' ? scriptColors : serviceColors;
+  const colors = type === 'service' ? serviceColors : scriptColors;
 
   return (
     <Circle
@@ -85,11 +85,13 @@ export function SortableTerminalTab({
     >
       {terminal.type === 'script' ? (
         <FileCode className="size-3 text-muted-foreground shrink-0 pointer-events-none" />
+      ) : terminal.type === 'shell' ? (
+        <SquareTerminal className="size-3 text-muted-foreground shrink-0 pointer-events-none" />
       ) : (
         <Terminal className="size-3 text-muted-foreground shrink-0 pointer-events-none" />
       )}
       <StatusIndicator status={terminal.status} type={terminal.type} />
-      <span className="truncate pointer-events-none">{terminal.name}</span>
+      <span className="truncate pointer-events-none" title={terminal.cwd}>{terminal.name}</span>
       {terminal.type === 'service' && terminal.detectedPorts.length > 0 && (
         <span
           className="text-[10px] px-1 py-0.5 rounded bg-primary/20 text-primary font-mono shrink-0 pointer-events-none"

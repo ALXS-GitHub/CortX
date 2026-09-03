@@ -1,4 +1,4 @@
-import { Circle, FileCode, Terminal } from 'lucide-react';
+import { Circle, FileCode, SquareTerminal, Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { TerminalItem, TerminalType } from './types';
 
@@ -17,7 +17,7 @@ function StatusIndicator({ status, type }: { status: string; type?: TerminalType
     failed: 'text-red-500',
   };
 
-  const colors = type === 'script' ? scriptColors : serviceColors;
+  const colors = type === 'service' ? serviceColors : scriptColors;
 
   return (
     <Circle
@@ -37,6 +37,8 @@ export function TabDragOverlay({ terminal }: TabDragOverlayProps) {
     <div className="flex items-center gap-1.5 px-2 py-1.5 bg-card border rounded shadow-lg text-xs cursor-grabbing">
       {terminal.type === 'script' ? (
         <FileCode className="size-3 text-muted-foreground shrink-0" />
+      ) : terminal.type === 'shell' ? (
+        <SquareTerminal className="size-3 text-muted-foreground shrink-0" />
       ) : (
         <Terminal className="size-3 text-muted-foreground shrink-0" />
       )}

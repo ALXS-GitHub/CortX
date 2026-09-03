@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState, useCallback, useMemo, memo, Component, type ReactNode, Fragment } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, Component, type ReactNode, Fragment } from 'react';
 import { useAppStore, parseTerminalId, type TerminalPane } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,16 +20,23 @@ import {
   Terminal,
   FileCode,
   AlertTriangle,
-  ArrowDownToLine,
+  Plus,
+  SquareTerminal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import AnsiToHtml from 'ansi-to-html';
-import type { LogEntry } from '@/types';
-import { open } from '@tauri-apps/plugin-shell';
+import { toast } from 'sonner';
+import { XtermView } from './XtermView';
+import { clearTerminal } from '@/lib/terminalSessions';
 import { TerminalDndContext, type TerminalItem, type TerminalType } from './terminal-dnd';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableTerminalTab } from './terminal-dnd';
+
+/** Last path segment, tolerant of both separators and trailing slashes. */
+function basename(path: string): string {
+  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
 
 // Error boundary to prevent crashes from taking down the whole app
 interface ErrorBoundaryState {
@@ -73,98 +79,6 @@ class TerminalErrorBoundary extends Component<{ children: ReactNode; onReset: ()
 }
 
 // Create ANSI to HTML converter with dark theme colors
-const ansiConverter = new AnsiToHtml({
-  fg: '#d4d4d4',
-  bg: 'transparent',
-  colors: {
-    0: '#1e1e1e', // black
-    1: '#f44747', // red
-    2: '#6a9955', // green
-    3: '#dcdcaa', // yellow
-    4: '#569cd6', // blue
-    5: '#c586c0', // magenta
-    6: '#4ec9b0', // cyan
-    7: '#d4d4d4', // white
-    8: '#808080', // bright black
-    9: '#f44747', // bright red
-    10: '#6a9955', // bright green
-    11: '#dcdcaa', // bright yellow
-    12: '#569cd6', // bright blue
-    13: '#c586c0', // bright magenta
-    14: '#4ec9b0', // bright cyan
-    15: '#ffffff', // bright white
-  },
-});
-
-// URL regex pattern for detecting links
-const urlRegex = /(https?:\/\/[^\s<>"')\],;]+)/g;
-
-// ANSI escape code pattern for stripping
-const ansiRegex = /\x1b\[[0-9;]*m/g;
-
-// Cache for processed terminal content - avoids expensive re-computation
-// Using WeakRef approach isn't suitable here, so we use LRU-style cache
-const processedContentCache = new Map<string, string>();
-const MAX_CACHE_SIZE = 2000; // Allow caching ~2x max logs per terminal
-
-// Process terminal output: detect URLs in raw content, then convert ANSI and wrap URLs
-function processTerminalContent(rawContent: string): string {
-  // Check cache first
-  const cached = processedContentCache.get(rawContent);
-  if (cached !== undefined) {
-    return cached;
-  }
-
-  let html: string;
-
-  try {
-    // First, find URLs in raw content BEFORE ANSI conversion
-    // This prevents ANSI codes that colorize parts of URLs from breaking detection
-    const urlMatches: string[] = [];
-    const contentWithPlaceholders = rawContent.replace(urlRegex, (url) => {
-      const index = urlMatches.length;
-      urlMatches.push(url);
-      return `__URL_${index}__`;
-    });
-
-    // Convert ANSI to HTML
-    html = ansiConverter.toHtml(contentWithPlaceholders);
-
-    // Also clean up any orphaned bracket sequences in the HTML output
-    html = html.replace(/\[([0-9;]*)m/g, '');
-
-    // Replace placeholders with clickable links
-    html = html.replace(/__URL_(\d+)__/g, (_, indexStr) => {
-      const rawUrl = urlMatches[parseInt(indexStr)];
-      // Strip ANSI codes from the URL for clean display and href
-      const cleanUrl = rawUrl.replace(ansiRegex, '');
-      const escapedUrl = cleanUrl.replace(/"/g, '&quot;');
-      return `<span class="terminal-link" data-url="${escapedUrl}">${cleanUrl}</span>`;
-    });
-  } catch (error) {
-    // Fallback: just escape HTML and return plain text
-    console.error('Error processing terminal content:', error);
-    html = rawContent
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  }
-
-  // Manage cache size - remove oldest entries if too large
-  if (processedContentCache.size >= MAX_CACHE_SIZE) {
-    // Delete first 500 entries (oldest)
-    const keysToDelete = Array.from(processedContentCache.keys()).slice(0, 500);
-    for (const key of keysToDelete) {
-      processedContentCache.delete(key);
-    }
-  }
-
-  // Cache the result
-  processedContentCache.set(rawContent, html);
-
-  return html;
-}
-
 // Droppable pane component with edge drop zones
 function DroppablePaneContent({
   pane,
@@ -177,7 +91,6 @@ function DroppablePaneContent({
   onRemovePane,
   onFocusPane,
   showRemoveButton,
-  handleTerminalClick,
 }: {
   pane: TerminalPane;
   paneTerminals: TerminalItem[];
@@ -189,49 +102,7 @@ function DroppablePaneContent({
   onRemovePane: () => void;
   onFocusPane: () => void;
   showRemoveButton: boolean;
-  handleTerminalClick: (e: React.MouseEvent) => void;
 }) {
-  // Scroll state for this pane
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const [userScrolledUp, setUserScrolledUp] = useState(false);
-
-  // Scroll to bottom function
-  const scrollToBottom = useCallback(() => {
-    if (!scrollAreaRef.current) return;
-    const viewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
-    if (viewport) {
-      viewport.scrollTop = viewport.scrollHeight;
-    }
-    setUserScrolledUp(false);
-  }, []);
-
-  // Handle scroll events to detect if user scrolled up
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLDivElement;
-    const { scrollTop, scrollHeight, clientHeight } = target;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
-    setUserScrolledUp(!isAtBottom);
-  }, []);
-
-  // Auto-scroll when logs change (only if not scrolled up)
-  useEffect(() => {
-    if (!userScrolledUp && activeTerminal) {
-      requestAnimationFrame(() => {
-        scrollToBottom();
-      });
-    }
-  }, [activeTerminal?.logs.length, userScrolledUp, scrollToBottom]);
-
-  // Scroll to bottom when switching active terminal in this pane
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        scrollToBottom();
-      });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [pane.activeTerminalId, scrollToBottom]);
-
   // Main pane drop zone (for dropping into center)
   const { setNodeRef: setPaneRef, isOver: isOverPane } = useDroppable({
     id: `pane-drop-${pane.id}`,
@@ -339,43 +210,11 @@ function DroppablePaneContent({
         </div>
       </div>
 
-      {/* Pane content - shows active terminal's logs */}
+      {/* Pane content: the persistent xterm.js session for the active tab */}
       {activeTerminal ? (
         <TerminalErrorBoundary onReset={() => onClearLogs(activeTerminal.id)}>
-          <div ref={scrollAreaRef} className="flex-1 min-h-0 relative">
-            {/* Absolute container gives ScrollArea explicit dimensions */}
-            <div className="absolute inset-0">
-              <ScrollArea
-                className="h-full w-full"
-                onScrollCapture={handleScroll}
-              >
-                <div
-                  className="p-2 font-mono text-xs space-y-0.5"
-                  onClick={handleTerminalClick}
-                >
-                  {activeTerminal.logs.length === 0 ? (
-                    <div className="text-muted-foreground">Waiting for output...</div>
-                  ) : (
-                    <TerminalLogs logs={activeTerminal.logs} />
-                  )}
-                </div>
-              </ScrollArea>
-            </div>
-            {/* Scroll to bottom button */}
-            {userScrolledUp && (
-              <Button
-                variant="secondary"
-                size="icon-sm"
-                className="absolute bottom-2 right-4 z-10 shadow-md opacity-90 hover:opacity-100"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  scrollToBottom();
-                }}
-                title="Scroll to bottom"
-              >
-                <ArrowDownToLine className="size-4" />
-              </Button>
-            )}
+          <div className="flex-1 min-h-0 relative">
+            <XtermView terminalId={activeTerminal.id} autoFocus={isFocused} />
           </div>
         </TerminalErrorBoundary>
       ) : (
@@ -408,6 +247,10 @@ export function TerminalPanel() {
     globalScriptRuntimes,
     stopGlobalScript,
     clearGlobalScriptLogs,
+    shellRuntimes,
+    openShell,
+    killShell,
+    selectedProjectId,
     // Multi-pane state
     terminalPanes,
     focusedPaneId,
@@ -555,8 +398,30 @@ export function TerminalPanel() {
       });
     }
 
+    // Add interactive shells
+    for (const [shellId, runtime] of shellRuntimes.entries()) {
+      const project = runtime.projectId ? projects.find((p) => p.id === runtime.projectId) : undefined;
+      items.push({
+        id: `shell:${shellId}`,
+        type: 'shell',
+        name: `${basename(runtime.program).replace(/\.exe$/i, '')} · ${basename(runtime.cwd)}`,
+        projectName: project?.name ?? '',
+        projectId: project?.id ?? '',
+        status:
+          runtime.status === 'running'
+            ? 'running'
+            : runtime.exitCode === 0 || runtime.exitCode == null
+              ? 'completed'
+              : 'failed',
+        logs: [],
+        detectedPorts: [],
+        lastExitCode: runtime.exitCode ?? undefined,
+        cwd: runtime.cwd,
+      });
+    }
+
     return items;
-  }, [serviceRuntimes, scriptRuntimes, globalScriptRuntimes, globalScripts, getServiceInfo, getScriptInfo]);
+  }, [serviceRuntimes, scriptRuntimes, globalScriptRuntimes, shellRuntimes, globalScripts, projects, getServiceInfo, getScriptInfo]);
 
   // Filter `allTerminals` using the canonical Terminal entity visibility.
   const visibleTerminals = useMemo(() => {
@@ -596,10 +461,11 @@ export function TerminalPanel() {
     if (!activeTerminalId) return;
     const parsed = resolveTerminal(activeTerminalId);
     if (!parsed) return;
-    if (parsed.kind === 'global-script') await stopGlobalScript(parsed.runtimeKey);
+    if (parsed.kind === 'shell') await killShell(parsed.runtimeKey);
+    else if (parsed.kind === 'global-script') await stopGlobalScript(parsed.runtimeKey);
     else if (parsed.kind === 'script') await stopScript(parsed.runtimeKey);
     else await stopService(parsed.runtimeKey);
-  }, [activeTerminalId, resolveTerminal, stopScript, stopService, stopGlobalScript]);
+  }, [activeTerminalId, resolveTerminal, stopScript, stopService, stopGlobalScript, killShell]);
 
   // Hide terminal (removes from pane, runtime preserved — can be restored from tray).
   const handleHideTerminal = useCallback((id: string) => {
@@ -618,10 +484,27 @@ export function TerminalPanel() {
     if (!activeTerminalId) return;
     const parsed = resolveTerminal(activeTerminalId);
     if (!parsed) return;
+    clearTerminal(activeTerminalId);
     if (parsed.kind === 'global-script') clearGlobalScriptLogs(parsed.runtimeKey);
     else if (parsed.kind === 'script') clearScriptLogs(parsed.runtimeKey);
-    else clearServiceLogs(parsed.runtimeKey);
+    else if (parsed.kind === 'service') clearServiceLogs(parsed.runtimeKey);
   }, [activeTerminalId, resolveTerminal, clearScriptLogs, clearServiceLogs, clearGlobalScriptLogs]);
+
+  // Open a new interactive shell. Working directory = the active tab's project,
+  // else the project selected in the sidebar, else the home directory.
+  const newShellProjectId = activeProjectId || selectedProjectId || undefined;
+  const newShellProjectName = useMemo(
+    () => (newShellProjectId ? projects.find((p) => p.id === newShellProjectId)?.name : undefined),
+    [newShellProjectId, projects]
+  );
+  const handleNewShell = useCallback(async () => {
+    try {
+      await openShell({ projectId: newShellProjectId });
+    } catch (error) {
+      console.error('Failed to open shell:', error);
+      toast.error(`Failed to open terminal: ${String(error)}`);
+    }
+  }, [openShell, newShellProjectId]);
 
   // Get current terminal info (UI item for the focused pane's active tab)
   const currentTerminal = useMemo(() => {
@@ -638,22 +521,6 @@ export function TerminalPanel() {
       return currentTerminal.status === 'running';
     }
   }, [currentTerminal]);
-
-  // Handle link clicks in terminal output
-  const handleTerminalClick = useCallback(async (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.classList.contains('terminal-link')) {
-      e.preventDefault();
-      const url = target.dataset.url;
-      if (url) {
-        try {
-          await open(url);
-        } catch (error) {
-          console.error('Failed to open URL:', error);
-        }
-      }
-    }
-  }, []);
 
   // Pane resize handlers
   const panesContainerRef = useRef<HTMLDivElement>(null);
@@ -735,9 +602,10 @@ export function TerminalPanel() {
   const handleClearPaneLogs = useCallback((id: string) => {
     const parsed = resolveTerminal(id);
     if (!parsed) return;
+    clearTerminal(id);
     if (parsed.kind === 'global-script') clearGlobalScriptLogs(parsed.runtimeKey);
     else if (parsed.kind === 'script') clearScriptLogs(parsed.runtimeKey);
-    else clearServiceLogs(parsed.runtimeKey);
+    else if (parsed.kind === 'service') clearServiceLogs(parsed.runtimeKey);
   }, [resolveTerminal, clearScriptLogs, clearServiceLogs, clearGlobalScriptLogs]);
 
   if (!terminalPanelOpen) {
@@ -785,6 +653,15 @@ export function TerminalPanel() {
             </span>
           </div>
           <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={handleNewShell}
+              title={newShellProjectName ? `New terminal in ${newShellProjectName}` : 'New terminal'}
+            >
+              <Plus className="size-4" />
+            </Button>
+
             {/* Hidden terminals dropdown */}
             {hiddenTerminals.length > 0 && (
               <DropdownMenu>
@@ -798,6 +675,8 @@ export function TerminalPanel() {
                     <DropdownMenuItem key={item.id} onClick={() => handleShowTerminal(item)}>
                       {item.type === 'script' ? (
                         <FileCode className="size-3 mr-2 text-muted-foreground" />
+                      ) : item.type === 'shell' ? (
+                        <SquareTerminal className="size-3 mr-2 text-muted-foreground" />
                       ) : (
                         <Terminal className="size-3 mr-2 text-muted-foreground" />
                       )}
@@ -829,7 +708,13 @@ export function TerminalPanel() {
                     variant="ghost"
                     size="icon-sm"
                     onClick={handleStopCurrent}
-                    title={currentTerminal.type === 'script' ? 'Stop script' : 'Stop service'}
+                    title={
+                      currentTerminal.type === 'shell'
+                        ? 'Kill shell'
+                        : currentTerminal.type === 'service'
+                          ? 'Stop service'
+                          : 'Stop script'
+                    }
                   >
                     <Square className="size-3.5" />
                   </Button>
@@ -869,12 +754,16 @@ export function TerminalPanel() {
           )}
         >
           {visibleTerminals.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground">
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-foreground">
               <p>
                 {hiddenTerminals.length > 0
                   ? 'All terminals are hidden. Click the eye icon to show them.'
-                  : 'No active terminals. Start a service or script to see output here.'}
+                  : 'No active terminals. Start a service or script, or open a shell.'}
               </p>
+              <Button variant="outline" size="sm" onClick={handleNewShell} className="gap-1.5">
+                <Plus className="size-3.5" />
+                {newShellProjectName ? `New terminal in ${newShellProjectName}` : 'New terminal'}
+              </Button>
             </div>
           ) : (
             <>
@@ -900,7 +789,6 @@ export function TerminalPanel() {
                         onRemovePane={() => removePane(pane.id)}
                         onFocusPane={() => focusPane(pane.id)}
                         showRemoveButton={terminalPanes.length > 1}
-                        handleTerminalClick={handleTerminalClick}
                       />
                     </div>
 
@@ -922,32 +810,6 @@ export function TerminalPanel() {
   );
 }
 
-// Memoized log line component to prevent unnecessary re-renders
-const LogLine = memo(function LogLine({ log }: { log: LogEntry }) {
-  return (
-    <div
-      className={cn(
-        'whitespace-pre-wrap break-all',
-        log.stream === 'stderr' && 'text-red-400'
-      )}
-      dangerouslySetInnerHTML={{
-        __html: processTerminalContent(log.content),
-      }}
-    />
-  );
-});
-
-// Memoized terminal logs component - only re-renders when logs array changes
-const TerminalLogs = memo(function TerminalLogs({ logs }: { logs: LogEntry[] }) {
-  return (
-    <>
-      {logs.map((log, index) => (
-        <LogLine key={index} log={log} />
-      ))}
-    </>
-  );
-});
-
 function StatusIndicator({ status, type }: { status: string; type?: TerminalType }) {
   // Service statuses: stopped, starting, running, error
   // Script statuses: idle, running, completed, failed
@@ -965,7 +827,7 @@ function StatusIndicator({ status, type }: { status: string; type?: TerminalType
     failed: 'text-red-500',
   };
 
-  const colors = type === 'script' ? scriptColors : serviceColors;
+  const colors = type === 'service' ? serviceColors : scriptColors;
 
   return (
     <Circle

@@ -98,6 +98,9 @@ export interface TerminalConfig {
   preset: TerminalPreset;
   customPath: string;
   customArgs: string[];
+  /** Shell launched by "new terminal" tabs in the integrated terminal, as a
+   *  command line (e.g. `pwsh -NoLogo`, `/bin/zsh -l`). Empty = auto-detect. */
+  integratedShell?: string;
 }
 
 export interface AppearanceConfig {
@@ -141,6 +144,27 @@ export interface LogEntry {
   timestamp: string;
   stream: LogStream;
   content: string;
+}
+
+// Integrated terminal (PTY) — see cortx_core::process_manager / terminal
+export interface ShellInfo {
+  id: string;
+  pid: number;
+  cwd: string;
+  projectId?: string | null;
+  program: string;
+  startedAt: string;
+}
+
+export interface ShellExitPayload {
+  shellId: string;
+  exitCode?: number | null;
+}
+
+export interface TerminalCapabilities {
+  /** Windows only: the bundled Windows Terminal ConPTY (image passthrough) is in use. */
+  conptySideloaded: boolean;
+  platform: string;
 }
 
 // Event payloads from Tauri

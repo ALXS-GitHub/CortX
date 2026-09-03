@@ -1,6 +1,6 @@
 import type { ServiceStatus, ScriptStatus, LogEntry } from '@/types';
 
-export type TerminalType = 'service' | 'script' | 'global-script';
+export type TerminalType = 'service' | 'script' | 'global-script' | 'shell';
 
 export interface TerminalItem {
   id: string;
@@ -14,6 +14,8 @@ export interface TerminalItem {
   activeMode?: string;
   lastExitCode?: number;
   lastSuccess?: boolean;
+  /** Shell tabs: working directory the shell was opened in. */
+  cwd?: string;
 }
 
 export interface DragData {

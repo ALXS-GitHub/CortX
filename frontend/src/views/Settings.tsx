@@ -132,6 +132,7 @@ export function Settings() {
   const [terminalPreset, setTerminalPreset] = useState<TerminalPreset>('windowsterminal');
   const [customPath, setCustomPath] = useState('');
   const [customArgs, setCustomArgs] = useState('');
+  const [integratedShell, setIntegratedShell] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [launchMethod, setLaunchMethod] = useState<'clipboard' | 'external' | 'integrated'>('integrated');
   const [toolboxBaseUrl, setToolboxBaseUrl] = useState('');
@@ -164,6 +165,7 @@ export function Settings() {
       setTerminalPreset(settings.terminal.preset);
       setCustomPath(settings.terminal.customPath);
       setCustomArgs(settings.terminal.customArgs.join(' '));
+      setIntegratedShell(settings.terminal.integratedShell ?? '');
       setTheme(settings.appearance.theme);
       setLaunchMethod(settings.defaults.launchMethod);
       setToolboxBaseUrl(settings.toolboxBaseUrl ?? '');
@@ -360,6 +362,7 @@ export function Settings() {
         preset: terminalPreset,
         customPath: customPath,
         customArgs: customArgs.split(' ').filter(Boolean),
+        integratedShell: integratedShell.trim() || undefined,
       },
       appearance: {
         theme,
@@ -535,6 +538,42 @@ export function Settings() {
               </p>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Integrated terminal */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Integrated Terminal</CardTitle>
+          <CardDescription>
+            The terminal panel runs every service, script and shell tab in a real PTY. Configure the
+            shell used by the "New terminal" button.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="integrated-shell">Shell</Label>
+            <Input
+              id="integrated-shell"
+              value={integratedShell}
+              onChange={(e) => {
+                setIntegratedShell(e.target.value);
+                setHasChanges(true);
+              }}
+              placeholder={
+                navigator.userAgent.includes('Windows')
+                  ? 'Auto (pwsh -NoLogo, falls back to powershell)'
+                  : 'Auto ($SHELL)'
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              Command line of the shell to launch, e.g.{' '}
+              <code className="bg-muted px-1 rounded">pwsh -NoLogo</code>,{' '}
+              <code className="bg-muted px-1 rounded">nu</code> or{' '}
+              <code className="bg-muted px-1 rounded">/bin/zsh -l</code>. Leave empty to auto-detect.
+              Applies to newly opened tabs.
+            </p>
+          </div>
         </CardContent>
       </Card>
 
