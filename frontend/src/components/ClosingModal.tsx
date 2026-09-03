@@ -16,8 +16,10 @@ export function ClosingModal() {
     let unlisten: (() => void) | undefined;
 
     const setup = async () => {
-      unlisten = await listen<boolean>('app-closing', () => {
-        setIsClosing(true);
+      // Payload: whether processes are still running (the modal explains the
+      // wait); a quick quit with nothing to stop shows nothing.
+      unlisten = await listen<boolean>('app-closing', (event) => {
+        if (event.payload) setIsClosing(true);
       });
     };
 

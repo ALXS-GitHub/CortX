@@ -2908,6 +2908,21 @@ pub fn save_terminal_snapshots(state: State<AppState>, terminal_ids: Option<Vec<
     );
 }
 
+/// Snapshot produced by the GUI: the xterm buffer serialised as plain lines
+/// with colours (no cursor movement), which replays cleanly at any width.
+/// Preferred over the backend's raw PTY tail when fresh.
+#[tauri::command]
+pub fn store_terminal_snapshot(state: State<AppState>, terminal_id: String, text: String) {
+    if !state.storage.get_settings().terminal.restore_scrollback {
+        return;
+    }
+    cortx_core::terminal::snapshot::store(
+        state.storage.app_dir().join("runtime").as_path(),
+        &terminal_id,
+        text.as_bytes(),
+    );
+}
+
 /// Drop snapshots of terminals that are no longer in the layout.
 #[tauri::command]
 pub fn prune_terminal_snapshots(state: State<AppState>, keep: Vec<String>) {

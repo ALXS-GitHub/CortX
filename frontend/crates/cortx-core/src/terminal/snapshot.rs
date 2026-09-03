@@ -54,8 +54,44 @@ pub fn tail_lines(bytes: &[u8], max_lines: usize) -> &[u8] {
     tail
 }
 
-/// Write the snapshot of every terminal in `ids` (or all hub terminals when
-/// `ids` is `None`). Missing / empty scrollbacks remove a stale file.
+/// A snapshot written by the GUI (a serialised xterm buffer: plain lines
+/// with colours, no cursor movement) is preferred over the raw PTY tail; the
+/// raw tail only fills in when the GUI's copy is older than this.
+const GUI_SNAPSHOT_FRESH: std::time::Duration = std::time::Duration::from_secs(150);
+
+/// Store a snapshot produced by the GUI (see `terminalSnapshots.ts`).
+pub fn store(runtime_dir: &Path, terminal_id: &str, bytes: &[u8]) {
+    let path = file_for(runtime_dir, terminal_id);
+    if bytes.is_empty() {
+        let _ = fs::remove_file(&path);
+        return;
+    }
+    if fs::create_dir_all(snapshots_dir(runtime_dir)).is_err() {
+        return;
+    }
+    let capped = if bytes.len() > MAX_SNAPSHOT_BYTES {
+        &bytes[bytes.len() - MAX_SNAPSHOT_BYTES..]
+    } else {
+        bytes
+    };
+    let tmp = path.with_extension("bin.tmp");
+    if fs::write(&tmp, capped).is_ok() {
+        let _ = fs::rename(&tmp, &path);
+    }
+}
+
+fn is_fresh(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .map(|age| age < GUI_SNAPSHOT_FRESH)
+        .unwrap_or(false)
+}
+
+/// Write the raw PTY tail of every terminal in `ids` (or all hub terminals
+/// when `ids` is `None`), unless the GUI stored a fresh snapshot for it.
+/// Missing / empty scrollbacks remove a stale file.
 pub fn save_all(hub: &TerminalHub, runtime_dir: &Path, ids: Option<&[String]>, max_lines: usize) {
     let dir = snapshots_dir(runtime_dir);
     if fs::create_dir_all(&dir).is_err() {
@@ -66,9 +102,12 @@ pub fn save_all(hub: &TerminalHub, runtime_dir: &Path, ids: Option<&[String]>, m
         None => hub.ids(),
     };
     for id in ids {
+        let path = file_for(runtime_dir, &id);
+        if is_fresh(&path) {
+            continue;
+        }
         let scrollback = hub.scrollback(&id);
         let tail = tail_lines(&scrollback, max_lines);
-        let path = file_for(runtime_dir, &id);
         if tail.is_empty() {
             let _ = fs::remove_file(&path);
             continue;

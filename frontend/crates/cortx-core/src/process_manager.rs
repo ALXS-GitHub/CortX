@@ -885,7 +885,11 @@ impl ProcessManager {
         if let Some(old_id) = request.restore_from.as_deref() {
             let runtime_dir = self.runtime_store.dir();
             if let Some(bytes) = crate::terminal::snapshot::load(runtime_dir, old_id) {
+                // Reset attributes on both sides so a colour left open in the
+                // tail can't bleed into the separator or the new prompt.
+                self.terminal_hub.push(&tid, b"\x1b[0m");
                 self.terminal_hub.push(&tid, &bytes);
+                self.terminal_hub.push(&tid, b"\x1b[0m");
                 self.terminal_hub.push(&tid, crate::terminal::snapshot::RESTORE_SEPARATOR);
             }
             crate::terminal::snapshot::remove(runtime_dir, old_id);

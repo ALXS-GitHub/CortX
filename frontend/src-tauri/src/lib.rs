@@ -425,12 +425,12 @@ pub fn run() {
                 let window_clone = window.clone();
                 std::thread::spawn(move || {
                     if let Some(state) = app_handle.try_state::<AppState>() {
-                        let has_running = state.process_manager.has_running_processes();
-                        if has_running {
-                            log::info!("Quit requested - notifying frontend of cleanup...");
-                            let _ = window_clone.emit("app-closing", true);
-                            std::thread::sleep(std::time::Duration::from_millis(100));
-                        }
+                        // Every webview gets `app-closing`: the ClosingModal
+                        // shows when processes are running, and each window
+                        // stores its restore snapshots — give them a moment.
+                        log::info!("Quit requested - notifying frontend of cleanup...");
+                        let _ = app_handle.emit("app-closing", state.process_manager.has_running_processes());
+                        std::thread::sleep(std::time::Duration::from_millis(600));
                         // Session restore: keep the tail of every scrollback
                         // before the processes go away.
                         let tcfg = state.storage.get_settings().terminal;
@@ -498,6 +498,7 @@ pub fn run() {
             commands::take_terminal_window_scope,
             commands::take_terminal_window_launch,
             commands::save_terminal_snapshots,
+            commands::store_terminal_snapshot,
             commands::prune_terminal_snapshots,
             commands::list_launch_configs,
             commands::get_launch_config,

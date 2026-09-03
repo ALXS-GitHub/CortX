@@ -10,7 +10,10 @@ import {
   Save,
   SquareArrowOutDownLeft,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
+import { adjustTerminalZoom, resetTerminalZoom } from '@/lib/terminalSessions';
 import {
   CommandDialog,
   CommandEmpty,
@@ -105,6 +108,21 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
                 </CommandItem>
               </>
             )}
+            <CommandItem value="zoom in bigger font" onSelect={() => run(() => void adjustTerminalZoom(1))}>
+              <ZoomIn />
+              Zoom in
+              <span className="ml-auto text-xs text-faint">Ctrl +</span>
+            </CommandItem>
+            <CommandItem value="zoom out smaller font" onSelect={() => run(() => void adjustTerminalZoom(-1))}>
+              <ZoomOut />
+              Zoom out
+              <span className="ml-auto text-xs text-faint">Ctrl -</span>
+            </CommandItem>
+            <CommandItem value="zoom reset font size" onSelect={() => run(() => void resetTerminalZoom())}>
+              <ZoomOut className="opacity-0" />
+              Reset zoom
+              <span className="ml-auto text-xs text-faint">Ctrl 0</span>
+            </CommandItem>
             <CommandItem value="toggle sessions rail sidebar" onSelect={() => run(toggleRail)}>
               <PanelLeft />
               Toggle the sessions rail

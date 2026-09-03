@@ -832,6 +832,11 @@ export async function pruneTerminalSnapshots(keep: string[]): Promise<void> {
   return invoke('prune_terminal_snapshots', { keep });
 }
 
+/** Store a GUI-serialised buffer as the terminal's restore snapshot. */
+export async function storeTerminalSnapshot(terminalId: string, text: string): Promise<void> {
+  return invoke('store_terminal_snapshot', { terminalId, text });
+}
+
 export async function listLaunchConfigs(): Promise<LaunchConfig[]> {
   return invoke('list_launch_configs');
 }

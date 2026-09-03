@@ -23,6 +23,8 @@ import {
 } from '@/lib/tauri';
 import { formatDuration, terminalDisplayName } from '@/lib/terminalNames';
 import { restoreTerminalSessions } from '@/lib/terminalRestore';
+import { startTerminalSnapshotScheduler, storeTerminalSnapshots } from '@/lib/terminalSnapshots';
+import { listen } from '@tauri-apps/api/event';
 import type { LogEntry } from '@/types';
 
 /**
@@ -257,6 +259,25 @@ export function useAppBootstrap() {
     const onFocus = () => useAppStore.getState().markVisibleTerminalsSeen();
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  // Restore snapshots: this window serialises its own xterm buffers every
+  // 30 s and once more when the app starts closing (the backend waits for it).
+  useEffect(() => {
+    const stop = startTerminalSnapshotScheduler();
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen('app-closing', () => {
+      void storeTerminalSnapshots(true);
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+      stop();
+    };
   }, []);
 
   // Light / dark mode follows the app settings (and the OS when "system").

@@ -10,7 +10,6 @@ import { ScopeSwitcher } from '@/components/terminal/ScopeSwitcher';
 import { SessionRail } from '@/components/terminal/SessionRail';
 import { WindowTabStrip } from '@/components/terminal/WindowTabStrip';
 import { SplitTree } from '@/components/terminal/SplitTree';
-import { TerminalStatusBar } from '@/components/terminal/TerminalStatusBar';
 import { TerminalPalette } from '@/components/terminal/TerminalPalette';
 import { openNewTerminal } from '@/components/terminal/actions';
 import { useItemMap } from '@/components/terminal/model';
@@ -186,7 +185,6 @@ export function TerminalWindow() {
                   </div>
                 )}
               </div>
-              <TerminalStatusBar items={items} />
             </div>
           </div>
         )}

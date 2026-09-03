@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type ReactNode, type Ref } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Plus, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode, type Ref } from 'react';
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import { PanelLeftClose, PanelLeftOpen, Pin, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeIcon';
@@ -10,7 +14,9 @@ import { FREE_WORKSPACE_ID, projectIdOfWorkspace, tabsInScope, type TerminalTab 
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { closeTabAndRelease, openNewTerminal } from './actions';
-import { cwdLabel, projectColor, tabItem, tabLiveState, tabTitle, useItemMap, type ItemMap } from './model';
+import { cwdLabel, describeItem, projectColor, tabItem, tabLiveState, tabTitle, useItemMap, type ItemMap } from './model';
+import { TabContextMenu, TabRenameInput } from './tabMenu';
+import { useTabContextMenu, useTabRename } from './useTabMenu';
 
 interface RailGroup {
   workspaceId: string;
@@ -53,39 +59,91 @@ function RailIconButton({
   );
 }
 
-/** One session row (expanded rail). */
+/**
+ * One session row (expanded rail): sortable within its group, renamable on
+ * double-click, with the tab's colour as a left accent bar (and a faint tint
+ * when active) and a right-click menu. The second line is the live cwd, or
+ * the command while one runs — the only place this is shown now.
+ */
 function SessionRow({ tab, items, active, onSelect, onClose }: { tab: TerminalTab; items: ItemMap; active: boolean; onSelect: () => void; onClose: () => void }) {
   const item = tabItem(tab, items);
   const live = tabLiveState(tab, items);
   const title = tabTitle(tab, items);
   const cwd = cwdLabel(item);
+  const running = item?.shell?.phase === 'running';
+  const secondary = running ? (item?.shell?.command ?? '(command)') : cwd;
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
+  const rename = useTabRename(tab, title);
+  const menu = useTabContextMenu();
+
+  const color = tab.color;
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    // Active + coloured: a tint of the tab colour instead of the neutral accent.
+    ...(active && color ? { backgroundColor: `color-mix(in srgb, ${color} 8%, transparent)` } : {}),
+  };
+
   return (
     <div
-      role="button"
-      tabIndex={0}
+      ref={setNodeRef}
+      style={style}
       onClick={onSelect}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        rename.start();
+      }}
       onKeyDown={(e) => {
+        if (rename.editing) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onSelect();
+        } else if (e.key === 'F2') {
+          e.preventDefault();
+          rename.start();
         }
       }}
+      onContextMenu={menu.onContextMenu}
+      title={!rename.editing && item ? describeItem(item) : undefined}
       className={cn(
-        'group flex h-10 w-full cursor-default items-center gap-2 rounded-[var(--rad-nav)] px-2 text-left transition-colors',
-        active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
+        'group relative flex h-10 w-full cursor-default select-none items-center gap-2 rounded-[var(--rad-nav)] px-2 text-left transition-colors',
+        active ? 'text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+        active && !color && 'bg-accent',
+        isDragging && 'z-10 opacity-60'
       )}
+      {...attributes}
+      {...listeners}
     >
+      {color && (
+        <span
+          className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-full"
+          style={{ backgroundColor: color }}
+          aria-hidden
+        />
+      )}
       <TerminalTypeIcon
         type={item?.type ?? 'shell'}
-        className="size-3.5 shrink-0 text-faint"
+        className="pointer-events-none size-3.5 shrink-0 text-faint"
       />
-      <span className="flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="truncate text-[12.5px]" style={tab.color ? { color: tab.color } : undefined}>
-          {title}
+      {rename.editing ? (
+        <TabRenameInput
+          value={rename.draft}
+          onChange={rename.setDraft}
+          onCommit={rename.commit}
+          onCancel={rename.cancel}
+          className="min-w-0 flex-1"
+        />
+      ) : (
+        <span className="pointer-events-none flex min-w-0 flex-1 flex-col leading-tight">
+          <span className="truncate text-[12.5px]">{title}</span>
+          {secondary && (
+            <span className={cn('truncate font-mono text-[10.5px]', running ? 'text-primary' : 'text-faint')}>{secondary}</span>
+          )}
         </span>
-        {cwd && <span className="truncate font-mono text-[10.5px] text-faint">{cwd}</span>}
-      </span>
-      <TerminalStatusGlyph live={live} />
+      )}
+      {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
+      <TerminalStatusGlyph live={live} className="pointer-events-none" />
       <button
         type="button"
         className="grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
@@ -93,12 +151,71 @@ function SessionRow({ tab, items, active, onSelect, onClose }: { tab: TerminalTa
           e.stopPropagation();
           onClose();
         }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
         title="Close tab"
         aria-label="Close tab"
       >
-        <X className="size-3" />
+        <X className="pointer-events-none size-3" />
       </button>
+
+      <TabContextMenu tab={tab} open={menu.open} onOpenChange={menu.setOpen} pos={menu.pos} onRename={rename.start} onClose={onClose} />
     </div>
+  );
+}
+
+/**
+ * The rows of one workspace group, reorderable by drag within the group.
+ * Each group is its own drag context so a row cannot land in another
+ * workspace.
+ */
+function SessionGroupRows({
+  group,
+  items,
+  activeTabId,
+  onSelect,
+  onReorder,
+}: {
+  group: RailGroup;
+  items: ItemMap;
+  activeTabId: string | null;
+  onSelect: (tabId: string) => void;
+  onReorder: (workspaceId: string, orderedIds: string[]) => void;
+}) {
+  const ids = useMemo(() => group.tabs.map((t) => t.id), [group.tabs]);
+  // A small distance threshold keeps plain clicks (select, rename, close)
+  // from being swallowed by the drag sensor.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const onDragEnd = useCallback(
+    (e: DragEndEvent) => {
+      const { active, over } = e;
+      if (!over || active.id === over.id) return;
+      const from = ids.indexOf(String(active.id));
+      const to = ids.indexOf(String(over.id));
+      if (from === -1 || to === -1) return;
+      onReorder(group.workspaceId, arrayMove(ids, from, to));
+    },
+    [ids, group.workspaceId, onReorder]
+  );
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis, restrictToParentElement]} onDragEnd={onDragEnd}>
+      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+        <div className="flex flex-col gap-0.5">
+          {group.tabs.map((tab) => (
+            <SessionRow
+              key={tab.id}
+              tab={tab}
+              items={items}
+              active={tab.id === activeTabId}
+              onSelect={() => onSelect(tab.id)}
+              onClose={() => closeTabAndRelease(tab.id)}
+            />
+          ))}
+        </div>
+      </SortableContext>
+    </DndContext>
   );
 }
 
@@ -146,6 +263,7 @@ export function SessionRail() {
   const scopedTabs = useMemo(() => tabsInScope(win, win.scope), [win]);
   const activeTabId = win.activeTabId;
   const setActiveTab = useTerminalLayoutStore((s) => s.setActiveTab);
+  const reorderTabs = useTerminalLayoutStore((s) => s.reorderTabs);
   const { railCollapsed, toggleRail, railWidth, setRailWidth } = useTerminalWindowPrefsStore();
 
   const groups = useMemo<RailGroup[]>(() => {
@@ -173,6 +291,15 @@ export function SessionRail() {
       return projects.findIndex((p) => `project:${p.id}` === a.workspaceId) - projects.findIndex((p) => `project:${p.id}` === b.workspaceId);
     });
   }, [scopedTabs, projects]);
+
+  // A drop reorders one group; the other groups keep their relative order in
+  // the full list the store expects.
+  const reorderGroup = useCallback(
+    (workspaceId: string, orderedIds: string[]) => {
+      reorderTabs(groups.flatMap((g) => (g.workspaceId === workspaceId ? orderedIds : g.tabs.map((t) => t.id))));
+    },
+    [groups, reorderTabs]
+  );
 
   const runningCount = useMemo(
     () => scopedTabs.filter((t) => tabLiveState(t, items).running).length,
@@ -251,22 +378,15 @@ export function SessionRail() {
                 <span className="ml-auto tabular-nums">{g.tabs.length}</span>
               </div>
             )}
-            <div className={cn('flex flex-col', collapsed ? 'items-center gap-1' : 'gap-0.5')}>
-              {g.tabs.map((tab) =>
-                collapsed ? (
+            {collapsed ? (
+              <div className="flex flex-col items-center gap-1">
+                {g.tabs.map((tab) => (
                   <SessionIcon key={tab.id} tab={tab} items={items} active={tab.id === activeTabId} onSelect={() => setActiveTab(tab.id)} />
-                ) : (
-                  <SessionRow
-                    key={tab.id}
-                    tab={tab}
-                    items={items}
-                    active={tab.id === activeTabId}
-                    onSelect={() => setActiveTab(tab.id)}
-                    onClose={() => closeTabAndRelease(tab.id)}
-                  />
-                )
-              )}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <SessionGroupRows group={g} items={items} activeTabId={activeTabId} onSelect={setActiveTab} onReorder={reorderGroup} />
+            )}
           </div>
         ))}
       </nav>

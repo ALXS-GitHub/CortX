@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
 import { closeActiveLeaf, cycleLeaf, cycleTab, openNewTerminal, splitActiveLeaf } from './actions';
+import { adjustTerminalZoom, resetTerminalZoom } from '@/lib/terminalSessions';
 
 function isTextField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -26,6 +27,14 @@ export function useTerminalWindowShortcuts() {
       if (mod && key === 'tab') {
         e.preventDefault();
         cycleTab(e.shiftKey ? -1 : 1);
+        return;
+      }
+      // Zoom: Ctrl+= / Ctrl++ / Ctrl+- / Ctrl+0 (numpad included).
+      if (mod && !e.altKey && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0')) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === '0') resetTerminalZoom();
+        else adjustTerminalZoom(e.key === '-' ? -1 : 1);
         return;
       }
       if (mod && e.shiftKey && !e.altKey) {

@@ -19,6 +19,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { ImageAddon } from '@xterm/addon-image';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
@@ -188,7 +189,7 @@ function ensureFontSubscription() {
     last = key;
     for (const s of sessions.values()) {
       s.term.options.fontFamily = next.fontFamily;
-      s.term.options.fontSize = next.fontSize;
+      s.term.options.fontSize = Math.max(6, next.fontSize + zoomDelta);
       if (s.container.isConnected) fitTerminal(s.id);
     }
   });
@@ -241,7 +242,7 @@ function createSession(id: string): TerminalSession {
     cursorBlink: true,
     cursorStyle: 'bar',
     fontFamily: font.fontFamily,
-    fontSize: font.fontSize,
+    fontSize: Math.max(6, font.fontSize + zoomDelta),
     lineHeight: 1.2,
     scrollback: 10000,
     theme: buildTerminalTheme(),
@@ -472,4 +473,66 @@ export function disposeTerminal(id: string) {
 
 export function hasTerminalSession(id: string): boolean {
   return sessions.has(id);
+}
+
+/** Ids of every session held by this window (mounted or not). */
+export function listTerminalSessionIds(): string[] {
+  return Array.from(sessions.keys());
+}
+
+/**
+ * The buffer of a session as plain lines with colours (no cursor movement),
+ * for the restore snapshot. `null` when the session has no content yet.
+ */
+export function serializeTerminalSession(id: string, scrollback = 200): string | null {
+  const session = sessions.get(id);
+  if (!session?.opened) return null;
+  try {
+    let serializer = serializers.get(id);
+    if (!serializer) {
+      serializer = new SerializeAddon();
+      session.term.loadAddon(serializer);
+      serializers.set(id, serializer);
+      session.disposables.push({ dispose: () => serializers.delete(id) });
+    }
+    const text = serializer.serialize({ scrollback });
+    return text.trim().length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+const serializers = new Map<string, SerializeAddon>();
+
+// ---------------------------------------------------------------------------
+// Zoom (per window, not persisted): Ctrl+= / Ctrl+- / Ctrl+0
+// ---------------------------------------------------------------------------
+
+let zoomDelta = 0;
+const ZOOM_MIN = -6;
+const ZOOM_MAX = 12;
+
+function applyZoomToAll() {
+  const base = terminalFontOptions().fontSize;
+  for (const s of sessions.values()) {
+    s.term.options.fontSize = Math.max(6, base + zoomDelta);
+    if (s.container.isConnected) fitTerminal(s.id);
+  }
+}
+
+/** Grow / shrink every terminal of this window by `step` px. Returns the resulting font size. */
+export function adjustTerminalZoom(step: number): number {
+  zoomDelta = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomDelta + step));
+  applyZoomToAll();
+  return terminalFontOptions().fontSize + zoomDelta;
+}
+
+export function resetTerminalZoom(): number {
+  zoomDelta = 0;
+  applyZoomToAll();
+  return terminalFontOptions().fontSize;
+}
+
+export function currentTerminalZoomDelta(): number {
+  return zoomDelta;
 }
