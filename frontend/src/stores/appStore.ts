@@ -49,6 +49,8 @@ import type {
 } from '@/types';
 import * as api from '@/lib/tauri';
 import { disposeTerminal } from '@/lib/terminalSessions';
+import type { TerminalSurface } from '@/lib/terminalLayout';
+import { focusInTerminalWindow } from '@/lib/terminalWindowBridge';
 
 interface ServiceRuntime {
   status: ServiceStatus;
@@ -101,7 +103,8 @@ export interface TerminalCommandFinished {
 
 // Terminal entity — single source of truth for "which terminal is where, what state is it in"
 export type TerminalKind = 'service' | 'script' | 'global-script' | 'shell';
-export type TerminalVisibility = 'visible' | 'hidden' | 'closed';
+/** 'window' = shown in the dedicated Terminal window, not in this dock. */
+export type TerminalVisibility = 'visible' | 'hidden' | 'closed' | 'window';
 
 export interface Terminal {
   id: string;                      // Canonical: `${kind}:${runtimeKey}` e.g. "service:abc"
@@ -309,6 +312,10 @@ interface AppState {
   terminalStates: Map<string, TerminalShellState>;
   terminalAttention: Map<string, TerminalAttention>;
 
+  // Mirror of the shared layout's `surfaces` (see terminalLayoutStore):
+  // which terminal ids live in the Terminal window instead of this dock.
+  terminalSurfaces: Record<string, TerminalSurface>;
+
   // Actions - Projects
   loadProjects: () => Promise<void>;
   createProject: (input: CreateProjectInput) => Promise<Project>;
@@ -329,8 +336,10 @@ interface AppState {
   stopScript: (scriptId: string) => Promise<void>;
 
   // Actions - Interactive shells (integrated terminal tabs)
-  /** Spawn a shell (in the project's root when projectId is given) and open its tab. Resolves with the shell id. */
-  openShell: (options?: { projectId?: string; cwd?: string }) => Promise<string>;
+  /** Spawn a shell (in the project's root when projectId is given) and open its tab. Resolves with the shell id.
+   *  With `surface: 'window'` the tab is not opened in the dock: the caller
+   *  places it in the Terminal window layout. */
+  openShell: (options?: { projectId?: string; cwd?: string; surface?: TerminalSurface }) => Promise<string>;
   killShell: (shellId: string) => Promise<void>;
   markShellExited: (shellId: string, exitCode?: number | null) => void;
   /** Re-discover shells still alive in the backend (after a reload). */
@@ -347,6 +356,10 @@ interface AppState {
   markTerminalSeen: (id: string) => void;
   /** Clear the attention markers of every terminal currently in view. */
   markVisibleTerminalsSeen: () => void;
+
+  // Actions - Terminal window surfaces (main window only)
+  /** Apply the shared layout's surfaces: move terminals out of / back into the dock. */
+  syncTerminalSurfaces: (surfaces: Record<string, TerminalSurface>) => void;
 
   // Actions - Script runtime updates
   updateScriptStatus: (scriptId: string, status: ScriptStatus, pid?: number) => void;
@@ -545,6 +558,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   dragOverPosition: null,
   terminalStates: new Map(),
   terminalAttention: new Map(),
+  terminalSurfaces: {},
 
   // Project actions
   loadProjects: async () => {
@@ -729,9 +743,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         projectId: info.projectId ?? undefined,
         program: info.program,
       });
+      if (options.surface === 'window') {
+        const terminals = new Map(state.terminals);
+        const id = terminalId('shell', info.id);
+        terminals.set(id, {
+          id,
+          kind: 'shell',
+          runtimeKey: info.id,
+          paneId: null,
+          visibility: 'window',
+          order: Date.now(),
+          createdAt: Date.now(),
+        });
+        return { shellRuntimes, terminals };
+      }
       return { shellRuntimes };
     });
-    get().openTerminal('shell', info.id);
+    if (options.surface !== 'window') get().openTerminal('shell', info.id);
     return info.id;
   },
 
@@ -766,7 +794,22 @@ export const useAppStore = create<AppState>((set, get) => ({
               program: info.program,
             });
           }
-          terminals = ensureTerminal(terminals, 'shell', info.id);
+          const tid = terminalId('shell', info.id);
+          if (!terminals.has(tid) && state.terminalSurfaces[tid] === 'window') {
+            // Lives in the Terminal window: keep it out of this dock's tray.
+            terminals = new Map(terminals);
+            terminals.set(tid, {
+              id: tid,
+              kind: 'shell',
+              runtimeKey: info.id,
+              paneId: null,
+              visibility: 'window',
+              order: Date.now(),
+              createdAt: Date.now(),
+            });
+          } else {
+            terminals = ensureTerminal(terminals, 'shell', info.id);
+          }
         }
         return { shellRuntimes, terminals };
       });
@@ -888,6 +931,11 @@ export const useAppStore = create<AppState>((set, get) => ({
    * the session — the user's previous close is overridden by this explicit open.
    */
   openTerminal: (kind, runtimeKey) => {
+    // Lives in the Terminal window: show it there instead of duplicating it
+    // in this dock (sidebar clicks, "open terminal" from a project…).
+    if (get().terminalSurfaces[terminalId(kind, runtimeKey)] === 'window') {
+      if (focusInTerminalWindow(terminalId(kind, runtimeKey))) return;
+    }
     set((state) => {
       const id = terminalId(kind, runtimeKey);
       const terminals = new Map(state.terminals);
@@ -1660,6 +1708,72 @@ export const useAppStore = create<AppState>((set, get) => ({
       terminalAttention.delete(id);
       return { terminalAttention };
     });
+  },
+
+  syncTerminalSurfaces: (surfaces) => {
+    set({ terminalSurfaces: surfaces });
+    const toDock: Terminal[] = [];
+    let panesDirty = false;
+    set((state) => {
+      let terminals = state.terminals;
+      let changed = false;
+      const touch = () => {
+        if (!changed) {
+          terminals = new Map(terminals);
+          changed = true;
+        }
+      };
+      for (const [id, t] of state.terminals) {
+        const surface = surfaces[id];
+        if (surface === 'window') {
+          if (t.visibility === 'window' || t.visibility === 'closed') continue;
+          touch();
+          terminals.set(id, { ...t, visibility: 'window', paneId: null });
+          if (t.paneId) panesDirty = true;
+          // The Terminal window renders it now; free this webview's xterm.
+          disposeTerminal(id);
+        } else if (t.visibility === 'window') {
+          if (surface === 'dock') {
+            toDock.push(t);
+          } else {
+            // Closed from the Terminal window. Shells are dead by now; a
+            // service or script keeps running, so it goes to the tray.
+            touch();
+            terminals.set(id, { ...t, visibility: t.kind === 'shell' ? 'closed' : 'hidden', paneId: null });
+          }
+        }
+      }
+      if (!changed) return state;
+      let terminalPanes = state.terminalPanes;
+      if (panesDirty) {
+        terminalPanes = terminalPanes.map((p) => {
+          const active = p.activeTerminalId ? terminals.get(p.activeTerminalId) : null;
+          if (active && active.visibility !== 'visible') {
+            return { ...p, activeTerminalId: pickNewActiveForPane(p.id, terminals, active.id) };
+          }
+          return p;
+        });
+      }
+      const pruned = pruneEmptyPanes(terminalPanes, terminals, state.focusedPaneId);
+      if (pruned) {
+        return { terminals, terminalPanes: pruned.terminalPanes, focusedPaneId: pruned.focusedPaneId };
+      }
+      return { terminals, terminalPanes };
+    });
+    for (const t of toDock) get().openTerminal(t.kind, t.runtimeKey);
+    // Terminals sent to the dock that this window never saw (spawned in the
+    // Terminal window): discover their runtime first, then open them.
+    const unknown = Object.entries(surfaces).filter(([id, s]) => s === 'dock' && !get().terminals.has(id));
+    if (unknown.length > 0) {
+      get()
+        .loadShells()
+        .then(() => {
+          for (const [id] of unknown) {
+            const parsed = parseTerminalId(id);
+            if (parsed) get().openTerminal(parsed.kind, parsed.runtimeKey);
+          }
+        });
+    }
   },
 
   markVisibleTerminalsSeen: () => {

@@ -22,7 +22,7 @@ use cortx_core::agents::{
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use walkdir::WalkDir;
 
 pub struct AppState {
@@ -33,6 +33,12 @@ pub struct AppState {
     /// Set to true to opt out of "close = hide-to-tray" and run the real
     /// quit cleanup flow when the next CloseRequested event fires.
     pub quitting: Arc<std::sync::atomic::AtomicBool>,
+    /// Terminal layout shared between the main window's dock and the
+    /// Terminal window (DEV-13 P1). See `cortx_core::terminal::layout`.
+    pub terminal_layout: Arc<cortx_core::terminal::LayoutStore>,
+    /// Project scope requested for a Terminal window being created; the
+    /// window takes it once on boot (`take_terminal_window_scope`).
+    pub terminal_window_scope: std::sync::Mutex<Option<String>>,
 }
 
 // Project commands
@@ -2796,6 +2802,73 @@ pub fn get_command_history(
     limit: Option<usize>,
 ) -> Vec<cortx_core::terminal::CommandRecord> {
     state.process_manager.command_history().recent(limit.unwrap_or(200))
+}
+
+// ---------------------------------------------------------------------------
+// Terminal layout + Terminal window (DEV-13 P1)
+// ---------------------------------------------------------------------------
+
+/// The shared layout document and its revision.
+#[tauri::command]
+pub fn get_terminal_layout(state: State<AppState>) -> cortx_core::terminal::LayoutDoc {
+    state.terminal_layout.get()
+}
+
+/// Payload of the `terminal-layout` broadcast.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalLayoutEvent {
+    revision: u64,
+    layout: serde_json::Value,
+    /// Label of the window that wrote it, so it can ignore its own echo.
+    source: String,
+}
+
+/// Replace the shared layout. `source` is the writing window's label.
+/// Returns the new revision; every window (including the writer) receives
+/// the `terminal-layout` event.
+#[tauri::command]
+pub fn set_terminal_layout(
+    app_handle: AppHandle,
+    state: State<AppState>,
+    layout: serde_json::Value,
+    source: String,
+) -> u64 {
+    let revision = state.terminal_layout.set(layout.clone());
+    let _ = app_handle.emit(
+        "terminal-layout",
+        TerminalLayoutEvent {
+            revision,
+            layout,
+            source,
+        },
+    );
+    revision
+}
+
+/// Open (or focus) the dedicated Terminal window, optionally scoped to a
+/// project. If the window already exists the scope is sent as the
+/// `terminal-scope` event instead.
+///
+/// `async` on purpose: a synchronous command runs on the main thread, and on
+/// Windows creating a webview from there deadlocks its initialisation (the
+/// window shows up but stays on about:blank).
+#[tauri::command]
+pub async fn open_terminal_window(app_handle: AppHandle, project_id: Option<String>) -> Result<(), String> {
+    crate::open_terminal_window(&app_handle, project_id.as_deref())
+}
+
+/// Show / focus the main window (from the Terminal window).
+#[tauri::command]
+pub fn show_main_window(app_handle: AppHandle) {
+    crate::show_main_window(&app_handle);
+}
+
+/// The project scope a freshly created Terminal window was asked for, if
+/// any. Cleared on read so a later reload does not re-apply it.
+#[tauri::command]
+pub fn take_terminal_window_scope(state: State<AppState>) -> Option<String> {
+    state.terminal_window_scope.lock().ok().and_then(|mut s| s.take())
 }
 
 /// OS-level notification (toast centre). The GUI decides *when*; this only

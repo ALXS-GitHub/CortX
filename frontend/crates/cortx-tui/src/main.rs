@@ -147,6 +147,13 @@ enum Command {
         shell: String,
     },
 
+    /// Open the CortX Terminal window (starts the app if it is not running)
+    Terminal {
+        /// Scope the window to a project (name or id)
+        #[arg(short, long)]
+        project: Option<String>,
+    },
+
     /// Manage global scripts
     Script {
         #[command(subcommand)]
@@ -1069,6 +1076,7 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
         Some(Command::Tools { scan }) => cmd_tool_list(&storage, None, None, scan, json),
 
         Some(Command::Init { shell }) => cmd_init(&storage, &shell),
+        Some(Command::Terminal { project }) => cmd_terminal(&storage, project.as_deref()),
 
         // Script group
         Some(Command::Script { action }) => match action {
@@ -4102,6 +4110,84 @@ fn cmd_init(storage: &Storage, shell_name: &str) -> anyhow::Result<()> {
     let integration = storage.get_settings().terminal.shell_integration;
     let script = cortx_core::shell_init::generate_init_script(&shell, &aliases, integration);
     print!("{}", script);
+    Ok(())
+}
+
+// ============================================================================
+// `cortx terminal` — open the Terminal window of the GUI (DEV-13 P1)
+// ============================================================================
+
+/// Where the GUI executable lives: next to this CLI (it is bundled as a
+/// sidecar), then the default install locations, then PATH.
+fn find_gui_executable() -> Option<std::path::PathBuf> {
+    let exe_name = if cfg!(target_os = "windows") { "cortx-app.exe" } else { "cortx-app" };
+    if let Ok(me) = std::env::current_exe() {
+        if let Some(dir) = me.parent() {
+            let sibling = dir.join(exe_name);
+            if sibling.is_file() {
+                return Some(sibling);
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let candidates = [
+            std::env::var("ProgramFiles").ok().map(|p| std::path::PathBuf::from(p).join("Cortx").join(exe_name)),
+            std::env::var("LOCALAPPDATA").ok().map(|p| std::path::PathBuf::from(p).join("Cortx").join(exe_name)),
+        ];
+        for c in candidates.into_iter().flatten() {
+            if c.is_file() {
+                return Some(c);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let bundled = std::path::PathBuf::from("/Applications/Cortx.app/Contents/MacOS/cortx-app");
+        if bundled.is_file() {
+            return Some(bundled);
+        }
+    }
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(exe_name))
+        .find(|p| p.is_file())
+}
+
+fn cmd_terminal(storage: &Storage, project: Option<&str>) -> anyhow::Result<()> {
+    let project_id = match project {
+        Some(needle) => {
+            let projects = storage.get_all_projects();
+            let found = projects.iter().find(|p| p.id == needle).or_else(|| {
+                projects
+                    .iter()
+                    .find(|p| p.name.eq_ignore_ascii_case(needle))
+            });
+            match found {
+                Some(p) => Some(p.id.clone()),
+                None => anyhow::bail!("No project named '{}'", needle),
+            }
+        }
+        None => None,
+    };
+    let exe = find_gui_executable()
+        .ok_or_else(|| anyhow::anyhow!("CortX app executable not found (cortx-app). Is CortX installed?"))?;
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.arg("--terminal");
+    if let Some(id) = &project_id {
+        cmd.arg("--project").arg(id);
+    }
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: no console, no tie to ours.
+        cmd.creation_flags(0x0000_0008 | 0x0000_0200);
+    }
+    cmd.spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to start {}: {}", exe.display(), e))?;
     Ok(())
 }
 

@@ -5,7 +5,8 @@ Statut : plan validé avec Alexis le 2026-09-03. Branche `feat/terminal-mode`.
 | Phase | État | Notes |
 |-------|------|-------|
 | P0 | Implémentée (commit `62567dd`, 2026-09-03), à valider | Vérifiée de bout en bout via CDP : cwd, spinner, pastille, toast, historique. ConPTY (dll vendorée) laisse passer OSC 7 / 133. Le bloc PowerShell est livré en une ligne base64 pour survivre à `\| Invoke-Expression` ligne à ligne ; le profil d'Alexis utilise `\| Out-String \| Invoke-Expression`. |
-| P1–P4 | À faire | |
+| P1 | Implémentée (2026-09-03), à valider | Même binaire, seconde fenêtre Tauri `terminal` (le front choisit sa racine par le label de fenêtre ; la commande de création est `async`, sinon le WebView reste sur about:blank sous Windows). Document de layout partagé via Rust (`get/set_terminal_layout` + événement `terminal-layout`, révision). Rail de sessions par défaut, bandeau d'onglets en option (réglage), police configurable (Hack NF pour Alexis). Rejeu du scrollback : les réponses aux requêtes du shell sont mises en sourdine pendant le rejeu. `cortx terminal` vérifié à froid. Single-instance actif en release seulement (le verrou est par identifiant d'app, un build dev l'aurait transmis à l'app installée). Artefact connu : un scrollback rejoué dans une fenêtre d'une autre largeur redessine l'ancien contenu décalé jusqu'au prochain prompt. |
+| P2–P4 | À faire | |
 
 ## Contexte
 

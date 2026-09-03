@@ -109,6 +109,12 @@ export interface TerminalConfig {
   notifyOnLongCommand?: boolean;
   /** Threshold for "long", in seconds. Default 10. */
   longCommandSeconds?: number;
+  /** Terminal window: sessions rail on the left (default) or a tab strip on top — never both. */
+  tabsPlacement?: 'sidebar' | 'top';
+  /** Font of every terminal. Empty = bundled monospace stack. */
+  fontFamily?: string;
+  /** Font size in px. Default 12. */
+  fontSize?: number;
 }
 
 export type ShellPhase = 'unknown' | 'idle' | 'running';

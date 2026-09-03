@@ -17,9 +17,11 @@
 //! [`SinkFn`].
 
 pub mod history;
+pub mod layout;
 pub mod osc;
 
 pub use history::{CommandHistory, CommandRecord};
+pub use layout::{LayoutDoc, LayoutStore};
 pub use osc::{OscScanner, ShellEvent, ShellPhase, TerminalShellState, TerminalStateTracker};
 
 use parking_lot::Mutex;

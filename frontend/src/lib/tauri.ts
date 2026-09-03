@@ -752,3 +752,50 @@ export async function getCommandHistory(limit = 200): Promise<CommandRecord[]> {
 export async function sendOsNotification(title: string, body: string): Promise<void> {
   return invoke('send_os_notification', { title, body });
 }
+
+// ============================================================================
+// Terminal layout shared between windows + Terminal window (DEV-13 P1)
+// ============================================================================
+
+export interface TerminalLayoutDocEnvelope {
+  revision: number;
+  /** Raw document; see `lib/terminalLayout.ts` for the schema. */
+  layout: unknown;
+}
+
+export interface TerminalLayoutEvent extends TerminalLayoutDocEnvelope {
+  /** Label of the window that wrote it. */
+  source: string;
+}
+
+export async function getTerminalLayout(): Promise<TerminalLayoutDocEnvelope> {
+  return invoke('get_terminal_layout');
+}
+
+export async function setTerminalLayout(layout: unknown, source: string): Promise<number> {
+  return invoke('set_terminal_layout', { layout, source });
+}
+
+export async function onTerminalLayout(
+  callback: (event: TerminalLayoutEvent) => void
+): Promise<UnlistenFn> {
+  return listen<TerminalLayoutEvent>('terminal-layout', (event) => callback(event.payload));
+}
+
+/** Project id pushed to an already-open Terminal window (`cortx terminal --project`). */
+export async function onTerminalScope(callback: (projectId: string) => void): Promise<UnlistenFn> {
+  return listen<string>('terminal-scope', (event) => callback(event.payload));
+}
+
+export async function openTerminalWindow(projectId?: string | null): Promise<void> {
+  return invoke('open_terminal_window', { projectId: projectId ?? null });
+}
+
+export async function showMainWindow(): Promise<void> {
+  return invoke('show_main_window');
+}
+
+/** Project scope the Terminal window was created with (read once on boot). */
+export async function takeTerminalWindowScope(): Promise<string | null> {
+  return invoke('take_terminal_window_scope');
+}

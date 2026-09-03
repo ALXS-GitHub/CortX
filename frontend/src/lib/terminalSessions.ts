@@ -23,6 +23,7 @@ import '@xterm/xterm/css/xterm.css';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import * as api from '@/lib/tauri';
+import { useAppStore } from '@/stores/appStore';
 
 export interface TerminalSession {
   id: string;
@@ -36,6 +37,8 @@ export interface TerminalSession {
   attachToken: number | null;
   webgl: WebglAddon | null;
   disposables: IDisposable[];
+  /** True while the backend scrollback snapshot is being parsed (see attach). */
+  replaying: boolean;
 }
 
 const sessions = new Map<string, TerminalSession>();
@@ -151,6 +154,46 @@ function ensureThemeObserver() {
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
 }
 
+// ---------------------------------------------------------------------------
+// Font (Settings > Integrated terminal; synced through settings.json)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_FONT_STACK =
+  'ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "JetBrains Mono", Menlo, Monaco, monospace';
+const DEFAULT_FONT_SIZE = 12;
+
+/** xterm font options from the user's settings, with the bundled stack as fallback. */
+export function terminalFontOptions(): { fontFamily: string; fontSize: number } {
+  const cfg = useAppStore.getState().settings?.terminal;
+  const family = cfg?.fontFamily?.trim();
+  const size = cfg?.fontSize;
+  return {
+    // A user font still falls back to the stack for glyphs it lacks.
+    fontFamily: family ? `"${family.replace(/"/g, '')}", ${DEFAULT_FONT_STACK}` : DEFAULT_FONT_STACK,
+    fontSize: size && size >= 8 && size <= 32 ? size : DEFAULT_FONT_SIZE,
+  };
+}
+
+let fontSubscribed = false;
+
+/** Re-apply the font to every session when the settings change. */
+function ensureFontSubscription() {
+  if (fontSubscribed) return;
+  fontSubscribed = true;
+  let last = JSON.stringify(terminalFontOptions());
+  useAppStore.subscribe(() => {
+    const next = terminalFontOptions();
+    const key = JSON.stringify(next);
+    if (key === last) return;
+    last = key;
+    for (const s of sessions.values()) {
+      s.term.options.fontFamily = next.fontFamily;
+      s.term.options.fontSize = next.fontSize;
+      if (s.container.isConnected) fitTerminal(s.id);
+    }
+  });
+}
+
 export function applyThemeToAll() {
   const theme = buildTerminalTheme();
   for (const s of sessions.values()) {
@@ -190,13 +233,15 @@ async function pasteFromClipboard(term: Terminal) {
 
 function createSession(id: string): TerminalSession {
   ensureThemeObserver();
+  ensureFontSubscription();
+  const font = terminalFontOptions();
 
   const term = new Terminal({
     allowProposedApi: true, // needed by addon-image / unicode11
     cursorBlink: true,
     cursorStyle: 'bar',
-    fontFamily: 'ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "JetBrains Mono", Menlo, Monaco, monospace',
-    fontSize: 12,
+    fontFamily: font.fontFamily,
+    fontSize: font.fontSize,
     lineHeight: 1.2,
     scrollback: 10000,
     theme: buildTerminalTheme(),
@@ -245,11 +290,13 @@ function createSession(id: string): TerminalSession {
     attachToken: null,
     webgl: null,
     disposables: [],
+    replaying: false,
   };
 
   // Keyboard input → PTY. Errors (process already gone) are expected; ignore.
   session.disposables.push(
     term.onData((data) => {
+      if (session.replaying) return;
       api.writeTerminal(id, data).catch(() => {});
     })
   );
@@ -313,7 +360,20 @@ function tryLoadWebgl(session: TerminalSession) {
 async function attach(session: TerminalSession) {
   if (session.attachToken !== null) return;
   try {
+    let first = true;
     const token = await api.attachTerminal(session.id, (bytes) => {
+      if (first) {
+        // The stored scrollback. It still contains the queries the shell
+        // made when it started (device attributes, cursor position…) and
+        // xterm would answer them again — straight into the shell's input
+        // line. Mute keyboard/response output until the replay is parsed.
+        first = false;
+        session.replaying = true;
+        session.term.write(bytes, () => {
+          session.replaying = false;
+        });
+        return;
+      }
       session.term.write(bytes);
     });
     // The session may have been disposed while the invoke was in flight.
@@ -344,19 +404,27 @@ export function mountTerminal(id: string, parent: HTMLElement): TerminalSession 
   if (!session.opened) {
     session.term.open(session.container);
     session.opened = true;
-    tryLoadWebgl(session);
     attach(session);
   }
+  // GPU renderer only while on screen (see unmountTerminal): a window with
+  // 20 tabs holds one WebGL context per *visible* pane, not per tab.
+  if (!session.webgl) tryLoadWebgl(session);
   // Two frames: layout must settle before fit() can measure the container.
   requestAnimationFrame(() => requestAnimationFrame(() => fitTerminal(id)));
   return session;
 }
 
-/** Detach the DOM without destroying the session (tab switched / hidden). */
+/** Detach the DOM without destroying the session (tab switched / hidden).
+ *  Releases the WebGL context; the buffer stays in memory and the DOM
+ *  renderer takes over until the next mount reloads WebGL. */
 export function unmountTerminal(id: string) {
   const session = sessions.get(id);
   if (!session) return;
   session.container.remove();
+  if (session.webgl) {
+    session.webgl.dispose();
+    session.webgl = null;
+  }
 }
 
 export function fitTerminal(id: string) {

@@ -30,6 +30,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
 walkdir = "2.4"

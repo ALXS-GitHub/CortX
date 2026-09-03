@@ -28,6 +28,65 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+/// Label of the dedicated Terminal window (DEV-13 P1).
+pub const TERMINAL_WINDOW_LABEL: &str = "terminal";
+
+/// Open the Terminal window, or focus it if it already exists. The window
+/// loads the same bundle as the main one with `?window=terminal` so the
+/// frontend picks the terminal root. A project scope travels in the URL on
+/// creation, or as the `terminal-scope` event when the window is already up.
+pub fn open_terminal_window(app: &AppHandle, project_id: Option<&str>) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(TERMINAL_WINDOW_LABEL) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        if let Some(pid) = project_id {
+            let _ = app.emit("terminal-scope", pid.to_string());
+        }
+        return Ok(());
+    }
+    // The frontend picks its root from the window label; the requested scope
+    // is parked in AppState and fetched by `take_terminal_window_scope` on
+    // boot (a query string on the App URL does not survive the dev server).
+    if let Some(state) = app.try_state::<AppState>() {
+        *state.terminal_window_scope.lock().unwrap() = project_id.map(|s| s.to_string());
+    }
+    let builder = tauri::WebviewWindowBuilder::new(app, TERMINAL_WINDOW_LABEL, tauri::WebviewUrl::App("index.html".into()))
+        .title("CortX Terminal")
+        .inner_size(1180.0, 760.0)
+        .min_inner_size(720.0, 460.0)
+        .resizable(true)
+        .visible(false);
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.decorations(false);
+    let window = builder.build().map_err(|e| e.to_string())?;
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+/// `cortx-app --terminal [--project <id>]` — from a second launch (forwarded
+/// by the single-instance plugin) or the first one.
+fn handle_cli_args(app: &AppHandle, args: &[String]) {
+    let wants_terminal = args.iter().any(|a| a == "--terminal");
+    let project = args
+        .iter()
+        .position(|a| a == "--project")
+        .and_then(|i| args.get(i + 1))
+        .cloned();
+    if wants_terminal {
+        if let Err(e) = open_terminal_window(app, project.as_deref()) {
+            log::error!("Could not open the terminal window: {}", e);
+        }
+    } else {
+        show_main_window(app);
+    }
+}
+
 /// Toggle the main window's visibility. Used by left-clicks on the tray icon.
 fn toggle_main_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -96,10 +155,27 @@ pub fn run() {
         process_manager: Arc::new(process_manager),
         agents: agent_index,
         quitting: Arc::new(AtomicBool::new(false)),
+        // Memory only until P2 persists it under data/terminal/sessions.json.
+        terminal_layout: Arc::new(cortx_core::terminal::LayoutStore::new(None)),
+        terminal_window_scope: std::sync::Mutex::new(None),
     };
 
     #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Must be registered first: a second `cortx-app` launch (e.g. `cortx
+    // terminal`) hands its args to the running instance and exits. Release
+    // only — the lock is keyed on the app identifier, so a dev build would
+    // otherwise forward to (or be swallowed by) the installed CortX.
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            handle_cli_args(app, &args);
+        }));
+    }
+
+    #[allow(unused_mut)]
+    let mut builder = builder
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -146,12 +222,21 @@ pub fn run() {
             // On Windows/Linux we don't want native chrome at all because we
             // ship a custom TitleBar component, so we drop decorations here
             // before showing the window.
+            let launch_args: Vec<String> = std::env::args().skip(1).collect();
+            let terminal_launch = launch_args.iter().any(|a| a == "--terminal");
             if let Some(main) = app.get_webview_window("main") {
                 #[cfg(any(target_os = "windows", target_os = "linux"))]
                 {
                     let _ = main.set_decorations(false);
                 }
-                let _ = main.show();
+                // `cortx terminal` on a cold start: only the Terminal window
+                // comes up; the main window waits in the tray.
+                if !terminal_launch {
+                    let _ = main.show();
+                }
+            }
+            if terminal_launch {
+                handle_cli_args(app.handle(), &launch_args);
             }
 
             // Start file watcher for cross-process data sync
@@ -333,6 +418,11 @@ pub fn run() {
             commands::get_terminal_states,
             commands::get_command_history,
             commands::send_os_notification,
+            commands::get_terminal_layout,
+            commands::set_terminal_layout,
+            commands::open_terminal_window,
+            commands::show_main_window,
+            commands::take_terminal_window_scope,
             commands::spawn_shell,
             commands::kill_shell,
             commands::list_shells,

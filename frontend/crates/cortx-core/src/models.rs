@@ -352,10 +352,30 @@ pub struct TerminalConfig {
     pub notify_on_long_command: bool,
     #[serde(default = "default_long_command_seconds")]
     pub long_command_seconds: u32,
+    /// Terminal window: where the tab list lives. One or the other, never both.
+    #[serde(default)]
+    pub tabs_placement: TabsPlacement,
+    /// Font of every terminal (dock and window). None = bundled default stack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    /// Font size in px. None = 12.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<u16>,
 }
 
 fn default_long_command_seconds() -> u32 {
     10
+}
+
+/// Terminal window layout for the list of tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TabsPlacement {
+    /// Sessions rail on the left (default).
+    #[default]
+    Sidebar,
+    /// Tab strip above the panes.
+    Top,
 }
 
 impl Default for TerminalConfig {
@@ -368,6 +388,9 @@ impl Default for TerminalConfig {
             shell_integration: true,
             notify_on_long_command: true,
             long_command_seconds: default_long_command_seconds(),
+            tabs_placement: TabsPlacement::default(),
+            font_family: None,
+            font_size: None,
         }
     }
 }

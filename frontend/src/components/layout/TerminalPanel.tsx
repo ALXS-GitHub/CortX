@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo, Component, type ReactNode, Fragment } from 'react';
 import { useAppStore, parseTerminalId, type TerminalPane } from '@/stores/appStore';
+import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
+import { openTerminalWindow } from '@/lib/tauri';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -20,12 +22,14 @@ import {
   Terminal,
   AlertTriangle,
   Plus,
+  AppWindow,
+  SquareArrowOutUpRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { XtermView } from './XtermView';
 import { clearTerminal } from '@/lib/terminalSessions';
-import { shellTabName } from '@/lib/terminalNames';
+import { useTerminalItems } from '@/hooks/useTerminalItems';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { TerminalDndContext, type TerminalItem } from './terminal-dnd';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
@@ -264,8 +268,6 @@ export function TerminalPanel() {
     toggleTerminalPanel,
     terminalHeight,
     setTerminalHeight,
-    serviceRuntimes,
-    scriptRuntimes,
     projects,
     stopService,
     stopScript,
@@ -275,16 +277,11 @@ export function TerminalPanel() {
     hideTerminal,
     openTerminal,
     terminals,
-    globalScripts,
-    globalScriptRuntimes,
     stopGlobalScript,
     clearGlobalScriptLogs,
-    shellRuntimes,
     openShell,
     killShell,
     selectedProjectId,
-    terminalStates,
-    terminalAttention,
     // Multi-pane state
     terminalPanes,
     focusedPaneId,
@@ -342,133 +339,7 @@ export function TerminalPanel() {
     };
   }, [isResizing, setTerminalHeight]);
 
-  // Get service info helper
-  const getServiceInfo = useCallback(
-    (serviceId: string) => {
-      let serviceName = serviceId;
-      let projectName = '';
-      let projectId = '';
-      for (const project of projects) {
-        const service = project.services.find((s) => s.id === serviceId);
-        if (service) {
-          serviceName = service.name;
-          projectName = project.name;
-          projectId = project.id;
-          break;
-        }
-      }
-      return { serviceName, projectName, projectId };
-    },
-    [projects]
-  );
-
-  // Get script info helper
-  const getScriptInfo = useCallback(
-    (scriptId: string) => {
-      let scriptName = scriptId;
-      let projectName = '';
-      let projectId = '';
-      for (const project of projects) {
-        const script = project.scripts?.find((s) => s.id === scriptId);
-        if (script) {
-          scriptName = script.name;
-          projectName = project.name;
-          projectId = project.id;
-          break;
-        }
-      }
-      return { scriptName, projectName, projectId };
-    },
-    [projects]
-  );
-
-  // Build unified list of all terminal items (services + scripts)
-  const allTerminals = useMemo(() => {
-    const items: TerminalItem[] = [];
-
-    // Add services
-    for (const [serviceId, runtime] of serviceRuntimes.entries()) {
-      const { serviceName, projectName, projectId } = getServiceInfo(serviceId);
-      items.push({
-        id: `service:${serviceId}`,
-        type: 'service',
-        name: serviceName,
-        projectName,
-        projectId,
-        status: runtime.status,
-        logs: runtime.logs,
-        detectedPorts: runtime.detectedPorts,
-        activeMode: runtime.activeMode,
-        shell: terminalStates.get(`service:${serviceId}`),
-        attention: terminalAttention.get(`service:${serviceId}`),
-      });
-    }
-
-    // Add scripts
-    for (const [scriptId, runtime] of scriptRuntimes.entries()) {
-      const { scriptName, projectName, projectId } = getScriptInfo(scriptId);
-      items.push({
-        id: `script:${scriptId}`,
-        type: 'script',
-        name: scriptName,
-        projectName,
-        projectId,
-        status: runtime.status,
-        logs: runtime.logs,
-        detectedPorts: [],
-        lastExitCode: runtime.lastExitCode,
-        lastSuccess: runtime.lastSuccess,
-        shell: terminalStates.get(`script:${scriptId}`),
-        attention: terminalAttention.get(`script:${scriptId}`),
-      });
-    }
-
-    // Add global scripts
-    for (const [scriptId, runtime] of globalScriptRuntimes.entries()) {
-      const script = globalScripts.find(s => s.id === scriptId);
-      items.push({
-        id: `global-script:${scriptId}`,
-        type: 'global-script',
-        name: script?.name || 'Unknown Script',
-        projectName: 'Global',
-        projectId: '',
-        status: runtime.status,
-        logs: runtime.logs,
-        detectedPorts: [],
-        lastExitCode: runtime.lastExitCode,
-        lastSuccess: runtime.lastSuccess,
-        shell: terminalStates.get(`global-script:${scriptId}`),
-        attention: terminalAttention.get(`global-script:${scriptId}`),
-      });
-    }
-
-    // Add interactive shells
-    for (const [shellId, runtime] of shellRuntimes.entries()) {
-      const project = runtime.projectId ? projects.find((p) => p.id === runtime.projectId) : undefined;
-      const live = terminalStates.get(`shell:${shellId}`);
-      items.push({
-        id: `shell:${shellId}`,
-        type: 'shell',
-        name: shellTabName(runtime, live),
-        projectName: project?.name ?? '',
-        projectId: project?.id ?? '',
-        status:
-          runtime.status === 'running'
-            ? 'running'
-            : runtime.exitCode === 0 || runtime.exitCode == null
-              ? 'completed'
-              : 'failed',
-        logs: [],
-        detectedPorts: [],
-        lastExitCode: runtime.exitCode ?? undefined,
-        cwd: live?.cwd || runtime.cwd,
-        shell: live,
-        attention: terminalAttention.get(`shell:${shellId}`),
-      });
-    }
-
-    return items;
-  }, [serviceRuntimes, scriptRuntimes, globalScriptRuntimes, shellRuntimes, globalScripts, projects, getServiceInfo, getScriptInfo, terminalStates, terminalAttention]);
+  const allTerminals = useTerminalItems();
 
   // Filter `allTerminals` using the canonical Terminal entity visibility.
   const visibleTerminals = useMemo(() => {
@@ -562,6 +433,17 @@ export function TerminalPanel() {
     if (!activeTerminalId) return null;
     return allTerminals.find((t) => t.id === activeTerminalId) || null;
   }, [activeTerminalId, allTerminals]);
+
+  // Dedicated Terminal window (DEV-13 P1)
+  const handleOpenWindow = useCallback(() => {
+    openTerminalWindow().catch((error) => toast.error(`Failed to open the terminal window: ${String(error)}`));
+  }, []);
+
+  const handleSendCurrentToWindow = useCallback(() => {
+    if (!currentTerminal) return;
+    useTerminalLayoutStore.getState().sendToWindow(currentTerminal.id, currentTerminal.projectId || undefined);
+    handleOpenWindow();
+  }, [currentTerminal, handleOpenWindow]);
 
   // Check if current terminal can be stopped
   const canStopCurrent = currentTerminal?.status === 'running';
@@ -684,6 +566,9 @@ export function TerminalPanel() {
           )}
           <ChevronUp className="ml-auto size-3.5" />
         </button>
+        <DockButton label="Open the Terminal window" onClick={handleOpenWindow}>
+          <AppWindow className="size-3.5" />
+        </DockButton>
         <DockButton label={newShellLabel} onClick={handleNewShell}>
           <Plus className="size-3.5" />
         </DockButton>
@@ -724,6 +609,9 @@ export function TerminalPanel() {
             <DockButton label={newShellLabel} onClick={handleNewShell}>
               <Plus className="size-3.5" />
             </DockButton>
+            <DockButton label="Open the Terminal window" onClick={handleOpenWindow}>
+              <AppWindow className="size-3.5" />
+            </DockButton>
 
             {/* Hidden terminals tray */}
             {hiddenTerminals.length > 0 && (
@@ -755,6 +643,9 @@ export function TerminalPanel() {
 
             {currentTerminal && (
               <>
+                <DockButton label="Move to the Terminal window" onClick={handleSendCurrentToWindow}>
+                  <SquareArrowOutUpRight className="size-3.5" />
+                </DockButton>
                 <DockButton label="Clear output" onClick={handleClearCurrent}>
                   <Trash2 className="size-3.5" />
                 </DockButton>

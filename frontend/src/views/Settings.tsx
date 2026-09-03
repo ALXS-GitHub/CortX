@@ -250,6 +250,9 @@ export function Settings() {
   const [shellIntegration, setShellIntegration] = useState(true);
   const [notifyOnLongCommand, setNotifyOnLongCommand] = useState(true);
   const [longCommandSeconds, setLongCommandSeconds] = useState(10);
+  const [tabsPlacement, setTabsPlacement] = useState<'sidebar' | 'top'>('sidebar');
+  const [terminalFontFamily, setTerminalFontFamily] = useState('');
+  const [terminalFontSize, setTerminalFontSize] = useState(12);
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [launchMethod, setLaunchMethod] = useState<'clipboard' | 'external' | 'integrated'>('integrated');
   const [toolboxBaseUrl, setToolboxBaseUrl] = useState('');
@@ -286,6 +289,9 @@ export function Settings() {
       setShellIntegration(settings.terminal.shellIntegration ?? true);
       setNotifyOnLongCommand(settings.terminal.notifyOnLongCommand ?? true);
       setLongCommandSeconds(settings.terminal.longCommandSeconds ?? 10);
+      setTabsPlacement(settings.terminal.tabsPlacement ?? 'sidebar');
+      setTerminalFontFamily(settings.terminal.fontFamily ?? '');
+      setTerminalFontSize(settings.terminal.fontSize ?? 12);
       setTheme(settings.appearance.theme);
       setLaunchMethod(settings.defaults.launchMethod);
       setToolboxBaseUrl(settings.toolboxBaseUrl ?? '');
@@ -486,6 +492,9 @@ export function Settings() {
         shellIntegration,
         notifyOnLongCommand,
         longCommandSeconds: Math.max(1, Math.round(longCommandSeconds) || 10),
+        tabsPlacement,
+        fontFamily: terminalFontFamily.trim() || undefined,
+        fontSize: Math.min(32, Math.max(8, Math.round(terminalFontSize) || 12)),
       },
       appearance: {
         theme,
@@ -750,6 +759,61 @@ export function Settings() {
               className="w-28 font-mono text-[12px]"
               disabled={!shellIntegration || !notifyOnLongCommand}
             />
+          </Field>
+
+          <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+            <Field
+              label="Font"
+              htmlFor="terminal-font"
+              hint="Any installed font (e.g. Hack NF, JetBrains Mono, Cascadia Code). Nerd Font variants render prompt glyphs. Applies to every terminal, dock and window."
+            >
+              <Input
+                id="terminal-font"
+                value={terminalFontFamily}
+                onChange={(e) => { setTerminalFontFamily(e.target.value); setHasChanges(true); }}
+                placeholder="Default monospace stack"
+                className="font-mono text-[12px]"
+                list="terminal-font-suggestions"
+              />
+              <datalist id="terminal-font-suggestions">
+                <option value="Hack NF" />
+                <option value="Hack NFM" />
+                <option value="JetBrains Mono" />
+                <option value="Cascadia Code" />
+                <option value="Cascadia Mono" />
+                <option value="Consolas" />
+              </datalist>
+            </Field>
+            <Field label="Size" htmlFor="terminal-font-size">
+              <Input
+                id="terminal-font-size"
+                type="number"
+                min={8}
+                max={32}
+                value={terminalFontSize}
+                onChange={(e) => { setTerminalFontSize(Number(e.target.value)); setHasChanges(true); }}
+                className="w-24 font-mono text-[12px]"
+              />
+            </Field>
+          </div>
+
+          <Field
+            label="Terminal window · tabs"
+            htmlFor="tabs-placement"
+            hint="Where the list of terminals lives in the Terminal window: a sessions rail on the left, or a tab strip above the panes. One or the other, never both."
+          >
+            <Select
+              value={tabsPlacement}
+              onValueChange={(v: 'sidebar' | 'top') => { setTabsPlacement(v); setHasChanges(true); }}
+            >
+              <SelectTrigger id="tabs-placement" className="w-[220px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sidebar">Sessions rail (left)</SelectItem>
+                <SelectItem value="top">Tab strip (top)</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
         </Section>
 

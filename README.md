@@ -43,6 +43,7 @@ Every service, script and shell tab runs in a real terminal (a PTY rendered with
 - **Inline images** - Sixel and iTerm2 (`imgcat`-style) images render in place, on Windows too
 - **Shell tabs** - Open a shell in the current project with the `+` button; pick the shell in Settings
 - **Shell integration** - With `cortx init` in your profile, tabs follow the shell's current directory, show a spinner while a command runs and a result pill (ok / exit code) when a command finished while you were looking elsewhere. Long commands that end in a background tab raise a toast, and an OS notification when CortX is not focused. Every finished command is appended to a cross-terminal history
+- **Terminal window** - A dedicated window for real terminal work: sessions grouped by project in a rail, a Global / project scope switcher, tabs with splits (right / down), rename, pin and colour, a status bar with the live directory and command state. Open it from the dock (window icon), move any dock tab into it, send a pane back to the dock, or run `cortx terminal [--project <name>]` from any shell
 - **Tabbed interface** - Switch between tabs, split into panes, hide tabs without stopping the process
 - **Clickable URLs** - Links in terminal output open in your browser
 - **Port detection** - Automatically detects and displays running ports

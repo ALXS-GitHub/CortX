@@ -268,6 +268,11 @@ Local App Launcher provides:
 | F4.3.29 | Dock tabs follow the live cwd, show a spinner while a command runs and a result pill (ok / exit code) when a command finished out of view; cleared when the tab is looked at again | Must Have | Done |
 | F4.3.30 | Long-command notifications: toast in-app and OS notification when the window is in the background (threshold and toggle in Settings) | Should Have | Done |
 | F4.3.31 | Cross-terminal command history (`runtime/command-history.jsonl`: project, cwd, command, exit code, duration), 10 MB rotation | Should Have | Done |
+| F4.3.32 | Dedicated Terminal window (DEV-13 P1): a second Tauri window (`label: terminal`, same bundle with `?window=terminal`) in the same process, so PTYs and scrollback stay in one place; opened from the dock, the CLI (`cortx terminal [--project]`) or `cortx-app --terminal`; single-instance forwarding in release builds | Must Have | Done |
+| F4.3.33 | Shared layout document (`get_terminal_layout` / `set_terminal_layout` + `terminal-layout` broadcast, revision-stamped): which terminal lives in the dock or the window (`surfaces`), the window's tabs and split trees. Each window applies mutations optimistically and reconciles on broadcast; the main window moves terminals out of / back into its dock accordingly | Must Have | Done |
+| F4.3.34 | Terminal window UI: sessions rail grouped by project (status per tab: idle / running / attention), scope switcher Global / project (a display filter, never a wall), flat tab strip with reorder, rename, pin, colour, split right / split down trees with draggable dividers, per-leaf header actions (split, send to dock, close), status bar (cwd, program, running command with elapsed time or last exit), keyboard shortcuts | Must Have | Done |
+| F4.3.35 | Move terminals between surfaces: "Move to the Terminal window" from the dock toolbar, "Send to dock" from a leaf; the xterm session is re-created from the backend scrollback on the other side (one WebView = one DOM) | Must Have | Done |
+| F4.3.36 | Renderer pooling: hidden tabs release their WebGL context and keep their buffer; only on-screen panes hold a GPU renderer | Should Have | Done |
 
 ---
 
@@ -287,6 +292,7 @@ Local App Launcher provides:
 | F5.7 | Keyboard shortcuts customization | Could Have | Pending |
 | F5.8 | Data storage location configuration | Could Have | Pending |
 | F5.9 | Terminal: shell integration toggle, long-command notification toggle and threshold (Settings > Integrated terminal) | Should Have | Done |
+| F5.10 | Terminal: font family and size for every terminal (dock and window), Terminal window tab placement (sessions rail on the left by default, or a tab strip on top — never both). All in `settings.json`, so synced by the git backup | Should Have | Done |
 
 ---
 
