@@ -236,14 +236,20 @@ pub fn generate_init_script_ext(shell: &Shell, aliases: &[ShellAlias], opts: Ini
     }
 
     if opts.disable_shell_predictions && *shell == Shell::PowerShell {
-        // One line on purpose (survives a line-by-line Invoke-Expression).
-        output.push_str(
-            "if ($env:CORTX_TERMINAL_ID -and (Get-Module -Name PSReadLine)) { Set-PSReadLineOption -PredictionSource None }\n",
-        );
+        output.push_str(DISABLE_PSREADLINE_PREDICTION);
     }
 
     output
 }
+
+/// Turns PSReadLine's own inline prediction off inside a CortX terminal, so
+/// it does not double up with our ghost text.
+///
+/// One line on purpose: it has to survive a line-by-line `Invoke-Expression`.
+/// It checks that the parameter exists before using it — `-PredictionSource`
+/// only arrived in PSReadLine 2.1, and Windows PowerShell 5.1 still ships 2.0,
+/// where the call throws a binding error in the user's face at every prompt.
+const DISABLE_PSREADLINE_PREDICTION: &str = "if ($env:CORTX_TERMINAL_ID -and (Get-Module -Name PSReadLine) -and (Get-Command Set-PSReadLineOption -ErrorAction SilentlyContinue | Where-Object { $_.Parameters.ContainsKey('PredictionSource') })) { Set-PSReadLineOption -PredictionSource None }\n";
 
 /// Which shell a program name is, for the app-side injection (`pwsh.exe`,
 /// `/bin/zsh`, `fish`…). `None` for anything we have no snippet for.
@@ -272,9 +278,7 @@ pub fn shell_integration_startup(shell: &Shell, opts: InitOptions) -> String {
         out.push_str(&shell_integration_block(shell));
     }
     if opts.disable_shell_predictions && *shell == Shell::PowerShell {
-        out.push_str(
-            "if ($env:CORTX_TERMINAL_ID -and (Get-Module -Name PSReadLine)) { Set-PSReadLineOption -PredictionSource None }\n",
-        );
+        out.push_str(DISABLE_PSREADLINE_PREDICTION);
     }
     out
 }
