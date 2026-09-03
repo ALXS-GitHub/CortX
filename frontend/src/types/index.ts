@@ -141,6 +141,16 @@ export interface TerminalConfig {
   windowEffect?: 'none' | 'acrylic' | 'mica' | 'vibrancy';
   /** Ghost-text completions from the command history (→ accepts). Default true. */
   inlineSuggestions?: boolean;
+  /** Wallpaper overrides; undefined = the theme file's own values. */
+  wallpaperOpacity?: number;
+  wallpaperBlur?: number;
+  wallpaperFit?: 'cover' | 'contain' | 'tile' | 'center';
+  /** Darkening overlay on the wallpaper, 0–90 %. Default 0. */
+  wallpaperDim?: number;
+  /** Title bar + rail background alpha 0–100 %. Default 72. */
+  chromeOpacity?: number;
+  /** Title bar + rail backdrop blur in px. Default 20. */
+  chromeBlur?: number;
 }
 
 export type TerminalTargetSurface = 'dock' | 'window';

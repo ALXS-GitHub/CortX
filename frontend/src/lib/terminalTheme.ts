@@ -57,7 +57,7 @@ export function resolveActiveThemeName(terminal: TerminalConfig | undefined, isD
 
 export function clampOpacity(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 100;
-  return Math.min(100, Math.max(50, Math.round(value)));
+  return Math.min(100, Math.max(20, Math.round(value)));
 }
 
 // ---------------------------------------------------------------------------
@@ -200,17 +200,32 @@ const CHROME_TOKENS = [
   '--canvas-wash',
   '--terminal-window-bg',
   '--terminal-window-alpha',
+  '--glass-blur',
+  '--glass-strong-blur',
   '--terminal-selection',
   '--terminal-cursor',
 ] as const;
 
+/** User-level look of the window chrome (title bar + rail); see TerminalConfig. */
+export interface ChromeLook {
+  /** Background alpha of the title bar and rail, 0–100 %. Default 72. */
+  chromeOpacity?: number;
+  /** Backdrop blur of the title bar and rail, px. Default 20. */
+  chromeBlur?: number;
+}
+
+export const DEFAULT_CHROME_OPACITY = 72;
+export const DEFAULT_CHROME_BLUR = 20;
+
 /** The design tokens a theme maps to (also used by the settings preview strip). */
-export function chromeTokens(theme: TerminalTheme, opacity = 100): Record<string, string> {
+export function chromeTokens(theme: TerminalTheme, opacity = 100, look: ChromeLook = {}): Record<string, string> {
   const dark = theme.details !== 'lighter';
   const bg = theme.background;
   const fg = theme.foreground;
   const ac = theme.accent;
   const alpha = clampOpacity(opacity) / 100;
+  const chrome = Math.max(0, Math.min(100, look.chromeOpacity ?? DEFAULT_CHROME_OPACITY)) / 100;
+  const blur = Math.max(0, Math.min(80, look.chromeBlur ?? DEFAULT_CHROME_BLUR));
   // Surfaces lift towards white on both sides: a dark theme's card is a hair
   // lighter than the canvas, a light theme's card is nearly white.
   const card = dark ? mix(bg, '#ffffff', 0.06) : mix(bg, '#ffffff', 0.45);
@@ -236,8 +251,10 @@ export function chromeTokens(theme: TerminalTheme, opacity = 100): Record<string
     '--ring': ac,
     '--text-faint': mix(fg, bg, 0.5),
     '--accent-border': rgba(ac, 0.4),
-    '--bg-sidebar': rgba(card, 0.55 * alpha),
-    '--bg-glass': rgba(card, 0.72 * alpha),
+    '--bg-sidebar': rgba(card, chrome * 0.8 * alpha),
+    '--bg-glass': rgba(card, chrome * alpha),
+    '--glass-blur': `${blur}px`,
+    '--glass-strong-blur': `${blur}px`,
     '--bg-input': rgba(card, 0.9),
     // Panes are see-through: the root paints the colour, wallpaper above.
     '--bg-terminal': 'transparent',
@@ -257,7 +274,10 @@ export function chromeTokens(theme: TerminalTheme, opacity = 100): Record<string
  * and set the `dark` class from the theme's `details`. `null` restores the
  * app's own look (`dark` per `opts.dark`, accent from the theme store).
  */
-export function applyWindowTheme(theme: TerminalTheme | null, opts: { opacity?: number; dark?: boolean } = {}): void {
+export function applyWindowTheme(
+  theme: TerminalTheme | null,
+  opts: { opacity?: number; dark?: boolean; look?: ChromeLook } = {}
+): void {
   const root = document.documentElement;
   if (!theme) {
     if (!windowThemeActive) return;
@@ -269,7 +289,7 @@ export function applyWindowTheme(theme: TerminalTheme | null, opts: { opacity?: 
     bootstrapThemeStyle();
     return;
   }
-  const tokens = chromeTokens(theme, opts.opacity);
+  const tokens = chromeTokens(theme, opts.opacity, opts.look);
   for (const [name, value] of Object.entries(tokens)) root.style.setProperty(name, value);
   root.classList.add(WINDOW_THEME_CLASS);
   root.classList.toggle('dark', theme.details !== 'lighter');

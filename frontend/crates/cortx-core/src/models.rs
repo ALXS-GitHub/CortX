@@ -408,6 +408,31 @@ pub struct TerminalConfig {
     /// suggestion shows.
     #[serde(default = "default_true")]
     pub inline_suggestions: bool,
+    /// Wallpaper overrides (None = the theme file's own values).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallpaper_opacity: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallpaper_blur: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallpaper_fit: Option<String>,
+    /// Darkening overlay on the wallpaper, 0–90 (%): how much the theme
+    /// colour tones the picture down.
+    #[serde(default)]
+    pub wallpaper_dim: u8,
+    /// Title bar + sessions rail background alpha, 0–100 (%).
+    #[serde(default = "default_chrome_opacity")]
+    pub chrome_opacity: u8,
+    /// Title bar + sessions rail backdrop blur, px.
+    #[serde(default = "default_chrome_blur")]
+    pub chrome_blur: u16,
+}
+
+fn default_chrome_opacity() -> u8 {
+    72
+}
+
+fn default_chrome_blur() -> u16 {
+    20
 }
 
 fn default_terminal_padding() -> u16 {
@@ -497,6 +522,12 @@ impl Default for TerminalConfig {
             window_opacity: default_window_opacity(),
             window_effect: WindowEffect::default(),
             inline_suggestions: true,
+            wallpaper_opacity: None,
+            wallpaper_blur: None,
+            wallpaper_fit: None,
+            wallpaper_dim: 0,
+            chrome_opacity: default_chrome_opacity(),
+            chrome_blur: default_chrome_blur(),
         }
     }
 }

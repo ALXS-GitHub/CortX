@@ -321,6 +321,12 @@ export function Settings() {
         padding: settings.terminal.padding ?? 8,
         windowOpacity: settings.terminal.windowOpacity ?? 100,
         windowEffect: settings.terminal.windowEffect ?? 'none',
+        wallpaperOpacity: settings.terminal.wallpaperOpacity,
+        wallpaperBlur: settings.terminal.wallpaperBlur,
+        wallpaperFit: settings.terminal.wallpaperFit,
+        wallpaperDim: settings.terminal.wallpaperDim ?? 0,
+        chromeOpacity: settings.terminal.chromeOpacity ?? 72,
+        chromeBlur: settings.terminal.chromeBlur ?? 20,
       });
       setKeybindings({ ...(settings.terminal.keybindings ?? {}) });
       setTheme(settings.appearance.theme);

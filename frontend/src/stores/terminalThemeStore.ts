@@ -140,7 +140,11 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
     const settings = currentSettings();
     setXtermThemeOverride(theme);
     if (chrome) {
-      applyWindowTheme(theme, { opacity: settings?.terminal.windowOpacity, dark: isAppDark(settings) });
+      applyWindowTheme(theme, {
+        opacity: settings?.terminal.windowOpacity,
+        dark: isAppDark(settings),
+        look: { chromeOpacity: settings?.terminal.chromeOpacity, chromeBlur: settings?.terminal.chromeBlur },
+      });
       syncWindowEffect(theme, settings?.terminal);
     }
     applyThemeToAll();

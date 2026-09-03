@@ -227,6 +227,80 @@ export interface TerminalAppearanceSectionProps {
  * Settings card "Terminal appearance": themes per mode, cursor, padding,
  * window opacity and backdrop effect. The host owns the draft and saves.
  */
+/** Range + number for a look setting; `clearable` offers "theme default" (undefined). */
+function LookSlider({
+  id,
+  label,
+  hint,
+  value,
+  fallback,
+  min,
+  max,
+  unit,
+  onChange,
+  clearable = true,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  value: number | undefined;
+  fallback: number;
+  min: number;
+  max: number;
+  unit: string;
+  onChange: (value: number | undefined) => void;
+  clearable?: boolean;
+}) {
+  const shown = value ?? fallback;
+  const clamp = (n: number) => Math.min(max, Math.max(min, Math.round(n)));
+  return (
+    <Row
+      label={
+        <span className="flex items-center gap-2">
+          {label}
+          <span className="font-mono text-[11px] text-faint">
+            {shown}
+            {unit}
+            {value === undefined && clearable ? ' · theme' : ''}
+          </span>
+        </span>
+      }
+      htmlFor={id}
+      hint={hint}
+    >
+      <div className="flex items-center gap-3">
+        <input
+          id={id}
+          type="range"
+          min={min}
+          max={max}
+          step={1}
+          value={shown}
+          onChange={(e) => onChange(clamp(Number(e.target.value)))}
+          className="h-1.5 flex-1 cursor-pointer accent-primary"
+        />
+        <Input
+          type="number"
+          min={min}
+          max={max}
+          value={shown}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n)) onChange(clamp(n));
+          }}
+          className="w-20"
+          aria-label={label}
+        />
+        {clearable && value !== undefined && (
+          <Button variant="ghost" size="xs" onClick={() => onChange(undefined)} title="Back to the theme's value">
+            Reset
+          </Button>
+        )}
+      </div>
+    </Row>
+  );
+}
+
 export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanceSectionProps) {
   const themes = useTerminalThemeStore((s) => s.themes);
   const loaded = useTerminalThemeStore((s) => s.loaded);
@@ -345,6 +419,85 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
           </Row>
         </div>
 
+        {/* Look: wallpaper and chrome, on top of what the theme file says */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <LookSlider
+            id="terminal-wallpaper-opacity"
+            label="Wallpaper opacity"
+            hint="Empty = the theme's own value."
+            value={value.wallpaperOpacity}
+            fallback={100}
+            min={0}
+            max={100}
+            unit="%"
+            onChange={(v) => onChange({ wallpaperOpacity: v })}
+          />
+          <LookSlider
+            id="terminal-wallpaper-blur"
+            label="Wallpaper blur"
+            hint="Empty = the theme's own value."
+            value={value.wallpaperBlur}
+            fallback={0}
+            min={0}
+            max={40}
+            unit="px"
+            onChange={(v) => onChange({ wallpaperBlur: v })}
+          />
+          <LookSlider
+            id="terminal-wallpaper-dim"
+            label="Wallpaper dimming"
+            hint="Tones the picture down with the theme colour."
+            value={value.wallpaperDim ?? 0}
+            fallback={0}
+            min={0}
+            max={90}
+            unit="%"
+            onChange={(v) => onChange({ wallpaperDim: v ?? 0 })}
+            clearable={false}
+          />
+          <Row label="Wallpaper fit" htmlFor="terminal-wallpaper-fit" hint="Empty = the theme's own value.">
+            <Select
+              value={value.wallpaperFit ?? '__theme__'}
+              onValueChange={(v) => onChange({ wallpaperFit: v === '__theme__' ? undefined : (v as 'cover' | 'contain' | 'tile' | 'center') })}
+            >
+              <SelectTrigger id="terminal-wallpaper-fit" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__theme__">Theme default</SelectItem>
+                <SelectItem value="cover">Cover</SelectItem>
+                <SelectItem value="contain">Contain</SelectItem>
+                <SelectItem value="tile">Tile</SelectItem>
+                <SelectItem value="center">Center</SelectItem>
+              </SelectContent>
+            </Select>
+          </Row>
+          <LookSlider
+            id="terminal-chrome-opacity"
+            label="Title bar & rail opacity"
+            hint="Background of the title bar and the sessions rail."
+            value={value.chromeOpacity ?? 72}
+            fallback={72}
+            min={0}
+            max={100}
+            unit="%"
+            onChange={(v) => onChange({ chromeOpacity: v ?? 72 })}
+            clearable={false}
+          />
+          <LookSlider
+            id="terminal-chrome-blur"
+            label="Title bar & rail blur"
+            hint="Frosted-glass blur behind the title bar and the rail."
+            value={value.chromeBlur ?? 20}
+            fallback={20}
+            min={0}
+            max={60}
+            unit="px"
+            onChange={(v) => onChange({ chromeBlur: v ?? 20 })}
+            clearable={false}
+          />
+        </div>
+
         <div className="grid gap-4 sm:grid-cols-2">
           <Row
             label={
@@ -359,7 +512,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
               <input
                 id="terminal-window-opacity"
                 type="range"
-                min={50}
+                min={20}
                 max={100}
                 step={1}
                 value={opacity}
@@ -368,7 +521,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
               />
               <Input
                 type="number"
-                min={50}
+                min={20}
                 max={100}
                 value={opacity}
                 onChange={(e) => {
