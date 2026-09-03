@@ -63,18 +63,13 @@ pub fn open_terminal_window(app: &AppHandle, project_id: Option<&str>, launch: O
         .inner_size(1180.0, 760.0)
         .min_inner_size(720.0, 460.0)
         .resizable(true)
+        // Transparent at the OS level so the window opacity and the acrylic /
+        // mica effects work without recreating the window. The frontend paints
+        // an opaque background whenever the opacity is 100 (and falls back to
+        // an opaque surface colour if the theme is still loading), so this can
+        // never leave the window see-through by accident.
+        .transparent(true)
         .visible(false);
-    // Transparent only when the settings actually ask for it (opacity below
-    // 100 or a backdrop effect): an opaque window can never end up showing
-    // the desktop through a half-applied theme.
-    let wants_transparency = app
-        .try_state::<AppState>()
-        .map(|state| {
-            let t = state.storage.get_settings().terminal;
-            t.window_opacity < 100 || !matches!(t.window_effect, cortx_core::models::WindowEffect::None)
-        })
-        .unwrap_or(false);
-    let builder = builder.transparent(wants_transparency);
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)

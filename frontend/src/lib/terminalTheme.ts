@@ -108,24 +108,34 @@ export function themeCursor(theme: TerminalTheme): string {
   return theme.cortx?.cursor ?? theme.foreground;
 }
 
-export function themeSelection(theme: TerminalTheme): string {
-  return theme.cortx?.selection ?? rgba(theme.foreground, 0.25);
+/**
+ * Selection colour: the user's setting first (`selectionColor`, any CSS
+ * colour), then the theme's `cortx.selection`, then a wash of the accent —
+ * the plain grey of a foreground wash reads as dull over a wallpaper.
+ */
+export function themeSelection(theme: TerminalTheme, override?: string | null): string {
+  const custom = override?.trim();
+  if (custom) return custom;
+  return theme.cortx?.selection ?? rgba(theme.accent, 0.42);
 }
 
 /**
  * xterm `ITheme` for a theme. With `transparentBackground` the canvas is
  * see-through (the window root paints the colour, wallpaper on top).
  */
-export function themeToXterm(theme: TerminalTheme, opts: { transparentBackground?: boolean } = {}): ITheme {
+export function themeToXterm(
+  theme: TerminalTheme,
+  opts: { transparentBackground?: boolean; selectionColor?: string | null } = {}
+): ITheme {
   const { normal, bright } = theme.terminal_colors;
-  const selection = themeSelection(theme);
+  const selection = themeSelection(theme, opts.selectionColor);
   return {
     background: opts.transparentBackground ? rgba(theme.background, 0) : theme.background,
     foreground: theme.foreground,
     cursor: themeCursor(theme),
     cursorAccent: theme.background,
     selectionBackground: selection,
-    selectionInactiveBackground: theme.cortx?.selection ? selection : rgba(theme.foreground, 0.15),
+    selectionInactiveBackground: opts.selectionColor || theme.cortx?.selection ? selection : rgba(theme.foreground, 0.15),
     black: normal.black,
     red: normal.red,
     green: normal.green,
@@ -200,8 +210,10 @@ const CHROME_TOKENS = [
   '--canvas-wash',
   '--terminal-window-bg',
   '--terminal-window-alpha',
+  '--terminal-window-solid',
   '--glass-blur',
   '--glass-strong-blur',
+  '--glass-saturate',
   '--terminal-selection',
   '--terminal-cursor',
 ] as const;
@@ -212,6 +224,8 @@ export interface ChromeLook {
   chromeOpacity?: number;
   /** Backdrop blur of the title bar and rail, px. Default 20. */
   chromeBlur?: number;
+  /** Selection colour override (any CSS colour). */
+  selectionColor?: string | null;
 }
 
 export const DEFAULT_CHROME_OPACITY = 72;
@@ -230,6 +244,9 @@ export function chromeTokens(theme: TerminalTheme, opacity = 100, look: ChromeLo
   // lighter than the canvas, a light theme's card is nearly white.
   const card = dark ? mix(bg, '#ffffff', 0.06) : mix(bg, '#ffffff', 0.45);
   return {
+    // Transparent: the window root paints the theme colour and the wallpaper,
+    // and any `bg-background` surface above them must not hide it. Inverted
+    // text (tooltips are `text-background`) uses `--terminal-window-solid`.
     '--background': 'transparent',
     '--foreground': fg,
     '--card': card,
@@ -255,6 +272,10 @@ export function chromeTokens(theme: TerminalTheme, opacity = 100, look: ChromeLo
     '--bg-glass': rgba(card, chrome * alpha),
     '--glass-blur': `${blur}px`,
     '--glass-strong-blur': `${blur}px`,
+    // No saturation boost over a wallpaper: the app skin punches colours up
+    // by 1.5×, which made the rail and title bar look garish (worse the more
+    // see-through they are).
+    '--glass-saturate': '100%',
     '--bg-input': rgba(card, 0.9),
     // Panes are see-through: the root paints the colour, wallpaper above.
     '--bg-terminal': 'transparent',
@@ -263,8 +284,9 @@ export function chromeTokens(theme: TerminalTheme, opacity = 100, look: ChromeLo
     '--btn-outline-bg': rgba(card, 0.7),
     '--canvas-wash': 'none',
     '--terminal-window-bg': rgba(bg, alpha),
+    '--terminal-window-solid': bg,
     '--terminal-window-alpha': alpha.toFixed(3),
-    '--terminal-selection': themeSelection(theme),
+    '--terminal-selection': themeSelection(theme, look.selectionColor),
     '--terminal-cursor': themeCursor(theme),
   };
 }

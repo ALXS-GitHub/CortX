@@ -145,14 +145,30 @@ function isDarkTheme(): boolean {
 }
 
 /**
+ * Does the Terminal window actually need see-through panes? Only when
+ * something is meant to show behind the text: a wallpaper, a window opacity
+ * below 100, or a backdrop effect. It matters because xterm's
+ * `allowTransparency` disables the opaque glyph path — text is alpha-blended
+ * and comes out visibly heavier — so a plain theme keeps crisp letters.
+ */
+export function needsTransparentPanes(): boolean {
+  if (!IS_TERMINAL_WINDOW) return false;
+  const cfg = useAppStore.getState().settings?.terminal;
+  if ((cfg?.windowOpacity ?? 100) < 100) return true;
+  if ((cfg?.windowEffect ?? 'none') !== 'none') return true;
+  return !!getXtermThemeOverride()?.background_image?.path;
+}
+
+/**
  * xterm palette: the active / previewed terminal theme when the theme store
  * has one (see `stores/terminalThemeStore`), else derived from the app's
  * CSS tokens.
  */
 export function buildTerminalTheme(): ITheme {
   const override = getXtermThemeOverride();
+  const selectionColor = useAppStore.getState().settings?.terminal.selectionColor;
   if (override) {
-    return themeToXterm(override, { transparentBackground: IS_TERMINAL_WINDOW });
+    return themeToXterm(override, { transparentBackground: needsTransparentPanes(), selectionColor });
   }
   const dark = isDarkTheme();
   // Panes of the Terminal window are always see-through: the window itself
@@ -162,13 +178,14 @@ export function buildTerminalTheme(): ITheme {
   // wallpaper with an opaque canvas either.
   if (IS_TERMINAL_WINDOW) {
     const fgOnly = resolveCssColor('--terminal-fg') ?? resolveCssColor('--foreground') ?? (dark ? [229, 229, 229] : [36, 36, 36]);
+    const solid = getComputedStyle(document.documentElement).getPropertyValue('--terminal-window-solid').trim();
     return {
-      background: 'rgba(0, 0, 0, 0)',
+      background: needsTransparentPanes() || !solid ? 'rgba(0, 0, 0, 0)' : solid,
       foreground: toHex(fgOnly),
       cursor: toHex(fgOnly),
       cursorAccent: 'rgba(0, 0, 0, 0)',
-      selectionBackground: `rgba(${fgOnly[0]}, ${fgOnly[1]}, ${fgOnly[2]}, 0.25)`,
-      selectionInactiveBackground: `rgba(${fgOnly[0]}, ${fgOnly[1]}, ${fgOnly[2]}, 0.15)`,
+      selectionBackground: selectionColor?.trim() || `rgba(${fgOnly[0]}, ${fgOnly[1]}, ${fgOnly[2]}, 0.25)`,
+      selectionInactiveBackground: selectionColor?.trim() || `rgba(${fgOnly[0]}, ${fgOnly[1]}, ${fgOnly[2]}, 0.15)`,
       ...(dark ? DARK_ANSI : LIGHT_ANSI),
     };
   }
@@ -180,8 +197,8 @@ export function buildTerminalTheme(): ITheme {
     foreground: toHex(fg),
     cursor: toHex(fg),
     cursorAccent: toHex(bg),
-    selectionBackground: `rgba(${fg[0]}, ${fg[1]}, ${fg[2]}, 0.25)`,
-    selectionInactiveBackground: `rgba(${fg[0]}, ${fg[1]}, ${fg[2]}, 0.15)`,
+    selectionBackground: selectionColor?.trim() || `rgba(${fg[0]}, ${fg[1]}, ${fg[2]}, 0.25)`,
+    selectionInactiveBackground: selectionColor?.trim() || `rgba(${fg[0]}, ${fg[1]}, ${fg[2]}, 0.15)`,
     ...ansi,
   };
 }
@@ -203,12 +220,28 @@ const DEFAULT_FONT_STACK =
 const DEFAULT_FONT_SIZE = 12;
 
 /** xterm font options from the user's settings, with the bundled stack as fallback. */
-export function terminalFontOptions(): { fontFamily: string; fontSize: number; lineHeight: number } {
+function clampWeight(w: number | undefined): number | undefined {
+  if (w === undefined || !Number.isFinite(w)) return undefined;
+  return Math.min(900, Math.max(100, Math.round(w / 100) * 100));
+}
+
+export function terminalFontOptions(): {
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
+  letterSpacing?: number;
+  fontWeight: number;
+  fontWeightBold: number;
+} {
   const cfg = useAppStore.getState().settings?.terminal;
   const family = cfg?.fontFamily?.trim();
   const size = cfg?.fontSize;
   const lh = cfg?.lineHeight;
+  const ls = cfg?.letterSpacing;
   return {
+    letterSpacing: ls !== undefined && ls >= -2 && ls <= 6 ? ls : undefined,
+    fontWeight: clampWeight(cfg?.fontWeight) ?? 400,
+    fontWeightBold: clampWeight(cfg?.fontWeightBold) ?? 700,
     // A user font still falls back to the stack for glyphs it lacks.
     fontFamily: family ? `"${family.replace(/"/g, '')}", ${DEFAULT_FONT_STACK}` : DEFAULT_FONT_STACK,
     fontSize: size && size >= 8 && size <= 32 ? size : DEFAULT_FONT_SIZE,
@@ -248,12 +281,14 @@ export function autoLetterSpacing(fontFamily: string, fontSize: number): number 
 }
 
 /** Push family, size (with the window zoom), line height and letter spacing to one terminal. */
-function applyFontMetrics(term: Terminal, font: { fontFamily: string; fontSize: number; lineHeight: number }) {
+function applyFontMetrics(term: Terminal, font: ReturnType<typeof terminalFontOptions>) {
   const size = Math.max(6, font.fontSize + zoomDelta);
   term.options.fontFamily = font.fontFamily;
   term.options.fontSize = size;
   term.options.lineHeight = font.lineHeight;
-  term.options.letterSpacing = autoLetterSpacing(font.fontFamily, size);
+  term.options.letterSpacing = font.letterSpacing ?? autoLetterSpacing(font.fontFamily, size);
+  term.options.fontWeight = font.fontWeight;
+  term.options.fontWeightBold = font.fontWeightBold;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +341,7 @@ function ensureSettingsSubscription() {
         if (s.container.isConnected) fitTerminal(s.id);
       }
     }
+    applyRendererToAll();
     const cursor = terminalCursorOptions();
     const cursorKey = JSON.stringify(cursor);
     if (cursorKey !== lastCursor) {
@@ -325,7 +361,9 @@ function ensureSettingsSubscription() {
 
 export function applyThemeToAll() {
   const theme = buildTerminalTheme();
+  const transparent = needsTransparentPanes();
   for (const s of sessions.values()) {
+    s.term.options.allowTransparency = transparent;
     s.term.options.theme = theme;
   }
 }
@@ -376,7 +414,9 @@ function createSession(id: string): TerminalSession {
     fontFamily: font.fontFamily,
     fontSize: Math.max(6, font.fontSize + zoomDelta),
     lineHeight: font.lineHeight,
-    letterSpacing: autoLetterSpacing(font.fontFamily, Math.max(6, font.fontSize + zoomDelta)),
+    letterSpacing: font.letterSpacing ?? autoLetterSpacing(font.fontFamily, Math.max(6, font.fontSize + zoomDelta)),
+    fontWeight: font.fontWeight,
+    fontWeightBold: font.fontWeightBold,
     scrollback: 10000,
     theme: buildTerminalTheme(),
     macOptionIsMeta: true,
@@ -473,6 +513,24 @@ function createSession(id: string): TerminalSession {
 
   sessions.set(id, session);
   return session;
+}
+
+/** GPU renderer only when the setting asks for it (see `renderer`). */
+function wantsWebgl(): boolean {
+  return useAppStore.getState().settings?.terminal.renderer === 'webgl';
+}
+
+/** Add / drop the WebGL addon of every open session to match the setting. */
+function applyRendererToAll() {
+  const webgl = wantsWebgl();
+  for (const s of sessions.values()) {
+    if (!s.opened) continue;
+    if (webgl && !s.webgl) tryLoadWebgl(s);
+    else if (!webgl && s.webgl) {
+      s.webgl.dispose();
+      s.webgl = null;
+    }
+  }
 }
 
 function tryLoadWebgl(session: TerminalSession) {
@@ -588,7 +646,7 @@ export function mountTerminal(id: string, parent: HTMLElement): TerminalSession 
   }
   // GPU renderer only while on screen (see unmountTerminal): a window with
   // 20 tabs holds one WebGL context per *visible* pane, not per tab.
-  if (!session.webgl) tryLoadWebgl(session);
+  if (!session.webgl && wantsWebgl()) tryLoadWebgl(session);
   // Two frames: layout must settle before fit() can measure the container.
   requestAnimationFrame(() => requestAnimationFrame(() => fitTerminal(id)));
   return session;

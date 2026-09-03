@@ -119,6 +119,15 @@ export interface TerminalConfig {
   fontSize?: number;
   /** Line height multiplier 1.0–2.0. Default 1.2. */
   lineHeight?: number;
+  /** Extra space between glyphs in px. Undefined = automatic. */
+  letterSpacing?: number;
+  /** Weight of normal / bold text (100–900). Undefined = 400 / 700. */
+  fontWeight?: number;
+  fontWeightBold?: number;
+  /** `dom` (finest glyphs, default) or `webgl` (fastest on heavy output). */
+  renderer?: 'dom' | 'webgl';
+  /** Selection colour (any CSS colour). Undefined = the theme's. */
+  selectionColor?: string;
   /** Reopen the Terminal window's tabs on start (shells in their last cwd, nothing re-run). Default true. */
   restoreSessions?: boolean;
   /** Seed restored shells with the tail of their previous scrollback. Default true. */

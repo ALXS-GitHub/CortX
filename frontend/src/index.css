@@ -383,49 +383,8 @@
 .cortx-xterm .xterm {
   height: 100%;
 }
-/* Thin, rounded, see-through scrollbar on the terminal viewport (WebView2
-   otherwise draws the wide square system one). Colour follows the text. */
-.cortx-xterm .xterm .xterm-viewport::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-.cortx-xterm .xterm .xterm-viewport::-webkit-scrollbar-track {
-  background: transparent;
-}
-.cortx-xterm .xterm .xterm-viewport::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--terminal-fg, var(--foreground)) 22%, transparent);
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-.cortx-xterm .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--terminal-fg, var(--foreground)) 38%, transparent);
-  background-clip: padding-box;
-}
-/* xterm 5.5+ draws its own scrollbar (`.xterm-scrollable-element > .scrollbar`),
-   14 px and square by default; the rules above only cover the native one. */
-.cortx-xterm .xterm .xterm-scrollable-element > .scrollbar.vertical {
-  width: 8px !important;
-}
-.cortx-xterm .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
-  width: 6px !important;
-  left: 1px !important;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--terminal-fg, var(--foreground)) 22%, transparent) !important;
-  transition: background-color 120ms ease;
-}
-.cortx-xterm .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider:hover,
-.cortx-xterm .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider.active {
-  background: color-mix(in srgb, var(--terminal-fg, var(--foreground)) 38%, transparent) !important;
-}
 .cortx-xterm .xterm .xterm-viewport {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--terminal-fg, var(--foreground)) 22%, transparent) transparent;
-  /* xterm paints the viewport with the renderer's idea of the background,
-     which turns black after a WebGL dispose / reload (hidden tabs release
-     their GPU context). The rows never cover the last few pixels of the
-     viewport, so that strip must follow the theme itself. */
-  background-color: var(--bg-terminal) !important;
 }
 
 /* Terminal clickable links (legacy log view) */
@@ -440,59 +399,4 @@
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-/* ============================================================
-   Terminal window theming (DEV-13 P3). While a terminal theme is applied,
-   `lib/terminalTheme.ts` rewrites the design tokens inline on <html> and
-   adds `.terminal-window`; the window itself is transparent. The root
-   below paints the theme background at the chosen opacity, the wallpaper
-   layer sits right above it, and everything else (title bar, rail, panes,
-   popovers) is see-through or frosted over it — the whole window follows
-   the theme, like Warp.
-   ============================================================ */
-:root.terminal-window,
-:root.terminal-window body {
-  background-color: transparent;
-  background-image: none;
-}
-.terminal-window-root {
-  position: relative;
-  isolation: isolate;
-  min-height: 100vh;
-  /* Never see-through by accident: without theme tokens (theme still
-     loading, backend restarting) this falls back to the opaque surface
-     colour instead of showing the desktop or a black hole. */
-  background: var(--terminal-window-bg, var(--card));
-}
-.terminal-theme-layer {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover;
-}
-/* Panes: transparent canvas + theme padding. `--terminal-padding` is set by
-   lib/terminalSessions from Settings (default 8px); no right padding so the
-   scrollbar stays at the edge. */
-.cortx-xterm {
-  padding: var(--terminal-padding, 8px) 0 var(--terminal-padding, 8px) var(--terminal-padding, 8px);
-}
-:root.terminal-window .cortx-xterm,
-:root.terminal-window .cortx-xterm .xterm .xterm-viewport,
-:root.terminal-window .terminal-dock {
-  background: transparent !important;
-}
-:root.terminal-window ::selection {
-  background: var(--terminal-selection, color-mix(in srgb, var(--primary) 30%, transparent));
-}
-
-/* Settings: a live-applied change can make a section flicker for a frame
-   (a list reloading), and Chrome's scroll anchoring then "compensates" by
-   moving the scroll position. The page must stay exactly where it is. */
-.settings-sections,
-.settings-sections * {
-  overflow-anchor: none;
 }

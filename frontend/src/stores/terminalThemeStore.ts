@@ -153,7 +153,11 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
       applyWindowTheme(theme, {
         opacity: settings?.terminal.windowOpacity,
         dark: isAppDark(settings),
-        look: { chromeOpacity: settings?.terminal.chromeOpacity, chromeBlur: settings?.terminal.chromeBlur },
+        look: {
+          chromeOpacity: settings?.terminal.chromeOpacity,
+          chromeBlur: settings?.terminal.chromeBlur,
+          selectionColor: settings?.terminal.selectionColor,
+        },
       });
       syncWindowEffect(theme, settings?.terminal);
     }

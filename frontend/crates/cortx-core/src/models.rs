@@ -368,6 +368,23 @@ pub struct TerminalConfig {
     /// Line height multiplier, 1.0–2.0. None = 1.2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_height: Option<f32>,
+    /// Extra space between glyphs in px. None = auto (CortX compensates for
+    /// fonts whose advance is not a whole number of pixels).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<f32>,
+    /// Font weight of normal / bold text (100–900). None = 400 / 700.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_weight_bold: Option<u16>,
+    /// How the terminals are drawn. The GPU renderer is faster on heavy
+    /// output; the DOM one uses the browser's own text rendering, whose
+    /// glyphs are noticeably finer.
+    #[serde(default)]
+    pub renderer: TerminalRenderer,
+    /// Selection colour of the terminals (any CSS colour). None = the theme's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_color: Option<String>,
     /// Reopen the Terminal window's tabs (shells in their last directory,
     /// nothing re-run) when the app starts.
     #[serde(default = "default_true")]
@@ -485,6 +502,17 @@ fn default_dev_sessions_target() -> TerminalTarget {
     TerminalTarget::Window
 }
 
+/// Glyph renderer of the integrated terminals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalRenderer {
+    /// Browser text rendering: finest glyphs (default).
+    #[default]
+    Dom,
+    /// GPU atlas: fastest on very heavy output, slightly heavier glyphs.
+    Webgl,
+}
+
 /// A surface terminals can be shown in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -519,6 +547,11 @@ impl Default for TerminalConfig {
             font_family: None,
             font_size: None,
             line_height: None,
+            letter_spacing: None,
+            font_weight: None,
+            font_weight_bold: None,
+            renderer: TerminalRenderer::default(),
+            selection_color: None,
             restore_sessions: true,
             restore_scrollback: true,
             restore_scrollback_lines: default_restore_scrollback_lines(),

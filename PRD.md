@@ -312,6 +312,7 @@ Local App Launcher provides:
 | F5.11 | Terminal: session restore toggle, scrollback snapshot toggle and line count, "processes open in" and "dev sessions open in", and the Launch configurations section (list, run, edit, duplicate, delete) | Should Have | Done |
 | F5.12 | Terminal appearance section (themes per mode + picker, cursor, padding, window opacity and effect, inline suggestions toggle) and Shortcuts section | Should Have | Done |
 | F5.13 | Settings as tabs (General, Appearance, Terminal, Scripts, Agents) with a search box, and **live apply**: every change is written 400 ms later with a "Saving… / Saved" indicator instead of a Save button; the page never remounts or loses its scroll position | Should Have | Done |
+| F5.14 | Text rendering settings: renderer (browser = finest glyphs, default; GPU = fastest), font weight and bold weight, letter spacing (auto by default), line height, and the terminal selection colour | Should Have | Done |
 
 ---
 

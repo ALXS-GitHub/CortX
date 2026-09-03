@@ -50,7 +50,10 @@ export function TerminalThemeLayer() {
 
   const image = theme.background_image;
   const opacityPct = look?.wallpaperOpacity ?? image?.opacity ?? 100;
-  const opacity = Math.max(0, Math.min(1, opacityPct / 100));
+  // The window opacity applies to the wallpaper too: at 60 % you must see
+  // the desktop through the picture, not just around it.
+  const windowAlpha = Math.max(0, Math.min(100, look?.windowOpacity ?? 100)) / 100;
+  const opacity = Math.max(0, Math.min(1, (opacityPct / 100) * windowAlpha));
   const fit: Fit = look?.wallpaperFit ?? theme.cortx?.imageFit ?? 'cover';
   const blur = Math.max(0, look?.wallpaperBlur ?? theme.cortx?.blur ?? 0);
   const dim = Math.max(0, Math.min(90, look?.wallpaperDim ?? 0)) / 100;
@@ -75,7 +78,7 @@ export function TerminalThemeLayer() {
         <div
           aria-hidden
           className="terminal-theme-layer"
-          style={{ backgroundImage: 'none', backgroundColor: '#000', opacity: dim }}
+          style={{ backgroundImage: 'none', backgroundColor: '#000', opacity: dim * windowAlpha }}
         />
       )}
     </>

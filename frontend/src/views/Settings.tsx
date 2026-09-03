@@ -341,6 +341,11 @@ export function Settings() {
   const [activeTab, setActiveTab] = useState<SettingsTab>(readSavedTab);
   const [query, setQuery] = useState('');
   const [terminalLineHeight, setTerminalLineHeight] = useState(1.2);
+  const [terminalLetterSpacing, setTerminalLetterSpacing] = useState<string>('');
+  const [terminalFontWeight, setTerminalFontWeight] = useState(400);
+  const [terminalFontWeightBold, setTerminalFontWeightBold] = useState(700);
+  const [terminalRenderer, setTerminalRenderer] = useState<'dom' | 'webgl'>('dom');
+  const [terminalSelectionColor, setTerminalSelectionColor] = useState('');
   const [dockUsesTerminalTheme, setDockUsesTerminalTheme] = useState(false);
   // Hydrate from the store only when its content actually changed (the
   // store object is replaced on every reload, our own saves included).
@@ -366,6 +371,11 @@ export function Settings() {
       setNotifyOnLongCommand(settings.terminal.notifyOnLongCommand ?? true);
       setLongCommandSeconds(settings.terminal.longCommandSeconds ?? 10);
       setTerminalLineHeight(settings.terminal.lineHeight ?? 1.2);
+      setTerminalLetterSpacing(settings.terminal.letterSpacing === undefined ? '' : String(settings.terminal.letterSpacing));
+      setTerminalFontWeight(settings.terminal.fontWeight ?? 400);
+      setTerminalFontWeightBold(settings.terminal.fontWeightBold ?? 700);
+      setTerminalRenderer(settings.terminal.renderer ?? 'dom');
+      setTerminalSelectionColor(settings.terminal.selectionColor ?? '');
       setDockUsesTerminalTheme(settings.terminal.dockUsesTerminalTheme ?? false);
       setTabsPlacement(settings.terminal.tabsPlacement ?? 'sidebar');
       setTerminalFontFamily(settings.terminal.fontFamily ?? '');
@@ -594,6 +604,11 @@ export function Settings() {
         notifyOnLongCommand,
         longCommandSeconds: Math.max(1, Math.round(longCommandSeconds) || 10),
         lineHeight: Math.min(2, Math.max(1, Number(terminalLineHeight) || 1.2)),
+        letterSpacing: terminalLetterSpacing.trim() === '' ? undefined : Math.min(6, Math.max(-2, Number(terminalLetterSpacing) || 0)),
+        fontWeight: terminalFontWeight,
+        fontWeightBold: terminalFontWeightBold,
+        renderer: terminalRenderer,
+        selectionColor: terminalSelectionColor.trim() || undefined,
         dockUsesTerminalTheme,
         tabsPlacement,
         fontFamily: terminalFontFamily.trim() || undefined,
@@ -1000,6 +1015,90 @@ export function Settings() {
                 />
               </Field>
             </div>
+
+            <div className="grid gap-4 sm:grid-cols-4">
+              <Field
+                label="Text weight"
+                htmlFor="terminal-font-weight"
+                hint="400 is regular, 300 lighter."
+              >
+                <Input
+                  id="terminal-font-weight"
+                  type="number"
+                  min={100}
+                  max={900}
+                  step={100}
+                  value={terminalFontWeight}
+                  onChange={(e) => { setTerminalFontWeight(Number(e.target.value)); setHasChanges(true); }}
+                  className="w-24 font-mono text-[12px]"
+                />
+              </Field>
+              <Field label="Bold weight" htmlFor="terminal-font-weight-bold" hint="700 by default; 600 is calmer.">
+                <Input
+                  id="terminal-font-weight-bold"
+                  type="number"
+                  min={100}
+                  max={900}
+                  step={100}
+                  value={terminalFontWeightBold}
+                  onChange={(e) => { setTerminalFontWeightBold(Number(e.target.value)); setHasChanges(true); }}
+                  className="w-24 font-mono text-[12px]"
+                />
+              </Field>
+              <Field
+                label="Letter spacing"
+                htmlFor="terminal-letter-spacing"
+                hint="px; empty = automatic (compensates fonts whose advance is not a whole pixel)."
+              >
+                <Input
+                  id="terminal-letter-spacing"
+                  type="number"
+                  min={-2}
+                  max={6}
+                  step={0.5}
+                  value={terminalLetterSpacing}
+                  placeholder="auto"
+                  onChange={(e) => { setTerminalLetterSpacing(e.target.value); setHasChanges(true); }}
+                  className="w-24 font-mono text-[12px]"
+                />
+              </Field>
+              <Field
+                label="Selection colour"
+                htmlFor="terminal-selection-color"
+                hint="Any CSS colour; empty = the theme's."
+              >
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="terminal-selection-color"
+                    value={terminalSelectionColor}
+                    placeholder="theme"
+                    onChange={(e) => { setTerminalSelectionColor(e.target.value); setHasChanges(true); }}
+                    className="w-32 font-mono text-[12px]"
+                  />
+                  <span
+                    aria-hidden
+                    className="size-6 shrink-0 rounded-[var(--rad-xs)] border border-border"
+                    style={{ background: terminalSelectionColor.trim() || 'var(--terminal-selection, transparent)' }}
+                  />
+                </div>
+              </Field>
+            </div>
+
+            <Field
+              label="Renderer"
+              htmlFor="terminal-renderer"
+              hint="The browser renderer draws the finest glyphs (what CortX uses by default). The GPU one is faster on very heavy output but its letters look heavier."
+            >
+              <Select value={terminalRenderer} onValueChange={(v: 'dom' | 'webgl') => { setTerminalRenderer(v); setHasChanges(true); }}>
+                <SelectTrigger id="terminal-renderer" className="w-[260px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dom">Browser (finest text)</SelectItem>
+                  <SelectItem value="webgl">GPU (fastest)</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
 
             <div className="flex items-center justify-between gap-4">
               <div>
