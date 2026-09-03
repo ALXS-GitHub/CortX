@@ -124,8 +124,8 @@ export interface TerminalConfig {
   /** Weight of normal / bold text (100–900). Undefined = 400 / 700. */
   fontWeight?: number;
   fontWeightBold?: number;
-  /** `webgl` (default: glyphs scaled to the cell) or `dom` (thinner text). */
-  renderer?: 'dom' | 'webgl';
+  /** `webgl` (GPU), `canvas` (fine text + exact block glyphs) or `dom` (no acceleration). */
+  renderer?: 'dom' | 'webgl' | 'canvas';
   /** Selection colour (any CSS colour). Undefined = the theme's. */
   selectionColor?: string;
   /** Reopen the Terminal window's tabs on start (shells in their last cwd, nothing re-run). Default true. */

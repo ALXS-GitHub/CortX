@@ -14,6 +14,7 @@
 import { Terminal, type ITheme, type IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { CanvasAddon } from '@xterm/addon-canvas';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { ImageAddon } from '@xterm/addon-image';
@@ -39,6 +40,8 @@ export interface TerminalSession {
   opened: boolean;
   attachToken: number | null;
   webgl: WebglAddon | null;
+  /** Canvas renderer (alternative GPU-free accelerated renderer). */
+  canvas: CanvasAddon | null;
   disposables: IDisposable[];
   /** True while the backend scrollback snapshot is being parsed (see attach). */
   replaying: boolean;
@@ -220,16 +223,18 @@ export function terminalFontOptions(): {
   const cfg = useAppStore.getState().settings?.terminal;
   const family = cfg?.fontFamily?.trim();
   const size = cfg?.fontSize;
-  const renderer = cfg?.renderer ?? 'webgl';
+  const renderer = cfg?.renderer ?? 'canvas';
   const lh = cfg?.lineHeight;
   const ls = cfg?.letterSpacing;
+  // A user font still falls back to the stack for glyphs it lacks.
+  const fontFamily = family ? `"${family.replace(/"/g, '')}", ${DEFAULT_FONT_STACK}` : DEFAULT_FONT_STACK;
+  const requested = size && size >= 8 && size <= 32 ? size : DEFAULT_FONT_SIZE;
   return {
     letterSpacing: ls !== undefined && ls >= -2 && ls <= 6 ? ls : undefined,
     fontWeight: clampWeight(cfg?.fontWeight) ?? 400,
     fontWeightBold: clampWeight(cfg?.fontWeightBold) ?? 700,
-    // A user font still falls back to the stack for glyphs it lacks.
-    fontFamily: family ? `"${family.replace(/"/g, '')}", ${DEFAULT_FONT_STACK}` : DEFAULT_FONT_STACK,
-    fontSize: size && size >= 8 && size <= 32 ? size : DEFAULT_FONT_SIZE,
+    fontFamily,
+    fontSize: snapFontSize(fontFamily, requested, renderer),
     lineHeight: lh && lh >= 1 && lh <= 2 ? lh : defaultLineHeight(renderer),
   };
 }
@@ -253,9 +258,50 @@ function defaultLineHeight(renderer: string): number {
  */
 export const DEFAULT_LETTER_SPACING = 0;
 
+let advanceCanvas: CanvasRenderingContext2D | null | undefined;
+const advanceCache = new Map<string, number>();
+
+/** Horizontal advance of one glyph of `fontFamily` at `fontSize`, in CSS px. */
+function glyphAdvance(fontFamily: string, fontSize: number): number {
+  const key = `${fontSize}|${fontFamily}`;
+  const cached = advanceCache.get(key);
+  if (cached !== undefined) return cached;
+  if (advanceCanvas === undefined) advanceCanvas = document.createElement('canvas').getContext('2d');
+  if (!advanceCanvas) return fontSize * 0.6;
+  advanceCanvas.font = `${fontSize}px ${fontFamily}`;
+  const width = advanceCanvas.measureText('W'.repeat(50)).width / 50;
+  advanceCache.set(key, width);
+  return width;
+}
+
+/**
+ * Font size that makes one cell an exact number of CSS pixels.
+ *
+ * A monospace advance is a fraction of the em (Hack is 0.602 em), so at most
+ * sizes a cell is fractional — 7.82 px at 13. The browser renderer then
+ * starts every cell between two device pixels: glyphs are resampled (blurry)
+ * and the edge of a powerline separator leaves a hairline against its
+ * neighbour. Scaling the size by a hair (13 → 13.288, cell exactly 8 px)
+ * puts every cell on a whole pixel and both problems disappear. The GPU
+ * renderer redraws box and powerline glyphs at the cell size, so it is left
+ * alone.
+ */
+export function snapFontSize(fontFamily: string, fontSize: number, renderer: string): number {
+  if (renderer !== 'dom') return fontSize;
+  const advance = glyphAdvance(fontFamily, fontSize);
+  if (advance <= 0) return fontSize;
+  const perPx = advance / fontSize;
+  const target = Math.round(advance);
+  if (target < 1) return fontSize;
+  const snapped = target / perPx;
+  // Only a nudge: never move the size the user asked for by a visible amount.
+  return Math.abs(snapped - fontSize) <= 0.8 ? Math.round(snapped * 1000) / 1000 : fontSize;
+}
+
 /** Push family, size (with the window zoom), line height and letter spacing to one terminal. */
 function applyFontMetrics(term: Terminal, font: ReturnType<typeof terminalFontOptions>) {
-  const size = Math.max(6, font.fontSize + zoomDelta);
+  const renderer = useAppStore.getState().settings?.terminal.renderer ?? 'canvas';
+  const size = snapFontSize(font.fontFamily, Math.max(6, font.fontSize + zoomDelta), renderer);
   term.options.fontFamily = font.fontFamily;
   term.options.fontSize = size;
   term.options.lineHeight = font.lineHeight;
@@ -386,7 +432,11 @@ function createSession(id: string): TerminalSession {
     // opacity and wallpaper show behind the text (see lib/terminalTheme).
     allowTransparency: IS_TERMINAL_WINDOW,
     fontFamily: font.fontFamily,
-    fontSize: Math.max(6, font.fontSize + zoomDelta),
+    fontSize: snapFontSize(
+      font.fontFamily,
+      Math.max(6, font.fontSize + zoomDelta),
+      useAppStore.getState().settings?.terminal.renderer ?? 'canvas'
+    ),
     lineHeight: font.lineHeight,
     letterSpacing: font.letterSpacing ?? DEFAULT_LETTER_SPACING,
     fontWeight: font.fontWeight,
@@ -437,6 +487,7 @@ function createSession(id: string): TerminalSession {
     opened: false,
     attachToken: null,
     webgl: null,
+    canvas: null,
     disposables: [],
     replaying: false,
   };
@@ -489,21 +540,45 @@ function createSession(id: string): TerminalSession {
   return session;
 }
 
-/** GPU renderer only when the setting asks for it (see `renderer`). */
-function wantsWebgl(): boolean {
-  return (useAppStore.getState().settings?.terminal.renderer ?? 'webgl') !== 'dom';
+/** Renderer from the settings (`webgl` when unset). */
+function currentRenderer(): 'webgl' | 'canvas' | 'dom' {
+  return useAppStore.getState().settings?.terminal.renderer ?? 'canvas';
 }
 
-/** Add / drop the WebGL addon of every open session to match the setting. */
+/** Attach the accelerated renderer the settings ask for (none in `dom`). */
+function applyRenderer(session: TerminalSession) {
+  if (!session.opened) return;
+  const renderer = currentRenderer();
+  if (renderer !== 'webgl' && session.webgl) {
+    session.webgl.dispose();
+    session.webgl = null;
+  }
+  if (renderer !== 'canvas' && session.canvas) {
+    session.canvas.dispose();
+    session.canvas = null;
+  }
+  if (renderer === 'webgl' && !session.webgl) tryLoadWebgl(session);
+  if (renderer === 'canvas' && !session.canvas) tryLoadCanvas(session);
+}
+
 function applyRendererToAll() {
-  const webgl = wantsWebgl();
-  for (const s of sessions.values()) {
-    if (!s.opened) continue;
-    if (webgl && !s.webgl) tryLoadWebgl(s);
-    else if (!webgl && s.webgl) {
-      s.webgl.dispose();
-      s.webgl = null;
-    }
+  for (const s of sessions.values()) applyRenderer(s);
+}
+
+/**
+ * Canvas renderer: like the GPU one it draws box, block and powerline
+ * characters itself at the exact cell size (no seams), but it rasterises
+ * text through the platform's engine, so glyphs stay as fine as the DOM
+ * renderer's.
+ */
+function tryLoadCanvas(session: TerminalSession) {
+  try {
+    const canvas = new CanvasAddon();
+    session.term.loadAddon(canvas);
+    session.canvas = canvas;
+  } catch (err) {
+    console.warn('Canvas renderer unavailable, using the DOM renderer:', err);
+    session.canvas = null;
   }
 }
 
@@ -620,7 +695,7 @@ export function mountTerminal(id: string, parent: HTMLElement): TerminalSession 
   }
   // GPU renderer only while on screen (see unmountTerminal): a window with
   // 20 tabs holds one WebGL context per *visible* pane, not per tab.
-  if (!session.webgl && wantsWebgl()) tryLoadWebgl(session);
+  applyRenderer(session);
   // Two frames: layout must settle before fit() can measure the container.
   requestAnimationFrame(() => requestAnimationFrame(() => fitTerminal(id)));
   return session;
@@ -636,6 +711,10 @@ export function unmountTerminal(id: string) {
   if (session.webgl) {
     session.webgl.dispose();
     session.webgl = null;
+  }
+  if (session.canvas) {
+    session.canvas.dispose();
+    session.canvas = null;
   }
 }
 
@@ -678,6 +757,7 @@ export function disposeTerminal(id: string) {
   }
   for (const d of session.disposables) d.dispose();
   session.webgl?.dispose();
+  session.canvas?.dispose();
   session.term.dispose();
   session.container.remove();
 }

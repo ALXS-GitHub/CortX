@@ -344,7 +344,7 @@ export function Settings() {
   const [terminalLetterSpacing, setTerminalLetterSpacing] = useState<string>('');
   const [terminalFontWeight, setTerminalFontWeight] = useState(400);
   const [terminalFontWeightBold, setTerminalFontWeightBold] = useState(700);
-  const [terminalRenderer, setTerminalRenderer] = useState<'dom' | 'webgl'>('webgl');
+  const [terminalRenderer, setTerminalRenderer] = useState<'dom' | 'webgl' | 'canvas'>('canvas');
   const [terminalSelectionColor, setTerminalSelectionColor] = useState('');
   const [dockUsesTerminalTheme, setDockUsesTerminalTheme] = useState(false);
   // Hydrate from the store only when its content actually changed (the
@@ -374,7 +374,7 @@ export function Settings() {
       setTerminalLetterSpacing(settings.terminal.letterSpacing === undefined ? '' : String(settings.terminal.letterSpacing));
       setTerminalFontWeight(settings.terminal.fontWeight ?? 400);
       setTerminalFontWeightBold(settings.terminal.fontWeightBold ?? 700);
-      setTerminalRenderer(settings.terminal.renderer ?? 'webgl');
+      setTerminalRenderer(settings.terminal.renderer ?? 'canvas');
       setTerminalSelectionColor(settings.terminal.selectionColor ?? '');
       setDockUsesTerminalTheme(settings.terminal.dockUsesTerminalTheme ?? false);
       setTabsPlacement(settings.terminal.tabsPlacement ?? 'sidebar');
@@ -1091,15 +1091,16 @@ export function Settings() {
             <Field
               label="Renderer"
               htmlFor="terminal-renderer"
-              hint="The GPU renderer redraws box and powerline glyphs at the cell size. The browser one draws finer text through the system rasteriser — set the line height to 1.0 with it so the separators still touch."
+              hint="GPU and Canvas both draw box, block and powerline characters themselves, so they always line up; Canvas rasterises the text through the platform engine, which keeps the letters finer. The browser renderer draws everything as text and can leave hairlines between cells."
             >
-              <Select value={terminalRenderer} onValueChange={(v: 'dom' | 'webgl') => { setTerminalRenderer(v); setHasChanges(true); }}>
+              <Select value={terminalRenderer} onValueChange={(v: 'dom' | 'webgl' | 'canvas') => { setTerminalRenderer(v); setHasChanges(true); }}>
                 <SelectTrigger id="terminal-renderer" className="w-[260px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="webgl">GPU (default, glyphs fit the cell)</SelectItem>
-                  <SelectItem value="dom">Browser (thinner text, powerline glyphs may not join)</SelectItem>
+                  <SelectItem value="webgl">GPU (fastest on heavy output)</SelectItem>
+                  <SelectItem value="canvas">Canvas (default: fine text, exact block glyphs)</SelectItem>
+                  <SelectItem value="dom">Browser (no acceleration)</SelectItem>
                 </SelectContent>
               </Select>
             </Field>

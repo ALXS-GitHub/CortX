@@ -506,12 +506,15 @@ fn default_dev_sessions_target() -> TerminalTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TerminalRenderer {
-    /// GPU atlas (default): scales glyphs to the cell, so powerline /
-    /// Nerd Font separators line up exactly.
+    /// Canvas (default): draws box / block / powerline characters itself at
+    /// the cell size — no seams — while the text is rasterised by the
+    /// platform engine, so the letters stay fine.
     #[default]
+    Canvas,
+    /// GPU atlas: fastest on very heavy output, slightly heavier glyphs.
     Webgl,
-    /// Browser text rendering: thinner glyphs, but block glyphs keep their
-    /// own height and can leave gaps in a powerline prompt.
+    /// No acceleration: the browser draws every character, block glyphs
+    /// included, which can leave hairlines between cells.
     Dom,
 }
 
