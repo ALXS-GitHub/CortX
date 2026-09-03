@@ -27,6 +27,7 @@ import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
+import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { getXtermThemeOverride, isWindowThemeActive, themeToXterm } from '@/lib/terminalTheme';
 
 export interface TerminalSession {
@@ -691,6 +692,9 @@ export function mountTerminal(id: string, parent: HTMLElement): TerminalSession 
   if (!session.opened) {
     session.term.open(session.container);
     session.opened = true;
+    // Fit before the first output is consumed, and so the pane's size is
+    // known to the next shell that spawns.
+    fitTerminal(id);
     attach(session);
   }
   // GPU renderer only while on screen (see unmountTerminal): a window with
@@ -726,7 +730,40 @@ export function fitTerminal(id: string) {
   } catch {
     // fit() throws when the container has no size yet; the ResizeObserver
     // in XtermView calls us again once it does.
+    return;
   }
+  // Remember the size on the leaf: a restored shell is spawned at the size it
+  // will have, instead of being resized after its prompt is already on screen.
+  const { cols, rows } = session.term;
+  if (cols > 2 && rows > 2) {
+    useTerminalLayoutStore.getState().updateLeafSize(id, cols, rows);
+  }
+}
+
+/**
+ * Size a shell should be spawned at, read from a terminal already on screen
+ * (`preferred` first, then any mounted one). `null` when nothing is mounted —
+ * the caller then leaves it to the backend default.
+ *
+ * Spawning at the final size matters: a PTY resized after the shell has drawn
+ * its prompt leaves the line editor writing several lines above it, because
+ * the coordinates it captured no longer match the reflowed buffer.
+ */
+export function measuredTerminalSize(preferred?: string): { cols: number; rows: number } | null {
+  const usable = (s: TerminalSession | undefined) =>
+    s?.opened && s.container.isConnected && s.term.cols > 2 && s.term.rows > 2
+      ? { cols: s.term.cols, rows: s.term.rows }
+      : null;
+  const first = preferred ? usable(sessions.get(preferred)) : null;
+  if (first) return first;
+  // Widest pane on screen: a new tab is a single full-width pane, so the
+  // largest mounted terminal is the closest match.
+  let best: { cols: number; rows: number } | null = null;
+  for (const s of sessions.values()) {
+    const size = usable(s);
+    if (size && (!best || size.cols * size.rows > best.cols * best.rows)) best = size;
+  }
+  return best;
 }
 
 export function focusTerminal(id: string) {

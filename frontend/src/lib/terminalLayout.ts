@@ -25,6 +25,10 @@ export interface LeafNode {
   terminalId: string;
   /** Last directory the shell reported (OSC 7); where a restored shell reopens. */
   cwd?: string | null;
+  /** Last size of the pane, so a restored shell starts at the size it will
+      have instead of being resized once its prompt is already drawn. */
+  cols?: number;
+  rows?: number;
   /** Shell command line to use when restoring (launch configs). */
   shell?: string | null;
 }
@@ -253,6 +257,35 @@ export function setLeafCwd(layout: TerminalWindowLayout, terminalId: string, cwd
   const tabs = layout.tabs.map((t) => {
     const next = mapLeaves(t.layout, (leaf) =>
       leaf.terminalId === terminalId && leaf.cwd !== cwd ? { ...leaf, cwd } : leaf
+    );
+    if (next === t.layout) return t;
+    changed = true;
+    return { ...t, layout: next };
+  });
+  return changed ? { ...layout, tabs } : layout;
+}
+
+/**
+ * Record the size of a terminal's pane on its leaf.
+ *
+ * A shell spawned at the wrong size gets resized once it has already printed
+ * its prompt (and, for a profile like fastfetch, a screenful above it). The
+ * shell's line editor keeps the coordinates it captured before the resize, so
+ * what you type lands several lines above the prompt. Restoring at the right
+ * size removes the resize altogether.
+ */
+export function setLeafSize(
+  layout: TerminalWindowLayout,
+  terminalId: string,
+  cols: number,
+  rows: number
+): TerminalWindowLayout {
+  let changed = false;
+  const tabs = layout.tabs.map((t) => {
+    const next = mapLeaves(t.layout, (leaf) =>
+      leaf.terminalId === terminalId && (leaf.cols !== cols || leaf.rows !== rows)
+        ? { ...leaf, cols, rows }
+        : leaf
     );
     if (next === t.layout) return t;
     changed = true;

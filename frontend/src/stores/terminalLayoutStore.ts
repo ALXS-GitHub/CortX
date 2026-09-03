@@ -10,6 +10,7 @@ import {
   removeLeaf,
   setSplitSizes,
   setLeafCwd,
+  setLeafSize,
   collectLeaves,
   findLeafByTerminal,
   tabContainingTerminal,
@@ -30,6 +31,10 @@ import { registerFocusInTerminalWindow, registerSendToTerminalWindow } from '@/l
 // Debounced cwd writes (see updateLeafCwd).
 const pendingCwd = new Map<string, string>();
 let cwdTimer: number | null = null;
+// Debounced pane-size writes (see updateLeafSize): a drag on a splitter fires
+// a fit on every frame.
+const pendingSize = new Map<string, { cols: number; rows: number }>();
+let sizeTimer: number | null = null;
 
 /** `main` or `terminal` — every window keeps its own copy of this store. */
 export const WINDOW_LABEL: string = (() => {
@@ -110,6 +115,8 @@ interface TerminalLayoutState {
   closeTab: (tabId: string) => string[];
   /** Record a terminal's live cwd on its leaf (debounced; session restore reopens it there). */
   updateLeafCwd: (terminalId: string, cwd: string) => void;
+  /** Remember a pane's size so a restored shell spawns at that size. */
+  updateLeafSize: (terminalId: string, cols: number, rows: number) => void;
   /** Append ready-made tabs (launch configuration) and show the first one. */
   addLaunchTabs: (tabs: TerminalTab[], projectId: string | null) => void;
 
@@ -414,6 +421,26 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
         return win === d.window ? d : { ...d, window: win };
       });
     }, 500);
+  },
+
+  updateLeafSize: (terminalId, cols, rows) => {
+    // Same ownership rule as updateLeafCwd: whichever window shows the pane.
+    const { doc } = get();
+    if (!IS_TERMINAL_WINDOW && doc.windowOpen) return;
+    if (cols < 2 || rows < 2) return;
+    if (!tabContainingTerminal(doc.window, terminalId)) return;
+    pendingSize.set(terminalId, { cols, rows });
+    if (sizeTimer !== null) return;
+    sizeTimer = window.setTimeout(() => {
+      sizeTimer = null;
+      const updates = Array.from(pendingSize.entries());
+      pendingSize.clear();
+      get().commit((d) => {
+        let win = d.window;
+        for (const [id, size] of updates) win = setLeafSize(win, id, size.cols, size.rows);
+        return win === d.window ? d : { ...d, window: win };
+      });
+    }, 800);
   },
 
   addLaunchTabs: (tabs, projectId) =>

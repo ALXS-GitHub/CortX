@@ -895,6 +895,23 @@ impl ProcessManager {
                 self.terminal_hub.push(&tid, &bytes);
                 self.terminal_hub.push(&tid, b"\x1b[0m");
                 self.terminal_hub.push(&tid, crate::terminal::snapshot::RESTORE_SEPARATOR);
+                // Move the replay off the screen and into the scrollback, then
+                // put the cursor home.
+                //
+                // The shell about to start gets a fresh, empty ConPTY screen and
+                // writes from its top-left. If our screen still holds the
+                // restored lines, the two disagree by however many rows the
+                // replay took: every absolute cursor move ConPTY sends lands
+                // that far off, and the line editor redraws what you type above
+                // the prompt instead of on it. Going to the last row and feeding
+                // one screenful of newlines scrolls each restored line into the
+                // scrollback (still there, just scroll up) and leaves a blank
+                // screen that matches ConPTY's.
+                let rows = if request.rows == 0 { DEFAULT_PTY_ROWS } else { request.rows };
+                let mut align = format!("\x1b[{};1H", rows).into_bytes();
+                align.extend(std::iter::repeat(b'\n').take(rows as usize));
+                align.extend_from_slice(b"\x1b[H");
+                self.terminal_hub.push(&tid, &align);
             }
             crate::terminal::snapshot::remove(runtime_dir, old_id);
         }

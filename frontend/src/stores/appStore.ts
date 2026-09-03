@@ -48,7 +48,7 @@ import type {
   ListAgentSessionsOptions,
 } from '@/types';
 import * as api from '@/lib/tauri';
-import { disposeTerminal } from '@/lib/terminalSessions';
+import { disposeTerminal, measuredTerminalSize } from '@/lib/terminalSessions';
 import type { TerminalSurface } from '@/lib/terminalLayout';
 import { focusInTerminalWindow, sendToTerminalWindow } from '@/lib/terminalWindowBridge';
 
@@ -736,7 +736,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Interactive shells
   openShell: async (options = {}) => {
-    const info = await api.spawnShell({ projectId: options.projectId, cwd: options.cwd });
+    // Spawn at the size the pane will have (see measuredTerminalSize): a PTY
+    // resized after the shell has drawn its prompt misplaces what you type.
+    const size = measuredTerminalSize();
+    const info = await api.spawnShell({
+      projectId: options.projectId,
+      cwd: options.cwd,
+      cols: size?.cols,
+      rows: size?.rows,
+    });
     set((state) => {
       const shellRuntimes = new Map(state.shellRuntimes);
       shellRuntimes.set(info.id, {
