@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type ReactNode, type Ref } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Plus, Rocket, Save, X } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeIcon';
@@ -11,8 +11,6 @@ import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { closeTabAndRelease, openNewTerminal } from './actions';
 import { cwdLabel, projectColor, tabItem, tabLiveState, tabTitle, useItemMap, type ItemMap } from './model';
-import { LaunchConfigMenu } from './launch/LaunchConfigMenu';
-import { SaveLaunchConfigDialog } from './launch/SaveLaunchConfigDialog';
 
 interface RailGroup {
   workspaceId: string;
@@ -149,8 +147,6 @@ export function SessionRail() {
   const activeTabId = win.activeTabId;
   const setActiveTab = useTerminalLayoutStore((s) => s.setActiveTab);
   const { railCollapsed, toggleRail, railWidth, setRailWidth } = useTerminalWindowPrefsStore();
-  const scopedProjectId = win.scope === 'global' ? null : win.scope.projectId;
-  const [saveOpen, setSaveOpen] = useState(false);
 
   const groups = useMemo<RailGroup[]>(() => {
     const byWorkspace = new Map<string, TerminalTab[]>();
@@ -232,11 +228,6 @@ export function SessionRail() {
                 ? 'none'
                 : `${scopedTabs.length}${runningCount > 0 ? ` · ${runningCount} running` : ''}`}
             </span>
-            <LaunchConfigMenu scopedProjectId={scopedProjectId} target="window">
-              <RailIconButton label="Run a launch configuration">
-                <Rocket className="size-4" />
-              </RailIconButton>
-            </LaunchConfigMenu>
           </>
         )}
         <RailIconButton label={collapsed ? 'Expand sessions (Ctrl+B)' : 'Collapse sessions (Ctrl+B)'} onClick={toggleRail}>
@@ -283,33 +274,16 @@ export function SessionRail() {
       {/* Footer */}
       <div className={cn('flex shrink-0 items-center border-t border-border', collapsed ? 'flex-col justify-center gap-1 py-2' : 'gap-1.5 p-2')}>
         {collapsed ? (
-          <>
-            <LaunchConfigMenu scopedProjectId={scopedProjectId} target="window">
-              <RailIconButton label="Run a launch configuration">
-                <Rocket className="size-4" />
-              </RailIconButton>
-            </LaunchConfigMenu>
-            <RailIconButton label="Save these tabs as a launch configuration" onClick={() => setSaveOpen(true)}>
-              <Save className="size-4" />
-            </RailIconButton>
-            <RailIconButton label="New terminal (Ctrl+Shift+T)" onClick={() => void openNewTerminal()}>
-              <Plus className="size-4" />
-            </RailIconButton>
-          </>
+          <RailIconButton label="New terminal (Ctrl+Shift+T)" onClick={() => void openNewTerminal()}>
+            <Plus className="size-4" />
+          </RailIconButton>
         ) : (
-          <>
-            <Button variant="outline" size="sm" className="min-w-0 flex-1" onClick={() => void openNewTerminal()} title="Ctrl+Shift+T">
-              <Plus />
-              New terminal
-            </Button>
-            <RailIconButton label="Save these tabs as a launch configuration" onClick={() => setSaveOpen(true)}>
-              <Save className="size-4" />
-            </RailIconButton>
-          </>
+          <Button variant="outline" size="sm" className="min-w-0 flex-1" onClick={() => void openNewTerminal()} title="Ctrl+Shift+T">
+            <Plus />
+            New terminal
+          </Button>
         )}
       </div>
-
-      <SaveLaunchConfigDialog open={saveOpen} onOpenChange={setSaveOpen} />
 
       {/* Resize handle */}
       {!collapsed && (

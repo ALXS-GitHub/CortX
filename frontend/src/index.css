@@ -385,6 +385,11 @@
 }
 .cortx-xterm .xterm .xterm-viewport {
   scrollbar-width: thin;
+  /* xterm paints the viewport with the renderer's idea of the background,
+     which turns black after a WebGL dispose / reload (hidden tabs release
+     their GPU context). The rows never cover the last few pixels of the
+     viewport, so that strip must follow the theme itself. */
+  background-color: var(--bg-terminal) !important;
 }
 
 /* Terminal clickable links (legacy log view) */

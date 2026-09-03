@@ -1,6 +1,6 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppWindow, Loader2, Plus, SquareTerminal } from 'lucide-react';
+import { AppWindow, Loader2, Plus, Search, SquareTerminal } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { SessionRail } from '@/components/terminal/SessionRail';
 import { WindowTabStrip } from '@/components/terminal/WindowTabStrip';
 import { SplitTree } from '@/components/terminal/SplitTree';
 import { TerminalStatusBar } from '@/components/terminal/TerminalStatusBar';
+import { TerminalPalette } from '@/components/terminal/TerminalPalette';
 import { openNewTerminal } from '@/components/terminal/actions';
 import { useItemMap } from '@/components/terminal/model';
 import { useTerminalWindowShortcuts } from '@/components/terminal/useTerminalWindowShortcuts';
@@ -40,6 +41,24 @@ export function TerminalWindow() {
   const setScope = useTerminalLayoutStore((s) => s.setScope);
   const win = useTerminalLayoutStore((s) => s.doc.window);
   const items = useItemMap();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Ctrl+K / Ctrl+Shift+P: the window's own command palette (launch
+  // configurations, scope, splits…). Capture phase so xterm never sees it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+      if ((key === 'k' && !e.shiftKey) || (key === 'p' && e.shiftKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+  }, []);
   // Sessions rail (default) or tab strip: one or the other, never both.
   const tabsPlacement = useAppStore((s) => s.settings?.terminal.tabsPlacement ?? 'sidebar');
 
@@ -119,10 +138,16 @@ export function TerminalWindow() {
           title="Terminal"
           center={loaded ? <ScopeSwitcher /> : undefined}
           trailing={
-            <Button variant="ghost" size="xs" onClick={() => void showMainWindow()} title="Bring the main window up">
-              <AppWindow />
-              Open CortX
-            </Button>
+            <>
+              <Button variant="ghost" size="xs" onClick={() => setPaletteOpen(true)} title="Command palette (Ctrl+K)">
+                <Search />
+                <span className="kbd">Ctrl K</span>
+              </Button>
+              <Button variant="ghost" size="xs" onClick={() => void showMainWindow()} title="Bring the main window up">
+                <AppWindow />
+                Open CortX
+              </Button>
+            </>
           }
           closeLabel="Close window"
           onClose={() => getCurrentWindow().close()}
@@ -166,6 +191,7 @@ export function TerminalWindow() {
           </div>
         )}
       </div>
+      <TerminalPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <Toaster position="bottom-right" />
     </TooltipProvider>
   );
