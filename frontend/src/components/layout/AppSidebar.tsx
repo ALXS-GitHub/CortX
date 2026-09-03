@@ -273,20 +273,16 @@ export function AppSidebar() {
       )}
       style={{ width: collapsed ? RAIL_WIDTH : sidebarWidth }}
     >
-      {/* Header: logo + collapse toggle */}
-      <div className={cn('flex h-12 shrink-0 items-center', collapsed ? 'justify-center' : 'gap-2.5 px-3')}>
+      {/* Header: collapse toggle only (the app name lives in the title bar) */}
+      <div className={cn('flex h-10 shrink-0 items-center', collapsed ? 'justify-center' : 'justify-end px-3')}>
         {collapsed ? (
-          <RailButton label="Expand sidebar (Ctrl+B)" onClick={toggleSidebar}>
-            <PanelLeftOpen className="size-[18px]" />
+          <RailButton label="Expand sidebar (Ctrl+B)" onClick={toggleSidebar} className="size-8">
+            <PanelLeftOpen className="size-4" />
           </RailButton>
         ) : (
-          <>
-            <img src="/cortx-logo.png" alt="" className="size-7 rounded-[var(--rad-xs)] shadow-soft" draggable={false} />
-            <span className="flex-1 truncate font-display text-[15px] font-semibold tracking-tight">CortX</span>
-            <RailButton label="Collapse sidebar (Ctrl+B)" onClick={toggleSidebar} className="size-8">
-              <PanelLeftClose className="size-4" />
-            </RailButton>
-          </>
+          <RailButton label="Collapse sidebar (Ctrl+B)" onClick={toggleSidebar} className="size-8">
+            <PanelLeftClose className="size-4" />
+          </RailButton>
         )}
       </div>
 
