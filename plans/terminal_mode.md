@@ -1,6 +1,11 @@
 # Plan : Mode Terminal dans CortX — DEV-13
 
-Statut : plan validé avec Alexis le 2026-09-03, avant implémentation.
+Statut : plan validé avec Alexis le 2026-09-03. Branche `feat/terminal-mode`.
+
+| Phase | État | Notes |
+|-------|------|-------|
+| P0 | Implémentée (commit `62567dd`, 2026-09-03), à valider | Vérifiée de bout en bout via CDP : cwd, spinner, pastille, toast, historique. ConPTY (dll vendorée) laisse passer OSC 7 / 133. Le bloc PowerShell est livré en une ligne base64 pour survivre à `\| Invoke-Expression` ligne à ligne ; le profil d'Alexis utilise `\| Out-String \| Invoke-Expression`. |
+| P1–P4 | À faire | |
 
 ## Contexte
 
