@@ -511,7 +511,9 @@ function neutraliseThemeBackground(bytes: Uint8Array): Uint8Array {
   if (!has48) return bytes;
   let latin1 = '';
   for (let i = 0; i < bytes.length; i++) latin1 += String.fromCharCode(bytes[i]);
-  const replaced = latin1.replace(bgFilter.pattern, '49');
+  // Keep the CSI prefix the pattern captured ('$1' + '49' would be read as
+  // group 149 by some engines, hence the function form).
+  const replaced = latin1.replace(bgFilter.pattern, (_m, prefix: string) => `${prefix}49`);
   if (replaced === latin1) return bytes;
   const out = new Uint8Array(replaced.length);
   for (let i = 0; i < replaced.length; i++) out[i] = replaced.charCodeAt(i);

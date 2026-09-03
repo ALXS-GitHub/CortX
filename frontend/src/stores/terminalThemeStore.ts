@@ -81,6 +81,11 @@ function fetchTheme(key: string): Promise<TerminalTheme | null> {
       return null;
     });
     themeCache.set(key, p);
+    // A miss (backend not ready during a dev restart, file being written…)
+    // must not poison the cache: the next request asks again.
+    p.then((theme) => {
+      if (!theme) themeCache.delete(key);
+    });
   }
   return p;
 }
@@ -94,6 +99,9 @@ export function loadThemeImage(key: string): Promise<string | null> {
       return null;
     });
     imageCache.set(key, p);
+    p.then((url) => {
+      if (!url) imageCache.delete(key);
+    });
   }
   return p;
 }
@@ -370,4 +378,9 @@ export function initTerminalThemeStore(opts: { windowChrome?: boolean } = {}): (
     if (wasChrome) applyWindowTheme(null, { dark: isAppDark(currentSettings()) });
     applyThemeToAll();
   };
+}
+
+// Dev-only escape hatch for CDP-driven checks (see terminalSessions.ts).
+if (import.meta.env.DEV) {
+  (window as unknown as { __cortxThemeStore?: typeof useTerminalThemeStore }).__cortxThemeStore = useTerminalThemeStore;
 }

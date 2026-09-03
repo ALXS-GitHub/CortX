@@ -485,3 +485,11 @@
 :root.terminal-window ::selection {
   background: var(--terminal-selection, color-mix(in srgb, var(--primary) 30%, transparent));
 }
+
+/* Settings: a live-applied change can make a section flicker for a frame
+   (a list reloading), and Chrome's scroll anchoring then "compensates" by
+   moving the scroll position. The page must stay exactly where it is. */
+.settings-sections,
+.settings-sections * {
+  overflow-anchor: none;
+}

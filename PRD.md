@@ -311,6 +311,7 @@ Local App Launcher provides:
 | F5.10 | Terminal: font family and size for every terminal (dock and window), Terminal window tab placement (sessions rail on the left by default, or a tab strip on top — never both). All in `settings.json`, so synced by the git backup | Should Have | Done |
 | F5.11 | Terminal: session restore toggle, scrollback snapshot toggle and line count, "processes open in" and "dev sessions open in", and the Launch configurations section (list, run, edit, duplicate, delete) | Should Have | Done |
 | F5.12 | Terminal appearance section (themes per mode + picker, cursor, padding, window opacity and effect, inline suggestions toggle) and Shortcuts section | Should Have | Done |
+| F5.13 | Settings as tabs (General, Appearance, Terminal, Scripts, Agents) with a search box, and **live apply**: every change is written 400 ms later with a "Saving… / Saved" indicator instead of a Save button; the page never remounts or loses its scroll position | Should Have | Done |
 
 ---
 

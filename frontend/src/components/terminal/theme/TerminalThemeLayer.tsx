@@ -24,12 +24,23 @@ export function TerminalThemeLayer() {
   useEffect(() => {
     if (!key || !imagePath) return;
     let cancelled = false;
-    loadThemeImage(key).then((url) => {
-      if (cancelled) return;
-      setSrc(url ? { key, url } : null);
-    });
+    let retry: number | null = null;
+    const load = (attempt: number) => {
+      loadThemeImage(key).then((url) => {
+        if (cancelled) return;
+        if (url) {
+          setSrc({ key, url });
+          return;
+        }
+        // The backend may not have been ready (dev restart, file being
+        // written): try again a few times before giving up.
+        if (attempt < 3) retry = window.setTimeout(() => load(attempt + 1), 1500 * (attempt + 1));
+      });
+    };
+    load(0);
     return () => {
       cancelled = true;
+      if (retry !== null) window.clearTimeout(retry);
     };
   }, [key, imagePath]);
 
