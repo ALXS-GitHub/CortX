@@ -31,6 +31,9 @@ export async function restoreTerminalSessions(): Promise<void> {
   const alive = new Set((await api.listShells().catch(() => [])).map((s) => `shell:${s.id}`));
   const mapping: Record<string, string> = {};
   const surfaces = { ...doc.surfaces };
+  // A tab that was never brought to the front has no recorded size. Its pane
+  // is laid out like the others, so a sibling's size is the right guess.
+  const fallbackSize = leaves.map(({ leaf }) => leaf).find((l) => l.cols && l.rows);
 
   for (const { tab, leaf } of leaves) {
     const id = leaf.terminalId;
@@ -39,6 +42,12 @@ export async function restoreTerminalSessions(): Promise<void> {
       const info = await api.spawnShell({
         cwd: leaf.cwd ?? undefined,
         projectId: projectIdOfWorkspace(tab.workspaceId) ?? undefined,
+        // The size the pane had when the app closed. Without it the shell
+        // starts at the backend default, prints its prompt (and whatever the
+        // profile shows above it), and is only then resized — which leaves
+        // the line editor writing several lines above the prompt.
+        cols: leaf.cols ?? fallbackSize?.cols,
+        rows: leaf.rows ?? fallbackSize?.rows,
         restoreFrom: id,
       });
       const newId = `shell:${info.id}`;
