@@ -117,6 +117,8 @@ export interface TerminalConfig {
   fontFamily?: string;
   /** Font size in px. Default 12. */
   fontSize?: number;
+  /** Line height multiplier 1.0–2.0. Default 1.2. */
+  lineHeight?: number;
   /** Reopen the Terminal window's tabs on start (shells in their last cwd, nothing re-run). Default true. */
   restoreSessions?: boolean;
   /** Seed restored shells with the tail of their previous scrollback. Default true. */

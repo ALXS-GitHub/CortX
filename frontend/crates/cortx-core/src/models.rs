@@ -365,6 +365,9 @@ pub struct TerminalConfig {
     /// Font size in px. None = 12.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size: Option<u16>,
+    /// Line height multiplier, 1.0–2.0. None = 1.2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_height: Option<f32>,
     /// Reopen the Terminal window's tabs (shells in their last directory,
     /// nothing re-run) when the app starts.
     #[serde(default = "default_true")]
@@ -515,6 +518,7 @@ impl Default for TerminalConfig {
             tabs_placement: TabsPlacement::default(),
             font_family: None,
             font_size: None,
+            line_height: None,
             restore_sessions: true,
             restore_scrollback: true,
             restore_scrollback_lines: default_restore_scrollback_lines(),

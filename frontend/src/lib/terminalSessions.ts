@@ -186,15 +186,57 @@ const DEFAULT_FONT_STACK =
 const DEFAULT_FONT_SIZE = 12;
 
 /** xterm font options from the user's settings, with the bundled stack as fallback. */
-export function terminalFontOptions(): { fontFamily: string; fontSize: number } {
+export function terminalFontOptions(): { fontFamily: string; fontSize: number; lineHeight: number } {
   const cfg = useAppStore.getState().settings?.terminal;
   const family = cfg?.fontFamily?.trim();
   const size = cfg?.fontSize;
+  const lh = cfg?.lineHeight;
   return {
     // A user font still falls back to the stack for glyphs it lacks.
     fontFamily: family ? `"${family.replace(/"/g, '')}", ${DEFAULT_FONT_STACK}` : DEFAULT_FONT_STACK,
     fontSize: size && size >= 8 && size <= 32 ? size : DEFAULT_FONT_SIZE,
+    lineHeight: lh && lh >= 1 && lh <= 2 ? lh : DEFAULT_LINE_HEIGHT,
   };
+}
+
+const DEFAULT_LINE_HEIGHT = 1.2;
+let advanceCanvas: CanvasRenderingContext2D | null | undefined;
+const advanceCache = new Map<string, number>();
+
+/** Horizontal advance of one glyph of `fontFamily` at `fontSize`, in CSS px. */
+function glyphAdvance(fontFamily: string, fontSize: number): number {
+  const key = `${fontSize}|${fontFamily}`;
+  const cached = advanceCache.get(key);
+  if (cached !== undefined) return cached;
+  if (advanceCanvas === undefined) advanceCanvas = document.createElement('canvas').getContext('2d');
+  if (!advanceCanvas) return fontSize * 0.6;
+  advanceCanvas.font = `${fontSize}px ${fontFamily}`;
+  const width = advanceCanvas.measureText('WWWWWWWWWW').width / 10;
+  advanceCache.set(key, width);
+  return width;
+}
+
+/**
+ * xterm truncates the cell width to whole pixels, so a font whose advance is
+ * 8.43 px is drawn in 8 px cells: glyphs overlap and look bold and cramped
+ * (Hack at 14 px, for one). One pixel of letter spacing when the fraction is
+ * large restores the spacing the font was designed with.
+ */
+export function autoLetterSpacing(fontFamily: string, fontSize: number): number {
+  const advance = glyphAdvance(fontFamily, fontSize);
+  const fraction = advance - Math.floor(advance);
+  // Anything but a near-integral advance gets the extra pixel: a hair of air
+  // between glyphs beats clipped, overlapping strokes.
+  return fraction >= 0.15 ? 1 : 0;
+}
+
+/** Push family, size (with the window zoom), line height and letter spacing to one terminal. */
+function applyFontMetrics(term: Terminal, font: { fontFamily: string; fontSize: number; lineHeight: number }) {
+  const size = Math.max(6, font.fontSize + zoomDelta);
+  term.options.fontFamily = font.fontFamily;
+  term.options.fontSize = size;
+  term.options.lineHeight = font.lineHeight;
+  term.options.letterSpacing = autoLetterSpacing(font.fontFamily, size);
 }
 
 // ---------------------------------------------------------------------------
@@ -243,8 +285,7 @@ function ensureSettingsSubscription() {
     if (fontKey !== lastFont) {
       lastFont = fontKey;
       for (const s of sessions.values()) {
-        s.term.options.fontFamily = font.fontFamily;
-        s.term.options.fontSize = Math.max(6, font.fontSize + zoomDelta);
+        applyFontMetrics(s.term, font);
         if (s.container.isConnected) fitTerminal(s.id);
       }
     }
@@ -317,7 +358,8 @@ function createSession(id: string): TerminalSession {
     allowTransparency: IS_TERMINAL_WINDOW,
     fontFamily: font.fontFamily,
     fontSize: Math.max(6, font.fontSize + zoomDelta),
-    lineHeight: 1.2,
+    lineHeight: font.lineHeight,
+    letterSpacing: autoLetterSpacing(font.fontFamily, Math.max(6, font.fontSize + zoomDelta)),
     scrollback: 10000,
     theme: buildTerminalTheme(),
     macOptionIsMeta: true,
@@ -432,6 +474,50 @@ function tryLoadWebgl(session: TerminalSession) {
   }
 }
 
+/**
+ * Programs that ask the terminal for its background colour (OSC 11) and
+ * then paint their own rows with it — Claude Code's input line, for one —
+ * would draw an opaque slab of theme colour over the wallpaper. In a themed
+ * Terminal window, an explicit truecolor background equal to the theme
+ * background is turned back into the default (transparent) background.
+ * Pure ASCII rewrite of `48;2;R;G;B` / `48:2::R:G:B`, applied per chunk.
+ */
+let bgFilter: { key: string; pattern: RegExp } | null = null;
+
+function neutraliseThemeBackground(bytes: Uint8Array): Uint8Array {
+  if (!IS_TERMINAL_WINDOW) return bytes;
+  const theme = getXtermThemeOverride();
+  const hex = theme?.background;
+  if (!hex || !isWindowThemeActive()) return bytes;
+  if (bgFilter?.key !== hex) {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex);
+    if (!m) return bytes;
+    const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h, 16));
+    // Only inside a CSI sequence (`ESC [ … m`), so the same digits typed as
+    // plain text are left alone.
+    bgFilter = {
+      key: hex,
+      pattern: new RegExp(`(\\x1b\\[[0-9;:]*?)48(?:;2;${r};${g};${b}|:2::?${r}:${g}:${b})(?=[;:m])`, 'g'),
+    };
+  }
+  // Cheap pre-check: the sequence is rare, most chunks pass untouched.
+  let has48 = false;
+  for (let i = 0; i + 1 < bytes.length; i++) {
+    if (bytes[i] === 0x34 && bytes[i + 1] === 0x38) {
+      has48 = true;
+      break;
+    }
+  }
+  if (!has48) return bytes;
+  let latin1 = '';
+  for (let i = 0; i < bytes.length; i++) latin1 += String.fromCharCode(bytes[i]);
+  const replaced = latin1.replace(bgFilter.pattern, '49');
+  if (replaced === latin1) return bytes;
+  const out = new Uint8Array(replaced.length);
+  for (let i = 0; i < replaced.length; i++) out[i] = replaced.charCodeAt(i);
+  return out;
+}
+
 async function attach(session: TerminalSession) {
   if (session.attachToken !== null) return;
   try {
@@ -444,12 +530,12 @@ async function attach(session: TerminalSession) {
         // line. Mute keyboard/response output until the replay is parsed.
         first = false;
         session.replaying = true;
-        session.term.write(bytes, () => {
+        session.term.write(neutraliseThemeBackground(bytes), () => {
           session.replaying = false;
         });
         return;
       }
-      session.term.write(bytes);
+      session.term.write(neutraliseThemeBackground(bytes));
     });
     // The session may have been disposed while the invoke was in flight.
     if (!sessions.has(session.id)) {
@@ -587,9 +673,9 @@ const ZOOM_MIN = -6;
 const ZOOM_MAX = 12;
 
 function applyZoomToAll() {
-  const base = terminalFontOptions().fontSize;
+  const font = terminalFontOptions();
   for (const s of sessions.values()) {
-    s.term.options.fontSize = Math.max(6, base + zoomDelta);
+    applyFontMetrics(s.term, font);
     if (s.container.isConnected) fitTerminal(s.id);
   }
 }
