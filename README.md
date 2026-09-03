@@ -42,6 +42,12 @@ Every service, script and shell tab runs in a real terminal (a PTY rendered with
 - **Real terminal** - Colors, progress bars, interactive prompts and TUIs behave exactly as in a standalone terminal; type into any tab to answer a prompt
 - **Inline images** - Sixel and iTerm2 (`imgcat`-style) images render in place, on Windows too
 - **Shell tabs** - Open a shell in the current project with the `+` button; pick the shell in Settings
+- **Shell integration** - With `cortx init` in your profile, tabs follow the shell's current directory, show a spinner while a command runs and a result pill (ok / exit code) when a command finished while you were looking elsewhere. Long commands that end in a background tab raise a toast, and an OS notification when CortX is not focused. Every finished command is appended to a cross-terminal history
+- **Terminal window** - A dedicated window for real terminal work: sessions grouped by project in a rail, a Global / project scope switcher, tabs with splits (right / down), rename, pin and colour, a status bar with the live directory and command state. Open it from the dock (window icon), move any dock tab into it, send a pane back to the dock, or run `cortx terminal [--project <name>]` from any shell
+- **Session restore** - Quit and come back: the Terminal window reopens with the same tabs and splits, each shell in the directory it was in, with the tail of its previous output above a "restored session" rule. Nothing is re-run. Services and scripts show as ended with a Restart button. Everything lives in `data/terminal/sessions.json`, synced by the git backup
+- **Launch configurations** - Presets that open a set of terminals for a project — tabs, splits, a directory and an optional command for each — from the project page ("Open a dev session"), the Terminal window, the command palette or `cortx terminal --layout <name>`. Save the current window as one, edit them as a form or as YAML in Settings
+- **Shortcuts & productivity** - Warp-like defaults, all rebindable in Settings: new tab in the current directory, splits, pane focus / resize / maximize, Ctrl+1-9, find in terminal, zoom, reopen closed tab… Ghost-text suggestions from your command history (→ to accept), file drop pastes paths, copy path / open in Explorer from any tab
+- **Themes** - Warp's YAML theme format, so the whole Warp themes library imports as is (file or folder), plus 8 bundled themes. The theme covers the entire Terminal window — title bar, rail, panes — with the wallpaper behind everything, window opacity and acrylic / mica effects. Picker with live preview from the palette (Ctrl+K)
 - **Tabbed interface** - Switch between tabs, split into panes, hide tabs without stopping the process
 - **Clickable URLs** - Links in terminal output open in your browser
 - **Port detection** - Automatically detects and displays running ports
@@ -172,6 +178,7 @@ Access settings from the sidebar to configure:
 
 - **Default terminal** - Choose between integrated or external terminal
 - **Integrated terminal shell** - Command line of the shell used by "new terminal" tabs (auto-detects PowerShell 7 / `$SHELL`)
+- **Shell integration & notifications** - Turn the OSC 7 / OSC 133 block of `cortx init` on or off, and choose whether long commands notify you and from how many seconds
 - **Appearance** - Light / dark / system mode, plus the style: *Halcyon* (the default look, shared with Zorg) or *Classic* (the previous neutral shadcn theme). Accent colour and font are adjustable in both styles; corner radius in Halcyon
 
 ## Tech Stack

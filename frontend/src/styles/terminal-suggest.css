@@ -1,0 +1,12 @@
+/* Ghost text of the inline history suggestion (see lib/terminalSuggest.ts).
+   Rendered by an xterm decoration at the cursor cell; inherits the
+   terminal's font metrics so it lines up with the typed text. */
+.cortx-ghost {
+  color: var(--text-faint);
+  opacity: 0.85;
+  white-space: pre;
+  pointer-events: none;
+  font: inherit;
+  line-height: inherit;
+  overflow: hidden;
+}

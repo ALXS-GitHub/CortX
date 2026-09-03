@@ -28,6 +28,116 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+/// Label of the dedicated Terminal window (DEV-13 P1).
+pub const TERMINAL_WINDOW_LABEL: &str = "terminal";
+
+/// Open the Terminal window, or focus it if it already exists. The window
+/// loads the same bundle as the main one with `?window=terminal` so the
+/// frontend picks the terminal root. A project scope travels in the URL on
+/// creation, or as the `terminal-scope` event when the window is already up.
+pub fn open_terminal_window(app: &AppHandle, project_id: Option<&str>, launch: Option<&str>) -> Result<(), String> {
+    // Remembered in the layout document so the next start reopens the window.
+    set_terminal_window_open(app, true);
+    if let Some(w) = app.get_webview_window(TERMINAL_WINDOW_LABEL) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        if let Some(pid) = project_id {
+            let _ = app.emit("terminal-scope", pid.to_string());
+        }
+        if let Some(name) = launch {
+            let _ = app.emit("terminal-launch", name.to_string());
+        }
+        return Ok(());
+    }
+    // The frontend picks its root from the window label; the requested scope
+    // and launch configuration are parked in AppState and fetched by
+    // `take_terminal_window_scope` / `take_terminal_window_launch` on boot (a
+    // query string on the App URL does not survive the dev server).
+    if let Some(state) = app.try_state::<AppState>() {
+        *state.terminal_window_scope.lock().unwrap() = project_id.map(|s| s.to_string());
+        *state.terminal_window_launch.lock().unwrap() = launch.map(|s| s.to_string());
+    }
+    let builder = tauri::WebviewWindowBuilder::new(app, TERMINAL_WINDOW_LABEL, tauri::WebviewUrl::App("index.html".into()))
+        .title("CortX Terminal")
+        .inner_size(1180.0, 760.0)
+        .min_inner_size(720.0, 460.0)
+        .resizable(true)
+        // Transparent at the OS level so the window opacity and the acrylic /
+        // mica effects work without recreating the window. The frontend paints
+        // an opaque background whenever the opacity is 100 (and falls back to
+        // an opaque surface colour if the theme is still loading), so this can
+        // never leave the window see-through by accident.
+        .transparent(true)
+        .visible(false);
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.decorations(false);
+    let window = builder.build().map_err(|e| e.to_string())?;
+    // Backdrop effect + opacity from the settings, before the first paint.
+    if let Some(state) = app.try_state::<AppState>() {
+        let terminal = state.storage.get_settings().terminal;
+        let dark = !matches!(state.storage.get_settings().appearance.theme, cortx_core::models::Theme::Light);
+        if let Err(e) = commands::apply_terminal_window_effect(
+            &window,
+            terminal.window_effect,
+            terminal.window_opacity,
+            None,
+            dark,
+        ) {
+            log::warn!("Terminal window effect not applied: {}", e);
+        }
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+/// Record whether the Terminal window is up in the shared layout document
+/// (`windowOpen`), and tell the webviews. Session restore reopens the window
+/// when it was open at the last quit.
+pub fn set_terminal_window_open(app: &AppHandle, open: bool) {
+    if let Some(state) = app.try_state::<AppState>() {
+        let current = state
+            .terminal_layout
+            .get()
+            .layout
+            .get("windowOpen")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if current == open {
+            return;
+        }
+        let doc = state.terminal_layout.patch("windowOpen", serde_json::Value::Bool(open));
+        let _ = app.emit(
+            "terminal-layout",
+            serde_json::json!({ "revision": doc.revision, "layout": doc.layout, "source": "backend" }),
+        );
+    }
+}
+
+fn arg_value(args: &[String], flag: &str) -> Option<String> {
+    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
+}
+
+/// `cortx-app --terminal [--project <id>] [--layout <name>]` — from a second
+/// launch (forwarded by the single-instance plugin) or the first one.
+fn handle_cli_args(app: &AppHandle, args: &[String]) {
+    let wants_terminal = args.iter().any(|a| a == "--terminal");
+    let project = arg_value(args, "--project");
+    let launch = arg_value(args, "--layout");
+    if wants_terminal {
+        if let Err(e) = open_terminal_window(app, project.as_deref(), launch.as_deref()) {
+            log::error!("Could not open the terminal window: {}", e);
+        }
+    } else {
+        show_main_window(app);
+    }
+}
+
 /// Toggle the main window's visibility. Used by left-clicks on the tray icon.
 fn toggle_main_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -91,20 +201,43 @@ pub fn run() {
         &storage.app_dir().join("runtime"),
     ));
 
+    let terminal_dir = storage.terminal_dir();
     let app_state = AppState {
         storage: Arc::new(storage),
         process_manager: Arc::new(process_manager),
         agents: agent_index,
         quitting: Arc::new(AtomicBool::new(false)),
+        // Persisted under data/terminal/sessions.json (synced by the git backup).
+        terminal_layout: Arc::new(cortx_core::terminal::LayoutStore::new(Some(
+            terminal_dir.join("sessions.json"),
+        ))),
+        terminal_window_scope: std::sync::Mutex::new(None),
+        terminal_window_launch: std::sync::Mutex::new(None),
+        launch_configs: Arc::new(cortx_core::terminal::LaunchStore::new(&terminal_dir)),
     };
 
     #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Must be registered first: a second `cortx-app` launch (e.g. `cortx
+    // terminal`) hands its args to the running instance and exits. Release
+    // only — the lock is keyed on the app identifier, so a dev build would
+    // otherwise forward to (or be swallowed by) the installed CortX.
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            handle_cli_args(app, &args);
+        }));
+    }
+
+    #[allow(unused_mut)]
+    let mut builder = builder
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -145,12 +278,21 @@ pub fn run() {
             // On Windows/Linux we don't want native chrome at all because we
             // ship a custom TitleBar component, so we drop decorations here
             // before showing the window.
+            let launch_args: Vec<String> = std::env::args().skip(1).collect();
+            let terminal_launch = launch_args.iter().any(|a| a == "--terminal");
             if let Some(main) = app.get_webview_window("main") {
                 #[cfg(any(target_os = "windows", target_os = "linux"))]
                 {
                     let _ = main.set_decorations(false);
                 }
-                let _ = main.show();
+                // `cortx terminal` on a cold start: only the Terminal window
+                // comes up; the main window waits in the tray.
+                if !terminal_launch {
+                    let _ = main.show();
+                }
+            }
+            if terminal_launch {
+                handle_cli_args(app.handle(), &launch_args);
             }
 
             // Start file watcher for cross-process data sync
@@ -197,6 +339,29 @@ pub fn run() {
                 .spawn(move || {
                     agents.refresh_all();
                     let _ = agents_app.emit("agent-sessions-changed", ());
+                })
+                .ok();
+
+            // Session restore: refresh the scrollback snapshots every minute
+            // so a crash loses at most that much (quit saves them too).
+            let snap_state_app = app.handle().clone();
+            std::thread::Builder::new()
+                .name("cortx-terminal-snapshots".into())
+                .spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                    let Some(state) = snap_state_app.try_state::<AppState>() else {
+                        continue;
+                    };
+                    let tcfg = state.storage.get_settings().terminal;
+                    if !tcfg.restore_scrollback {
+                        continue;
+                    }
+                    cortx_core::terminal::snapshot::save_all(
+                        state.process_manager.terminal_hub(),
+                        &state.storage.app_dir().join("runtime"),
+                        None,
+                        tcfg.restore_scrollback_lines as usize,
+                    );
                 })
                 .ok();
 
@@ -267,6 +432,9 @@ pub fn run() {
                 if !is_quitting {
                     api.prevent_close();
                     let _ = window.hide();
+                    if window.label() == TERMINAL_WINDOW_LABEL {
+                        set_terminal_window_open(&app_handle, false);
+                    }
                     return;
                 }
 
@@ -277,11 +445,22 @@ pub fn run() {
                 let window_clone = window.clone();
                 std::thread::spawn(move || {
                     if let Some(state) = app_handle.try_state::<AppState>() {
-                        let has_running = state.process_manager.has_running_processes();
-                        if has_running {
-                            log::info!("Quit requested - notifying frontend of cleanup...");
-                            let _ = window_clone.emit("app-closing", true);
-                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        // Every webview gets `app-closing`: the ClosingModal
+                        // shows when processes are running, and each window
+                        // stores its restore snapshots — give them a moment.
+                        log::info!("Quit requested - notifying frontend of cleanup...");
+                        let _ = app_handle.emit("app-closing", state.process_manager.has_running_processes());
+                        std::thread::sleep(std::time::Duration::from_millis(600));
+                        // Session restore: keep the tail of every scrollback
+                        // before the processes go away.
+                        let tcfg = state.storage.get_settings().terminal;
+                        if tcfg.restore_scrollback {
+                            cortx_core::terminal::snapshot::save_all(
+                                state.process_manager.terminal_hub(),
+                                &state.storage.app_dir().join("runtime"),
+                                None,
+                                tcfg.restore_scrollback_lines as usize,
+                            );
                         }
                         log::info!("Stopping all services...");
                         state.process_manager.stop_all();
@@ -329,6 +508,33 @@ pub fn run() {
             commands::resize_terminal,
             commands::clear_terminal_scrollback,
             commands::remove_terminal,
+            commands::get_terminal_states,
+            commands::get_command_history,
+            commands::send_os_notification,
+            commands::get_terminal_layout,
+            commands::set_terminal_layout,
+            commands::open_terminal_window,
+            commands::show_main_window,
+            commands::take_terminal_window_scope,
+            commands::take_terminal_window_launch,
+            commands::save_terminal_snapshots,
+            commands::store_terminal_snapshot,
+            commands::prune_terminal_snapshots,
+            commands::list_launch_configs,
+            commands::get_launch_config,
+            commands::read_launch_config_yaml,
+            commands::save_launch_config,
+            commands::save_launch_config_yaml,
+            commands::delete_launch_config,
+            commands::launch_config_to_yaml,
+            commands::list_terminal_themes,
+            commands::get_terminal_theme,
+            commands::import_terminal_theme_file,
+            commands::import_terminal_theme_folder,
+            commands::delete_terminal_theme,
+            commands::save_terminal_theme,
+            commands::read_terminal_theme_image,
+            commands::set_terminal_window_effect,
             commands::spawn_shell,
             commands::kill_shell,
             commands::list_shells,

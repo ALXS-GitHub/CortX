@@ -4,6 +4,7 @@ use cortx_core::models::{
     ServiceStatusPayload, ShellExitPayload,
 };
 use cortx_core::process_manager::ProcessEventEmitter;
+use cortx_core::terminal::TerminalShellState;
 use tauri::{AppHandle, Emitter};
 
 pub struct TauriEmitter {
@@ -142,5 +143,9 @@ impl ProcessEventEmitter for TauriEmitter {
                 exit_code,
             },
         );
+    }
+
+    fn emit_terminal_state(&self, state: &TerminalShellState) {
+        let _ = self.app_handle.emit("terminal-state", state);
     }
 }

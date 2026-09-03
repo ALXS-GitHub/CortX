@@ -29,6 +29,10 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
 walkdir = "2.4"
+# Terminal window backdrop effects (acrylic / mica on Windows, vibrancy on macOS) — DEV-13 P3
+window-vibrancy = "0.6"

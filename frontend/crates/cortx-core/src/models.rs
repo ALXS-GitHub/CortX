@@ -310,6 +310,10 @@ pub enum TerminalPreset {
     MacTerminal,
     ITerm2,
     Custom,
+    /// CortX's own Terminal window: "external" launches run in a PTY and
+    /// open there instead of in the dock (handled by the GUI, not by
+    /// `spawn_in_terminal`).
+    CortxTerminal,
 }
 
 impl Default for TerminalPreset {
@@ -342,6 +346,196 @@ pub struct TerminalConfig {
     /// auto-detect (see `process_manager::resolve_shell`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrated_shell: Option<String>,
+    /// `cortx init` emits OSC 7 / OSC 133 (cwd, command boundaries, exit
+    /// codes) when the shell runs inside a CortX terminal. Off = plain aliases.
+    #[serde(default = "default_true")]
+    pub shell_integration: bool,
+    /// Toast + OS notification when a command that ran at least
+    /// `long_command_seconds` finishes in a terminal you are not looking at.
+    #[serde(default = "default_true")]
+    pub notify_on_long_command: bool,
+    #[serde(default = "default_long_command_seconds")]
+    pub long_command_seconds: u32,
+    /// Terminal window: where the tab list lives. One or the other, never both.
+    #[serde(default)]
+    pub tabs_placement: TabsPlacement,
+    /// Font of every terminal (dock and window). None = bundled default stack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    /// Font size in px. None = 12.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<u16>,
+    /// Line height multiplier, 1.0–2.0. None = 1.2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_height: Option<f32>,
+    /// Extra space between glyphs in px. None = auto (CortX compensates for
+    /// fonts whose advance is not a whole number of pixels).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<f32>,
+    /// Font weight of normal / bold text (100–900). None = 400 / 700.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_weight_bold: Option<u16>,
+    /// How the terminals are drawn. The GPU renderer is faster on heavy
+    /// output; the DOM one uses the browser's own text rendering, whose
+    /// glyphs are noticeably finer.
+    #[serde(default)]
+    pub renderer: TerminalRenderer,
+    /// Selection colour of the terminals (any CSS colour). None = the theme's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_color: Option<String>,
+    /// Reopen the Terminal window's tabs (shells in their last directory,
+    /// nothing re-run) when the app starts.
+    #[serde(default = "default_true")]
+    pub restore_sessions: bool,
+    /// Seed restored shells with the tail of their previous scrollback.
+    #[serde(default = "default_true")]
+    pub restore_scrollback: bool,
+    #[serde(default = "default_restore_scrollback_lines")]
+    pub restore_scrollback_lines: u32,
+    /// Where a started service / script shows up.
+    #[serde(default)]
+    pub open_processes_in: TerminalTarget,
+    /// Where "open a dev session" (launch configuration) opens its tabs.
+    #[serde(default = "default_dev_sessions_target")]
+    pub open_dev_sessions_in: TerminalTarget,
+    /// Terminal window shortcuts: action id → key combo (e.g. `"split.right": "Ctrl+Shift+D"`).
+    /// Missing ids use the built-in defaults (`keybindings.ts`).
+    #[serde(default)]
+    pub keybindings: std::collections::HashMap<String, String>,
+    /// Terminal theme names (files under `data/terminal/themes/`) for the
+    /// app's dark and light modes. None = bundled defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_dark: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_light: Option<String>,
+    /// Pick `theme_dark` / `theme_light` from the app's light/dark mode
+    /// (true) or always use `theme_dark` (false).
+    #[serde(default = "default_true")]
+    pub theme_follows_app: bool,
+    #[serde(default)]
+    pub cursor_style: CursorStyle,
+    #[serde(default = "default_true")]
+    pub cursor_blink: bool,
+    /// Inner padding of every terminal, in px.
+    #[serde(default = "default_terminal_padding")]
+    pub padding: u16,
+    /// Terminal window opacity, 50–100 (%).
+    #[serde(default = "default_window_opacity")]
+    pub window_opacity: u8,
+    /// Terminal window backdrop effect (Windows: acrylic / mica; macOS: vibrancy).
+    #[serde(default)]
+    pub window_effect: WindowEffect,
+    /// Ghost-text completions from the command history (→ to accept). When
+    /// on, `cortx init` turns PSReadLine's own prediction off so only one
+    /// suggestion shows.
+    #[serde(default = "default_true")]
+    pub inline_suggestions: bool,
+    /// Wallpaper overrides (None = the theme file's own values).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallpaper_opacity: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallpaper_blur: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallpaper_fit: Option<String>,
+    /// Darkening overlay on the wallpaper, 0–90 (%): how much the theme
+    /// colour tones the picture down.
+    #[serde(default)]
+    pub wallpaper_dim: u8,
+    /// Title bar + sessions rail background alpha, 0–100 (%).
+    #[serde(default = "default_chrome_opacity")]
+    pub chrome_opacity: u8,
+    /// Title bar + sessions rail backdrop blur, px.
+    #[serde(default = "default_chrome_blur")]
+    pub chrome_blur: u16,
+    /// Also colour the main window's dock terminals with the terminal theme
+    /// (off: the dock follows the app skin, as before).
+    #[serde(default)]
+    pub dock_uses_terminal_theme: bool,
+}
+
+fn default_chrome_opacity() -> u8 {
+    72
+}
+
+fn default_chrome_blur() -> u16 {
+    20
+}
+
+fn default_terminal_padding() -> u16 {
+    8
+}
+
+fn default_window_opacity() -> u8 {
+    100
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CursorStyle {
+    Block,
+    Underline,
+    #[default]
+    Bar,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowEffect {
+    #[default]
+    None,
+    Acrylic,
+    Mica,
+    Vibrancy,
+}
+
+fn default_long_command_seconds() -> u32 {
+    10
+}
+
+fn default_restore_scrollback_lines() -> u32 {
+    200
+}
+
+fn default_dev_sessions_target() -> TerminalTarget {
+    TerminalTarget::Window
+}
+
+/// Glyph renderer of the integrated terminals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalRenderer {
+    /// Canvas (default): draws box / block / powerline characters itself at
+    /// the cell size — no seams — while the text is rasterised by the
+    /// platform engine, so the letters stay fine.
+    #[default]
+    Canvas,
+    /// GPU atlas: fastest on very heavy output, slightly heavier glyphs.
+    Webgl,
+    /// No acceleration: the browser draws every character, block glyphs
+    /// included, which can leave hairlines between cells.
+    Dom,
+}
+
+/// A surface terminals can be shown in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalTarget {
+    #[default]
+    Dock,
+    Window,
+}
+
+/// Terminal window layout for the list of tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TabsPlacement {
+    /// Sessions rail on the left (default).
+    #[default]
+    Sidebar,
+    /// Tab strip above the panes.
+    Top,
 }
 
 impl Default for TerminalConfig {
@@ -351,6 +545,40 @@ impl Default for TerminalConfig {
             custom_path: String::new(),
             custom_args: Vec::new(),
             integrated_shell: None,
+            shell_integration: true,
+            notify_on_long_command: true,
+            long_command_seconds: default_long_command_seconds(),
+            tabs_placement: TabsPlacement::default(),
+            font_family: None,
+            font_size: None,
+            line_height: None,
+            letter_spacing: None,
+            font_weight: None,
+            font_weight_bold: None,
+            renderer: TerminalRenderer::default(),
+            selection_color: None,
+            restore_sessions: true,
+            restore_scrollback: true,
+            restore_scrollback_lines: default_restore_scrollback_lines(),
+            open_processes_in: TerminalTarget::Dock,
+            open_dev_sessions_in: TerminalTarget::Window,
+            keybindings: std::collections::HashMap::new(),
+            theme_dark: None,
+            theme_light: None,
+            theme_follows_app: true,
+            cursor_style: CursorStyle::default(),
+            cursor_blink: true,
+            padding: default_terminal_padding(),
+            window_opacity: default_window_opacity(),
+            window_effect: WindowEffect::default(),
+            inline_suggestions: true,
+            wallpaper_opacity: None,
+            wallpaper_blur: None,
+            wallpaper_fit: None,
+            wallpaper_dim: 0,
+            chrome_opacity: default_chrome_opacity(),
+            chrome_blur: default_chrome_blur(),
+            dock_uses_terminal_theme: false,
         }
     }
 }

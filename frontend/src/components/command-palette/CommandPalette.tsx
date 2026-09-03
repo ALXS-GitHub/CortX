@@ -11,6 +11,10 @@ import {
 } from '@/components/ui/command';
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
+import { Rocket, SquareTerminal } from 'lucide-react';
+import { listLaunchConfigs, openTerminalWindow } from '@/lib/tauri';
+import { runLaunchConfig } from '@/lib/launchConfigs';
+import type { LaunchConfig } from '@/types';
 
 import { buildEntities } from './buildEntities';
 import { buildItemValue, commandFilter, parseQuery } from './searchFilter';
@@ -26,6 +30,7 @@ const CATEGORY_ORDER: EntityCategory[] = [
   'Navigation',
   'Apps',
   'Projects',
+  'Launch configurations',
   'Services',
   'Agents',
   'Scripts',
@@ -39,7 +44,67 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [selectedValue, setSelectedValue] = useState('');
   const [actionsPanelOpen, setActionsPanelOpen] = useState(false);
 
-  const entities = useMemo(() => buildEntities(store), [store]);
+  // Launch configurations live on disk, not in the store: load them lazily
+  // each time the palette opens.
+  const [launchConfigs, setLaunchConfigs] = useState<LaunchConfig[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    listLaunchConfigs()
+      .then((list) => {
+        if (!cancelled) setLaunchConfigs(list);
+      })
+      .catch((err) => console.error('Failed to list launch configurations:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const projects = store.projects;
+  const launchEntities = useMemo<CommandEntity[]>(() => {
+    const list: CommandEntity[] = [
+      {
+        id: 'terminal:open-window',
+        category: 'Navigation',
+        label: 'Open the Terminal window (beta)',
+        icon: <SquareTerminal className="size-4" />,
+        keywords: 'terminal window shell sessions',
+        actions: [
+          {
+            id: 'open',
+            label: 'Open',
+            shortcut: SHORTCUTS.primary,
+            run: () => openTerminalWindow(),
+          },
+        ],
+      },
+    ];
+    for (const config of launchConfigs.slice().sort((a, b) => a.name.localeCompare(b.name))) {
+      const projectName = config.projectId ? projects.find((p) => p.id === config.projectId)?.name ?? 'Unknown project' : 'Global';
+      list.push({
+        id: `launch:${config.id}`,
+        category: 'Launch configurations',
+        label: `Run ${config.name}`,
+        subtitle: projectName,
+        icon: <Rocket className="size-4" />,
+        keywords: `launch dev session terminal ${projectName}`,
+        actions: [
+          {
+            id: 'run',
+            label: 'Run',
+            shortcut: SHORTCUTS.primary,
+            run: async () => {
+              await runLaunchConfig(config);
+              toast.success(`Opened "${config.name}"`);
+            },
+          },
+        ],
+      });
+    }
+    return list;
+  }, [launchConfigs, projects]);
+
+  const entities = useMemo(() => [...buildEntities(store), ...launchEntities], [store, launchEntities]);
   const grouped = useMemo(() => groupByCategory(entities), [entities]);
   const activeScope = useMemo(() => parseQuery(query).scope, [query]);
 

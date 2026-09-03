@@ -22,7 +22,7 @@ use cortx_core::agents::{
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use walkdir::WalkDir;
 
 pub struct AppState {
@@ -33,6 +33,17 @@ pub struct AppState {
     /// Set to true to opt out of "close = hide-to-tray" and run the real
     /// quit cleanup flow when the next CloseRequested event fires.
     pub quitting: Arc<std::sync::atomic::AtomicBool>,
+    /// Terminal layout shared between the main window's dock and the
+    /// Terminal window (DEV-13 P1). See `cortx_core::terminal::layout`.
+    pub terminal_layout: Arc<cortx_core::terminal::LayoutStore>,
+    /// Project scope requested for a Terminal window being created; the
+    /// window takes it once on boot (`take_terminal_window_scope`).
+    pub terminal_window_scope: std::sync::Mutex<Option<String>>,
+    /// Launch configuration (`cortx terminal --layout <name>`) to run once
+    /// the Terminal window is up (`take_terminal_window_launch`).
+    pub terminal_window_launch: std::sync::Mutex<Option<String>>,
+    /// `data/terminal/launch/*.yaml` (DEV-13 P2).
+    pub launch_configs: Arc<cortx_core::terminal::LaunchStore>,
 }
 
 // Project commands
@@ -393,6 +404,9 @@ pub(crate) fn spawn_in_terminal(
         const CREATE_NEW_CONSOLE: u32 = 0x00000010;
 
         match settings.terminal.preset {
+            TerminalPreset::CortxTerminal => {
+                return Err("The CortX Terminal preset runs services inside CortX; use the integrated launch".to_string());
+            }
             TerminalPreset::WindowsTerminal => {
                 // Windows Terminal - use -d for directory and pass the command
                 std::process::Command::new("wt.exe")
@@ -470,6 +484,9 @@ pub(crate) fn spawn_in_terminal(
     #[cfg(target_os = "macos")]
     {
         match settings.terminal.preset {
+            TerminalPreset::CortxTerminal => {
+                return Err("The CortX Terminal preset runs services inside CortX; use the integrated launch".to_string());
+            }
             TerminalPreset::MacTerminal => {
                 let script = format!(
                     r#"tell application "Terminal"
@@ -552,6 +569,9 @@ pub(crate) fn spawn_in_terminal(
         let full_command = format!("cd \"{}\" && {}; exec $SHELL", working_dir, command);
 
         match settings.terminal.preset {
+            TerminalPreset::CortxTerminal => {
+                return Err("The CortX Terminal preset runs services inside CortX; use the integrated launch".to_string());
+            }
             TerminalPreset::Custom => {
                 if settings.terminal.custom_path.is_empty() {
                     // Try common terminal emulators
@@ -2141,7 +2161,15 @@ pub fn generate_shell_init(state: State<AppState>, shell: String) -> Result<Stri
     let shell_type = cortx_core::shell_init::Shell::from_str(&shell)
         .ok_or_else(|| format!("Unknown shell: {}. Supported: powershell, bash, zsh, fish", shell))?;
     let aliases = state.storage.get_all_aliases();
-    Ok(cortx_core::shell_init::generate_init_script(&shell_type, &aliases))
+    let tcfg = state.storage.get_settings().terminal;
+    Ok(cortx_core::shell_init::generate_init_script_ext(
+        &shell_type,
+        &aliases,
+        cortx_core::shell_init::InitOptions {
+            shell_integration: tcfg.shell_integration,
+            disable_shell_predictions: tcfg.shell_integration && tcfg.inline_suggestions,
+        },
+    ))
 }
 
 // ============================================================================
@@ -2777,6 +2805,207 @@ pub fn clear_terminal_scrollback(state: State<AppState>, terminal_id: String) {
 #[tauri::command]
 pub fn remove_terminal(state: State<AppState>, terminal_id: String) {
     state.process_manager.terminal_hub().remove(&terminal_id);
+    state.process_manager.forget_terminal_state(&terminal_id);
+}
+
+/// Shell-integration state (cwd, running command, last exit code) of every
+/// terminal that reported one. Used to seed the GUI after a reload; live
+/// updates arrive through the `terminal-state` event.
+#[tauri::command]
+pub fn get_terminal_states(state: State<AppState>) -> Vec<cortx_core::terminal::TerminalShellState> {
+    state.process_manager.all_terminal_states()
+}
+
+/// Most recent finished commands across all CortX terminals (newest first).
+#[tauri::command]
+pub fn get_command_history(
+    state: State<AppState>,
+    limit: Option<usize>,
+) -> Vec<cortx_core::terminal::CommandRecord> {
+    state.process_manager.command_history().recent(limit.unwrap_or(200))
+}
+
+// ---------------------------------------------------------------------------
+// Terminal layout + Terminal window (DEV-13 P1)
+// ---------------------------------------------------------------------------
+
+/// The shared layout document and its revision.
+#[tauri::command]
+pub fn get_terminal_layout(state: State<AppState>) -> cortx_core::terminal::LayoutDoc {
+    state.terminal_layout.get()
+}
+
+/// Payload of the `terminal-layout` broadcast.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalLayoutEvent {
+    revision: u64,
+    layout: serde_json::Value,
+    /// Label of the window that wrote it, so it can ignore its own echo.
+    source: String,
+}
+
+/// Replace the shared layout. `source` is the writing window's label.
+/// Returns the new revision; every window (including the writer) receives
+/// the `terminal-layout` event.
+#[tauri::command]
+pub fn set_terminal_layout(
+    app_handle: AppHandle,
+    state: State<AppState>,
+    layout: serde_json::Value,
+    source: String,
+) -> u64 {
+    let revision = state.terminal_layout.set(layout.clone());
+    let _ = app_handle.emit(
+        "terminal-layout",
+        TerminalLayoutEvent {
+            revision,
+            layout,
+            source,
+        },
+    );
+    revision
+}
+
+/// Open (or focus) the dedicated Terminal window, optionally scoped to a
+/// project. If the window already exists the scope is sent as the
+/// `terminal-scope` event instead.
+///
+/// `async` on purpose: a synchronous command runs on the main thread, and on
+/// Windows creating a webview from there deadlocks its initialisation (the
+/// window shows up but stays on about:blank).
+#[tauri::command]
+pub async fn open_terminal_window(
+    app_handle: AppHandle,
+    project_id: Option<String>,
+    launch: Option<String>,
+) -> Result<(), String> {
+    crate::open_terminal_window(&app_handle, project_id.as_deref(), launch.as_deref())
+}
+
+/// Show / focus the main window (from the Terminal window).
+#[tauri::command]
+pub fn show_main_window(app_handle: AppHandle) {
+    crate::show_main_window(&app_handle);
+}
+
+/// The project scope a freshly created Terminal window was asked for, if
+/// any. Cleared on read so a later reload does not re-apply it.
+#[tauri::command]
+pub fn take_terminal_window_scope(state: State<AppState>) -> Option<String> {
+    state.terminal_window_scope.lock().ok().and_then(|mut s| s.take())
+}
+
+/// Launch configuration name/id requested by `cortx terminal --layout`,
+/// cleared on read.
+#[tauri::command]
+pub fn take_terminal_window_launch(state: State<AppState>) -> Option<String> {
+    state.terminal_window_launch.lock().ok().and_then(|mut s| s.take())
+}
+
+// ---------------------------------------------------------------------------
+// Session restore + launch configurations (DEV-13 P2)
+// ---------------------------------------------------------------------------
+
+/// Write the scrollback tail of every live terminal to
+/// `runtime/terminal-snapshots/`. The backend also does this at quit and
+/// every minute; the GUI calls it before it recreates shells.
+#[tauri::command]
+pub fn save_terminal_snapshots(state: State<AppState>, terminal_ids: Option<Vec<String>>) {
+    let settings = state.storage.get_settings().terminal;
+    if !settings.restore_scrollback {
+        return;
+    }
+    cortx_core::terminal::snapshot::save_all(
+        state.process_manager.terminal_hub(),
+        state.storage.app_dir().join("runtime").as_path(),
+        terminal_ids.as_deref(),
+        settings.restore_scrollback_lines as usize,
+    );
+}
+
+/// Snapshot produced by the GUI: the xterm buffer serialised as plain lines
+/// with colours (no cursor movement), which replays cleanly at any width.
+/// Preferred over the backend's raw PTY tail when fresh.
+#[tauri::command]
+pub fn store_terminal_snapshot(state: State<AppState>, terminal_id: String, text: String) {
+    if !state.storage.get_settings().terminal.restore_scrollback {
+        return;
+    }
+    cortx_core::terminal::snapshot::store(
+        state.storage.app_dir().join("runtime").as_path(),
+        &terminal_id,
+        text.as_bytes(),
+    );
+}
+
+/// Drop snapshots of terminals that are no longer in the layout.
+#[tauri::command]
+pub fn prune_terminal_snapshots(state: State<AppState>, keep: Vec<String>) {
+    cortx_core::terminal::snapshot::prune_except(state.storage.app_dir().join("runtime").as_path(), &keep);
+}
+
+#[tauri::command]
+pub fn list_launch_configs(state: State<AppState>) -> Vec<cortx_core::terminal::LaunchConfig> {
+    state.launch_configs.list()
+}
+
+#[tauri::command]
+pub fn get_launch_config(state: State<AppState>, id: String) -> Option<cortx_core::terminal::LaunchConfig> {
+    state.launch_configs.get(&id)
+}
+
+/// Raw YAML of a configuration (for the editor); a fresh template when `id`
+/// is unknown.
+#[tauri::command]
+pub fn read_launch_config_yaml(state: State<AppState>, id: String) -> Option<String> {
+    state.launch_configs.read_yaml(&id)
+}
+
+#[tauri::command]
+pub fn save_launch_config(
+    state: State<AppState>,
+    config: cortx_core::terminal::LaunchConfig,
+) -> Result<cortx_core::terminal::LaunchConfig, String> {
+    state.launch_configs.save(&config)?;
+    Ok(config)
+}
+
+/// Validate and store YAML as typed by the user. `expected_id` is the file
+/// being edited (renamed ids replace it).
+#[tauri::command]
+pub fn save_launch_config_yaml(
+    state: State<AppState>,
+    expected_id: Option<String>,
+    yaml: String,
+) -> Result<cortx_core::terminal::LaunchConfig, String> {
+    state.launch_configs.save_yaml(expected_id.as_deref(), &yaml)
+}
+
+#[tauri::command]
+pub fn delete_launch_config(state: State<AppState>, id: String) -> Result<(), String> {
+    state.launch_configs.delete(&id)
+}
+
+/// Serialise a configuration to YAML without saving (editor preview).
+#[tauri::command]
+pub fn launch_config_to_yaml(config: cortx_core::terminal::LaunchConfig) -> Result<String, String> {
+    config.validate()?;
+    config.to_yaml()
+}
+
+/// OS-level notification (toast centre). The GUI decides *when*; this only
+/// wraps the plugin so the frontend needs no extra JS dependency.
+#[tauri::command]
+pub fn send_os_notification(app_handle: AppHandle, title: String, body: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app_handle
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2787,6 +3016,7 @@ pub fn spawn_shell(
     project_id: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
+    restore_from: Option<String>,
 ) -> Result<cortx_core::process_manager::ShellInfo, String> {
     // Default cwd: the project's root when a project is given.
     let cwd = match (cwd, &project_id) {
@@ -2798,7 +3028,14 @@ pub fn spawn_shell(
             .unwrap_or_default(),
         _ => String::new(),
     };
-    let shell = state.storage.get_settings().terminal.integrated_shell;
+    let tcfg = state.storage.get_settings().terminal;
+    let shell = tcfg.integrated_shell.clone();
+    // Shell integration is injected by the app itself (start-up code after
+    // the profile), so it does not depend on the CLI in the user's profile.
+    let integration = tcfg.shell_integration.then_some(cortx_core::shell_init::InitOptions {
+        shell_integration: true,
+        disable_shell_predictions: tcfg.inline_suggestions,
+    });
     let emitter: Arc<dyn ProcessEventEmitter> = Arc::new(TauriEmitter::new(app_handle));
     state.process_manager.spawn_shell(
         emitter,
@@ -2808,6 +3045,8 @@ pub fn spawn_shell(
             shell,
             cols: cols.unwrap_or(0),
             rows: rows.unwrap_or(0),
+            restore_from: restore_from.filter(|s| !s.is_empty()),
+            integration,
         },
     )
 }
@@ -2821,4 +3060,155 @@ pub fn kill_shell(app_handle: AppHandle, state: State<AppState>, shell_id: Strin
 #[tauri::command]
 pub fn list_shells(state: State<AppState>) -> Vec<cortx_core::process_manager::ShellInfo> {
     state.process_manager.list_shells()
+}
+
+// ============================================================================
+// Terminal themes (DEV-13 P3) — data/terminal/themes/*.yaml in Warp's format
+// ============================================================================
+
+fn theme_store(state: &State<AppState>) -> cortx_core::terminal::ThemeStore {
+    cortx_core::terminal::ThemeStore::new(&state.storage.terminal_dir())
+}
+
+#[tauri::command]
+pub fn list_terminal_themes(state: State<AppState>) -> Vec<cortx_core::terminal::ThemeSummary> {
+    theme_store(&state).list()
+}
+
+#[tauri::command]
+pub fn get_terminal_theme(state: State<AppState>, name: String) -> Option<cortx_core::terminal::TerminalTheme> {
+    theme_store(&state).get(&name)
+}
+
+#[tauri::command]
+pub fn import_terminal_theme_file(
+    state: State<AppState>,
+    path: String,
+) -> Result<cortx_core::terminal::TerminalTheme, String> {
+    theme_store(&state).import_file(Path::new(&path))
+}
+
+#[tauri::command]
+pub fn import_terminal_theme_folder(
+    state: State<AppState>,
+    path: String,
+) -> Result<cortx_core::terminal::themes::ImportReport, String> {
+    theme_store(&state).import_folder(Path::new(&path))
+}
+
+#[tauri::command]
+pub fn delete_terminal_theme(state: State<AppState>, name: String) -> Result<(), String> {
+    theme_store(&state).delete(&name)
+}
+
+#[tauri::command]
+pub fn save_terminal_theme(
+    state: State<AppState>,
+    theme: cortx_core::terminal::TerminalTheme,
+) -> Result<cortx_core::terminal::TerminalTheme, String> {
+    theme_store(&state).save(theme)
+}
+
+/// The theme's wallpaper as a `data:` URL (`None` when the theme has none).
+#[tauri::command]
+pub fn read_terminal_theme_image(state: State<AppState>, name: String) -> Result<Option<String>, String> {
+    theme_store(&state).read_image(&name)
+}
+
+/// Apply a backdrop effect to the Terminal window (`window-vibrancy`).
+///
+/// - Windows: `acrylic` (tinted blur, Windows 10 1809+) or `mica` (Windows
+///   11). Both need the window to be transparent, which `open_terminal_window`
+///   guarantees. `opacity` (50–100) only feeds the acrylic tint's alpha — the
+///   real window opacity is done in CSS (`--terminal-window-alpha`), Tauri has
+///   no per-window alpha on Windows.
+/// - macOS: `vibrancy` (NSVisualEffectView, hud / under-window material).
+/// - `none`: clear every effect; the transparent window then shows the
+///   desktop through whatever alpha the CSS leaves.
+///
+/// `tint` is the theme background (`#rrggbb`) used as the acrylic tint, and
+/// `dark` picks the mica / vibrancy material.
+pub fn apply_terminal_window_effect(
+    window: &tauri::WebviewWindow,
+    effect: cortx_core::models::WindowEffect,
+    opacity: u8,
+    tint: Option<&str>,
+    dark: bool,
+) -> Result<(), String> {
+    use cortx_core::models::WindowEffect;
+    let opacity = opacity.clamp(50, 100);
+    let _ = (opacity, tint, dark);
+
+    #[cfg(target_os = "windows")]
+    {
+        // Always clear first: switching acrylic ↔ mica needs a clean slate.
+        let _ = window_vibrancy::clear_acrylic(window);
+        let _ = window_vibrancy::clear_mica(window);
+        match effect {
+            WindowEffect::None | WindowEffect::Vibrancy => Ok(()),
+            WindowEffect::Acrylic => {
+                let (r, g, b) = tint.and_then(parse_rgb).unwrap_or(if dark { (18, 18, 18) } else { (240, 240, 240) });
+                // The tint alpha is what makes acrylic look opaque-ish; map 50–100 % to 40–200.
+                let a = (40.0 + (opacity as f32 - 50.0) / 50.0 * 160.0).round() as u8;
+                window_vibrancy::apply_acrylic(window, Some((r, g, b, a))).map_err(|e| e.to_string())
+            }
+            WindowEffect::Mica => window_vibrancy::apply_mica(window, Some(dark)).map_err(|e| e.to_string()),
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use window_vibrancy::{NSVisualEffectMaterial, NSVisualEffectState};
+        let _ = window_vibrancy::clear_vibrancy(window);
+        match effect {
+            WindowEffect::None | WindowEffect::Acrylic | WindowEffect::Mica => Ok(()),
+            WindowEffect::Vibrancy => window_vibrancy::apply_vibrancy(
+                window,
+                if dark { NSVisualEffectMaterial::HudWindow } else { NSVisualEffectMaterial::UnderWindowBackground },
+                Some(NSVisualEffectState::Active),
+                None,
+            )
+            .map_err(|e| e.to_string()),
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = (window, effect);
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn parse_rgb(hex: &str) -> Option<(u8, u8, u8)> {
+    let h = hex.trim().strip_prefix('#')?;
+    let full: String = match h.len() {
+        3 | 4 => h.chars().take(3).flat_map(|c| [c, c]).collect(),
+        6 | 8 => h[..6].to_string(),
+        _ => return None,
+    };
+    let v = u32::from_str_radix(&full, 16).ok()?;
+    Some(((v >> 16) as u8, (v >> 8 & 0xff) as u8, (v & 0xff) as u8))
+}
+
+/// Set the Terminal window's backdrop effect from the GUI (see
+/// [`apply_terminal_window_effect`]). No-op when the window is not open.
+#[tauri::command]
+pub fn set_terminal_window_effect(
+    app_handle: AppHandle,
+    effect: String,
+    opacity: u8,
+    tint: Option<String>,
+    dark: Option<bool>,
+) -> Result<(), String> {
+    use cortx_core::models::WindowEffect;
+    use tauri::Manager;
+    let effect = match effect.as_str() {
+        "acrylic" => WindowEffect::Acrylic,
+        "mica" => WindowEffect::Mica,
+        "vibrancy" => WindowEffect::Vibrancy,
+        _ => WindowEffect::None,
+    };
+    let Some(window) = app_handle.get_webview_window(crate::TERMINAL_WINDOW_LABEL) else {
+        return Ok(());
+    };
+    apply_terminal_window_effect(&window, effect, opacity, tint.as_deref(), dark.unwrap_or(true))
 }

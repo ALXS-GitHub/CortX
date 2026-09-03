@@ -89,7 +89,22 @@ function WinButton({
  * close button hides the app to the tray (the tray keeps the global hotkey
  * and the running services alive) — "Quit" lives in the app menu.
  */
-export function TitleBar({ onOpenPalette }: { onOpenPalette?: () => void }) {
+interface TitleBarProps {
+  onOpenPalette?: () => void;
+  /** Text after the logo (default "CortX"). */
+  title?: string;
+  /** Pill rendered right after the title (the Terminal window flags itself beta). */
+  badge?: ReactNode;
+  /** Rendered in the middle of the bar (the Terminal window puts its scope switcher here). */
+  center?: ReactNode;
+  /** Rendered just before the app menu. */
+  trailing?: ReactNode;
+  /** What the X button does: hide to tray (main window) or close this window. */
+  closeLabel?: string;
+  onClose?: () => void;
+}
+
+export function TitleBar({ onOpenPalette, title = 'CortX', badge, center, trailing, closeLabel = 'Hide to tray', onClose }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
   const paletteShortcut = useAppStore((s) => s.settings?.globalHotkey);
@@ -106,7 +121,8 @@ export function TitleBar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   }, []);
 
   const handleHide = () => {
-    appWindow.close();
+    if (onClose) onClose();
+    else appWindow.close();
   };
 
   const handleQuit = () => {
@@ -125,8 +141,9 @@ export function TitleBar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       >
         <img src="/cortx-logo.png" alt="" className="size-[18px] shrink-0 rounded-[4px]" draggable={false} />
         <span data-tauri-drag-region className="truncate font-display text-xs font-medium tracking-tight text-muted-foreground">
-          CortX
+          {title}
         </span>
+        {badge}
         {appVersion && (
           <span data-tauri-drag-region className="shrink-0 font-mono text-[10px] text-muted-foreground/60">
             v{appVersion}
@@ -147,9 +164,13 @@ export function TitleBar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           <span className="kbd">Ctrl K</span>
         </button>
       )}
+      {center && (
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">{center}</div>
+      )}
 
       {/* Right: app menu + window controls */}
       <div className="flex h-full items-stretch">
+        {trailing && <div className="flex items-center pr-1">{trailing}</div>}
         <DropdownMenu>
           <DropdownMenuTrigger
             className="grid h-full w-9 place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none"
@@ -171,7 +192,7 @@ export function TitleBar({ onOpenPalette }: { onOpenPalette?: () => void }) {
             )}
             <DropdownMenuItem onClick={handleHide}>
               <EyeOff />
-              Hide to tray
+              {closeLabel}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleQuit} variant="destructive">
               <LogOut />
@@ -188,7 +209,7 @@ export function TitleBar({ onOpenPalette }: { onOpenPalette?: () => void }) {
             <WinButton label={isMaximized ? 'Restore' : 'Maximize'} onClick={() => appWindow.toggleMaximize()}>
               {isMaximized ? <IconRestore /> : <IconMaximize />}
             </WinButton>
-            <WinButton label="Hide to tray" danger onClick={handleHide}>
+            <WinButton label={closeLabel} danger onClick={handleHide}>
               <IconClose />
             </WinButton>
           </>

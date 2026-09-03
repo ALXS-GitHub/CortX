@@ -157,6 +157,12 @@ impl Storage {
         self.app_dir.join("images")
     }
 
+    /// `data/terminal/`: sessions layout, launch configurations, themes.
+    /// Everything in here is synced by the git backup (DEV-13).
+    pub fn terminal_dir(&self) -> PathBuf {
+        self.app_dir.join("terminal")
+    }
+
     fn global_scripts_path(&self) -> PathBuf {
         self.app_dir.join("global_scripts.json")
     }
@@ -1382,6 +1388,9 @@ impl Storage {
     // Git Backup
     // ========================================================================
 
+    /// Data directories copied recursively into the git backup (DEV-13).
+    const BACKUP_DIRS: &'static [&'static str] = &["terminal"];
+
     /// Data files to include in git backup (excludes execution_history)
     const BACKUP_FILES: &'static [&'static str] = &[
         "projects.json",
@@ -1421,6 +1430,15 @@ impl Storage {
             if src.exists() {
                 fs::copy(&src, repo.join(filename))?;
                 copied += 1;
+            }
+        }
+        // Whole directories (terminal layout, launch configs, themes and
+        // their images). Files above 10 MB are skipped: a wallpaper that big
+        // does not belong in a git repo.
+        for dirname in Self::BACKUP_DIRS {
+            let src = self.app_dir.join(dirname);
+            if src.is_dir() {
+                copied += copy_dir_filtered(&src, &repo.join(dirname), 10 * 1024 * 1024)?;
             }
         }
 
@@ -1480,4 +1498,26 @@ impl Storage {
 
         Ok(format!("Backed up and pushed {} files", copied))
     }
+}
+
+/// Recursive copy for the git backup. Files larger than `max_bytes` are
+/// skipped. Returns the number of files copied.
+fn copy_dir_filtered(src: &Path, dst: &Path, max_bytes: u64) -> Result<usize, StorageError> {
+    fs::create_dir_all(dst)?;
+    let mut copied = 0usize;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let target = dst.join(entry.file_name());
+        let meta = entry.metadata()?;
+        if meta.is_dir() {
+            copied += copy_dir_filtered(&path, &target, max_bytes)?;
+        } else if meta.len() <= max_bytes {
+            fs::copy(&path, &target)?;
+            copied += 1;
+        } else {
+            log::warn!("Backup: skipping {} ({} bytes > limit)", path.display(), meta.len());
+        }
+    }
+    Ok(copied)
 }

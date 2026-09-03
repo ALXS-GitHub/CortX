@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { fitTerminal, focusTerminal, mountTerminal, unmountTerminal } from '@/lib/terminalSessions';
+import { attachSuggestions } from '@/lib/terminalSuggest';
 
 interface XtermViewProps {
   /** Canonical terminal id (`service:<id>`, `script:<id>`, `shell:<id>`, ...). */
@@ -19,6 +20,8 @@ export function XtermView({ terminalId, autoFocus = false }: XtermViewProps) {
     const el = ref.current;
     if (!el) return;
     mountTerminal(terminalId, el);
+    // Inline history suggestions (ghost text); no-op when disabled in settings.
+    attachSuggestions(terminalId);
     const observer = new ResizeObserver(() => fitTerminal(terminalId));
     observer.observe(el);
     return () => {

@@ -1,0 +1,119 @@
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { cn } from '@/lib/utils';
+import { useAppStore } from '@/stores/appStore';
+import { loadThemeImage, useCurrentTerminalTheme } from '@/stores/terminalThemeStore';
+
+type Fit = 'cover' | 'contain' | 'tile' | 'center';
+
+/**
+ * Wallpaper of the current terminal theme, painted behind the whole
+ * Terminal window (`background_image` + `cortx.blur` / `cortx.imageFit`,
+ * each overridable from Settings: `wallpaperOpacity`, `wallpaperBlur`,
+ * `wallpaperFit`), plus a `wallpaperDim` overlay in the theme colour that
+ * tones the picture down. Sits at `z-index: -1` inside
+ * `.terminal-window-root`, above the window background colour and below
+ * every panel.
+ */
+export function TerminalThemeLayer() {
+  const theme = useCurrentTerminalTheme();
+  const look = useAppStore((s) => s.settings?.terminal);
+  const key = theme?.key;
+  const imagePath = theme?.background_image?.path;
+  const [src, setSrc] = useState<{ key: string; url: string } | null>(null);
+
+  useEffect(() => {
+    if (!key || !imagePath) return;
+    let cancelled = false;
+    let retry: number | null = null;
+    let attempt = 0;
+    const load = () => {
+      retry = null;
+      loadThemeImage(key).then((url) => {
+        if (cancelled) return;
+        if (url) {
+          attempt = 0;
+          setSrc({ key, url });
+          return;
+        }
+        // The backend may not be ready yet (app start, dev restart, the file
+        // being written). Never give up: giving up leaves the window with its
+        // theme colour but no picture until the user reloads by hand, which
+        // reads as "my wallpaper disappeared".
+        attempt += 1;
+        retry = window.setTimeout(load, Math.min(10_000, 600 * attempt));
+      });
+    };
+    load();
+    // A failed read often means the backend was busy; coming back to the
+    // window is a good moment to try again immediately.
+    const onWake = () => {
+      if (cancelled || document.visibilityState !== 'visible') return;
+      if (retry !== null) {
+        window.clearTimeout(retry);
+        load();
+      }
+    };
+    window.addEventListener('focus', onWake);
+    document.addEventListener('visibilitychange', onWake);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onWake);
+      document.removeEventListener('visibilitychange', onWake);
+      if (retry !== null) window.clearTimeout(retry);
+    };
+  }, [key, imagePath]);
+
+  // A stale `src` (previous theme) is ignored rather than cleared: the key
+  // check below hides it until the new wallpaper is in.
+  if (!theme || !imagePath || !src || src.key !== theme.key) return null;
+
+  const image = theme.background_image;
+  const opacityPct = look?.wallpaperOpacity ?? image?.opacity ?? 100;
+  // The window opacity applies to the wallpaper too: at 60 % you must see
+  // the desktop through the picture, not just around it.
+  const windowAlpha = Math.max(0, Math.min(100, look?.windowOpacity ?? 100)) / 100;
+  const opacity = Math.max(0, Math.min(1, (opacityPct / 100) * windowAlpha));
+  const fit: Fit = look?.wallpaperFit ?? theme.cortx?.imageFit ?? 'cover';
+  const blur = Math.max(0, look?.wallpaperBlur ?? theme.cortx?.blur ?? 0);
+  const dim = Math.max(0, Math.min(90, look?.wallpaperDim ?? 0)) / 100;
+  const style: CSSProperties = {
+    backgroundImage: `url("${src.url}")`,
+    backgroundSize: fit === 'cover' ? 'cover' : fit === 'contain' ? 'contain' : 'auto',
+    backgroundRepeat: fit === 'tile' ? 'repeat' : 'no-repeat',
+    opacity,
+  };
+  if (blur > 0) {
+    style.filter = `blur(${blur}px)`;
+    // Bleed past the edges so the blur never fades to transparent there.
+    style.inset = `${-blur * 2}px`;
+  }
+  return (
+    <>
+      <div aria-hidden className="terminal-theme-layer" style={style} />
+      {dim > 0 && (
+        // Black, not the theme colour: dimming must darken the picture, not
+        // tint it further (set the wallpaper opacity to 100 and dim to taste
+        // to keep the image's own colours).
+        <div
+          aria-hidden
+          className="terminal-theme-layer"
+          style={{ backgroundImage: 'none', backgroundColor: '#000', opacity: dim * windowAlpha }}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Wrap the Terminal window's content in this: it paints the theme's
+ * background at the window opacity and mounts the wallpaper layer. The
+ * store must be started with `initTerminalThemeStore({ windowChrome: true })`.
+ */
+export function TerminalThemeRoot({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn('terminal-window-root', className)}>
+      <TerminalThemeLayer />
+      {children}
+    </div>
+  );
+}

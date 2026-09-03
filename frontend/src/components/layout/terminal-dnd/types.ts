@@ -1,4 +1,5 @@
-import type { ServiceStatus, ScriptStatus, LogEntry } from '@/types';
+import type { ServiceStatus, ScriptStatus, LogEntry, TerminalShellState } from '@/types';
+import type { TerminalAttention } from '@/stores/appStore';
 
 export type TerminalType = 'service' | 'script' | 'global-script' | 'shell';
 
@@ -16,6 +17,10 @@ export interface TerminalItem {
   lastSuccess?: boolean;
   /** Shell tabs: working directory the shell was opened in. */
   cwd?: string;
+  /** Live shell-integration state (cwd, running command, last exit code). */
+  shell?: TerminalShellState;
+  /** A command finished while this tab was not in view. */
+  attention?: TerminalAttention;
 }
 
 export interface DragData {

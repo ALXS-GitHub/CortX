@@ -9,6 +9,7 @@ export type EntityCategory =
   | 'Tools'
   | 'Utilities'
   | 'Agents'
+  | 'Launch configurations'
   | 'Shell Config';
 
 /**

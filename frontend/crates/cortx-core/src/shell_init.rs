@@ -68,8 +68,34 @@ pub fn is_shell_builtin(name: &str) -> bool {
 
 /// Generate shell init script for the given aliases.
 /// Aliases with `execution_order` set appear first (sorted ascending),
-/// followed by those without (sorted by `order`).
-pub fn generate_init_script(shell: &Shell, aliases: &[ShellAlias]) -> String {
+/// followed by those without (sorted by `order`). With `shell_integration`
+/// the OSC 7 / 133 block from [`shell_integration_snippet`] is appended
+/// last, so it wraps whatever prompt the aliases (starship, oh-my-posh…)
+/// installed.
+pub fn generate_init_script(shell: &Shell, aliases: &[ShellAlias], shell_integration: bool) -> String {
+    generate_init_script_ext(
+        shell,
+        aliases,
+        InitOptions {
+            shell_integration,
+            disable_shell_predictions: false,
+        },
+    )
+}
+
+/// Knobs of the generated init script (from `settings.terminal`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InitOptions {
+    /// Emit the OSC 7 / 133 block.
+    pub shell_integration: bool,
+    /// CortX draws its own history ghost text, so the shell's inline
+    /// prediction (PSReadLine) is switched off inside CortX terminals to
+    /// avoid two suggestions at once.
+    pub disable_shell_predictions: bool,
+}
+
+pub fn generate_init_script_ext(shell: &Shell, aliases: &[ShellAlias], opts: InitOptions) -> String {
+    let shell_integration = opts.shell_integration;
     let shell_key = shell.key();
 
     // Sort: execution_order set first (ascending), then the rest by order
@@ -204,12 +230,259 @@ pub fn generate_init_script(shell: &Shell, aliases: &[ShellAlias]) -> String {
         }
     }
 
+    if shell_integration {
+        output.push('\n');
+        output.push_str(&shell_integration_block(shell));
+    }
+
+    if opts.disable_shell_predictions && *shell == Shell::PowerShell {
+        // One line on purpose (survives a line-by-line Invoke-Expression).
+        output.push_str(
+            "if ($env:CORTX_TERMINAL_ID -and (Get-Module -Name PSReadLine)) { Set-PSReadLineOption -PredictionSource None }\n",
+        );
+    }
+
     output
 }
+
+/// Which shell a program name is, for the app-side injection (`pwsh.exe`,
+/// `/bin/zsh`, `fish`…). `None` for anything we have no snippet for.
+pub fn shell_for_program(program: &str) -> Option<Shell> {
+    let base = std::path::Path::new(program)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    match base.as_str() {
+        "pwsh" | "powershell" => Some(Shell::PowerShell),
+        "bash" => Some(Shell::Bash),
+        "zsh" => Some(Shell::Zsh),
+        "fish" => Some(Shell::Fish),
+        _ => None,
+    }
+}
+
+/// The integration as *startup code* the app hands to a shell it spawns, so
+/// it works even when the profile does not call `cortx init` (or calls an
+/// older CLI). PowerShell gets one `Invoke-Expression` statement per line
+/// (joined by `;` by the caller); other shells get the block verbatim.
+pub fn shell_integration_startup(shell: &Shell, opts: InitOptions) -> String {
+    let mut out = String::new();
+    if opts.shell_integration {
+        out.push_str(&shell_integration_block(shell));
+    }
+    if opts.disable_shell_predictions && *shell == Shell::PowerShell {
+        out.push_str(
+            "if ($env:CORTX_TERMINAL_ID -and (Get-Module -Name PSReadLine)) { Set-PSReadLineOption -PredictionSource None }\n",
+        );
+    }
+    out
+}
+
+/// The integration snippet in the form that goes into the init script.
+/// PowerShell gets a single `Invoke-Expression` line carrying the block as
+/// base64, so it survives both `| Out-String | Invoke-Expression` and a
+/// line-by-line `| Invoke-Expression`. Other shells eval the whole output
+/// at once and get the block verbatim.
+pub fn shell_integration_block(shell: &Shell) -> String {
+    let snippet = shell_integration_snippet(shell);
+    match shell {
+        Shell::PowerShell => {
+            use base64::Engine;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(snippet.as_bytes());
+            format!(
+                "# CortX shell integration (OSC 7 / OSC 133); decoded and evaluated as one block\n\
+                 Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{}')))\n",
+                b64
+            )
+        }
+        _ => snippet.to_string(),
+    }
+}
+
+/// Shell-integration block appended by `cortx init` when
+/// `settings.terminal.shell_integration` is on. Every shell guards on
+/// `CORTX_TERMINAL_ID` (set by CortX's PTYs) so external terminals never see
+/// the sequences. Protocol: OSC 7 for the cwd, OSC 133 A/B/C/D for prompt and
+/// command boundaries, with `C;cmd=<base64 utf-8>` carrying the command line.
+/// Parsed by `terminal::osc`.
+pub fn shell_integration_snippet(shell: &Shell) -> &'static str {
+    match shell {
+        Shell::PowerShell => POWERSHELL_INTEGRATION,
+        Shell::Bash => BASH_INTEGRATION,
+        Shell::Zsh => ZSH_INTEGRATION,
+        Shell::Fish => FISH_INTEGRATION,
+    }
+}
+
+const POWERSHELL_INTEGRATION: &str = r##"
+# --- CortX shell integration (OSC 7 / OSC 133) — active only inside a CortX terminal ---
+if ($env:CORTX_TERMINAL_ID) {
+    $global:__cortx_ran = $false
+    function global:__cortx_urlencode([string]$p) {
+        return $p.Replace('%', '%25').Replace(' ', '%20').Replace('#', '%23').Replace('?', '%3F')
+    }
+    function global:__cortx_wrap_prompt {
+        $inner = $function:prompt
+        if ($inner -and $inner.ToString().Contains('__cortx_marks')) { return }
+        $global:__cortx_inner_prompt = $inner
+        function global:prompt {
+            $lastSuccess = $?
+            $gle = $global:LASTEXITCODE
+            # __cortx_marks
+            $inner = $global:__cortx_inner_prompt
+            $loc = $ExecutionContext.SessionState.Path.CurrentLocation
+            $text = if ($inner) { & $inner } else { "PS $loc> " }
+            $e = [char]27; $b = [char]7
+            $out = ''
+            if ($global:__cortx_ran) {
+                $code = if ($lastSuccess) { 0 } elseif ($gle -is [int] -and $gle -ne 0) { $gle } else { 1 }
+                $out += "$e]133;D;$code$b"
+                $global:__cortx_ran = $false
+            }
+            if ($loc.Provider.Name -eq 'FileSystem') {
+                $p = $loc.ProviderPath -replace '\\', '/'
+                if (-not $p.StartsWith('/')) { $p = "/$p" }
+                $out += "$e]7;file://localhost$(__cortx_urlencode $p)$b"
+            }
+            $out += "$e]133;A$b"
+            $out += ($text -join '')
+            $out += "$e]133;B$b"
+            $global:LASTEXITCODE = $gle
+            return $out
+        }
+    }
+    __cortx_wrap_prompt
+    if (Get-Module -Name PSReadLine) {
+        Set-PSReadLineKeyHandler -Key Enter -BriefDescription CortXAcceptLine -Description 'Accept the line and mark the command start for CortX' -ScriptBlock {
+            $line = $null; $cursor = $null
+            [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+            if ($line -and $line.Trim()) {
+                $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($line))
+                [Console]::Write("$([char]27)]133;C;cmd=$b64$([char]7)")
+                $global:__cortx_ran = $true
+            }
+            __cortx_wrap_prompt
+            [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+        }
+    }
+}
+"##;
+
+const BASH_INTEGRATION: &str = r##"
+# --- CortX shell integration (OSC 7 / OSC 133) — active only inside a CortX terminal ---
+if [ -n "$CORTX_TERMINAL_ID" ] && [ -n "$BASH_VERSION" ]; then
+  __cortx_osc() { printf '\033]%s\007' "$1"; }
+  __cortx_urlencode() { local s="$1"; s="${s//%/%25}"; s="${s// /%20}"; s="${s//#/%23}"; s="${s//\?/%3F}"; printf '%s' "$s"; }
+  __cortx_preexec() {
+    [ "$__cortx_mode" = on ] || return 0
+    __cortx_mode=off
+    [ -n "$COMP_LINE" ] && return 0
+    local cmd
+    cmd=$(HISTTIMEFORMAT= builtin history 1 2>/dev/null | sed 's/^ *[0-9]* *//')
+    [ -z "$cmd" ] && cmd="$BASH_COMMAND"
+    __cortx_osc "133;C;cmd=$(printf '%s' "$cmd" | base64 2>/dev/null | tr -d '\n')"
+    __cortx_ran=1
+  }
+  __cortx_precmd() {
+    local ec=$?
+    if [ -n "$__cortx_ran" ]; then __cortx_osc "133;D;$ec"; __cortx_ran=; fi
+    __cortx_osc "7;file://${HOSTNAME:-localhost}$(__cortx_urlencode "$PWD")"
+    __cortx_osc "133;A"
+  }
+  __cortx_precmd_last() {
+    case "$PS1" in *'133;B'*) ;; *) PS1="${PS1}"'\[\e]133;B\a\]' ;; esac
+    __cortx_mode=on
+  }
+  PROMPT_COMMAND="__cortx_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND};__cortx_precmd_last"
+  trap '__cortx_preexec' DEBUG
+fi
+"##;
+
+const ZSH_INTEGRATION: &str = r##"
+# --- CortX shell integration (OSC 7 / OSC 133) — active only inside a CortX terminal ---
+if [[ -n "$CORTX_TERMINAL_ID" && -n "$ZSH_VERSION" ]]; then
+  autoload -Uz add-zsh-hook
+  __cortx_osc() { printf '\033]%s\007' "$1"; }
+  __cortx_urlencode() { local s="$1"; s="${s//\%/%25}"; s="${s// /%20}"; s="${s//\#/%23}"; s="${s//\?/%3F}"; printf '%s' "$s"; }
+  __cortx_preexec() {
+    __cortx_osc "133;C;cmd=$(printf '%s' "$1" | base64 2>/dev/null | tr -d '\n')"
+    __cortx_ran=1
+  }
+  __cortx_precmd() {
+    local ec=$?
+    if [[ -n "$__cortx_ran" ]]; then __cortx_osc "133;D;$ec"; __cortx_ran=; fi
+    __cortx_osc "7;file://${HOST:-localhost}$(__cortx_urlencode "$PWD")"
+    __cortx_osc "133;A"
+    [[ "$PS1" == *'133;B'* ]] || PS1="${PS1}%{$(printf '\033]133;B\007')%}"
+  }
+  add-zsh-hook preexec __cortx_preexec
+  add-zsh-hook precmd __cortx_precmd
+fi
+"##;
+
+const FISH_INTEGRATION: &str = r##"
+# --- CortX shell integration (OSC 7 / OSC 133) — active only inside a CortX terminal ---
+if set -q CORTX_TERMINAL_ID
+    function __cortx_osc
+        printf '\033]%s\007' $argv[1]
+    end
+    function __cortx_urlencode
+        string replace -a '%' '%25' -- $argv[1] | string replace -a ' ' '%20' | string replace -a '#' '%23' | string replace -a '?' '%3F'
+    end
+    function __cortx_preexec --on-event fish_preexec
+        set -g __cortx_ran 1
+        __cortx_osc "133;C;cmd="(printf '%s' $argv[1] | base64 2>/dev/null | string join '')
+    end
+    function __cortx_postexec --on-event fish_postexec
+        set -l ec $status
+        if set -q __cortx_ran
+            __cortx_osc "133;D;$ec"
+            set -e __cortx_ran
+        end
+    end
+    function __cortx_prompt --on-event fish_prompt
+        __cortx_osc "7;file://"(hostname)(__cortx_urlencode $PWD)
+        __cortx_osc "133;A"
+        __cortx_osc "133;B"
+    end
+end
+"##;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn integration_block_is_appended_last_and_guarded() {
+        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
+            let a = func_alias("hi", "echo hi");
+            let with = generate_init_script(&shell, std::slice::from_ref(&a), true);
+            let without = generate_init_script(&shell, std::slice::from_ref(&a), false);
+            assert!(with.starts_with(&without), "{:?}", shell);
+            assert!(!without.contains("133;A"), "{:?}", shell);
+            let snippet = shell_integration_snippet(&shell);
+            assert!(with.contains(&shell_integration_block(&shell)), "{:?}", shell);
+            assert!(snippet.contains("CORTX_TERMINAL_ID"), "{:?}", shell);
+            assert!(snippet.contains("133;A"), "{:?}", shell);
+            assert!(snippet.contains("133;C;cmd="), "{:?}", shell);
+            assert!(snippet.contains("133;D"), "{:?}", shell);
+            assert!(snippet.contains("7;file://"), "{:?}", shell);
+        }
+    }
+
+    #[test]
+    fn powershell_block_is_one_base64_line_that_decodes_to_the_snippet() {
+        use base64::Engine;
+        let block = shell_integration_block(&Shell::PowerShell);
+        let code_lines: Vec<&str> = block.lines().filter(|l| !l.starts_with('#')).collect();
+        assert_eq!(code_lines.len(), 1, "{}", block);
+        let line = code_lines[0];
+        let start = line.find("FromBase64String('").unwrap() + "FromBase64String('".len();
+        let end = line[start..].find('\'').unwrap() + start;
+        let decoded = base64::engine::general_purpose::STANDARD.decode(&line[start..end]).unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), shell_integration_snippet(&Shell::PowerShell));
+    }
 
     fn func_alias(name: &str, command: &str) -> ShellAlias {
         ShellAlias::new(name.to_string(), command.to_string())
@@ -218,7 +491,7 @@ mod tests {
     #[test]
     fn powershell_quoted_command_gets_the_call_operator() {
         let a = func_alias("payledger", r#""C:\Users\Alexis Munch\payledger.exe""#);
-        let out = generate_init_script(&Shell::PowerShell, std::slice::from_ref(&a));
+        let out = generate_init_script(&Shell::PowerShell, std::slice::from_ref(&a), false);
         assert!(
             out.contains(r#"function payledger { & "C:\Users\Alexis Munch\payledger.exe" @args }"#),
             "got: {out}"
@@ -229,7 +502,7 @@ mod tests {
     fn powershell_bare_command_is_left_alone() {
         // Starts with a command word: already command mode, `&` would be noise.
         let a = func_alias("onepack", r#"bun run "C:\a b\x.ts""#);
-        let out = generate_init_script(&Shell::PowerShell, std::slice::from_ref(&a));
+        let out = generate_init_script(&Shell::PowerShell, std::slice::from_ref(&a), false);
         assert!(
             out.contains(r#"function onepack { bun run "C:\a b\x.ts" @args }"#),
             "got: {out}"
@@ -240,7 +513,7 @@ mod tests {
     #[test]
     fn powershell_existing_call_operator_is_not_doubled() {
         let a = func_alias("zorg", r#"& "C:\a b\zorg.exe""#);
-        let out = generate_init_script(&Shell::PowerShell, std::slice::from_ref(&a));
+        let out = generate_init_script(&Shell::PowerShell, std::slice::from_ref(&a), false);
         assert!(out.contains(r#"{ & "C:\a b\zorg.exe" @args }"#), "got: {out}");
         assert!(!out.contains("& &"), "got: {out}");
     }
@@ -249,9 +522,9 @@ mod tests {
     fn posix_shells_need_no_call_operator() {
         // In sh and fish a quoted string is a perfectly good command word.
         let a = func_alias("payledger", r#""/opt/a b/payledger""#);
-        let bash = generate_init_script(&Shell::Bash, std::slice::from_ref(&a));
+        let bash = generate_init_script(&Shell::Bash, std::slice::from_ref(&a), false);
         assert!(bash.contains(r#"payledger() { "/opt/a b/payledger" "$@"; }"#), "got: {bash}");
-        let fish = generate_init_script(&Shell::Fish, std::slice::from_ref(&a));
+        let fish = generate_init_script(&Shell::Fish, std::slice::from_ref(&a), false);
         assert!(fish.contains(r#""/opt/a b/payledger" $argv"#), "got: {fish}");
     }
 }

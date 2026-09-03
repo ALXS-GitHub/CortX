@@ -1,0 +1,27 @@
+# CortX "Halcyon" dark — the app's own canvas + teal accent.
+name: Halcyon Dark
+background: "#0f1b1f"
+accent: "#2dd4bf"
+foreground: "#e5f1f1"
+details: darker
+cortx:
+  cursor: "#2dd4bf"
+terminal_colors:
+  normal:
+    black: "#16262b"
+    red: "#ff7a88"
+    green: "#2dd4bf"
+    yellow: "#f5b73a"
+    blue: "#48b9f5"
+    magenta: "#c792ea"
+    cyan: "#5fd7e6"
+    white: "#c9d8d8"
+  bright:
+    black: "#5c7378"
+    red: "#ff8aa0"
+    green: "#5eead4"
+    yellow: "#fcd34d"
+    blue: "#7dd3fc"
+    magenta: "#d8b4fe"
+    cyan: "#a5f3fc"
+    white: "#f1f8f8"

@@ -17,6 +17,12 @@ import type {
   ShellInfo,
   ShellExitPayload,
   TerminalCapabilities,
+  TerminalShellState,
+  CommandRecord,
+  LaunchConfig,
+  TerminalTheme,
+  TerminalThemeSummary,
+  TerminalThemeImportReport,
   ServiceExitPayload,
   ServicePortsPayload,
   ScriptLogPayload,
@@ -694,12 +700,15 @@ export async function spawnShell(options: {
   projectId?: string;
   cols?: number;
   rows?: number;
+  /** Session restore: terminal id this shell replaces (its scrollback snapshot is replayed first). */
+  restoreFrom?: string;
 }): Promise<ShellInfo> {
   return invoke('spawn_shell', {
     cwd: options.cwd ?? null,
     projectId: options.projectId ?? null,
     cols: options.cols ?? null,
     rows: options.rows ?? null,
+    restoreFrom: options.restoreFrom ?? null,
   });
 }
 
@@ -721,4 +730,187 @@ export async function onShellExit(
   return listen<ShellExitPayload>('shell-exit', (event) => {
     callback(event.payload);
   });
+}
+
+// ============================================================================
+// Shell integration (OSC 7 / OSC 133 from `cortx init`)
+// ============================================================================
+
+/** Fired whenever a terminal's shell reports a new cwd, command start or end. */
+export async function onTerminalState(
+  callback: (state: TerminalShellState) => void
+): Promise<UnlistenFn> {
+  return listen<TerminalShellState>('terminal-state', (event) => {
+    callback(event.payload);
+  });
+}
+
+/** Every known shell state — used to seed the store after a reload. */
+export async function getTerminalStates(): Promise<TerminalShellState[]> {
+  return invoke('get_terminal_states');
+}
+
+/** Most recent finished commands across all terminals, newest first. */
+export async function getCommandHistory(limit = 200): Promise<CommandRecord[]> {
+  return invoke('get_command_history', { limit });
+}
+
+/** OS notification (toast centre). Fire-and-forget. */
+export async function sendOsNotification(title: string, body: string): Promise<void> {
+  return invoke('send_os_notification', { title, body });
+}
+
+// ============================================================================
+// Terminal layout shared between windows + Terminal window (DEV-13 P1)
+// ============================================================================
+
+export interface TerminalLayoutDocEnvelope {
+  revision: number;
+  /** Raw document; see `lib/terminalLayout.ts` for the schema. */
+  layout: unknown;
+}
+
+export interface TerminalLayoutEvent extends TerminalLayoutDocEnvelope {
+  /** Label of the window that wrote it. */
+  source: string;
+}
+
+export async function getTerminalLayout(): Promise<TerminalLayoutDocEnvelope> {
+  return invoke('get_terminal_layout');
+}
+
+export async function setTerminalLayout(layout: unknown, source: string): Promise<number> {
+  return invoke('set_terminal_layout', { layout, source });
+}
+
+export async function onTerminalLayout(
+  callback: (event: TerminalLayoutEvent) => void
+): Promise<UnlistenFn> {
+  return listen<TerminalLayoutEvent>('terminal-layout', (event) => callback(event.payload));
+}
+
+/** Project id pushed to an already-open Terminal window (`cortx terminal --project`). */
+export async function onTerminalScope(callback: (projectId: string) => void): Promise<UnlistenFn> {
+  return listen<string>('terminal-scope', (event) => callback(event.payload));
+}
+
+export async function openTerminalWindow(projectId?: string | null): Promise<void> {
+  return invoke('open_terminal_window', { projectId: projectId ?? null });
+}
+
+export async function showMainWindow(): Promise<void> {
+  return invoke('show_main_window');
+}
+
+/** Project scope the Terminal window was created with (read once on boot). */
+export async function takeTerminalWindowScope(): Promise<string | null> {
+  return invoke('take_terminal_window_scope');
+}
+
+// ============================================================================
+// Session restore + launch configurations (DEV-13 P2)
+// ============================================================================
+
+/** Launch configuration id requested by `cortx terminal --layout` (read once on boot). */
+export async function takeTerminalWindowLaunch(): Promise<string | null> {
+  return invoke('take_terminal_window_launch');
+}
+
+/** Pushed to an already-open Terminal window by `cortx terminal --layout`. */
+export async function onTerminalLaunch(callback: (launchId: string) => void): Promise<UnlistenFn> {
+  return listen<string>('terminal-launch', (event) => callback(event.payload));
+}
+
+/** Open / focus the Terminal window and run a launch configuration there. */
+export async function openTerminalWindowWithLaunch(launchId: string, projectId?: string | null): Promise<void> {
+  return invoke('open_terminal_window', { projectId: projectId ?? null, launch: launchId });
+}
+
+/** Write the scrollback tail of the given (or all) terminals to `runtime/terminal-snapshots/`. */
+export async function saveTerminalSnapshots(terminalIds?: string[]): Promise<void> {
+  return invoke('save_terminal_snapshots', { terminalIds: terminalIds ?? null });
+}
+
+export async function pruneTerminalSnapshots(keep: string[]): Promise<void> {
+  return invoke('prune_terminal_snapshots', { keep });
+}
+
+/** Store a GUI-serialised buffer as the terminal's restore snapshot. */
+export async function storeTerminalSnapshot(terminalId: string, text: string): Promise<void> {
+  return invoke('store_terminal_snapshot', { terminalId, text });
+}
+
+export async function listLaunchConfigs(): Promise<LaunchConfig[]> {
+  return invoke('list_launch_configs');
+}
+
+export async function getLaunchConfig(id: string): Promise<LaunchConfig | null> {
+  return invoke('get_launch_config', { id });
+}
+
+export async function readLaunchConfigYaml(id: string): Promise<string | null> {
+  return invoke('read_launch_config_yaml', { id });
+}
+
+export async function saveLaunchConfig(config: LaunchConfig): Promise<LaunchConfig> {
+  return invoke('save_launch_config', { config });
+}
+
+export async function saveLaunchConfigYaml(expectedId: string | null, yaml: string): Promise<LaunchConfig> {
+  return invoke('save_launch_config_yaml', { expectedId, yaml });
+}
+
+export async function deleteLaunchConfig(id: string): Promise<void> {
+  return invoke('delete_launch_config', { id });
+}
+
+export async function launchConfigToYaml(config: LaunchConfig): Promise<string> {
+  return invoke('launch_config_to_yaml', { config });
+}
+
+// ---------------------------------------------------------------------------
+// Terminal themes (DEV-13 P3)
+// ---------------------------------------------------------------------------
+
+export async function listTerminalThemes(): Promise<TerminalThemeSummary[]> {
+  return invoke('list_terminal_themes');
+}
+
+export async function getTerminalTheme(name: string): Promise<TerminalTheme | null> {
+  return invoke('get_terminal_theme', { name });
+}
+
+export async function importTerminalThemeFile(path: string): Promise<TerminalTheme> {
+  return invoke('import_terminal_theme_file', { path });
+}
+
+export async function importTerminalThemeFolder(path: string): Promise<TerminalThemeImportReport> {
+  return invoke('import_terminal_theme_folder', { path });
+}
+
+export async function deleteTerminalTheme(name: string): Promise<void> {
+  return invoke('delete_terminal_theme', { name });
+}
+
+export async function saveTerminalTheme(theme: TerminalTheme): Promise<TerminalTheme> {
+  return invoke('save_terminal_theme', { theme });
+}
+
+/** The theme's wallpaper as a `data:` URL, `null` when it has none. */
+export async function readTerminalThemeImage(name: string): Promise<string | null> {
+  return invoke('read_terminal_theme_image', { name });
+}
+
+/**
+ * Backdrop effect of the Terminal window (acrylic / mica on Windows,
+ * vibrancy on macOS). `tint` = theme background (acrylic tint), `dark` picks
+ * the material. Opacity itself is CSS (`--terminal-window-alpha`).
+ */
+export async function setTerminalWindowEffect(
+  effect: 'none' | 'acrylic' | 'mica' | 'vibrancy',
+  opacity: number,
+  tint?: string | null,
+  dark?: boolean
+): Promise<void> {
+  return invoke('set_terminal_window_effect', { effect, opacity, tint: tint ?? null, dark: dark ?? null });
 }

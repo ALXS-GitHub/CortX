@@ -92,7 +92,9 @@ export type TerminalPreset =
   | 'warp'
   | 'macterminal'
   | 'iterm2'
-  | 'custom';
+  | 'custom'
+  /** CortX's own Terminal window: "external" launches run in a PTY there. */
+  | 'cortxterminal';
 
 export interface TerminalConfig {
   preset: TerminalPreset;
@@ -101,6 +103,130 @@ export interface TerminalConfig {
   /** Shell launched by "new terminal" tabs in the integrated terminal, as a
    *  command line (e.g. `pwsh -NoLogo`, `/bin/zsh -l`). Empty = auto-detect. */
   integratedShell?: string;
+  /** `cortx init` emits OSC 7 / OSC 133 (cwd, command boundaries, exit codes)
+   *  inside CortX terminals. Default true. */
+  shellIntegration?: boolean;
+  /** Toast + OS notification when a long command finishes in a terminal you
+   *  are not looking at. Default true. */
+  notifyOnLongCommand?: boolean;
+  /** Threshold for "long", in seconds. Default 10. */
+  longCommandSeconds?: number;
+  /** Terminal window: sessions rail on the left (default) or a tab strip on top — never both. */
+  tabsPlacement?: 'sidebar' | 'top';
+  /** Font of every terminal. Empty = bundled monospace stack. */
+  fontFamily?: string;
+  /** Font size in px. Default 12. */
+  fontSize?: number;
+  /** Line height multiplier 1.0–2.0. Default 1.2. */
+  lineHeight?: number;
+  /** Extra space between glyphs in px. Undefined = automatic. */
+  letterSpacing?: number;
+  /** Weight of normal / bold text (100–900). Undefined = 400 / 700. */
+  fontWeight?: number;
+  fontWeightBold?: number;
+  /** `webgl` (GPU), `canvas` (fine text + exact block glyphs) or `dom` (no acceleration). */
+  renderer?: 'dom' | 'webgl' | 'canvas';
+  /** Selection colour (any CSS colour). Undefined = the theme's. */
+  selectionColor?: string;
+  /** Reopen the Terminal window's tabs on start (shells in their last cwd, nothing re-run). Default true. */
+  restoreSessions?: boolean;
+  /** Seed restored shells with the tail of their previous scrollback. Default true. */
+  restoreScrollback?: boolean;
+  /** Lines kept per terminal. Default 200. */
+  restoreScrollbackLines?: number;
+  /** Where a started service / script shows up. Default dock. */
+  openProcessesIn?: TerminalTargetSurface;
+  /** Where a launch configuration opens its tabs. Default window. */
+  openDevSessionsIn?: TerminalTargetSurface;
+  /** Terminal window shortcuts: action id → combo (e.g. `{ "split.right": "Ctrl+Shift+D" }`). Missing = default. */
+  keybindings?: Record<string, string>;
+  /** Terminal theme names (files under data/terminal/themes/) for dark / light app mode. */
+  themeDark?: string;
+  themeLight?: string;
+  /** Pick the dark/light theme from the app mode (default true) or always use themeDark. */
+  themeFollowsApp?: boolean;
+  cursorStyle?: 'block' | 'underline' | 'bar';
+  cursorBlink?: boolean;
+  /** Inner padding in px. Default 8. */
+  padding?: number;
+  /** Terminal window opacity 50–100. Default 100. */
+  windowOpacity?: number;
+  windowEffect?: 'none' | 'acrylic' | 'mica' | 'vibrancy';
+  /** Ghost-text completions from the command history (→ accepts). Default true. */
+  inlineSuggestions?: boolean;
+  /** Wallpaper overrides; undefined = the theme file's own values. */
+  wallpaperOpacity?: number;
+  wallpaperBlur?: number;
+  wallpaperFit?: 'cover' | 'contain' | 'tile' | 'center';
+  /** Darkening overlay on the wallpaper, 0–90 %. Default 0. */
+  wallpaperDim?: number;
+  /** Title bar + rail background alpha 0–100 %. Default 72. */
+  chromeOpacity?: number;
+  /** Title bar + rail backdrop blur in px. Default 20. */
+  chromeBlur?: number;
+  /** Colour the main window's dock terminals with the terminal theme too. Default false. */
+  dockUsesTerminalTheme?: boolean;
+}
+
+export type TerminalTargetSurface = 'dock' | 'window';
+
+// ---------------------------------------------------------------------------
+// Launch configurations (data/terminal/launch/*.yaml)
+// ---------------------------------------------------------------------------
+
+export type LaunchSplitDirection = 'horizontal' | 'vertical';
+
+export type LaunchNode =
+  | { split: LaunchSplitDirection; children: LaunchNode[]; sizes?: number[] }
+  | { cwd?: string; command?: string; shell?: string; title?: string };
+
+export interface LaunchTab {
+  title?: string;
+  layout: LaunchNode;
+}
+
+export interface LaunchConfig {
+  id: string;
+  name: string;
+  projectId?: string;
+  /** `terminal` (default) or `dock`. */
+  window: 'terminal' | 'dock';
+  tabs: LaunchTab[];
+}
+
+export function isLaunchSplit(node: LaunchNode): node is { split: LaunchSplitDirection; children: LaunchNode[]; sizes?: number[] } {
+  return typeof node === 'object' && node !== null && 'split' in node;
+}
+
+export type ShellPhase = 'unknown' | 'idle' | 'running';
+
+/** What the shell behind a terminal reported through shell integration
+ *  (`terminal-state` event / `get_terminal_states`). */
+export interface TerminalShellState {
+  terminalId: string;
+  phase: ShellPhase;
+  cwd?: string | null;
+  /** Command currently running (phase === 'running'). */
+  command?: string | null;
+  /** Epoch ms. */
+  startedAt?: number | null;
+  lastCommand?: string | null;
+  lastExitCode?: number | null;
+  lastDurationMs?: number | null;
+  lastFinishedAt?: number | null;
+  /** Increments on every finished command. */
+  completedCommands: number;
+}
+
+/** One line of `runtime/command-history.jsonl`. */
+export interface CommandRecord {
+  ts: number;
+  terminalId: string;
+  projectId?: string;
+  cwd?: string;
+  command?: string;
+  exitCode?: number;
+  durationMs: number;
 }
 
 export interface AppearanceConfig {
@@ -788,4 +914,73 @@ export interface ListAgentSessionsOptions {
 export interface AgentTranscriptQuery {
   end?: number | null;         // exclusive end index; null => totalMessages
   limit: number;               // e.g. 50
+}
+
+// ---------------------------------------------------------------------------
+// Terminal themes (data/terminal/themes/*.yaml, Warp's format) — DEV-13 P3.
+// Field names mirror the YAML (snake_case) so a file round-trips unchanged.
+// ---------------------------------------------------------------------------
+
+export type TerminalThemeDetails = 'darker' | 'lighter';
+export type TerminalThemeImageFit = 'cover' | 'contain' | 'tile' | 'center';
+export type TerminalThemeSource = 'bundled' | 'user';
+
+export interface TerminalAnsiColors {
+  black: string;
+  red: string;
+  green: string;
+  yellow: string;
+  blue: string;
+  magenta: string;
+  cyan: string;
+  white: string;
+}
+
+export interface TerminalThemeImage {
+  /** Absolute path once read through `getTerminalTheme` (bare file name on disk). */
+  path: string;
+  /** Percent, Warp semantics. Missing = 100. */
+  opacity?: number | null;
+}
+
+/** CortX-only knobs under the `cortx:` key (ignored by Warp). */
+export interface TerminalThemeCortxExt {
+  cursor?: string | null;
+  selection?: string | null;
+  /** Wallpaper blur in px. */
+  blur?: number | null;
+  imageFit?: TerminalThemeImageFit | null;
+}
+
+export interface TerminalTheme {
+  /** File stem — what the settings (`themeDark` / `themeLight`) refer to. */
+  key: string;
+  name: string;
+  background: string;
+  accent: string;
+  foreground: string;
+  details: TerminalThemeDetails;
+  background_image?: TerminalThemeImage | null;
+  terminal_colors: { normal: TerminalAnsiColors; bright: TerminalAnsiColors };
+  cortx?: TerminalThemeCortxExt | null;
+}
+
+/** One row of the theme picker. */
+export interface TerminalThemeSummary {
+  key: string;
+  name: string;
+  background: string;
+  accent: string;
+  foreground: string;
+  details: TerminalThemeDetails;
+  hasImage: boolean;
+  source: TerminalThemeSource;
+  /** The 8 normal ANSI colours. */
+  swatches: string[];
+}
+
+export interface TerminalThemeImportReport {
+  imported: number;
+  skipped: number;
+  keys: string[];
 }

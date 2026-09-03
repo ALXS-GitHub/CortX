@@ -14,15 +14,20 @@
 import { Terminal, type ITheme, type IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { CanvasAddon } from '@xterm/addon-canvas';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { ImageAddon } from '@xterm/addon-image';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import * as api from '@/lib/tauri';
+import { useAppStore } from '@/stores/appStore';
+import { getXtermThemeOverride, isWindowThemeActive, themeToXterm } from '@/lib/terminalTheme';
 
 export interface TerminalSession {
   id: string;
@@ -35,7 +40,11 @@ export interface TerminalSession {
   opened: boolean;
   attachToken: number | null;
   webgl: WebglAddon | null;
+  /** Canvas renderer (alternative GPU-free accelerated renderer). */
+  canvas: CanvasAddon | null;
   disposables: IDisposable[];
+  /** True while the backend scrollback snapshot is being parsed (see attach). */
+  replaying: boolean;
 }
 
 const sessions = new Map<string, TerminalSession>();
@@ -49,11 +58,23 @@ if (import.meta.env.DEV) {
 
 const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
 
+/** True inside the dedicated Terminal window (whose panes are see-through
+ *  so the theme's window opacity / wallpaper show behind the text). */
+const IS_TERMINAL_WINDOW = (() => {
+  try {
+    return getCurrentWindow().label === 'terminal';
+  } catch {
+    return false;
+  }
+})();
+
 // ---------------------------------------------------------------------------
 // Theme
 // ---------------------------------------------------------------------------
 
-/** VS Code "Dark Modern" ANSI palette. */
+// Fallback palettes for windows where no terminal theme is loaded (the
+// dock in the main window): VS Code "Dark Modern" / "Light Modern", the same
+// values as the bundled `dark-modern` / `light-modern` themes.
 const DARK_ANSI = {
   black: '#1e1e1e',
   red: '#f14c4c',
@@ -73,7 +94,6 @@ const DARK_ANSI = {
   brightWhite: '#ffffff',
 };
 
-/** VS Code "Light Modern" ANSI palette. */
 const LIGHT_ANSI = {
   black: '#000000',
   red: '#cd3131',
@@ -127,8 +147,35 @@ function isDarkTheme(): boolean {
   return document.documentElement.classList.contains('dark');
 }
 
+/**
+ * xterm palette: the active / previewed terminal theme when the theme store
+ * has one (see `stores/terminalThemeStore`), else derived from the app's
+ * CSS tokens.
+ */
 export function buildTerminalTheme(): ITheme {
+  const override = getXtermThemeOverride();
+  const selectionColor = useAppStore.getState().settings?.terminal.selectionColor;
+  if (override) {
+    return themeToXterm(override, { transparentBackground: IS_TERMINAL_WINDOW, selectionColor });
+  }
   const dark = isDarkTheme();
+  // Panes of the Terminal window are always see-through: the window itself
+  // paints the theme colour and the wallpaper behind them (the window is
+  // opaque unless the user asked for transparency, so this can never leak
+  // the desktop). A theme that has not loaded yet must not blank the
+  // wallpaper with an opaque canvas either.
+  if (IS_TERMINAL_WINDOW) {
+    const fgOnly = resolveCssColor('--terminal-fg') ?? resolveCssColor('--foreground') ?? (dark ? [229, 229, 229] : [36, 36, 36]);
+    return {
+      background: 'rgba(0, 0, 0, 0)',
+      foreground: toHex(fgOnly),
+      cursor: toHex(fgOnly),
+      cursorAccent: 'rgba(0, 0, 0, 0)',
+      selectionBackground: selectionColor?.trim() || `rgba(${fgOnly[0]}, ${fgOnly[1]}, ${fgOnly[2]}, 0.25)`,
+      selectionInactiveBackground: selectionColor?.trim() || `rgba(${fgOnly[0]}, ${fgOnly[1]}, ${fgOnly[2]}, 0.15)`,
+      ...(dark ? DARK_ANSI : LIGHT_ANSI),
+    };
+  }
   const bg = resolveCssColor('--bg-terminal') ?? resolveCssColor('--card') ?? (dark ? [30, 30, 30] : [255, 255, 255]);
   const fg = resolveCssColor('--terminal-fg') ?? resolveCssColor('--foreground') ?? (dark ? [229, 229, 229] : [36, 36, 36]);
   const ansi = dark ? DARK_ANSI : LIGHT_ANSI;
@@ -137,8 +184,8 @@ export function buildTerminalTheme(): ITheme {
     foreground: toHex(fg),
     cursor: toHex(fg),
     cursorAccent: toHex(bg),
-    selectionBackground: `rgba(${fg[0]}, ${fg[1]}, ${fg[2]}, 0.25)`,
-    selectionInactiveBackground: `rgba(${fg[0]}, ${fg[1]}, ${fg[2]}, 0.15)`,
+    selectionBackground: selectionColor?.trim() || `rgba(${fg[0]}, ${fg[1]}, ${fg[2]}, 0.25)`,
+    selectionInactiveBackground: selectionColor?.trim() || `rgba(${fg[0]}, ${fg[1]}, ${fg[2]}, 0.15)`,
     ...ansi,
   };
 }
@@ -151,9 +198,192 @@ function ensureThemeObserver() {
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
 }
 
+// ---------------------------------------------------------------------------
+// Font (Settings > Integrated terminal; synced through settings.json)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_FONT_STACK =
+  'ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "JetBrains Mono", Menlo, Monaco, monospace';
+const DEFAULT_FONT_SIZE = 12;
+
+/** xterm font options from the user's settings, with the bundled stack as fallback. */
+function clampWeight(w: number | undefined): number | undefined {
+  if (w === undefined || !Number.isFinite(w)) return undefined;
+  return Math.min(900, Math.max(100, Math.round(w / 100) * 100));
+}
+
+export function terminalFontOptions(): {
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
+  letterSpacing?: number;
+  fontWeight: number;
+  fontWeightBold: number;
+} {
+  const cfg = useAppStore.getState().settings?.terminal;
+  const family = cfg?.fontFamily?.trim();
+  const size = cfg?.fontSize;
+  const renderer = cfg?.renderer ?? 'canvas';
+  const lh = cfg?.lineHeight;
+  const ls = cfg?.letterSpacing;
+  // A user font still falls back to the stack for glyphs it lacks.
+  const fontFamily = family ? `"${family.replace(/"/g, '')}", ${DEFAULT_FONT_STACK}` : DEFAULT_FONT_STACK;
+  const requested = size && size >= 8 && size <= 32 ? size : DEFAULT_FONT_SIZE;
+  return {
+    letterSpacing: ls !== undefined && ls >= -2 && ls <= 6 ? ls : undefined,
+    fontWeight: clampWeight(cfg?.fontWeight) ?? 400,
+    fontWeightBold: clampWeight(cfg?.fontWeightBold) ?? 700,
+    fontFamily,
+    fontSize: snapFontSize(fontFamily, requested, renderer),
+    lineHeight: lh && lh >= 1 && lh <= 2 ? lh : defaultLineHeight(renderer),
+  };
+}
+
+/**
+ * Default line height per renderer. The GPU renderer redraws box / powerline
+ * glyphs to the cell, so it tolerates a roomier line; the browser renderer
+ * draws them at their own size, and only a line box of exactly 1 lets them
+ * touch cell to cell (a powerline prompt shows gaps otherwise).
+ */
+function defaultLineHeight(renderer: string): number {
+  return renderer === 'dom' ? 1 : 1.2;
+}
+/**
+ * Extra spacing is **off** by default: powerline / Nerd Font glyphs are
+ * designed to touch cell to cell, and a spacing of even one pixel tears the
+ * prompt's separators apart. The heavy look this used to compensate for
+ * came from the GPU renderer, which is no longer the default (see the
+ * `renderer` setting). The Settings field
+ * still lets a font be tuned by hand.
+ */
+export const DEFAULT_LETTER_SPACING = 0;
+
+let advanceCanvas: CanvasRenderingContext2D | null | undefined;
+const advanceCache = new Map<string, number>();
+
+/** Horizontal advance of one glyph of `fontFamily` at `fontSize`, in CSS px. */
+function glyphAdvance(fontFamily: string, fontSize: number): number {
+  const key = `${fontSize}|${fontFamily}`;
+  const cached = advanceCache.get(key);
+  if (cached !== undefined) return cached;
+  if (advanceCanvas === undefined) advanceCanvas = document.createElement('canvas').getContext('2d');
+  if (!advanceCanvas) return fontSize * 0.6;
+  advanceCanvas.font = `${fontSize}px ${fontFamily}`;
+  const width = advanceCanvas.measureText('W'.repeat(50)).width / 50;
+  advanceCache.set(key, width);
+  return width;
+}
+
+/**
+ * Font size that makes one cell an exact number of CSS pixels.
+ *
+ * A monospace advance is a fraction of the em (Hack is 0.602 em), so at most
+ * sizes a cell is fractional — 7.82 px at 13. The browser renderer then
+ * starts every cell between two device pixels: glyphs are resampled (blurry)
+ * and the edge of a powerline separator leaves a hairline against its
+ * neighbour. Scaling the size by a hair (13 → 13.288, cell exactly 8 px)
+ * puts every cell on a whole pixel and both problems disappear. The GPU
+ * renderer redraws box and powerline glyphs at the cell size, so it is left
+ * alone.
+ */
+export function snapFontSize(fontFamily: string, fontSize: number, renderer: string): number {
+  if (renderer !== 'dom') return fontSize;
+  const advance = glyphAdvance(fontFamily, fontSize);
+  if (advance <= 0) return fontSize;
+  const perPx = advance / fontSize;
+  const target = Math.round(advance);
+  if (target < 1) return fontSize;
+  const snapped = target / perPx;
+  // Only a nudge: never move the size the user asked for by a visible amount.
+  return Math.abs(snapped - fontSize) <= 0.8 ? Math.round(snapped * 1000) / 1000 : fontSize;
+}
+
+/** Push family, size (with the window zoom), line height and letter spacing to one terminal. */
+function applyFontMetrics(term: Terminal, font: ReturnType<typeof terminalFontOptions>) {
+  const renderer = useAppStore.getState().settings?.terminal.renderer ?? 'canvas';
+  const size = snapFontSize(font.fontFamily, Math.max(6, font.fontSize + zoomDelta), renderer);
+  term.options.fontFamily = font.fontFamily;
+  term.options.fontSize = size;
+  term.options.lineHeight = font.lineHeight;
+  term.options.letterSpacing = font.letterSpacing ?? DEFAULT_LETTER_SPACING;
+  term.options.fontWeight = font.fontWeight;
+  term.options.fontWeightBold = font.fontWeightBold;
+}
+
+// ---------------------------------------------------------------------------
+// Cursor + padding (Settings > Terminal appearance; DEV-13 P3)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PADDING = 8;
+
+/** xterm cursor options from the user's settings. */
+export function terminalCursorOptions(): { cursorStyle: 'block' | 'underline' | 'bar'; cursorBlink: boolean } {
+  const cfg = useAppStore.getState().settings?.terminal;
+  return {
+    cursorStyle: cfg?.cursorStyle ?? 'bar',
+    cursorBlink: cfg?.cursorBlink ?? true,
+  };
+}
+
+/** Inner padding of every terminal, in px (clamped 0–48). */
+export function terminalPadding(): number {
+  const raw = useAppStore.getState().settings?.terminal.padding;
+  if (raw === undefined || !Number.isFinite(raw)) return DEFAULT_PADDING;
+  return Math.min(48, Math.max(0, Math.round(raw)));
+}
+
+/** Push the padding to `.cortx-xterm` (via `--terminal-padding`) and refit. */
+export function applyTerminalPadding() {
+  document.documentElement.style.setProperty('--terminal-padding', `${terminalPadding()}px`);
+  for (const s of sessions.values()) {
+    if (s.container.isConnected) fitTerminal(s.id);
+  }
+}
+
+let settingsSubscribed = false;
+
+/** Re-apply font, cursor and padding to every session when the settings change. */
+function ensureSettingsSubscription() {
+  if (settingsSubscribed) return;
+  settingsSubscribed = true;
+  applyTerminalPadding();
+  let lastFont = JSON.stringify(terminalFontOptions());
+  let lastCursor = JSON.stringify(terminalCursorOptions());
+  let lastPadding = terminalPadding();
+  useAppStore.subscribe(() => {
+    const font = terminalFontOptions();
+    const fontKey = JSON.stringify(font);
+    if (fontKey !== lastFont) {
+      lastFont = fontKey;
+      for (const s of sessions.values()) {
+        applyFontMetrics(s.term, font);
+        if (s.container.isConnected) fitTerminal(s.id);
+      }
+    }
+    applyRendererToAll();
+    const cursor = terminalCursorOptions();
+    const cursorKey = JSON.stringify(cursor);
+    if (cursorKey !== lastCursor) {
+      lastCursor = cursorKey;
+      for (const s of sessions.values()) {
+        s.term.options.cursorStyle = cursor.cursorStyle;
+        s.term.options.cursorBlink = cursor.cursorBlink;
+      }
+    }
+    const padding = terminalPadding();
+    if (padding !== lastPadding) {
+      lastPadding = padding;
+      applyTerminalPadding();
+    }
+  });
+}
+
 export function applyThemeToAll() {
   const theme = buildTerminalTheme();
   for (const s of sessions.values()) {
+    // Panes of the Terminal window are always see-through: the window paints
+    // the theme colour and the wallpaper behind them.
+    s.term.options.allowTransparency = IS_TERMINAL_WINDOW;
     s.term.options.theme = theme;
   }
 }
@@ -190,14 +420,27 @@ async function pasteFromClipboard(term: Terminal) {
 
 function createSession(id: string): TerminalSession {
   ensureThemeObserver();
+  ensureSettingsSubscription();
+  const font = terminalFontOptions();
+  const cursor = terminalCursorOptions();
 
   const term = new Terminal({
     allowProposedApi: true, // needed by addon-image / unicode11
-    cursorBlink: true,
-    cursorStyle: 'bar',
-    fontFamily: 'ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "JetBrains Mono", Menlo, Monaco, monospace',
-    fontSize: 12,
-    lineHeight: 1.2,
+    cursorBlink: cursor.cursorBlink,
+    cursorStyle: cursor.cursorStyle,
+    // Terminal window: the canvas is see-through so the theme's window
+    // opacity and wallpaper show behind the text (see lib/terminalTheme).
+    allowTransparency: IS_TERMINAL_WINDOW,
+    fontFamily: font.fontFamily,
+    fontSize: snapFontSize(
+      font.fontFamily,
+      Math.max(6, font.fontSize + zoomDelta),
+      useAppStore.getState().settings?.terminal.renderer ?? 'canvas'
+    ),
+    lineHeight: font.lineHeight,
+    letterSpacing: font.letterSpacing ?? DEFAULT_LETTER_SPACING,
+    fontWeight: font.fontWeight,
+    fontWeightBold: font.fontWeightBold,
     scrollback: 10000,
     theme: buildTerminalTheme(),
     macOptionIsMeta: true,
@@ -244,12 +487,15 @@ function createSession(id: string): TerminalSession {
     opened: false,
     attachToken: null,
     webgl: null,
+    canvas: null,
     disposables: [],
+    replaying: false,
   };
 
   // Keyboard input → PTY. Errors (process already gone) are expected; ignore.
   session.disposables.push(
     term.onData((data) => {
+      if (session.replaying) return;
       api.writeTerminal(id, data).catch(() => {});
     })
   );
@@ -294,6 +540,48 @@ function createSession(id: string): TerminalSession {
   return session;
 }
 
+/** Renderer from the settings (`webgl` when unset). */
+function currentRenderer(): 'webgl' | 'canvas' | 'dom' {
+  return useAppStore.getState().settings?.terminal.renderer ?? 'canvas';
+}
+
+/** Attach the accelerated renderer the settings ask for (none in `dom`). */
+function applyRenderer(session: TerminalSession) {
+  if (!session.opened) return;
+  const renderer = currentRenderer();
+  if (renderer !== 'webgl' && session.webgl) {
+    session.webgl.dispose();
+    session.webgl = null;
+  }
+  if (renderer !== 'canvas' && session.canvas) {
+    session.canvas.dispose();
+    session.canvas = null;
+  }
+  if (renderer === 'webgl' && !session.webgl) tryLoadWebgl(session);
+  if (renderer === 'canvas' && !session.canvas) tryLoadCanvas(session);
+}
+
+function applyRendererToAll() {
+  for (const s of sessions.values()) applyRenderer(s);
+}
+
+/**
+ * Canvas renderer: like the GPU one it draws box, block and powerline
+ * characters itself at the exact cell size (no seams), but it rasterises
+ * text through the platform's engine, so glyphs stay as fine as the DOM
+ * renderer's.
+ */
+function tryLoadCanvas(session: TerminalSession) {
+  try {
+    const canvas = new CanvasAddon();
+    session.term.loadAddon(canvas);
+    session.canvas = canvas;
+  } catch (err) {
+    console.warn('Canvas renderer unavailable, using the DOM renderer:', err);
+    session.canvas = null;
+  }
+}
+
 function tryLoadWebgl(session: TerminalSession) {
   try {
     const webgl = new WebglAddon();
@@ -310,11 +598,70 @@ function tryLoadWebgl(session: TerminalSession) {
   }
 }
 
+/**
+ * Programs that ask the terminal for its background colour (OSC 11) and
+ * then paint their own rows with it — Claude Code's input line, for one —
+ * would draw an opaque slab of theme colour over the wallpaper. In a themed
+ * Terminal window, an explicit truecolor background equal to the theme
+ * background is turned back into the default (transparent) background.
+ * Pure ASCII rewrite of `48;2;R;G;B` / `48:2::R:G:B`, applied per chunk.
+ */
+let bgFilter: { key: string; pattern: RegExp } | null = null;
+
+function neutraliseThemeBackground(bytes: Uint8Array): Uint8Array {
+  if (!IS_TERMINAL_WINDOW) return bytes;
+  const theme = getXtermThemeOverride();
+  const hex = theme?.background;
+  if (!hex || !isWindowThemeActive()) return bytes;
+  if (bgFilter?.key !== hex) {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex);
+    if (!m) return bytes;
+    const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h, 16));
+    // Only inside a CSI sequence (`ESC [ … m`), so the same digits typed as
+    // plain text are left alone.
+    bgFilter = {
+      key: hex,
+      pattern: new RegExp(`(\\x1b\\[[0-9;:]*?)48(?:;2;${r};${g};${b}|:2::?${r}:${g}:${b})(?=[;:m])`, 'g'),
+    };
+  }
+  // Cheap pre-check: the sequence is rare, most chunks pass untouched.
+  let has48 = false;
+  for (let i = 0; i + 1 < bytes.length; i++) {
+    if (bytes[i] === 0x34 && bytes[i + 1] === 0x38) {
+      has48 = true;
+      break;
+    }
+  }
+  if (!has48) return bytes;
+  let latin1 = '';
+  for (let i = 0; i < bytes.length; i++) latin1 += String.fromCharCode(bytes[i]);
+  // Keep the CSI prefix the pattern captured ('$1' + '49' would be read as
+  // group 149 by some engines, hence the function form).
+  const replaced = latin1.replace(bgFilter.pattern, (_m, prefix: string) => `${prefix}49`);
+  if (replaced === latin1) return bytes;
+  const out = new Uint8Array(replaced.length);
+  for (let i = 0; i < replaced.length; i++) out[i] = replaced.charCodeAt(i);
+  return out;
+}
+
 async function attach(session: TerminalSession) {
   if (session.attachToken !== null) return;
   try {
+    let first = true;
     const token = await api.attachTerminal(session.id, (bytes) => {
-      session.term.write(bytes);
+      if (first) {
+        // The stored scrollback. It still contains the queries the shell
+        // made when it started (device attributes, cursor position…) and
+        // xterm would answer them again — straight into the shell's input
+        // line. Mute keyboard/response output until the replay is parsed.
+        first = false;
+        session.replaying = true;
+        session.term.write(neutraliseThemeBackground(bytes), () => {
+          session.replaying = false;
+        });
+        return;
+      }
+      session.term.write(neutraliseThemeBackground(bytes));
     });
     // The session may have been disposed while the invoke was in flight.
     if (!sessions.has(session.id)) {
@@ -344,19 +691,31 @@ export function mountTerminal(id: string, parent: HTMLElement): TerminalSession 
   if (!session.opened) {
     session.term.open(session.container);
     session.opened = true;
-    tryLoadWebgl(session);
     attach(session);
   }
+  // GPU renderer only while on screen (see unmountTerminal): a window with
+  // 20 tabs holds one WebGL context per *visible* pane, not per tab.
+  applyRenderer(session);
   // Two frames: layout must settle before fit() can measure the container.
   requestAnimationFrame(() => requestAnimationFrame(() => fitTerminal(id)));
   return session;
 }
 
-/** Detach the DOM without destroying the session (tab switched / hidden). */
+/** Detach the DOM without destroying the session (tab switched / hidden).
+ *  Releases the WebGL context; the buffer stays in memory and the DOM
+ *  renderer takes over until the next mount reloads WebGL. */
 export function unmountTerminal(id: string) {
   const session = sessions.get(id);
   if (!session) return;
   session.container.remove();
+  if (session.webgl) {
+    session.webgl.dispose();
+    session.webgl = null;
+  }
+  if (session.canvas) {
+    session.canvas.dispose();
+    session.canvas = null;
+  }
 }
 
 export function fitTerminal(id: string) {
@@ -398,10 +757,73 @@ export function disposeTerminal(id: string) {
   }
   for (const d of session.disposables) d.dispose();
   session.webgl?.dispose();
+  session.canvas?.dispose();
   session.term.dispose();
   session.container.remove();
 }
 
 export function hasTerminalSession(id: string): boolean {
   return sessions.has(id);
+}
+
+/** Ids of every session held by this window (mounted or not). */
+export function listTerminalSessionIds(): string[] {
+  return Array.from(sessions.keys());
+}
+
+/**
+ * The buffer of a session as plain lines with colours (no cursor movement),
+ * for the restore snapshot. `null` when the session has no content yet.
+ */
+export function serializeTerminalSession(id: string, scrollback = 200): string | null {
+  const session = sessions.get(id);
+  if (!session?.opened) return null;
+  try {
+    let serializer = serializers.get(id);
+    if (!serializer) {
+      serializer = new SerializeAddon();
+      session.term.loadAddon(serializer);
+      serializers.set(id, serializer);
+      session.disposables.push({ dispose: () => serializers.delete(id) });
+    }
+    const text = serializer.serialize({ scrollback });
+    return text.trim().length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+const serializers = new Map<string, SerializeAddon>();
+
+// ---------------------------------------------------------------------------
+// Zoom (per window, not persisted): Ctrl+= / Ctrl+- / Ctrl+0
+// ---------------------------------------------------------------------------
+
+let zoomDelta = 0;
+const ZOOM_MIN = -6;
+const ZOOM_MAX = 12;
+
+function applyZoomToAll() {
+  const font = terminalFontOptions();
+  for (const s of sessions.values()) {
+    applyFontMetrics(s.term, font);
+    if (s.container.isConnected) fitTerminal(s.id);
+  }
+}
+
+/** Grow / shrink every terminal of this window by `step` px. Returns the resulting font size. */
+export function adjustTerminalZoom(step: number): number {
+  zoomDelta = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomDelta + step));
+  applyZoomToAll();
+  return terminalFontOptions().fontSize + zoomDelta;
+}
+
+export function resetTerminalZoom(): number {
+  zoomDelta = 0;
+  applyZoomToAll();
+  return terminalFontOptions().fontSize;
+}
+
+export function currentTerminalZoomDelta(): number {
+  return zoomDelta;
 }

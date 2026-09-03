@@ -13,7 +13,7 @@ import { useViewPrefsStore, type AgentsGroupMode, type AgentsScope } from '@/sto
 import { createProjectFromSession } from '@/lib/tauri';
 import { cn } from '@/lib/utils';
 import type { AgentSession } from '@/types';
-import { BetaBadge } from './BetaBadge';
+import { BetaBadge } from '@/components/ui/BetaBadge';
 import { AgentFilters } from './AgentFilters';
 import { AgentHealthPopover } from './AgentHealthPopover';
 import { AgentList } from './AgentList';

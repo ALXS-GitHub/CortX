@@ -1,0 +1,27 @@
+# CortX "Halcyon" light — the app's own canvas + teal accent.
+name: Halcyon Light
+background: "#eaf4f5"
+accent: "#0d9488"
+foreground: "#1b3537"
+details: lighter
+cortx:
+  cursor: "#0d9488"
+terminal_colors:
+  normal:
+    black: "#1b3537"
+    red: "#d3405a"
+    green: "#0f8f7f"
+    yellow: "#b07a0a"
+    blue: "#1b7fc4"
+    magenta: "#9b4dcc"
+    cyan: "#0e8aa0"
+    white: "#8aa3a5"
+  bright:
+    black: "#5c7378"
+    red: "#fb5d6b"
+    green: "#1bb89a"
+    yellow: "#f0a517"
+    blue: "#2aa6f0"
+    magenta: "#b46ee8"
+    cyan: "#22a9c2"
+    white: "#f7fbfb"
