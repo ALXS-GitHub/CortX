@@ -37,5 +37,5 @@ export function XtermView({ terminalId, autoFocus = false }: XtermViewProps) {
     return () => cancelAnimationFrame(frame);
   }, [autoFocus, terminalId]);
 
-  return <div ref={ref} className="absolute inset-0 overflow-hidden bg-terminal" />;
+  return <div ref={ref} className="cortx-xterm-host absolute inset-0 overflow-hidden bg-terminal" />;
 }
