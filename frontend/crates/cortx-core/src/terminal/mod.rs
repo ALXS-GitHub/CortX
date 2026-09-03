@@ -16,6 +16,12 @@
 //! Neither piece knows anything about Tauri; the GUI adapts a `Channel` into a
 //! [`SinkFn`].
 
+pub mod history;
+pub mod osc;
+
+pub use history::{CommandHistory, CommandRecord};
+pub use osc::{OscScanner, ShellEvent, ShellPhase, TerminalShellState, TerminalStateTracker};
+
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

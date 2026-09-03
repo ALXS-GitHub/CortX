@@ -11,6 +11,7 @@
 use crate::models::{LogStream, ScriptStatus, ServiceStatus};
 use crate::runtime_state::{self, EntityKind, RuntimeEntry, RuntimeStore};
 use crate::terminal::{terminal_id, AnsiLineSplitter, TerminalHub, TerminalKind};
+use crate::terminal::{CommandHistory, CommandRecord, OscScanner, TerminalShellState, TerminalStateTracker};
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -93,6 +94,18 @@ pub trait ProcessEventEmitter: Send + Sync {
     /// An interactive shell opened from the GUI exited (or was killed).
     /// Default no-op: only the GUI hosts shells.
     fn emit_shell_exit(&self, _shell_id: &str, _exit_code: Option<i32>) {}
+
+    /// Shell integration (OSC 7 / OSC 133 emitted by `cortx init`) changed
+    /// what we know about a terminal: cwd, running command, exit code.
+    /// Default no-op: only the GUI displays it.
+    fn emit_terminal_state(&self, _state: &TerminalShellState) {}
+}
+
+/// Who to tell about shell-integration events for one PTY, plus the project
+/// the terminal belongs to (recorded in the command history).
+pub struct PtyObserver {
+    pub emitter: Arc<dyn ProcessEventEmitter>,
+    pub project_id: Option<String>,
 }
 
 pub struct ProcessInfo {
@@ -152,13 +165,19 @@ pub struct ProcessManager {
     /// PTY master + writer per terminal id (`service:<id>`, `shell:<id>`, ...).
     ptys: Arc<Mutex<HashMap<String, PtyIo>>>,
     terminal_hub: Arc<TerminalHub>,
+    /// Latest shell-integration state per terminal id (see `terminal::osc`).
+    terminal_states: Arc<Mutex<HashMap<String, TerminalShellState>>>,
+    command_history: Arc<CommandHistory>,
     shutdown_flag: Arc<AtomicBool>,
     runtime_store: Arc<RuntimeStore>,
 }
 
 impl ProcessManager {
     pub fn new(runtime_store: Arc<RuntimeStore>) -> Self {
+        let command_history = Arc::new(CommandHistory::new(runtime_store.dir()));
         Self {
+            terminal_states: Arc::new(Mutex::new(HashMap::new())),
+            command_history,
             processes: Arc::new(Mutex::new(HashMap::new())),
             scripts: Arc::new(Mutex::new(HashMap::new())),
             global_scripts: Arc::new(Mutex::new(HashMap::new())),
@@ -179,6 +198,25 @@ impl ProcessManager {
     /// Raw scrollback + live subscribers for every terminal this manager runs.
     pub fn terminal_hub(&self) -> &Arc<TerminalHub> {
         &self.terminal_hub
+    }
+
+    /// Shell-integration state of one terminal, if its shell ever reported any.
+    pub fn terminal_state(&self, terminal_id: &str) -> Option<TerminalShellState> {
+        self.terminal_states.lock().get(terminal_id).cloned()
+    }
+
+    /// Every known shell-integration state (GUI reload after a refresh).
+    pub fn all_terminal_states(&self) -> Vec<TerminalShellState> {
+        self.terminal_states.lock().values().cloned().collect()
+    }
+
+    /// Drop the state of a terminal the GUI closed.
+    pub fn forget_terminal_state(&self, terminal_id: &str) {
+        self.terminal_states.lock().remove(terminal_id);
+    }
+
+    pub fn command_history(&self) -> &CommandHistory {
+        &self.command_history
     }
 
     /// Get a clone of the shutdown flag for monitoring threads
@@ -239,6 +277,7 @@ impl ProcessManager {
         size: PtySize,
         log_path: Option<PathBuf>,
         on_line: Box<dyn Fn(String) + Send>,
+        observer: Option<PtyObserver>,
     ) -> Result<Box<dyn Child + Send + Sync>, String> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -272,12 +311,23 @@ impl ProcessManager {
         );
         drop(stale);
 
+        // A fresh shell state for this id: a restarted service must not
+        // inherit the previous run's cwd / exit code.
+        self.terminal_states
+            .lock()
+            .insert(terminal_id.to_string(), TerminalShellState::new(terminal_id));
+
         spawn_pty_reader(
             reader,
             self.terminal_hub.clone(),
             terminal_id.to_string(),
             log_path,
             on_line,
+            ShellTracking {
+                observer,
+                states: self.terminal_states.clone(),
+                history: self.command_history.clone(),
+            },
         );
 
         Ok(child)
@@ -342,7 +392,7 @@ impl ProcessManager {
         );
 
         let tid = terminal_id(TerminalKind::Service, &service_id);
-        let cmd = build_shell_command(&command, &working_dir, env_vars.as_ref());
+        let cmd = build_shell_command(&command, &working_dir, &tid, env_vars.as_ref());
         let log_path = self.runtime_store.log_path(&service_id);
         let line_emitter = emitter.clone();
         let line_id = service_id.clone();
@@ -353,6 +403,10 @@ impl ProcessManager {
             Some(log_path),
             Box::new(move |line| {
                 line_emitter.emit_service_log(&line_id, LogStream::Stdout, line)
+            }),
+            Some(PtyObserver {
+                emitter: emitter.clone(),
+                project_id: meta.project_id.clone(),
             }),
         )?;
         let pid = child.process_id().unwrap_or(0);
@@ -550,7 +604,7 @@ impl ProcessManager {
         emitter.emit_script_status(&script_id, ScriptStatus::Running, None);
 
         let tid = terminal_id(TerminalKind::Script, &script_id);
-        let cmd = build_shell_command(&command, &working_dir, None);
+        let cmd = build_shell_command(&command, &working_dir, &tid, None);
         let log_path = self.runtime_store.log_path(&script_id);
         let line_emitter = emitter.clone();
         let line_id = script_id.clone();
@@ -561,6 +615,10 @@ impl ProcessManager {
             Some(log_path),
             Box::new(move |line| {
                 line_emitter.emit_script_log(&line_id, LogStream::Stdout, line)
+            }),
+            Some(PtyObserver {
+                emitter: emitter.clone(),
+                project_id: meta.project_id.clone(),
             }),
         )?;
         let pid = child.process_id().unwrap_or(0);
@@ -684,7 +742,7 @@ impl ProcessManager {
         let mut cmd = CommandBuilder::new(&program);
         cmd.args(&args);
         cmd.cwd(&working_dir);
-        apply_pty_env(&mut cmd, env_vars.as_ref());
+        apply_pty_env(&mut cmd, &tid, env_vars.as_ref());
         let log_path = self.runtime_store.log_path(&script_id);
         let line_emitter = emitter.clone();
         let line_id = script_id.clone();
@@ -696,6 +754,10 @@ impl ProcessManager {
                 Some(log_path),
                 Box::new(move |line| {
                     line_emitter.emit_global_script_log(&line_id, LogStream::Stdout, line)
+                }),
+                Some(PtyObserver {
+                    emitter: emitter.clone(),
+                    project_id: meta.project_id.clone(),
                 }),
             )
             .map_err(|e| e.replace("Failed to start process", "Failed to start global script"))?;
@@ -811,14 +873,14 @@ impl ProcessManager {
             return Err(format!("Directory does not exist: {}", cwd));
         }
 
+        let shell_id = uuid::Uuid::new_v4().to_string();
+        let tid = terminal_id(TerminalKind::Shell, &shell_id);
+
         let (program, args) = resolve_shell(request.shell.as_deref());
         let mut cmd = CommandBuilder::new(&program);
         cmd.args(&args);
         cmd.cwd(&cwd);
-        apply_pty_env(&mut cmd, None);
-
-        let shell_id = uuid::Uuid::new_v4().to_string();
-        let tid = terminal_id(TerminalKind::Shell, &shell_id);
+        apply_pty_env(&mut cmd, &tid, None);
         let size = PtySize {
             rows: if request.rows == 0 { DEFAULT_PTY_ROWS } else { request.rows },
             cols: if request.cols == 0 { DEFAULT_PTY_COLS } else { request.cols },
@@ -826,7 +888,17 @@ impl ProcessManager {
             pixel_height: 0,
         };
         let child = self
-            .spawn_in_pty(&tid, cmd, size, None, Box::new(|_| {}))
+            .spawn_in_pty(
+                &tid,
+                cmd,
+                size,
+                None,
+                Box::new(|_| {}),
+                Some(PtyObserver {
+                    emitter: emitter.clone(),
+                    project_id: request.project_id.clone(),
+                }),
+            )
             .map_err(|e| format!("{} ({})", e, program))?;
         let pid = child.process_id().unwrap_or(0);
 
@@ -1081,18 +1153,32 @@ fn watch_exit<T: Send + 'static>(
 // PTY reader: raw bytes → hub, de-ANSI'd lines → log file + emitter
 // ============================================================================
 
+/// Shell-integration plumbing handed to the reader thread.
+struct ShellTracking {
+    observer: Option<PtyObserver>,
+    states: Arc<Mutex<HashMap<String, TerminalShellState>>>,
+    history: Arc<CommandHistory>,
+}
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
 fn spawn_pty_reader(
     mut reader: Box<dyn Read + Send>,
     hub: Arc<TerminalHub>,
     terminal_id: String,
     log_path: Option<PathBuf>,
     on_line: Box<dyn Fn(String) + Send>,
+    tracking: ShellTracking,
 ) {
     thread::spawn(move || {
         let mut log = log_path.and_then(|p| {
             OpenOptions::new().create(true).append(true).open(p).ok()
         });
         let mut splitter = AnsiLineSplitter::new();
+        let mut scanner = OscScanner::new();
+        let mut tracker = TerminalStateTracker::new(&terminal_id);
         let mut buf = vec![0u8; 64 * 1024];
 
         let deliver = |line: String, log: &mut Option<std::fs::File>| {
@@ -1110,6 +1196,32 @@ fn spawn_pty_reader(
                     hub.push(&terminal_id, chunk);
                     for line in splitter.feed(chunk) {
                         deliver(line, &mut log);
+                    }
+                    for event in scanner.feed(chunk) {
+                        let update = tracker.apply(event, now_ms());
+                        if let Some(done) = update.finished {
+                            tracking.history.append(&CommandRecord {
+                                ts: done.finished_at,
+                                terminal_id: terminal_id.clone(),
+                                project_id: tracking
+                                    .observer
+                                    .as_ref()
+                                    .and_then(|o| o.project_id.clone()),
+                                cwd: done.cwd,
+                                command: done.command,
+                                exit_code: done.exit_code,
+                                duration_ms: done.duration_ms,
+                            });
+                        }
+                        if update.changed {
+                            tracking
+                                .states
+                                .lock()
+                                .insert(terminal_id.clone(), tracker.state().clone());
+                            if let Some(obs) = &tracking.observer {
+                                obs.emitter.emit_terminal_state(tracker.state());
+                            }
+                        }
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -1140,22 +1252,30 @@ fn default_size() -> PtySize {
 fn build_shell_command(
     command: &str,
     working_dir: &str,
+    terminal_id: &str,
     env_vars: Option<&HashMap<String, String>>,
 ) -> CommandBuilder {
     let (program, args) = parse_command(command);
     let mut cmd = CommandBuilder::new(program);
     cmd.args(args);
     cmd.cwd(working_dir);
-    apply_pty_env(&mut cmd, env_vars);
+    apply_pty_env(&mut cmd, terminal_id, env_vars);
     cmd
 }
 
 /// Environment every PTY child gets: terminal identification so programs
 /// enable colours / truecolor, UTF-8 on Windows, plus the caller's own vars.
-fn apply_pty_env(cmd: &mut CommandBuilder, env_vars: Option<&HashMap<String, String>>) {
+fn apply_pty_env(
+    cmd: &mut CommandBuilder,
+    terminal_id: &str,
+    env_vars: Option<&HashMap<String, String>>,
+) {
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "CortX");
+    // `cortx init` only turns on shell integration (OSC 7 / 133) when this
+    // is set, so external terminals stay untouched.
+    cmd.env("CORTX_TERMINAL_ID", terminal_id);
     // Force UTF-8 output on Windows to avoid cp1252 encoding errors
     #[cfg(target_os = "windows")]
     {
@@ -1399,7 +1519,8 @@ mod tests {
     fn build_shell_command_sets_terminal_env_and_cwd() {
         let mut env = HashMap::new();
         env.insert("FOO".to_string(), "bar".to_string());
-        let cmd = build_shell_command("echo hi", ".", Some(&env));
+        let cmd = build_shell_command("echo hi", ".", "service:test", Some(&env));
+        assert_eq!(cmd.get_env("CORTX_TERMINAL_ID").unwrap(), "service:test");
         assert_eq!(cmd.get_env("TERM").unwrap(), "xterm-256color");
         assert_eq!(cmd.get_env("FOO").unwrap(), "bar");
         assert_eq!(cmd.get_cwd().unwrap(), ".");

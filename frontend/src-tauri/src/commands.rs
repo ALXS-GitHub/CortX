@@ -2141,7 +2141,8 @@ pub fn generate_shell_init(state: State<AppState>, shell: String) -> Result<Stri
     let shell_type = cortx_core::shell_init::Shell::from_str(&shell)
         .ok_or_else(|| format!("Unknown shell: {}. Supported: powershell, bash, zsh, fish", shell))?;
     let aliases = state.storage.get_all_aliases();
-    Ok(cortx_core::shell_init::generate_init_script(&shell_type, &aliases))
+    let integration = state.storage.get_settings().terminal.shell_integration;
+    Ok(cortx_core::shell_init::generate_init_script(&shell_type, &aliases, integration))
 }
 
 // ============================================================================
@@ -2777,6 +2778,38 @@ pub fn clear_terminal_scrollback(state: State<AppState>, terminal_id: String) {
 #[tauri::command]
 pub fn remove_terminal(state: State<AppState>, terminal_id: String) {
     state.process_manager.terminal_hub().remove(&terminal_id);
+    state.process_manager.forget_terminal_state(&terminal_id);
+}
+
+/// Shell-integration state (cwd, running command, last exit code) of every
+/// terminal that reported one. Used to seed the GUI after a reload; live
+/// updates arrive through the `terminal-state` event.
+#[tauri::command]
+pub fn get_terminal_states(state: State<AppState>) -> Vec<cortx_core::terminal::TerminalShellState> {
+    state.process_manager.all_terminal_states()
+}
+
+/// Most recent finished commands across all CortX terminals (newest first).
+#[tauri::command]
+pub fn get_command_history(
+    state: State<AppState>,
+    limit: Option<usize>,
+) -> Vec<cortx_core::terminal::CommandRecord> {
+    state.process_manager.command_history().recent(limit.unwrap_or(200))
+}
+
+/// OS-level notification (toast centre). The GUI decides *when*; this only
+/// wraps the plugin so the frontend needs no extra JS dependency.
+#[tauri::command]
+pub fn send_os_notification(app_handle: AppHandle, title: String, body: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app_handle
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

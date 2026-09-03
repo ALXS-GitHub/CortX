@@ -17,6 +17,8 @@ import type {
   ShellInfo,
   ShellExitPayload,
   TerminalCapabilities,
+  TerminalShellState,
+  CommandRecord,
   ServiceExitPayload,
   ServicePortsPayload,
   ScriptLogPayload,
@@ -721,4 +723,32 @@ export async function onShellExit(
   return listen<ShellExitPayload>('shell-exit', (event) => {
     callback(event.payload);
   });
+}
+
+// ============================================================================
+// Shell integration (OSC 7 / OSC 133 from `cortx init`)
+// ============================================================================
+
+/** Fired whenever a terminal's shell reports a new cwd, command start or end. */
+export async function onTerminalState(
+  callback: (state: TerminalShellState) => void
+): Promise<UnlistenFn> {
+  return listen<TerminalShellState>('terminal-state', (event) => {
+    callback(event.payload);
+  });
+}
+
+/** Every known shell state — used to seed the store after a reload. */
+export async function getTerminalStates(): Promise<TerminalShellState[]> {
+  return invoke('get_terminal_states');
+}
+
+/** Most recent finished commands across all terminals, newest first. */
+export async function getCommandHistory(limit = 200): Promise<CommandRecord[]> {
+  return invoke('get_command_history', { limit });
+}
+
+/** OS notification (toast centre). Fire-and-forget. */
+export async function sendOsNotification(title: string, body: string): Promise<void> {
+  return invoke('send_os_notification', { title, body });
 }

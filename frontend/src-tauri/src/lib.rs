@@ -105,6 +105,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -329,6 +330,9 @@ pub fn run() {
             commands::resize_terminal,
             commands::clear_terminal_scrollback,
             commands::remove_terminal,
+            commands::get_terminal_states,
+            commands::get_command_history,
+            commands::send_os_notification,
             commands::spawn_shell,
             commands::kill_shell,
             commands::list_shells,

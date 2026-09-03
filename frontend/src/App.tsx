@@ -39,7 +39,11 @@ import {
   onOpenCommandPalette,
   getRunningServices,
   onShellExit,
+  onTerminalState,
+  sendOsNotification,
 } from '@/lib/tauri';
+import { formatDuration, terminalDisplayName } from '@/lib/terminalNames';
+import { toast } from 'sonner';
 import type { LogEntry } from '@/types';
 
 // Accent / radius / font are per-machine and applied before the first paint.
@@ -95,6 +99,7 @@ function App() {
 
     // Shell tabs still alive in the backend (e.g. after a webview reload)
     useAppStore.getState().loadShells();
+    useAppStore.getState().loadTerminalStates();
 
     // Check for running services on startup
     getRunningServices().then((serviceIds) => {
@@ -126,6 +131,7 @@ function App() {
     let unlistenGlobalScriptExit: (() => void) | undefined;
     // Shell (integrated terminal tab) listener
     let unlistenShellExit: (() => void) | undefined;
+    let unlistenTerminalState: (() => void) | undefined;
     // Data change listener (file watcher)
     let unlistenDataChanged: (() => void) | undefined;
     let isCancelled = false;
@@ -217,6 +223,26 @@ function App() {
         markShellExited(payload.shellId, payload.exitCode);
       });
 
+      // Shell integration: cwd / running command / exit codes. A long command
+      // that ends in a tab you are not looking at gets a toast, plus an OS
+      // notification when the window is in the background.
+      unlistenTerminalState = await onTerminalState((payload) => {
+        if (isCancelled) return;
+        const store = useAppStore.getState();
+        const finished = store.applyTerminalState(payload);
+        if (!finished || finished.inView) return;
+        const cfg = store.settings?.terminal;
+        if (cfg?.notifyOnLongCommand === false) return;
+        const threshold = (cfg?.longCommandSeconds ?? 10) * 1000;
+        if (finished.durationMs < threshold) return;
+        const { name, projectName } = terminalDisplayName(payload.terminalId, store);
+        const ok = finished.exitCode == null || finished.exitCode === 0;
+        const title = projectName ? `${name} · ${projectName}` : name;
+        const body = `${finished.command ?? 'Command'} ${ok ? 'finished' : `failed (exit ${finished.exitCode})`} in ${formatDuration(finished.durationMs)}`;
+        (ok ? toast.success : toast.error)(title, { description: body });
+        if (!document.hasFocus()) sendOsNotification(title, body).catch(() => {});
+      });
+
       // File watcher: reload all data when external changes detected
       unlistenDataChanged = await onDataChanged(() => {
         if (isCancelled) return;
@@ -247,9 +273,17 @@ function App() {
       unlistenGlobalScriptStatus?.();
       unlistenGlobalScriptExit?.();
       unlistenShellExit?.();
+      unlistenTerminalState?.();
       unlistenDataChanged?.();
       listenersSetUp.current = false;
     };
+  }, []);
+
+  // Coming back to the window counts as "seen" for the tabs on screen.
+  useEffect(() => {
+    const onFocus = () => useAppStore.getState().markVisibleTerminalsSeen();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, []);
 
   // Light / dark mode follows the app settings (and the OS when "system").

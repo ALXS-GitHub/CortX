@@ -4,6 +4,7 @@ import type {
   Service,
   Script,
   AppSettings,
+  TerminalShellState,
   CreateProjectInput,
   UpdateProjectInput,
   CreateServiceInput,
@@ -78,6 +79,24 @@ export interface ShellRuntime {
   /** Program launched (`pwsh.exe`, `/bin/zsh`, ...). */
   program: string;
   exitCode?: number | null;
+}
+
+/** A command finished in a terminal that was not in view: shown as a pill on
+ *  the tab until the tab is looked at again. */
+export interface TerminalAttention {
+  exitCode?: number | null;
+  command?: string | null;
+  durationMs: number;
+  /** Epoch ms. */
+  at: number;
+}
+
+/** What `applyTerminalState` reports when the event closed a command. */
+export interface TerminalCommandFinished {
+  inView: boolean;
+  durationMs: number;
+  exitCode: number | null;
+  command: string | null;
 }
 
 // Terminal entity — single source of truth for "which terminal is where, what state is it in"
@@ -285,6 +304,11 @@ interface AppState {
   dragOverPaneId: string | null;
   dragOverPosition: DragOverPosition;
 
+  // Shell integration (OSC 7 / 133): live state per terminal id + "finished
+  // while you weren't looking" markers.
+  terminalStates: Map<string, TerminalShellState>;
+  terminalAttention: Map<string, TerminalAttention>;
+
   // Actions - Projects
   loadProjects: () => Promise<void>;
   createProject: (input: CreateProjectInput) => Promise<Project>;
@@ -311,6 +335,18 @@ interface AppState {
   markShellExited: (shellId: string, exitCode?: number | null) => void;
   /** Re-discover shells still alive in the backend (after a reload). */
   loadShells: () => Promise<void>;
+
+  // Actions - Shell integration
+  /** Fold a `terminal-state` event in. Returns details when it closed a command. */
+  applyTerminalState: (state: TerminalShellState) => TerminalCommandFinished | null;
+  /** Seed `terminalStates` from the backend (after a reload). */
+  loadTerminalStates: () => Promise<void>;
+  /** Is this terminal the active tab of a pane in an open dock, in a focused window? */
+  isTerminalInView: (id: string) => boolean;
+  /** Clear the attention marker of one terminal. */
+  markTerminalSeen: (id: string) => void;
+  /** Clear the attention markers of every terminal currently in view. */
+  markVisibleTerminalsSeen: () => void;
 
   // Actions - Script runtime updates
   updateScriptStatus: (scriptId: string, status: ScriptStatus, pid?: number) => void;
@@ -507,6 +543,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusedPaneId: 'default',
   dragOverPaneId: null,
   dragOverPosition: null,
+  terminalStates: new Map(),
+  terminalAttention: new Map(),
 
   // Project actions
   loadProjects: async () => {
@@ -882,6 +920,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         terminalPanelOpen: true,
       };
     });
+    get().markTerminalSeen(terminalId(kind, runtimeKey));
   },
 
   /**
@@ -933,6 +972,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     api.removeTerminal(id).catch(() => {});
     disposeTerminal(id);
+    set((state) => {
+      if (!state.terminalStates.has(id) && !state.terminalAttention.has(id)) return state;
+      const terminalStates = new Map(state.terminalStates);
+      terminalStates.delete(id);
+      const terminalAttention = new Map(state.terminalAttention);
+      terminalAttention.delete(id);
+      return { terminalStates, terminalAttention };
+    });
 
     set((state) => {
       const existing = state.terminals.get(id);
@@ -1549,6 +1596,82 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   toggleTerminalPanel: () => {
     set((state) => ({ terminalPanelOpen: !state.terminalPanelOpen }));
+    if (get().terminalPanelOpen) get().markVisibleTerminalsSeen();
+  },
+
+  // ---- Shell integration ----
+
+  applyTerminalState: (next) => {
+    const id = next.terminalId;
+    const prev = get().terminalStates.get(id);
+    const finished = !!prev && next.completedCommands > prev.completedCommands;
+    const inView = get().isTerminalInView(id);
+    set((state) => {
+      const terminalStates = new Map(state.terminalStates);
+      terminalStates.set(id, next);
+      let terminalAttention = state.terminalAttention;
+      if (finished && !inView) {
+        terminalAttention = new Map(terminalAttention);
+        terminalAttention.set(id, {
+          exitCode: next.lastExitCode ?? null,
+          command: next.lastCommand ?? null,
+          durationMs: next.lastDurationMs ?? 0,
+          at: Date.now(),
+        });
+      } else if (next.phase === 'running' && terminalAttention.has(id)) {
+        // A new command started: the old result is stale.
+        terminalAttention = new Map(terminalAttention);
+        terminalAttention.delete(id);
+      }
+      return { terminalStates, terminalAttention };
+    });
+    if (!finished) return null;
+    return {
+      inView,
+      durationMs: next.lastDurationMs ?? 0,
+      exitCode: next.lastExitCode ?? null,
+      command: next.lastCommand ?? null,
+    };
+  },
+
+  loadTerminalStates: async () => {
+    try {
+      const list = await api.getTerminalStates();
+      set({ terminalStates: new Map(list.map((s) => [s.terminalId, s])) });
+    } catch (e) {
+      console.warn('Failed to load terminal states', e);
+    }
+  },
+
+  isTerminalInView: (id) => {
+    const state = get();
+    const t = state.terminals.get(id);
+    if (!t || t.visibility !== 'visible' || !t.paneId) return false;
+    if (!state.terminalPanelOpen) return false;
+    const pane = state.terminalPanes.find((p) => p.id === t.paneId);
+    if (pane?.activeTerminalId !== id) return false;
+    return typeof document === 'undefined' || document.hasFocus();
+  },
+
+  markTerminalSeen: (id) => {
+    set((state) => {
+      if (!state.terminalAttention.has(id)) return state;
+      const terminalAttention = new Map(state.terminalAttention);
+      terminalAttention.delete(id);
+      return { terminalAttention };
+    });
+  },
+
+  markVisibleTerminalsSeen: () => {
+    const state = get();
+    if (state.terminalAttention.size === 0 || !state.terminalPanelOpen) return;
+    const seen = state.terminalPanes
+      .map((p) => p.activeTerminalId)
+      .filter((id): id is string => !!id && state.terminalAttention.has(id));
+    if (seen.length === 0) return;
+    const terminalAttention = new Map(state.terminalAttention);
+    for (const id of seen) terminalAttention.delete(id);
+    set({ terminalAttention });
   },
 
   setTerminalHeight: (height) => {
@@ -1639,6 +1762,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       );
       return { terminalPanes: panes, focusedPaneId: paneId };
     });
+    if (terminalIdOrNull) get().markTerminalSeen(terminalIdOrNull);
   },
 
   moveTerminalToPane: (id, targetPaneId) => {
@@ -1696,6 +1820,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   focusPane: (paneId) => {
     set({ focusedPaneId: paneId });
+    const active = get().terminalPanes.find((p) => p.id === paneId)?.activeTerminalId;
+    if (active) get().markTerminalSeen(active);
   },
 
   resizePanes: (paneWidths) => {

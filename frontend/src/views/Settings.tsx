@@ -247,6 +247,9 @@ export function Settings() {
   const [customPath, setCustomPath] = useState('');
   const [customArgs, setCustomArgs] = useState('');
   const [integratedShell, setIntegratedShell] = useState('');
+  const [shellIntegration, setShellIntegration] = useState(true);
+  const [notifyOnLongCommand, setNotifyOnLongCommand] = useState(true);
+  const [longCommandSeconds, setLongCommandSeconds] = useState(10);
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [launchMethod, setLaunchMethod] = useState<'clipboard' | 'external' | 'integrated'>('integrated');
   const [toolboxBaseUrl, setToolboxBaseUrl] = useState('');
@@ -280,6 +283,9 @@ export function Settings() {
       setCustomPath(settings.terminal.customPath);
       setCustomArgs(settings.terminal.customArgs.join(' '));
       setIntegratedShell(settings.terminal.integratedShell ?? '');
+      setShellIntegration(settings.terminal.shellIntegration ?? true);
+      setNotifyOnLongCommand(settings.terminal.notifyOnLongCommand ?? true);
+      setLongCommandSeconds(settings.terminal.longCommandSeconds ?? 10);
       setTheme(settings.appearance.theme);
       setLaunchMethod(settings.defaults.launchMethod);
       setToolboxBaseUrl(settings.toolboxBaseUrl ?? '');
@@ -477,6 +483,9 @@ export function Settings() {
         customPath: customPath,
         customArgs: customArgs.split(' ').filter(Boolean),
         integratedShell: integratedShell.trim() || undefined,
+        shellIntegration,
+        notifyOnLongCommand,
+        longCommandSeconds: Math.max(1, Math.round(longCommandSeconds) || 10),
       },
       appearance: {
         theme,
@@ -692,6 +701,54 @@ export function Settings() {
                   : 'Auto ($SHELL)'
               }
               className="font-mono text-[12px]"
+            />
+          </Field>
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label htmlFor="shell-integration">Shell integration</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                <Code>cortx init</Code> makes the shell report its directory, running command and exit codes
+                (OSC 7 / OSC 133) — only inside CortX terminals. Powers the live tab titles, the
+                running spinner and the command history.
+              </p>
+            </div>
+            <Switch
+              id="shell-integration"
+              checked={shellIntegration}
+              onCheckedChange={(v) => { setShellIntegration(v); setHasChanges(true); }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label htmlFor="notify-long-command">Notify when a long command finishes</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Toast in the app, and an OS notification when CortX is in the background, for commands
+                that end in a tab you are not looking at.
+              </p>
+            </div>
+            <Switch
+              id="notify-long-command"
+              checked={notifyOnLongCommand}
+              onCheckedChange={(v) => { setNotifyOnLongCommand(v); setHasChanges(true); }}
+              disabled={!shellIntegration}
+            />
+          </div>
+
+          <Field
+            label={<span className="text-xs text-muted-foreground">Minimum duration (seconds)</span>}
+            htmlFor="long-command-seconds"
+          >
+            <Input
+              id="long-command-seconds"
+              type="number"
+              min={1}
+              max={3600}
+              value={longCommandSeconds}
+              onChange={(e) => { setLongCommandSeconds(Number(e.target.value)); setHasChanges(true); }}
+              className="w-28 font-mono text-[12px]"
+              disabled={!shellIntegration || !notifyOnLongCommand}
             />
           </Field>
         </Section>

@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { XtermView } from './XtermView';
 import { clearTerminal } from '@/lib/terminalSessions';
+import { shellTabName } from '@/lib/terminalNames';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { TerminalDndContext, type TerminalItem } from './terminal-dnd';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
@@ -34,12 +35,6 @@ import { TerminalTypeIcon } from './terminal-dnd/TerminalTypeIcon';
 
 /** Height of the collapsed dock strip. */
 export const TERMINAL_BAR_HEIGHT = 32;
-
-/** Last path segment, tolerant of both separators and trailing slashes. */
-function basename(path: string): string {
-  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
-  return parts[parts.length - 1] || path;
-}
 
 // Error boundary to prevent crashes from taking down the whole app
 interface ErrorBoundaryState {
@@ -288,6 +283,8 @@ export function TerminalPanel() {
     openShell,
     killShell,
     selectedProjectId,
+    terminalStates,
+    terminalAttention,
     // Multi-pane state
     terminalPanes,
     focusedPaneId,
@@ -402,6 +399,8 @@ export function TerminalPanel() {
         logs: runtime.logs,
         detectedPorts: runtime.detectedPorts,
         activeMode: runtime.activeMode,
+        shell: terminalStates.get(`service:${serviceId}`),
+        attention: terminalAttention.get(`service:${serviceId}`),
       });
     }
 
@@ -419,6 +418,8 @@ export function TerminalPanel() {
         detectedPorts: [],
         lastExitCode: runtime.lastExitCode,
         lastSuccess: runtime.lastSuccess,
+        shell: terminalStates.get(`script:${scriptId}`),
+        attention: terminalAttention.get(`script:${scriptId}`),
       });
     }
 
@@ -436,16 +437,19 @@ export function TerminalPanel() {
         detectedPorts: [],
         lastExitCode: runtime.lastExitCode,
         lastSuccess: runtime.lastSuccess,
+        shell: terminalStates.get(`global-script:${scriptId}`),
+        attention: terminalAttention.get(`global-script:${scriptId}`),
       });
     }
 
     // Add interactive shells
     for (const [shellId, runtime] of shellRuntimes.entries()) {
       const project = runtime.projectId ? projects.find((p) => p.id === runtime.projectId) : undefined;
+      const live = terminalStates.get(`shell:${shellId}`);
       items.push({
         id: `shell:${shellId}`,
         type: 'shell',
-        name: `${basename(runtime.program).replace(/\.exe$/i, '')} · ${basename(runtime.cwd)}`,
+        name: shellTabName(runtime, live),
         projectName: project?.name ?? '',
         projectId: project?.id ?? '',
         status:
@@ -457,12 +461,14 @@ export function TerminalPanel() {
         logs: [],
         detectedPorts: [],
         lastExitCode: runtime.exitCode ?? undefined,
-        cwd: runtime.cwd,
+        cwd: live?.cwd || runtime.cwd,
+        shell: live,
+        attention: terminalAttention.get(`shell:${shellId}`),
       });
     }
 
     return items;
-  }, [serviceRuntimes, scriptRuntimes, globalScriptRuntimes, shellRuntimes, globalScripts, projects, getServiceInfo, getScriptInfo]);
+  }, [serviceRuntimes, scriptRuntimes, globalScriptRuntimes, shellRuntimes, globalScripts, projects, getServiceInfo, getScriptInfo, terminalStates, terminalAttention]);
 
   // Filter `allTerminals` using the canonical Terminal entity visibility.
   const visibleTerminals = useMemo(() => {

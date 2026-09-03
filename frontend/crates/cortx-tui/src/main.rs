@@ -4099,7 +4099,8 @@ fn cmd_init(storage: &Storage, shell_name: &str) -> anyhow::Result<()> {
             shell_name,
         ))?;
     let aliases = storage.get_all_aliases();
-    let script = cortx_core::shell_init::generate_init_script(&shell, &aliases);
+    let integration = storage.get_settings().terminal.shell_integration;
+    let script = cortx_core::shell_init::generate_init_script(&shell, &aliases, integration);
     print!("{}", script);
     Ok(())
 }

@@ -342,6 +342,20 @@ pub struct TerminalConfig {
     /// auto-detect (see `process_manager::resolve_shell`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrated_shell: Option<String>,
+    /// `cortx init` emits OSC 7 / OSC 133 (cwd, command boundaries, exit
+    /// codes) when the shell runs inside a CortX terminal. Off = plain aliases.
+    #[serde(default = "default_true")]
+    pub shell_integration: bool,
+    /// Toast + OS notification when a command that ran at least
+    /// `long_command_seconds` finishes in a terminal you are not looking at.
+    #[serde(default = "default_true")]
+    pub notify_on_long_command: bool,
+    #[serde(default = "default_long_command_seconds")]
+    pub long_command_seconds: u32,
+}
+
+fn default_long_command_seconds() -> u32 {
+    10
 }
 
 impl Default for TerminalConfig {
@@ -351,6 +365,9 @@ impl Default for TerminalConfig {
             custom_path: String::new(),
             custom_args: Vec::new(),
             integrated_shell: None,
+            shell_integration: true,
+            notify_on_long_command: true,
+            long_command_seconds: default_long_command_seconds(),
         }
     }
 }

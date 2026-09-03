@@ -101,6 +101,45 @@ export interface TerminalConfig {
   /** Shell launched by "new terminal" tabs in the integrated terminal, as a
    *  command line (e.g. `pwsh -NoLogo`, `/bin/zsh -l`). Empty = auto-detect. */
   integratedShell?: string;
+  /** `cortx init` emits OSC 7 / OSC 133 (cwd, command boundaries, exit codes)
+   *  inside CortX terminals. Default true. */
+  shellIntegration?: boolean;
+  /** Toast + OS notification when a long command finishes in a terminal you
+   *  are not looking at. Default true. */
+  notifyOnLongCommand?: boolean;
+  /** Threshold for "long", in seconds. Default 10. */
+  longCommandSeconds?: number;
+}
+
+export type ShellPhase = 'unknown' | 'idle' | 'running';
+
+/** What the shell behind a terminal reported through shell integration
+ *  (`terminal-state` event / `get_terminal_states`). */
+export interface TerminalShellState {
+  terminalId: string;
+  phase: ShellPhase;
+  cwd?: string | null;
+  /** Command currently running (phase === 'running'). */
+  command?: string | null;
+  /** Epoch ms. */
+  startedAt?: number | null;
+  lastCommand?: string | null;
+  lastExitCode?: number | null;
+  lastDurationMs?: number | null;
+  lastFinishedAt?: number | null;
+  /** Increments on every finished command. */
+  completedCommands: number;
+}
+
+/** One line of `runtime/command-history.jsonl`. */
+export interface CommandRecord {
+  ts: number;
+  terminalId: string;
+  projectId?: string;
+  cwd?: string;
+  command?: string;
+  exitCode?: number;
+  durationMs: number;
 }
 
 export interface AppearanceConfig {

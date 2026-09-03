@@ -263,6 +263,11 @@ Local App Launcher provides:
 | F4.3.24 | "New terminal" tab: interactive shell in the current project's root (shell configurable in Settings) | Should Have | Done |
 | F4.3.25 | Graceful stop: Ctrl+C through the PTY, then kill the process tree after a short grace period | Should Have | Done |
 | F4.3.26 | Plain-text line log (`<id>.log`, MCP `get_logs`, TUI) kept in sync from the PTY stream with escape sequences stripped | Must Have | Done |
+| F4.3.27 | Shell integration (DEV-13 P0): `cortx init` emits OSC 7 (cwd) and OSC 133 A/B/C/D (prompt and command boundaries, `C;cmd=<base64>` carries the command line, `D;<exit>` the exit code) for PowerShell, bash, zsh and fish, only when `CORTX_TERMINAL_ID` is set | Must Have | Done |
+| F4.3.28 | Rust side observes the PTY stream (`terminal::osc`) without altering it: per-terminal cwd, phase (idle / running), running command, last exit code and duration, broadcast as the `terminal-state` event | Must Have | Done |
+| F4.3.29 | Dock tabs follow the live cwd, show a spinner while a command runs and a result pill (ok / exit code) when a command finished out of view; cleared when the tab is looked at again | Must Have | Done |
+| F4.3.30 | Long-command notifications: toast in-app and OS notification when the window is in the background (threshold and toggle in Settings) | Should Have | Done |
+| F4.3.31 | Cross-terminal command history (`runtime/command-history.jsonl`: project, cwd, command, exit code, duration), 10 MB rotation | Should Have | Done |
 
 ---
 
@@ -281,6 +286,7 @@ Local App Launcher provides:
 | F5.6 | Startup behavior (minimize to tray, start with OS) | Could Have | Pending |
 | F5.7 | Keyboard shortcuts customization | Could Have | Pending |
 | F5.8 | Data storage location configuration | Could Have | Pending |
+| F5.9 | Terminal: shell integration toggle, long-command notification toggle and threshold (Settings > Integrated terminal) | Should Have | Done |
 
 ---
 
