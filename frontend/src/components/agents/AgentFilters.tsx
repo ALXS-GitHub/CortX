@@ -34,15 +34,21 @@ export function AgentFilters({ value, onChange, availableTags, tagDefinitions }:
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant={active > 0 ? 'secondary' : 'outline'} size="sm" title="Filters">
-          <Filter className="size-4" />
+        <Button
+          variant="outline"
+          size="sm"
+          title="Filters"
+          aria-pressed={active > 0}
+          className={cn(active > 0 && 'border-accent-border bg-accent')}
+        >
+          <Filter className={cn(active > 0 && 'text-primary')} />
           Filters
           {active > 0 && (
-            <span className="ml-1 rounded-full bg-primary text-primary-foreground text-[10px] px-1.5 leading-4">{active}</span>
+            <span className="ml-0.5 rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">{active}</span>
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 p-3 space-y-3">
+      <PopoverContent align="end" className="w-72 gap-3 p-3">
         <FilterSection title="Provider">
           {ALL_PROVIDERS.map((p) => (
             <CheckRow
@@ -69,21 +75,21 @@ export function AgentFilters({ value, onChange, availableTags, tagDefinitions }:
 
         {availableTags.length > 0 && (
           <FilterSection title="Tags">
-            <div className="flex gap-1 flex-wrap">
+            <div className="flex flex-wrap gap-1.5">
               {availableTags.map((tag) => {
                 const isActive = value.tags.has(tag);
                 return (
                   <button
                     key={tag}
                     type="button"
-                    className="cursor-pointer"
+                    aria-pressed={isActive}
                     onClick={() => onChange({ ...value, tags: toggleInSet(value.tags, tag) })}
+                    className={cn(
+                      'rounded-full transition-opacity',
+                      isActive ? 'ring-2 ring-ring/50 ring-offset-1 ring-offset-background' : 'opacity-60 hover:opacity-100',
+                    )}
                   >
-                    <TagBadge
-                      tag={tag}
-                      tagDefinitions={tagDefinitions}
-                      className={isActive ? 'ring-2 ring-primary ring-offset-1' : 'opacity-60 hover:opacity-100'}
-                    />
+                    <TagBadge tag={tag} tagDefinitions={tagDefinitions} />
                   </button>
                 );
               })}
@@ -93,15 +99,13 @@ export function AgentFilters({ value, onChange, availableTags, tagDefinitions }:
 
         <Separator />
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="agents-show-hidden" className="text-xs font-normal">Show hidden</Label>
-            <Switch id="agents-show-hidden" checked={value.showHidden} onCheckedChange={(v) => onChange({ ...value, showHidden: v })} />
-          </div>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="agents-show-hidden" className="text-xs font-normal">Show hidden</Label>
+          <Switch id="agents-show-hidden" checked={value.showHidden} onCheckedChange={(v) => onChange({ ...value, showHidden: v })} />
         </div>
 
         {active > 0 && (
-          <Button variant="ghost" size="sm" className="w-full h-7 text-xs" onClick={() => onChange(defaultFilters())}>
+          <Button variant="ghost" size="sm" className="w-full" onClick={() => onChange(defaultFilters())}>
             Clear filters
           </Button>
         )}
@@ -113,7 +117,7 @@ export function AgentFilters({ value, onChange, availableTags, tagDefinitions }:
 function FilterSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+      <span className="eyebrow block">{title}</span>
       {children}
     </div>
   );
@@ -121,9 +125,9 @@ function FilterSection({ title, children }: { title: string; children: React.Rea
 
 function CheckRow({ id, label, checked, onChange }: { id: string; label: string; checked: boolean; onChange: () => void }) {
   return (
-    <div className={cn('flex items-center gap-2')}>
+    <div className="flex items-center gap-2">
       <Checkbox id={id} checked={checked} onCheckedChange={onChange} />
-      <Label htmlFor={id} className="text-xs font-normal cursor-pointer">{label}</Label>
+      <Label htmlFor={id} className="cursor-pointer text-xs font-normal">{label}</Label>
     </div>
   );
 }

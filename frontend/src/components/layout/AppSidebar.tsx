@@ -1,35 +1,80 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubItem,
-  SidebarMenuSubButton,
-  useSidebar,
-} from '@/components/ui/sidebar';
+  FolderKanban,
+  Settings,
+  FolderOpen,
+  Play,
+  X,
+  Square,
+  ScrollText,
+  Wrench,
+  SquareTerminal,
+  AppWindow,
+  Wand2,
+  Bot,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Terminal,
+  Sun,
+  Moon,
+  MonitorCog,
+  FileCode,
+} from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
-import { FolderKanban, Settings, FolderOpen, Terminal, Circle, Play, X, Square, FileCode, ScrollText, Wrench, SquareTerminal, AppWindow, Wand2, Bot } from 'lucide-react';
+import { useViewPrefsStore } from '@/stores/viewPrefsStore';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { BetaBadge } from '@/components/agents/BetaBadge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import type { View, ServiceStatus, ScriptStatus } from '@/types';
-import { getVersion } from '@tauri-apps/api/app';
+import { applyThemeMode, type ThemeMode } from '@/lib/theme';
+import type { View } from '@/types';
 
-// Minimized terminal bar height
-const MINIMIZED_TERMINAL_HEIGHT = 32;
+const RAIL_WIDTH = 56;
 
+interface NavItem {
+  view: View;
+  /** Views that keep this item highlighted (detail pages). */
+  matches: View[];
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  group: string;
+  beta?: boolean;
+}
+
+const NAV: NavItem[] = [
+  { view: 'dashboard', matches: ['dashboard', 'project'], label: 'Projects', icon: FolderKanban, group: 'Workspace' },
+  { view: 'scripts', matches: ['scripts', 'script-detail'], label: 'Scripts', icon: ScrollText, group: 'Workspace' },
+  { view: 'agents', matches: ['agents'], label: 'Agents', icon: Bot, group: 'Workspace', beta: true },
+  { view: 'tools', matches: ['tools', 'tool-detail'], label: 'Tools', icon: Wrench, group: 'Library' },
+  { view: 'apps', matches: ['apps', 'app-detail'], label: 'Apps', icon: AppWindow, group: 'Library' },
+  { view: 'aliases', matches: ['aliases', 'alias-detail'], label: 'Shell Config', icon: SquareTerminal, group: 'Library' },
+  { view: 'utilities', matches: ['utilities'], label: 'Utilities', icon: Wand2, group: 'Library' },
+];
+
+type RunKind = 'service' | 'script' | 'global-script';
+
+interface ActivityRow {
+  id: string;
+  kind: RunKind;
+  key: string;
+  name: string;
+  status: string;
+  hidden: boolean;
+}
+
+interface ActivityGroup {
+  id: string;
+  name: string;
+  rows: ActivityRow[];
+}
+
+/**
+ * Left navigation (frosted glass). Two halves: the section nav on top and, when
+ * something runs or has output, an "Activity" tree of the live services and
+ * scripts (grouped by project) with start / stop / close actions on hover.
+ * Collapses to an icon rail (Ctrl+B); the expanded width is drag-resizable.
+ */
 export function AppSidebar() {
-  const [appVersion, setAppVersion] = useState<string>('');
-  const { state: sidebarState } = useSidebar();
-  const isCollapsed = sidebarState === 'collapsed';
-
   const {
     currentView,
     setCurrentView,
@@ -44,722 +89,600 @@ export function AppSidebar() {
     stopService,
     runScript,
     stopScript,
-    terminalPanelOpen,
-    terminalHeight,
     globalScripts,
     globalScriptRuntimes,
     stopGlobalScript,
     openRunScriptDialog,
+    terminalPanelOpen,
+    toggleTerminalPanel,
+    settings,
+    updateSettings,
   } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, sidebarWidth, setSidebarWidth } = useViewPrefsStore();
 
-  // Helpers to query terminal visibility by raw runtime ID + kind.
-  const isHidden = (kind: 'service' | 'script' | 'global-script', runtimeKey: string) =>
-    terminals.get(`${kind}:${runtimeKey}`)?.visibility === 'hidden';
-  const isClosed = (kind: 'service' | 'script' | 'global-script', runtimeKey: string) =>
-    terminals.get(`${kind}:${runtimeKey}`)?.visibility === 'closed';
-
+  // Ctrl/Cmd+B toggles the rail.
   useEffect(() => {
-    getVersion().then(setAppVersion).catch(() => setAppVersion(''));
-  }, []);
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleSidebar]);
 
-  // Calculate bottom padding based on terminal state
-  const bottomPadding = terminalPanelOpen ? terminalHeight : MINIMIZED_TERMINAL_HEIGHT;
+  // Drag-resize (expanded only).
+  const [resizing, setResizing] = useState(false);
+  const startX = useRef(0);
+  const startW = useRef(0);
+  const onResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      startX.current = e.clientX;
+      startW.current = sidebarWidth;
+      setResizing(true);
+    },
+    [sidebarWidth]
+  );
+  useEffect(() => {
+    if (!resizing) return;
+    const move = (e: MouseEvent) => setSidebarWidth(startW.current + (e.clientX - startX.current));
+    const up = () => setResizing(false);
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+    document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+    return () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [resizing, setSidebarWidth]);
 
-  const handleNavigate = (view: View) => {
+  const navigate = (view: View) => {
     setCurrentView(view);
-    if (view === 'dashboard') {
-      selectProject(null);
-    }
+    if (view === 'dashboard') selectProject(null);
   };
 
-  // Get all services with runtime state (running or stopped with logs), grouped by project
-  const servicesByProject = new Map<string, {
-    projectId: string;
-    projectName: string;
-    services: {
-      serviceId: string;
-      serviceName: string;
-      status: ServiceStatus;
-      isHidden: boolean;
-    }[];
-  }>();
+  const visibilityOf = (kind: RunKind, key: string) => terminals.get(`${kind}:${key}`)?.visibility;
 
-  for (const [serviceId, runtime] of serviceRuntimes.entries()) {
-    // Skip closed terminals
-    if (isClosed('service', serviceId)) continue;
-    // Only show services that have logs or are running
-    if (runtime.logs.length === 0 && runtime.status === 'stopped') continue;
+  // ---- Activity: live services / scripts grouped by project ----
+  const { serviceGroups, scriptGroups, globalRows, runningTotal } = useMemo(() => {
+    const services = new Map<string, ActivityGroup>();
+    const scripts = new Map<string, ActivityGroup>();
+    const globals: ActivityRow[] = [];
+    let running = 0;
 
-    // Find the project and service
-    for (const project of projects) {
-      const service = project.services.find((s) => s.id === serviceId);
-      if (service) {
-        const existing = servicesByProject.get(project.id);
-        const serviceInfo = {
-          serviceId,
-          serviceName: service.name,
+    for (const [serviceId, runtime] of serviceRuntimes.entries()) {
+      if (visibilityOf('service', serviceId) === 'closed') continue;
+      if (runtime.logs.length === 0 && runtime.status === 'stopped') continue;
+      for (const project of projects) {
+        const service = project.services.find((s) => s.id === serviceId);
+        if (!service) continue;
+        const row: ActivityRow = {
+          id: `service:${serviceId}`,
+          kind: 'service',
+          key: serviceId,
+          name: service.name,
           status: runtime.status,
-          isHidden: isHidden('service', serviceId),
+          hidden: visibilityOf('service', serviceId) === 'hidden',
         };
-
-        if (existing) {
-          existing.services.push(serviceInfo);
-        } else {
-          servicesByProject.set(project.id, {
-            projectId: project.id,
-            projectName: project.name,
-            services: [serviceInfo],
-          });
-        }
+        if (runtime.status === 'running') running++;
+        const g = services.get(project.id) ?? { id: project.id, name: project.name, rows: [] };
+        g.rows.push(row);
+        services.set(project.id, g);
         break;
       }
     }
-  }
 
-  const projectsWithServices = Array.from(servicesByProject.values());
-  const totalServiceCount = projectsWithServices.reduce(
-    (acc, p) => acc + p.services.length,
-    0
-  );
-  const runningCount = projectsWithServices.reduce(
-    (acc, p) => acc + p.services.filter(s => s.status === 'running').length,
-    0
-  );
-
-  // Get all scripts with runtime state, grouped by project
-  const scriptsByProject = new Map<string, {
-    projectId: string;
-    projectName: string;
-    scripts: {
-      scriptId: string;
-      scriptName: string;
-      status: ScriptStatus;
-      isHidden: boolean;
-    }[];
-  }>();
-
-  for (const [scriptId, runtime] of scriptRuntimes.entries()) {
-    // Skip closed terminals
-    if (isClosed('script', scriptId)) continue;
-    // Only show scripts that have logs or are not idle
-    if (runtime.logs.length === 0 && runtime.status === 'idle') continue;
-
-    // Find the project and script
-    for (const project of projects) {
-      const script = project.scripts?.find((s) => s.id === scriptId);
-      if (script) {
-        const existing = scriptsByProject.get(project.id);
-        const scriptInfo = {
-          scriptId,
-          scriptName: script.name,
+    for (const [scriptId, runtime] of scriptRuntimes.entries()) {
+      if (visibilityOf('script', scriptId) === 'closed') continue;
+      if (runtime.logs.length === 0 && runtime.status === 'idle') continue;
+      for (const project of projects) {
+        const script = project.scripts?.find((s) => s.id === scriptId);
+        if (!script) continue;
+        const row: ActivityRow = {
+          id: `script:${scriptId}`,
+          kind: 'script',
+          key: scriptId,
+          name: script.name,
           status: runtime.status,
-          isHidden: isHidden('script', scriptId),
+          hidden: visibilityOf('script', scriptId) === 'hidden',
         };
-
-        if (existing) {
-          existing.scripts.push(scriptInfo);
-        } else {
-          scriptsByProject.set(project.id, {
-            projectId: project.id,
-            projectName: project.name,
-            scripts: [scriptInfo],
-          });
-        }
+        if (runtime.status === 'running') running++;
+        const g = scripts.get(project.id) ?? { id: project.id, name: project.name, rows: [] };
+        g.rows.push(row);
+        scripts.set(project.id, g);
         break;
       }
     }
-  }
 
-  const projectsWithScripts = Array.from(scriptsByProject.values());
-  const totalScriptCount = projectsWithScripts.reduce(
-    (acc, p) => acc + p.scripts.length,
-    0
-  );
-  const runningScriptsCount = projectsWithScripts.reduce(
-    (acc, p) => acc + p.scripts.filter(s => s.status === 'running').length,
-    0
-  );
-
-  // Get global scripts with runtime state
-  const globalScriptsWithRuntime = Array.from(globalScriptRuntimes.entries())
-    .filter(([scriptId, runtime]) => {
-      if (isClosed('global-script', scriptId)) return false;
-      return runtime.logs.length > 0 || runtime.status !== 'idle';
-    })
-    .map(([scriptId, runtime]) => {
-      const script = globalScripts.find(s => s.id === scriptId);
-      return {
-        scriptId,
-        scriptName: script?.name || 'Unknown',
+    for (const [scriptId, runtime] of globalScriptRuntimes.entries()) {
+      if (visibilityOf('global-script', scriptId) === 'closed') continue;
+      if (runtime.logs.length === 0 && runtime.status === 'idle') continue;
+      const script = globalScripts.find((s) => s.id === scriptId);
+      if (runtime.status === 'running') running++;
+      globals.push({
+        id: `global-script:${scriptId}`,
+        kind: 'global-script',
+        key: scriptId,
+        name: script?.name || 'Unknown script',
         status: runtime.status,
-        isHidden: isHidden('global-script', scriptId),
-      };
-    });
+        hidden: visibilityOf('global-script', scriptId) === 'hidden',
+      });
+    }
 
-  const runningGlobalScriptsCount = globalScriptsWithRuntime.filter(
-    s => s.status === 'running'
-  ).length;
+    return {
+      serviceGroups: Array.from(services.values()),
+      scriptGroups: Array.from(scripts.values()),
+      globalRows: globals,
+      runningTotal: running,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceRuntimes, scriptRuntimes, globalScriptRuntimes, projects, globalScripts, terminals]);
+
+  const hasActivity = serviceGroups.length + scriptGroups.length + globalRows.length > 0;
+
+  // ---- Theme mode toggle (persisted in the app settings) ----
+  const themeMode: ThemeMode = settings?.appearance.theme ?? 'system';
+  const cycleTheme = async () => {
+    if (!settings) return;
+    const next: ThemeMode = themeMode === 'light' ? 'dark' : themeMode === 'dark' ? 'system' : 'light';
+    applyThemeMode(next);
+    await updateSettings({ ...settings, appearance: { ...settings.appearance, theme: next } });
+  };
+  const ThemeIcon = themeMode === 'light' ? Sun : themeMode === 'dark' ? Moon : MonitorCog;
+  const themeLabel = themeMode === 'light' ? 'Light theme' : themeMode === 'dark' ? 'Dark theme' : 'Theme follows the system';
+
+  // ---- Row actions ----
+  const startRow = (row: ActivityRow) => {
+    if (row.kind === 'service') startService(row.key);
+    else if (row.kind === 'script') runScript(row.key);
+    else {
+      const gs = globalScripts.find((s) => s.id === row.key);
+      if (gs) openRunScriptDialog(gs);
+    }
+  };
+  const stopRow = (row: ActivityRow) => {
+    if (row.kind === 'service') stopService(row.key);
+    else if (row.kind === 'script') stopScript(row.key);
+    else stopGlobalScript(row.key);
+  };
+
+  const collapsed = sidebarCollapsed;
+  const groups = useMemo(() => {
+    const out: { name: string; items: NavItem[] }[] = [];
+    for (const item of NAV) {
+      let g = out.find((x) => x.name === item.group);
+      if (!g) {
+        g = { name: item.group, items: [] };
+        out.push(g);
+      }
+      g.items.push(item);
+    }
+    return out;
+  }, []);
 
   return (
-    <Sidebar collapsible="icon">
-      <SidebarHeader className="border-b border-sidebar-border">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" className={cn("gap-3", isCollapsed && "justify-center")} tooltip="Cortx">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg overflow-hidden flex-shrink-0">
-                <img src="/cortx-logo.png" alt="Cortx" className="size-8 object-contain" />
-              </div>
-              {!isCollapsed && (
-                <div className="flex flex-col gap-0.5 leading-none">
-                  <span className="font-semibold">Cortx</span>
-                  {appVersion && <span className="text-xs text-muted-foreground">v{appVersion}</span>}
-                </div>
-              )}
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
-
-      <SidebarContent style={{ paddingBottom: bottomPadding + 16 }}>
-        <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={currentView === 'dashboard'}
-                  onClick={() => handleNavigate('dashboard')}
-                  tooltip="Projects"
-                >
-                  <FolderKanban className="size-4" />
-                  <span>Projects</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={currentView === 'scripts' || currentView === 'script-detail'}
-                  onClick={() => handleNavigate('scripts')}
-                  tooltip="Scripts"
-                >
-                  <ScrollText className="size-4" />
-                  <span>Scripts</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={currentView === 'tools' || currentView === 'tool-detail'}
-                  onClick={() => handleNavigate('tools')}
-                  tooltip="Tools"
-                >
-                  <Wrench className="size-4" />
-                  <span>Tools</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={currentView === 'utilities'}
-                  onClick={() => handleNavigate('utilities')}
-                  tooltip="Utilities"
-                >
-                  <Wand2 className="size-4" />
-                  <span>Utilities</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={currentView === 'agents'}
-                  onClick={() => handleNavigate('agents')}
-                  tooltip="Agents (beta)"
-                >
-                  <Bot className="size-4" />
-                  <span>Agents</span>
-                  {!isCollapsed && <BetaBadge className="ml-auto" />}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={currentView === 'apps' || currentView === 'app-detail'}
-                  onClick={() => handleNavigate('apps')}
-                  tooltip="Apps"
-                >
-                  <AppWindow className="size-4" />
-                  <span>Apps</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={currentView === 'aliases' || currentView === 'alias-detail'}
-                  onClick={() => handleNavigate('aliases')}
-                  tooltip="Shell Config"
-                >
-                  <SquareTerminal className="size-4" />
-                  <span>Shell Config</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={currentView === 'settings'}
-                  onClick={() => handleNavigate('settings')}
-                  tooltip="Settings"
-                >
-                  <Settings className="size-4" />
-                  <span>Settings</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* Services Section - Grouped by Project */}
-        {totalServiceCount > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel>
-              <span className="flex items-center gap-2">
-                Services
-                {runningCount > 0 && (
-                  <span className="text-xs bg-green-500/20 text-green-600 dark:text-green-400 px-1.5 py-0.5 rounded-full">
-                    {runningCount} running
-                  </span>
-                )}
-              </span>
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {projectsWithServices.map(({ projectId, projectName, services }) => {
-                  const runningServices = services.filter(s => s.status === 'running');
-                  const stoppedServices = services.filter(s => s.status !== 'running');
-                  const hasRunning = runningServices.length > 0;
-                  const hasStopped = stoppedServices.length > 0;
-
-                  const handleStartAll = (e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    stoppedServices.forEach(s => startService(s.serviceId));
-                  };
-
-                  const handleStopAll = (e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    runningServices.forEach(s => stopService(s.serviceId));
-                  };
-
-                  const handleCloseAll = (e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    services.forEach(s => closeTerminal(`service:${s.serviceId}`));
-                  };
-
-                  const allStopped = !hasRunning;
-
-                  return (
-                  <SidebarMenuItem key={projectId}>
-                    <SidebarMenuButton className="font-medium group/project" tooltip={projectName}>
-                      <FolderOpen className="size-4" />
-                      <span className="flex-1">{projectName}</span>
-                      <span className="text-xs text-muted-foreground group-hover/project:hidden">
-                        {services.length}
-                      </span>
-                      {/* Project action buttons - visible on hover */}
-                      <div className="hidden group-hover/project:flex items-center gap-0.5">
-                        {hasStopped && (
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            className="size-5 p-0 flex items-center justify-center rounded hover:bg-green-500/20 hover:text-green-500 cursor-pointer"
-                            onClick={handleStartAll}
-                            onKeyDown={(e) => e.key === 'Enter' && handleStartAll(e as unknown as React.MouseEvent)}
-                            title="Start all services"
-                          >
-                            <Play className="size-3" />
-                          </div>
-                        )}
-                        {hasRunning && (
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
-                            onClick={handleStopAll}
-                            onKeyDown={(e) => e.key === 'Enter' && handleStopAll(e as unknown as React.MouseEvent)}
-                            title="Stop all services"
-                          >
-                            <Square className="size-3" />
-                          </div>
-                        )}
-                        {allStopped && (
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
-                            onClick={handleCloseAll}
-                            onKeyDown={(e) => e.key === 'Enter' && handleCloseAll(e as unknown as React.MouseEvent)}
-                            title="Close all terminals"
-                          >
-                            <X className="size-3" />
-                          </div>
-                        )}
-                      </div>
-                    </SidebarMenuButton>
-                    <SidebarMenuSub>
-                      {services.map(({ serviceId, serviceName, status, isHidden }) => (
-                        <SidebarMenuSubItem key={serviceId}>
-                          <SidebarMenuSubButton
-                            onClick={() => openTerminal('service', serviceId)}
-                            className="relative group/service"
-                          >
-                            <div className="relative">
-                              <Terminal className="size-3.5" />
-                              {isHidden && (
-                                <Circle className="absolute -top-1 -right-1 size-1.5 fill-yellow-500 text-yellow-500 animate-pulse" />
-                              )}
-                            </div>
-                            <span className={cn('text-xs flex-1', isHidden && 'opacity-60')}>
-                              {serviceName}
-                            </span>
-                            {/* Status indicator */}
-                            {status === 'running' ? (
-                              <Circle className="size-1.5 fill-green-500 text-green-500 animate-pulse" />
-                            ) : (
-                              <Circle className="size-1.5 fill-muted-foreground text-muted-foreground" />
-                            )}
-                            {/* Action buttons - visible on hover */}
-                            <div className="hidden group-hover/service:flex items-center gap-0.5 ml-1">
-                              {status === 'running' ? (
-                                <div
-                                  role="button"
-                                  tabIndex={0}
-                                  className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    stopService(serviceId);
-                                  }}
-                                  onKeyDown={(e) => e.key === 'Enter' && stopService(serviceId)}
-                                  title="Stop service"
-                                >
-                                  <Square className="size-3" />
-                                </div>
-                              ) : (
-                                <>
-                                  <div
-                                    role="button"
-                                    tabIndex={0}
-                                    className="size-5 p-0 flex items-center justify-center rounded hover:bg-green-500/20 hover:text-green-500 cursor-pointer"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      startService(serviceId);
-                                    }}
-                                    onKeyDown={(e) => e.key === 'Enter' && startService(serviceId)}
-                                    title="Start service"
-                                  >
-                                    <Play className="size-3" />
-                                  </div>
-                                  <div
-                                    role="button"
-                                    tabIndex={0}
-                                    className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      closeTerminal(`service:${serviceId}`);
-                                    }}
-                                    onKeyDown={(e) => e.key === 'Enter' && closeTerminal(`service:${serviceId}`)}
-                                    title="Close terminal"
-                                  >
-                                    <X className="size-3" />
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                      ))}
-                    </SidebarMenuSub>
-                  </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+    <aside
+      className={cn(
+        'glass relative z-30 flex h-full shrink-0 flex-col border-r border-border',
+        !resizing && 'transition-[width] duration-200 ease-out'
+      )}
+      style={{ width: collapsed ? RAIL_WIDTH : sidebarWidth }}
+    >
+      {/* Header: collapse toggle only (the app name lives in the title bar) */}
+      <div className={cn('flex h-10 shrink-0 items-center', collapsed ? 'justify-center' : 'justify-end px-3')}>
+        {collapsed ? (
+          <RailButton label="Expand sidebar (Ctrl+B)" onClick={toggleSidebar} className="size-8">
+            <PanelLeftOpen className="size-4" />
+          </RailButton>
+        ) : (
+          <RailButton label="Collapse sidebar (Ctrl+B)" onClick={toggleSidebar} className="size-8">
+            <PanelLeftClose className="size-4" />
+          </RailButton>
         )}
+      </div>
 
-        {/* Scripts Section - Grouped by Project */}
-        {totalScriptCount > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel>
-              <span className="flex items-center gap-2">
-                Scripts
-                {runningScriptsCount > 0 && (
-                  <span className="text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
-                    {runningScriptsCount} running
-                  </span>
-                )}
-              </span>
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {projectsWithScripts.map(({ projectId, projectName, scripts }) => {
-                  const runningScripts = scripts.filter(s => s.status === 'running');
-                  const hasRunning = runningScripts.length > 0;
+      {/* Navigation + activity */}
+      <nav className={cn('min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-1', collapsed ? 'px-2' : 'px-3')}>
+        {groups.map((g) => (
+          <div key={g.name} className="mb-3">
+            {!collapsed && <div className="eyebrow px-2 pb-1.5 pt-1">{g.name}</div>}
+            {collapsed && <div className="mx-auto mb-1.5 h-px w-6 bg-border first:hidden" />}
+            {g.items.map((item) => {
+              const Icon = item.icon;
+              const active = item.matches.includes(currentView);
+              return (
+                <NavButton
+                  key={item.view}
+                  active={active}
+                  collapsed={collapsed}
+                  label={item.label}
+                  onClick={() => navigate(item.view)}
+                >
+                  <Icon className={cn('size-[18px] shrink-0', active ? 'text-primary' : 'text-faint')} />
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1 truncate text-left">{item.label}</span>
+                      {item.beta && <BetaBadge />}
+                    </>
+                  )}
+                </NavButton>
+              );
+            })}
+          </div>
+        ))}
 
-                  const handleStopAllScripts = (e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    runningScripts.forEach(s => stopScript(s.scriptId));
-                  };
-
-                  const handleCloseAllScripts = (e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    scripts.forEach(s => closeTerminal(`script:${s.scriptId}`));
-                  };
-
-                  const allStopped = !hasRunning;
-
-                  return (
-                  <SidebarMenuItem key={projectId}>
-                    <SidebarMenuButton className="font-medium group/project" tooltip={projectName}>
-                      <FolderOpen className="size-4" />
-                      <span className="flex-1">{projectName}</span>
-                      <span className="text-xs text-muted-foreground group-hover/project:hidden">
-                        {scripts.length}
-                      </span>
-                      {/* Project action buttons - visible on hover */}
-                      <div className="hidden group-hover/project:flex items-center gap-0.5">
-                        {hasRunning && (
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
-                            onClick={handleStopAllScripts}
-                            onKeyDown={(e) => e.key === 'Enter' && handleStopAllScripts(e as unknown as React.MouseEvent)}
-                            title="Stop all scripts"
-                          >
-                            <Square className="size-3" />
-                          </div>
-                        )}
-                        {allStopped && (
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
-                            onClick={handleCloseAllScripts}
-                            onKeyDown={(e) => e.key === 'Enter' && handleCloseAllScripts(e as unknown as React.MouseEvent)}
-                            title="Close all script terminals"
-                          >
-                            <X className="size-3" />
-                          </div>
-                        )}
-                      </div>
-                    </SidebarMenuButton>
-                    <SidebarMenuSub>
-                      {scripts.map(({ scriptId, scriptName, status, isHidden }) => {
-                        const isRunning = status === 'running';
-                        const isCompleted = status === 'completed';
-                        const isFailed = status === 'failed';
-
-                        // Status color
-                        let statusColor = 'fill-muted-foreground text-muted-foreground'; // idle
-                        if (isRunning) {
-                          statusColor = 'fill-blue-500 text-blue-500 animate-pulse';
-                        } else if (isCompleted) {
-                          statusColor = 'fill-green-500 text-green-500';
-                        } else if (isFailed) {
-                          statusColor = 'fill-red-500 text-red-500';
-                        }
-
-                        return (
-                        <SidebarMenuSubItem key={scriptId}>
-                          <SidebarMenuSubButton
-                            onClick={() => openTerminal('script', scriptId)}
-                            className="relative group/script"
-                          >
-                            <div className="relative">
-                              <FileCode className="size-3.5" />
-                              {isHidden && (
-                                <Circle className="absolute -top-1 -right-1 size-1.5 fill-yellow-500 text-yellow-500 animate-pulse" />
-                              )}
-                            </div>
-                            <span className={cn('text-xs flex-1', isHidden && 'opacity-60')}>
-                              {scriptName}
-                            </span>
-                            {/* Status indicator */}
-                            <Circle className={cn('size-1.5', statusColor)} />
-                            {/* Action buttons - visible on hover */}
-                            <div className="hidden group-hover/script:flex items-center gap-0.5 ml-1">
-                              {isRunning ? (
-                                <div
-                                  role="button"
-                                  tabIndex={0}
-                                  className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    stopScript(scriptId);
-                                  }}
-                                  onKeyDown={(e) => e.key === 'Enter' && stopScript(scriptId)}
-                                  title="Stop script"
-                                >
-                                  <Square className="size-3" />
-                                </div>
-                              ) : (
-                                <>
-                                  <div
-                                    role="button"
-                                    tabIndex={0}
-                                    className="size-5 p-0 flex items-center justify-center rounded hover:bg-blue-500/20 hover:text-blue-500 cursor-pointer"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      runScript(scriptId);
-                                    }}
-                                    onKeyDown={(e) => e.key === 'Enter' && runScript(scriptId)}
-                                    title="Run script"
-                                  >
-                                    <Play className="size-3" />
-                                  </div>
-                                  <div
-                                    role="button"
-                                    tabIndex={0}
-                                    className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      closeTerminal(`script:${scriptId}`);
-                                    }}
-                                    onKeyDown={(e) => e.key === 'Enter' && closeTerminal(`script:${scriptId}`)}
-                                    title="Close terminal"
-                                  >
-                                    <X className="size-3" />
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                        );
-                      })}
-                    </SidebarMenuSub>
-                  </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-
-        {/* Global Scripts Section */}
-        {globalScriptsWithRuntime.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel>
-              <span className="flex items-center gap-2">
-                Global Scripts
-                {runningGlobalScriptsCount > 0 && (
-                  <span className="text-xs bg-purple-500/20 text-purple-600 dark:text-purple-400 px-1.5 py-0.5 rounded-full">
-                    {runningGlobalScriptsCount} running
-                  </span>
-                )}
-              </span>
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {globalScriptsWithRuntime.map(({ scriptId, scriptName, status, isHidden }) => {
-                  const isRunning = status === 'running';
-                  const isCompleted = status === 'completed';
-                  const isFailed = status === 'failed';
-
-                  let statusColor = 'fill-muted-foreground text-muted-foreground';
-                  if (isRunning) {
-                    statusColor = 'fill-purple-500 text-purple-500 animate-pulse';
-                  } else if (isCompleted) {
-                    statusColor = 'fill-green-500 text-green-500';
-                  } else if (isFailed) {
-                    statusColor = 'fill-red-500 text-red-500';
-                  }
-
-                  return (
-                    <SidebarMenuItem key={scriptId}>
-                      <SidebarMenuButton
-                        onClick={() => openTerminal('global-script', scriptId)}
-                        className="relative group/gscript"
-                        tooltip={scriptName}
-                      >
-                        <div className="relative">
-                          <ScrollText className="size-4" />
-                          {isHidden && (
-                            <Circle className="absolute -top-1 -right-1 size-1.5 fill-yellow-500 text-yellow-500 animate-pulse" />
-                          )}
-                        </div>
-                        <span className={cn('text-xs flex-1', isHidden && 'opacity-60')}>
-                          {scriptName}
-                        </span>
-                        <Circle className={cn('size-1.5', statusColor)} />
-                        <div className="hidden group-hover/gscript:flex items-center gap-0.5 ml-1">
-                          {isRunning ? (
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                stopGlobalScript(scriptId);
-                              }}
-                              onKeyDown={(e) => e.key === 'Enter' && stopGlobalScript(scriptId)}
-                              title="Stop script"
-                            >
-                              <Square className="size-3" />
-                            </div>
-                          ) : (
-                            <>
-                              <div
-                                role="button"
-                                tabIndex={0}
-                                className="size-5 p-0 flex items-center justify-center rounded hover:bg-purple-500/20 hover:text-purple-500 cursor-pointer"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const gs = globalScripts.find(s => s.id === scriptId);
-                                  if (gs) openRunScriptDialog(gs);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    const gs = globalScripts.find(s => s.id === scriptId);
-                                    if (gs) openRunScriptDialog(gs);
-                                  }
-                                }}
-                                title="Run script"
-                              >
-                                <Play className="size-3" />
-                              </div>
-                              <div
-                                role="button"
-                                tabIndex={0}
-                                className="size-5 p-0 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive cursor-pointer"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  closeTerminal(`global-script:${scriptId}`);
-                                }}
-                                onKeyDown={(e) => e.key === 'Enter' && closeTerminal(`global-script:${scriptId}`)}
-                                title="Close terminal"
-                              >
-                                <X className="size-3" />
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-      </SidebarContent>
-
-      <SidebarFooter className="border-t border-sidebar-border">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              size="sm"
-              className="text-muted-foreground"
-              tooltip="Settings"
-              onClick={() => handleNavigate('settings')}
+        {hasActivity && collapsed && (
+          <div className="mb-3">
+            <div className="mx-auto mb-1.5 h-px w-6 bg-border" />
+            <NavButton
+              active={terminalPanelOpen}
+              collapsed
+              label={`Terminal — ${runningTotal} running`}
+              onClick={toggleTerminalPanel}
             >
-              <Settings className="size-4" />
-              <span>Settings</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
-    </Sidebar>
+              <span className="relative">
+                <Terminal className={cn('size-[18px]', terminalPanelOpen ? 'text-primary' : 'text-faint')} />
+                {runningTotal > 0 && (
+                  <StatusDot tone="running" size={7} className="absolute -right-1 -top-1" />
+                )}
+              </span>
+            </NavButton>
+          </div>
+        )}
+
+        {hasActivity && !collapsed && (
+          <div className="mb-3">
+            <div className="flex items-center gap-2 px-2 pb-1.5 pt-1">
+              <span className="eyebrow">Activity</span>
+              {runningTotal > 0 && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-st-done/14 px-1.5 text-[10px] font-semibold leading-4 text-st-done">
+                  <StatusDot tone="running" size={6} />
+                  {runningTotal} running
+                </span>
+              )}
+            </div>
+
+            {serviceGroups.map((group) => {
+              const running = group.rows.filter((r) => r.status === 'running');
+              const stopped = group.rows.filter((r) => r.status !== 'running');
+              return (
+                <ActivityGroupBlock
+                  key={`svc-${group.id}`}
+                  icon={FolderOpen}
+                  name={group.name}
+                  count={group.rows.length}
+                  onOpen={() => selectProject(group.id)}
+                  actions={
+                    <>
+                      {stopped.length > 0 && (
+                        <RowAction tone="start" title="Start all services" onClick={() => stopped.forEach((r) => startService(r.key))}>
+                          <Play className="size-3" />
+                        </RowAction>
+                      )}
+                      {running.length > 0 && (
+                        <RowAction tone="stop" title="Stop all services" onClick={() => running.forEach((r) => stopService(r.key))}>
+                          <Square className="size-3" />
+                        </RowAction>
+                      )}
+                      {running.length === 0 && (
+                        <RowAction tone="close" title="Close all terminals" onClick={() => group.rows.forEach((r) => closeTerminal(r.id))}>
+                          <X className="size-3" />
+                        </RowAction>
+                      )}
+                    </>
+                  }
+                >
+                  {group.rows.map((row) => (
+                    <ActivityRowItem
+                      key={row.id}
+                      row={row}
+                      icon={Terminal}
+                      onOpen={() => openTerminal(row.kind, row.key)}
+                      onStart={() => startRow(row)}
+                      onStop={() => stopRow(row)}
+                      onClose={() => closeTerminal(row.id)}
+                    />
+                  ))}
+                </ActivityGroupBlock>
+              );
+            })}
+
+            {scriptGroups.map((group) => {
+              const running = group.rows.filter((r) => r.status === 'running');
+              return (
+                <ActivityGroupBlock
+                  key={`scr-${group.id}`}
+                  icon={FileCode}
+                  name={group.name}
+                  count={group.rows.length}
+                  onOpen={() => selectProject(group.id)}
+                  actions={
+                    <>
+                      {running.length > 0 && (
+                        <RowAction tone="stop" title="Stop all scripts" onClick={() => running.forEach((r) => stopScript(r.key))}>
+                          <Square className="size-3" />
+                        </RowAction>
+                      )}
+                      {running.length === 0 && (
+                        <RowAction tone="close" title="Close all script terminals" onClick={() => group.rows.forEach((r) => closeTerminal(r.id))}>
+                          <X className="size-3" />
+                        </RowAction>
+                      )}
+                    </>
+                  }
+                >
+                  {group.rows.map((row) => (
+                    <ActivityRowItem
+                      key={row.id}
+                      row={row}
+                      icon={FileCode}
+                      onOpen={() => openTerminal(row.kind, row.key)}
+                      onStart={() => startRow(row)}
+                      onStop={() => stopRow(row)}
+                      onClose={() => closeTerminal(row.id)}
+                    />
+                  ))}
+                </ActivityGroupBlock>
+              );
+            })}
+
+            {globalRows.length > 0 && (
+              <ActivityGroupBlock
+                icon={ScrollText}
+                name="Global scripts"
+                count={globalRows.length}
+                onOpen={() => navigate('scripts')}
+                actions={
+                  globalRows.some((r) => r.status === 'running') ? (
+                    <RowAction tone="stop" title="Stop all" onClick={() => globalRows.filter((r) => r.status === 'running').forEach((r) => stopGlobalScript(r.key))}>
+                      <Square className="size-3" />
+                    </RowAction>
+                  ) : (
+                    <RowAction tone="close" title="Close all" onClick={() => globalRows.forEach((r) => closeTerminal(r.id))}>
+                      <X className="size-3" />
+                    </RowAction>
+                  )
+                }
+              >
+                {globalRows.map((row) => (
+                  <ActivityRowItem
+                    key={row.id}
+                    row={row}
+                    icon={ScrollText}
+                    onOpen={() => openTerminal(row.kind, row.key)}
+                    onStart={() => startRow(row)}
+                    onStop={() => stopRow(row)}
+                    onClose={() => closeTerminal(row.id)}
+                  />
+                ))}
+              </ActivityGroupBlock>
+            )}
+          </div>
+        )}
+      </nav>
+
+      {/* Footer: settings + theme */}
+      <div className={cn('flex shrink-0 items-center gap-1 border-t border-border', collapsed ? 'flex-col px-2 py-2' : 'px-3 py-2')}>
+        <NavButton
+          active={currentView === 'settings'}
+          collapsed={collapsed}
+          label="Settings"
+          onClick={() => navigate('settings')}
+          className={collapsed ? undefined : 'flex-1'}
+        >
+          <Settings className={cn('size-[18px] shrink-0', currentView === 'settings' ? 'text-primary' : 'text-faint')} />
+          {!collapsed && <span className="flex-1 truncate text-left">Settings</span>}
+        </NavButton>
+        <RailButton label={`${themeLabel} — click to change`} onClick={cycleTheme} className="size-8">
+          <ThemeIcon className="size-4" />
+        </RailButton>
+      </div>
+
+      {/* Resize handle */}
+      {!collapsed && (
+        <div
+          className="absolute inset-y-0 -right-1 z-40 w-2 cursor-ew-resize"
+          onMouseDown={onResizeStart}
+        >
+          <div className={cn('mx-auto h-full w-px transition-colors', resizing ? 'bg-primary' : 'bg-transparent hover:bg-accent-border')} />
+        </div>
+      )}
+    </aside>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+function NavButton({
+  active,
+  collapsed,
+  label,
+  onClick,
+  children,
+  className,
+}: {
+  active: boolean;
+  collapsed: boolean;
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+  className?: string;
+}) {
+  const button = (
+    <button
+      type="button"
+      data-slot="nav-item"
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      aria-label={collapsed ? label : undefined}
+      className={cn(
+        'flex items-center rounded-[var(--rad-nav)] text-sm transition-colors',
+        collapsed ? 'mx-auto size-10 justify-center' : 'w-full gap-2.5 px-2.5 py-2',
+        active
+          ? 'bg-accent font-[550] text-foreground'
+          : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+        className
+      )}
+    >
+      {children}
+    </button>
+  );
+  if (!collapsed) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function RailButton({
+  label,
+  onClick,
+  children,
+  className,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          data-slot="rail-button"
+          onClick={onClick}
+          aria-label={label}
+          className={cn(
+            'grid size-10 shrink-0 place-items-center rounded-[var(--rad-nav)] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+            className
+          )}
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function RowAction({
+  tone,
+  title,
+  onClick,
+  children,
+}: {
+  tone: 'start' | 'stop' | 'close';
+  title: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={cn(
+        'grid size-5 place-items-center rounded-[6px] text-muted-foreground transition-colors',
+        tone === 'start' && 'hover:bg-st-done/18 hover:text-st-done',
+        tone === 'stop' && 'hover:bg-destructive/15 hover:text-destructive',
+        tone === 'close' && 'hover:bg-accent hover:text-foreground'
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ActivityGroupBlock({
+  icon: Icon,
+  name,
+  count,
+  onOpen,
+  actions,
+  children,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  name: string;
+  count: number;
+  onOpen: () => void;
+  actions: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mb-1">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={(e) => e.key === 'Enter' && onOpen()}
+        className="group/project flex w-full items-center gap-2 rounded-[var(--rad-nav)] px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-accent/60"
+      >
+        <Icon className="size-4 shrink-0 text-faint" />
+        <span className="flex-1 truncate text-left">{name}</span>
+        <span className="text-xs tabular-nums text-faint group-hover/project:hidden">{count}</span>
+        <div className="hidden items-center gap-0.5 group-hover/project:flex">{actions}</div>
+      </div>
+      <div className="ml-[15px] border-l border-border pl-2">{children}</div>
+    </div>
+  );
+}
+
+function ActivityRowItem({
+  row,
+  icon: Icon,
+  onOpen,
+  onStart,
+  onStop,
+  onClose,
+}: {
+  row: ActivityRow;
+  icon: ComponentType<{ className?: string }>;
+  onOpen: () => void;
+  onStart: () => void;
+  onStop: () => void;
+  onClose: () => void;
+}) {
+  const running = row.status === 'running';
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => e.key === 'Enter' && onOpen()}
+      title={row.hidden ? `${row.name} — hidden from the terminal panel` : row.name}
+      className="group/row flex w-full items-center gap-2 rounded-[var(--rad-xs)] py-1 pl-2 pr-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+    >
+      <Icon className="size-3.5 shrink-0 text-faint" />
+      <span className={cn('flex-1 truncate text-left', row.hidden && 'opacity-60')}>{row.name}</span>
+      <StatusDot status={row.status} size={7} className="group-hover/row:hidden" />
+      <div className="hidden items-center gap-0.5 group-hover/row:flex">
+        {running ? (
+          <RowAction tone="stop" title="Stop" onClick={onStop}>
+            <Square className="size-3" />
+          </RowAction>
+        ) : (
+          <>
+            <RowAction tone="start" title={row.kind === 'service' ? 'Start' : 'Run'} onClick={onStart}>
+              <Play className="size-3" />
+            </RowAction>
+            <RowAction tone="close" title="Close terminal" onClick={onClose}>
+              <X className="size-3" />
+            </RowAction>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

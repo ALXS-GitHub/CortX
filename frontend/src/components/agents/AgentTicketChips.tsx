@@ -1,4 +1,5 @@
 import { toast } from 'sonner';
+import { Chip } from '@/components/ui/Chip';
 import { cn } from '@/lib/utils';
 
 interface AgentTicketChipsProps {
@@ -24,19 +25,21 @@ export function AgentTicketChips({ refs, max = 3, className }: AgentTicketChipsP
   };
 
   return (
-    <span className={cn('inline-flex items-center gap-1 shrink-0', className)}>
+    <span className={cn('inline-flex shrink-0 items-center gap-1', className)}>
       {shown.map((ref) => (
         <button
           key={ref}
           type="button"
           onClick={(e) => copy(e, ref)}
           title={`Copy ${ref}`}
-          className="rounded border border-border bg-muted/60 px-1 font-mono text-[10px] leading-4 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+          className="cursor-pointer rounded-full opacity-80 transition-opacity hover:opacity-100"
         >
-          {ref}
+          <Chip neutral dot={false} className="font-mono text-[10px]">
+            {ref}
+          </Chip>
         </button>
       ))}
-      {rest > 0 && <span className="text-[10px] text-muted-foreground">+{rest}</span>}
+      {rest > 0 && <span className="text-[10px] text-faint">+{rest}</span>}
     </span>
   );
 }

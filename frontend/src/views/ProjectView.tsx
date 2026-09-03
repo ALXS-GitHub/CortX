@@ -6,8 +6,12 @@ import { ProjectForm } from '@/components/projects/ProjectForm';
 import { EnvironmentTab } from '@/components/env';
 import { ScriptsTab } from '@/components/scripts';
 import { AgentsView, BetaBadge } from '@/components/agents';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsCount, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { StatusDot } from '@/components/ui/StatusDot';
+import { TagBadge } from '@/components/ui/TagBadge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +23,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  ArrowLeft,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Plus,
   Play,
   Square,
@@ -33,6 +43,9 @@ import {
   Bot,
   ChevronDown,
   Star,
+  MoreVertical,
+  Link2,
+  ArrowLeft,
 } from 'lucide-react';
 import {
   Popover,
@@ -48,7 +61,6 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { TruncatedText } from '@/components/ui/TruncatedText';
 import { openInExplorer, openInVscode, openToolUrl } from '@/lib/tauri';
 import type { Service, CreateServiceInput, UpdateServiceInput, UpdateProjectInput } from '@/types';
 import { toast } from 'sonner';
@@ -60,6 +72,7 @@ export function ProjectView() {
     selectProject,
     setCurrentView,
     settings,
+    tagDefinitions,
     addService,
     updateService,
     deleteService,
@@ -86,13 +99,19 @@ export function ProjectView() {
 
   if (!project) {
     return (
-      <div className="flex flex-col items-center justify-center h-full">
-        <p className="text-muted-foreground mb-4">Project not found</p>
-        <Button onClick={() => setCurrentView('dashboard')}>
-          <ArrowLeft className="size-4 mr-2" />
-          Back to Dashboard
-        </Button>
-      </div>
+      <Screen title="Project" onBack={() => setCurrentView('dashboard')}>
+        <EmptyState
+          icon={FolderOpen}
+          title="Project not found"
+          description="It may have been removed from another window or from the CLI."
+          action={
+            <Button onClick={() => setCurrentView('dashboard')}>
+              <ArrowLeft />
+              Back to projects
+            </Button>
+          }
+        />
+      </Screen>
     );
   }
 
@@ -213,247 +232,236 @@ export function ProjectView() {
     toast.success('Stopped all services');
   };
 
-  return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-4 min-w-0 flex-1">
-          <Button variant="ghost" size="icon" onClick={handleBack} className="flex-shrink-0">
-            <ArrowLeft className="size-5" />
+  const toolboxUrl = project.toolboxUrl
+    ? project.toolboxUrl.startsWith('/') && settings?.toolboxBaseUrl
+      ? `${settings.toolboxBaseUrl.replace(/\/+$/, '')}${project.toolboxUrl}`
+      : project.toolboxUrl
+    : null;
+
+  const total = project.services.length;
+  const running = runningServices.length;
+
+  // Primary launch control shown in the header.
+  const launchControl = total === 0 ? null : running > 0 ? (
+    <Button variant="outline" onClick={handleStopAll} className="text-destructive hover:text-destructive">
+      <Square />
+      Stop all
+      {running < total && <span className="text-xs text-muted-foreground">({running}/{total})</span>}
+    </Button>
+  ) : hasAnyModes || hasAnyPresets ? (
+    <div className="flex items-center">
+      <Button className="rounded-r-none" onClick={() => handleStartAll()}>
+        <Play />
+        Start all
+      </Button>
+      <Popover open={startAllPopoverOpen} onOpenChange={setStartAllPopoverOpen}>
+        <PopoverTrigger asChild>
+          <Button className="rounded-l-none border-l border-l-primary-foreground/25 px-2" aria-label="Start all with options">
+            <ChevronDown className="size-4" />
           </Button>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 min-w-0">
-              <TruncatedText as="h1" className="text-2xl font-bold min-w-0">{project.name}</TruncatedText>
-              <div className="flex-shrink-0">
-                <StatusBadge status={project.status} />
-              </div>
-            </div>
-            {project.description && (
-              <p className="text-muted-foreground mt-1 break-words">{project.description}</p>
-            )}
-            <TruncatedText className="text-sm text-muted-foreground font-mono mt-2 block">
-              {project.rootPath}
-            </TruncatedText>
-            {project.toolboxUrl && (
-              <button
-                className="text-xs text-primary hover:underline mt-1 cursor-pointer block max-w-full truncate text-left"
-                onClick={() => {
-                  const url = project.toolboxUrl!.startsWith('/') && settings?.toolboxBaseUrl
-                    ? `${settings.toolboxBaseUrl.replace(/\/+$/, '')}${project.toolboxUrl}`
-                    : project.toolboxUrl!;
-                  openToolUrl(url).catch((e) => toast.error('Failed to open URL', { description: String(e) }));
-                }}
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-60 gap-3 p-3">
+          {hasAnyModes && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Mode</Label>
+              <Select
+                value={selectedModeForAll || '_default'}
+                onValueChange={(v) => setSelectedModeForAll(v === '_default' ? undefined : v)}
               >
+                <SelectTrigger className="h-8 w-full">
+                  <SelectValue placeholder="Select mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_default">Default</SelectItem>
+                  {allModeNames.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {hasAnyPresets && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Preset</Label>
+              <Select
+                value={selectedPresetForAll === null ? '_none' : selectedPresetForAll || '_default'}
+                onValueChange={(v) => setSelectedPresetForAll(v === '_default' ? undefined : v === '_none' ? null : v)}
+              >
+                <SelectTrigger className="h-8 w-full">
+                  <SelectValue placeholder="Select preset" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_default">Default</SelectItem>
+                  <SelectItem value="_none">None</SelectItem>
+                  {allPresetNames.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <Button
+            size="sm"
+            className="w-full"
+            onClick={() => {
+              // null means "None" (pass empty string to skip default), undefined means "Default"
+              handleStartAll(selectedModeForAll, selectedPresetForAll === null ? '' : selectedPresetForAll);
+              setStartAllPopoverOpen(false);
+            }}
+          >
+            <Play className="size-3.5" />
+            Start all
+          </Button>
+        </PopoverContent>
+      </Popover>
+    </div>
+  ) : (
+    <Button onClick={() => handleStartAll()}>
+      <Play />
+      Start all
+    </Button>
+  );
+
+  return (
+    <Screen
+      eyebrow="Project"
+      title={
+        <span className="inline-flex items-center gap-2">
+          {running > 0 && <StatusDot tone="running" size={8} />}
+          {project.name}
+          <StatusBadge status={project.status} />
+        </span>
+      }
+      subtitle={<span className="font-mono">{project.rootPath}</span>}
+      onBack={handleBack}
+      backLabel="Back to projects"
+      actions={
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-pressed={project.favorite}
+            onClick={handleToggleFavorite}
+            title={project.favorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Star className={project.favorite ? 'fill-warning text-warning' : ''} />
+          </Button>
+          <Button variant="outline" onClick={handleOpenInVscode} title="Open in VSCode">
+            <Code />
+            VSCode
+          </Button>
+          <Button variant="outline" size="icon" onClick={handleOpenFolder} title="Open folder" aria-label="Open folder">
+            <FolderOpen />
+          </Button>
+          {launchControl}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="More actions">
+                <MoreVertical />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setShowEditProject(true)}>
+                <Pencil />
+                Edit project
+              </DropdownMenuItem>
+              {toolboxUrl && (
+                <DropdownMenuItem onClick={() => openToolUrl(toolboxUrl).catch((e) => toast.error('Failed to open URL', { description: String(e) }))}>
+                  <Link2 />
+                  Open toolbox page
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => setShowDeleteProject(true)}>
+                <Trash2 />
+                Delete project
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      }
+    >
+      {/* Description, tags, toolbox link */}
+      {(project.description || project.tags.length > 0 || toolboxUrl) && (
+        <div className="mb-5 flex flex-col gap-2">
+          {project.description && <p className="max-w-3xl text-sm text-muted-foreground">{project.description}</p>}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {project.tags.map((tag) => (
+              <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
+            ))}
+            {toolboxUrl && (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 truncate text-xs text-primary hover:underline"
+                onClick={() => openToolUrl(toolboxUrl).catch((e) => toast.error('Failed to open URL', { description: String(e) }))}
+                title={toolboxUrl}
+              >
+                <Link2 className="size-3" />
                 {project.toolboxUrl}
               </button>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap justify-end max-w-[50%] lg:max-w-none">
-          <Button
-            variant="outline"
-            size="sm"
-            aria-pressed={project.favorite}
-            onClick={handleToggleFavorite}
-            title={project.favorite ? 'Remove from favorites' : 'Add to favorites'}
-          >
-            <Star className={project.favorite ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
-            {project.favorite ? 'Favorite' : 'Add to favorites'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleOpenInVscode}>
-            <Code className="size-4 mr-2" />
-            Open in VSCode
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleOpenFolder}>
-            <FolderOpen className="size-4 mr-2" />
-            Open Folder
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setShowEditProject(true)}>
-            <Pencil className="size-4 mr-2" />
-            Edit
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowDeleteProject(true)}
-            className="text-destructive hover:text-destructive"
-          >
-            <Trash2 className="size-4 mr-2" />
-            Delete
-          </Button>
-        </div>
-      </div>
+      )}
 
-      {/* Tabs for Services and Environment */}
-      <Tabs defaultValue="services" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="services" className="flex items-center gap-2">
-            <Terminal className="size-4" />
+      <Tabs defaultValue="services" className="gap-5">
+        <TabsList variant="line" className="w-full justify-start">
+          <TabsTrigger value="services" className="flex-none">
+            <Terminal />
             Services
-            {project.services.length > 0 && (
-              <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                {project.services.length}
-              </span>
-            )}
+            {total > 0 && <TabsCount>{total}</TabsCount>}
           </TabsTrigger>
-          <TabsTrigger value="environment" className="flex items-center gap-2">
-            <FileKey className="size-4" />
+          <TabsTrigger value="environment" className="flex-none">
+            <FileKey />
             Environment
-            {project.envFiles?.length > 0 && (
-              <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                {project.envFiles.length}
-              </span>
-            )}
+            {project.envFiles?.length > 0 && <TabsCount>{project.envFiles.length}</TabsCount>}
           </TabsTrigger>
-          <TabsTrigger value="scripts" className="flex items-center gap-2">
-            <FileCode className="size-4" />
+          <TabsTrigger value="scripts" className="flex-none">
+            <FileCode />
             Scripts
-            {project.scripts?.length > 0 && (
-              <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                {project.scripts.length}
-              </span>
-            )}
+            {project.scripts?.length > 0 && <TabsCount>{project.scripts.length}</TabsCount>}
           </TabsTrigger>
-          <TabsTrigger value="agents" className="flex items-center gap-2">
-            <Bot className="size-4" />
+          <TabsTrigger value="agents" className="flex-none">
+            <Bot />
             Agents
-            {projectAgentCount > 0 ? (
-              <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                {projectAgentCount}
-              </span>
-            ) : (
-              <BetaBadge />
-            )}
+            {projectAgentCount > 0 ? <TabsCount>{projectAgentCount}</TabsCount> : <BetaBadge />}
           </TabsTrigger>
         </TabsList>
 
         {/* Services Tab */}
         <TabsContent value="services" className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold">Services</h2>
-              <p className="text-sm text-muted-foreground">
-                {project.services.length} service{project.services.length !== 1 ? 's' : ''} configured
-                {runningServices.length > 0 && ` (${runningServices.length} running)`}
+              <h2 className="font-display text-base font-semibold">Services</h2>
+              <p className="text-xs text-muted-foreground">
+                {total} service{total !== 1 ? 's' : ''} configured
+                {running > 0 && ` · ${running} running`}
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              {project.services.length > 0 && (
-                <>
-                  {runningServices.length > 0 ? (
-                    <Button variant="outline" size="sm" onClick={handleStopAll}>
-                      <Square className="size-4 mr-2" />
-                      Stop All
-                    </Button>
-                  ) : (hasAnyModes || hasAnyPresets) ? (
-                    // Popover modal for mode and preset selection
-                    <div className="flex items-center">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-r-none border-r-0"
-                        onClick={() => handleStartAll()}
-                      >
-                        <Play className="size-4 mr-2" />
-                        Start All
-                      </Button>
-                      <Popover open={startAllPopoverOpen} onOpenChange={setStartAllPopoverOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="rounded-l-none px-2"
-                          >
-                            <ChevronDown className="size-4" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent align="end" className="w-56 p-3">
-                          <div className="space-y-3">
-                            {hasAnyModes && (
-                              <div className="space-y-1.5">
-                                <Label className="text-xs">Mode</Label>
-                                <Select
-                                  value={selectedModeForAll || '_default'}
-                                  onValueChange={(v) => setSelectedModeForAll(v === '_default' ? undefined : v)}
-                                >
-                                  <SelectTrigger className="h-8">
-                                    <SelectValue placeholder="Select mode" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="_default">Default</SelectItem>
-                                    {allModeNames.map((name) => (
-                                      <SelectItem key={name} value={name}>
-                                        {name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            )}
-                            {hasAnyPresets && (
-                              <div className="space-y-1.5">
-                                <Label className="text-xs">Preset</Label>
-                                <Select
-                                  value={selectedPresetForAll === null ? '_none' : selectedPresetForAll || '_default'}
-                                  onValueChange={(v) => setSelectedPresetForAll(v === '_default' ? undefined : v === '_none' ? null : v)}
-                                >
-                                  <SelectTrigger className="h-8">
-                                    <SelectValue placeholder="Select preset" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="_default">Default</SelectItem>
-                                    <SelectItem value="_none">None</SelectItem>
-                                    {allPresetNames.map((name) => (
-                                      <SelectItem key={name} value={name}>
-                                        {name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            )}
-                            <Button
-                              size="sm"
-                              className="w-full"
-                              onClick={() => {
-                                // null means "None" (pass empty string to skip default), undefined means "Default"
-                                handleStartAll(selectedModeForAll, selectedPresetForAll === null ? '' : selectedPresetForAll);
-                                setStartAllPopoverOpen(false);
-                              }}
-                            >
-                              <Play className="size-3.5 mr-2" />
-                              Start All
-                            </Button>
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                  ) : (
-                    <Button variant="outline" size="sm" onClick={() => handleStartAll()}>
-                      <Play className="size-4 mr-2" />
-                      Start All
-                    </Button>
-                  )}
-                </>
-              )}
-              <Button size="sm" onClick={() => setShowServiceForm(true)}>
-                <Plus className="size-4 mr-2" />
-                Add Service
-              </Button>
-            </div>
+            <Button size="sm" variant={total === 0 ? 'default' : 'outline'} onClick={() => setShowServiceForm(true)}>
+              <Plus className="size-4" />
+              Add service
+            </Button>
           </div>
 
-          {project.services.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center border rounded-lg border-dashed">
-              <Play className="size-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium">No services configured</h3>
-              <p className="text-muted-foreground mb-4">
-                Add services to define how to start your project
-              </p>
-              <Button onClick={() => setShowServiceForm(true)}>
-                <Plus className="size-4 mr-2" />
-                Add Service
-              </Button>
+          {total === 0 ? (
+            <div className="rounded-lg border border-dashed border-border-strong">
+              <EmptyState
+                compact
+                icon={Play}
+                title="No services configured"
+                description="A service is a long-running command (dev server, API, watcher) started from this project."
+                action={
+                  <Button onClick={() => setShowServiceForm(true)}>
+                    <Plus />
+                    Add service
+                  </Button>
+                }
+              />
             </div>
           ) : (
             <div className="space-y-3">
@@ -512,14 +520,14 @@ export function ProjectView() {
       <AlertDialog open={!!deletingService} onOpenChange={(open) => !open && setDeletingService(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Service</AlertDialogTitle>
+            <AlertDialogTitle>Delete service</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{deletingService?.name}"? This cannot be undone.
+              Delete "{deletingService?.name}"? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteService} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction variant="destructive" onClick={handleDeleteService}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -538,19 +546,19 @@ export function ProjectView() {
       <AlertDialog open={showDeleteProject} onOpenChange={setShowDeleteProject}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Project</AlertDialogTitle>
+            <AlertDialogTitle>Delete project</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{project.name}"? This will remove the project from your dashboard. Your files will not be affected.
+              Remove "{project.name}" from CortX? Your files on disk are not affected.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteProject} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction variant="destructive" onClick={handleDeleteProject}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </Screen>
   );
 }

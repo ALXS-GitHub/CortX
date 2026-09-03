@@ -51,22 +51,22 @@ export function AgentDetailAnnotations({ session }: AgentDetailAnnotationsProps)
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
+      <CollapsibleTrigger className="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground">
         <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
         Details, tags & notes
       </CollapsibleTrigger>
-      <CollapsibleContent className="pt-3 space-y-3 text-xs">
+      <CollapsibleContent className="space-y-4 pt-3 text-xs">
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5">
           <Fact label="Session id"><CopyValue value={session.id} mono /></Fact>
-          {session.pid !== undefined && <Fact label="PID">{session.pid}</Fact>}
+          {session.pid !== undefined && <Fact label="PID"><span className="font-mono text-[11px]">{session.pid}</span></Fact>}
           <Fact label="Folder"><CopyValue value={session.cwd} mono /></Fact>
           <Fact label="Transcript"><CopyValue value={session.transcriptPath} mono /></Fact>
           <Fact label="Started">{formatDateTime(session.startedAt)}</Fact>
           <Fact label="Last activity">{formatDateTime(session.lastActivityAt)}</Fact>
         </dl>
 
-        <div className="grid gap-1.5">
-          <Label className="text-xs">Status</Label>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium text-muted-foreground">Status</Label>
           <Select value={ann.status ?? NONE} onValueChange={(v) => void patch({ status: v === NONE ? undefined : v })}>
             <SelectTrigger size="sm" className="w-48"><SelectValue placeholder="No status" /></SelectTrigger>
             <SelectContent>
@@ -76,21 +76,26 @@ export function AgentDetailAnnotations({ session }: AgentDetailAnnotationsProps)
           </Select>
         </div>
 
-        <div className="grid gap-1.5">
-          <Label className="text-xs">Tags</Label>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-medium text-muted-foreground">Tags</Label>
           {allTags.length === 0 ? (
             <p className="text-muted-foreground">No tags defined yet (Settings → Tags).</p>
           ) : (
-            <div className="flex gap-1.5 flex-wrap">
+            <div className="flex flex-wrap gap-1.5">
               {allTags.map((tag) => {
                 const active = ann.tags.includes(tag);
                 return (
-                  <button key={tag} type="button" className="cursor-pointer" onClick={() => toggleTag(tag)}>
-                    <TagBadge
-                      tag={tag}
-                      tagDefinitions={tagDefinitions}
-                      className={active ? 'ring-2 ring-primary ring-offset-1' : 'opacity-60 hover:opacity-100'}
-                    />
+                  <button
+                    key={tag}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => toggleTag(tag)}
+                    className={cn(
+                      'rounded-full transition-opacity',
+                      active ? 'ring-2 ring-ring/50 ring-offset-1 ring-offset-background' : 'opacity-60 hover:opacity-100',
+                    )}
+                  >
+                    <TagBadge tag={tag} tagDefinitions={tagDefinitions} />
                   </button>
                 );
               })}
@@ -98,8 +103,8 @@ export function AgentDetailAnnotations({ session }: AgentDetailAnnotationsProps)
           )}
         </div>
 
-        <div className="grid gap-1.5">
-          <Label htmlFor="agent-notes" className="text-xs">Notes</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="agent-notes" className="text-xs font-medium text-muted-foreground">Notes</Label>
           <Textarea
             id="agent-notes"
             value={notesDraft ?? ann.notes ?? ''}
@@ -117,7 +122,7 @@ export function AgentDetailAnnotations({ session }: AgentDetailAnnotationsProps)
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <>
-      <dt className="text-muted-foreground whitespace-nowrap">{label}</dt>
+      <dt className="whitespace-nowrap text-faint">{label}</dt>
       <dd className="min-w-0 break-all">{children}</dd>
     </>
   );
@@ -135,10 +140,10 @@ function CopyValue({ value, mono }: { value: string; mono?: boolean }) {
     }
   };
   return (
-    <span className="inline-flex items-center gap-1 max-w-full">
-      <span className={cn('truncate', mono && 'font-mono text-[11px]')} title={value}>{value}</span>
-      <Button variant="ghost" size="icon" className="size-5 shrink-0" onClick={copy} title="Copy">
-        {copied ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />}
+    <span className="inline-flex max-w-full items-center gap-1">
+      <span className={cn('truncate', mono && 'font-mono text-[11px] text-muted-foreground')} title={value}>{value}</span>
+      <Button variant="ghost" size="icon-xs" className="size-5 shrink-0" onClick={copy} title="Copy">
+        {copied ? <Check className="size-3 text-st-done" /> : <Copy className="size-3" />}
       </Button>
     </span>
   );

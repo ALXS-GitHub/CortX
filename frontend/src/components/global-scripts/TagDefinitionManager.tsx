@@ -10,8 +10,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Chip } from '@/components/ui/Chip';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Pencil, Trash2, Plus, Tag } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
 import type { TagDefinition } from '@/types';
@@ -78,69 +80,59 @@ export function TagDefinitionManager({ open, onOpenChange, editingTag }: TagDefi
       <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Manage Tags</DialogTitle>
+            <DialogTitle>Manage tags</DialogTitle>
             <DialogDescription>
               Create and edit tag definitions. Tags can be applied to scripts, groups, and tools.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-2 max-h-[50vh] overflow-y-auto py-2">
+          <div className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6">
             {sortedTags.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No tags defined yet.</p>
+              <div className="rounded-lg border border-dashed border-border-strong">
+                <EmptyState compact icon={Tag} title="No tags defined yet" description="Tags colour-code your scripts and projects." />
+              </div>
             ) : (
-              sortedTags.map((tag) => (
-                <div
-                  key={tag.name}
-                  className="flex items-center justify-between px-3 py-2 border rounded-md"
-                >
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant="outline"
-                      className="text-xs"
-                      style={
-                        tag.color
-                          ? {
-                              borderColor: tag.color,
-                              color: tag.color,
-                              backgroundColor: `${tag.color}10`,
-                            }
-                          : undefined
-                      }
-                    >
-                      {tag.name}
-                    </Badge>
+              <div className="overflow-hidden rounded-lg border border-border bg-card/60">
+                {sortedTags.map((tag) => (
+                  <div
+                    key={tag.name}
+                    className="group flex h-10 items-center gap-2 border-b border-border px-3 transition-colors last:border-b-0 hover:bg-accent/50"
+                  >
+                    <Chip color={tag.color} neutral={!tag.color} dot={false}>{tag.name}</Chip>
                     {tag.order != null && (
-                      <span className="text-xs text-muted-foreground">#{tag.order}</span>
+                      <span className="font-mono text-[11px] text-faint">#{tag.order}</span>
                     )}
+                    <span className="flex-1" />
+                    <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Edit tag ${tag.name}`}
+                        onClick={() => {
+                          setFormTag(tag);
+                          setShowForm(true);
+                        }}
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive hover:text-destructive"
+                        aria-label={`Delete tag ${tag.name}`}
+                        onClick={() => setDeletingTag(tag)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      onClick={() => {
-                        setFormTag(tag);
-                        setShowForm(true);
-                      }}
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 text-destructive hover:text-destructive"
-                      onClick={() => setDeletingTag(tag)}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={handleClose}>
+            <Button variant="ghost" onClick={handleClose}>
               Close
             </Button>
             <Button
@@ -149,7 +141,8 @@ export function TagDefinitionManager({ open, onOpenChange, editingTag }: TagDefi
                 setShowForm(true);
               }}
             >
-              New Tag
+              <Plus />
+              New tag
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -169,17 +162,14 @@ export function TagDefinitionManager({ open, onOpenChange, editingTag }: TagDefi
       <AlertDialog open={!!deletingTag} onOpenChange={(o) => !o && setDeletingTag(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Tag</AlertDialogTitle>
+            <AlertDialogTitle>Delete tag</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete the tag "{deletingTag?.name}"? This will remove the tag definition but won't remove it from existing scripts.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteTag}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction variant="destructive" onClick={handleDeleteTag}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -253,16 +243,16 @@ function TagForm({ open, onOpenChange, tag }: TagFormProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-5">
           <DialogHeader>
-            <DialogTitle>{isEditing ? 'Edit Tag' : 'New Tag'}</DialogTitle>
+            <DialogTitle>{isEditing ? 'Edit tag' : 'New tag'}</DialogTitle>
             <DialogDescription>
               {isEditing ? 'Update the tag definition.' : 'Create a tag to organize your items.'}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
+          <div className="space-y-4">
+            <div className="space-y-2">
               <Label htmlFor="tag-name">Name *</Label>
               <Input
                 id="tag-name"
@@ -276,24 +266,30 @@ function TagForm({ open, onOpenChange, tag }: TagFormProps) {
               </p>
             </div>
 
-            <div className="grid gap-2">
+            <div className="space-y-2">
               <Label>Color</Label>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 {TAG_COLORS.map((c) => (
                   <button
                     key={c}
                     type="button"
-                    className={`size-6 rounded-full transition-all ${
-                      color === c ? 'ring-2 ring-offset-2 ring-primary' : ''
-                    }`}
+                    aria-label={`Use colour ${c}`}
+                    aria-pressed={color === c}
+                    className={cn(
+                      'size-6 rounded-full transition-[box-shadow,transform] hover:scale-110',
+                      color === c && 'ring-2 ring-ring ring-offset-2 ring-offset-background'
+                    )}
                     style={{ backgroundColor: c }}
                     onClick={() => setColor(c)}
                   />
                 ))}
+                <span className="ml-auto">
+                  <Chip color={color} dot={false}>{name.trim().toLowerCase() || 'preview'}</Chip>
+                </span>
               </div>
             </div>
 
-            <div className="grid gap-2">
+            <div className="space-y-2">
               <Label htmlFor="tag-order">Order</Label>
               <Input
                 id="tag-order"
@@ -312,11 +308,11 @@ function TagForm({ open, onOpenChange, tag }: TagFormProps) {
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : isEditing ? 'Save' : 'Create'}
+              {isSubmitting ? 'Saving…' : isEditing ? 'Save' : 'Create'}
             </Button>
           </DialogFooter>
         </form>

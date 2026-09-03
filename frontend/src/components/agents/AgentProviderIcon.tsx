@@ -13,8 +13,8 @@ interface AgentProviderIconProps {
 
 export function AgentProviderIcon({ provider, className, plain = false }: AgentProviderIconProps) {
   const icon = provider === 'codex'
-    ? <Braces className={cn('size-3.5 shrink-0 text-sky-600 dark:text-sky-400', className)} aria-label={PROVIDER_LABEL[provider]} />
-    : <Sparkles className={cn('size-3.5 shrink-0 text-orange-600 dark:text-orange-400', className)} aria-label={PROVIDER_LABEL[provider]} />;
+    ? <Braces className={cn('size-3.5 shrink-0 text-st-open', className)} aria-label={PROVIDER_LABEL[provider]} />
+    : <Sparkles className={cn('size-3.5 shrink-0 text-primary', className)} aria-label={PROVIDER_LABEL[provider]} />;
 
   if (plain) return icon;
   return (

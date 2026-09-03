@@ -3,6 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/EmptyState';
 import {
   Select,
   SelectContent,
@@ -18,10 +20,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Trash2, Loader2, Check } from 'lucide-react';
+import { Plus, Trash2, Layers, Settings2, Pencil, MoreVertical, Star, StarOff } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
+import { SaveStatus } from './ParameterEditor';
 import type { ParameterPreset, GlobalScript, UpdateGlobalScriptInput } from '@/types';
 
 interface PresetEditorProps {
@@ -155,108 +166,136 @@ export function PresetEditor({ script }: PresetEditorProps) {
 
   if (params.length === 0) {
     return (
-      <div className="text-center py-8 text-muted-foreground">
-        <p>No parameters configured.</p>
-        <p className="text-sm mt-1">Add parameters first in the Parameters tab to create presets.</p>
+      <div className="rounded-lg border border-dashed border-border-strong">
+        <EmptyState
+          compact
+          icon={Settings2}
+          title="No parameters configured"
+          description="Add parameters first in the Parameters tab to create presets."
+        />
       </div>
     );
   }
 
+  /** Human summary of what a preset sets, for the row. */
+  const presetSummary = (preset: ParameterPreset) => {
+    const parts = params
+      .filter((p) => {
+        const enabled = p.name in preset.enabled ? preset.enabled[p.name] : !!preset.values[p.name];
+        return p.required || enabled;
+      })
+      .map((p) => {
+        const v = preset.values[p.name];
+        if (p.paramType === 'bool') return v === 'true' ? (p.longFlag || p.shortFlag || p.name) : null;
+        return v ? `${p.longFlag || p.shortFlag || p.name} ${v}` : null;
+      })
+      .filter(Boolean);
+    return parts.join('  ');
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Save sets of parameter values for quick reuse when running this script.
-        </p>
-        <div className="flex items-center gap-3">
-          {/* Auto-save status indicator */}
-          <div className="text-xs text-muted-foreground flex items-center gap-1.5">
-            {saveStatus === 'saving' && (
-              <>
-                <Loader2 className="size-3 animate-spin" />
-                Saving...
-              </>
-            )}
-            {saveStatus === 'saved' && (
-              <>
-                <Check className="size-3 text-green-500" />
-                Saved
-              </>
-            )}
-          </div>
-          <Button variant="outline" size="sm" onClick={handleAddPreset}>
-            <Plus className="size-4 mr-1.5" />
-            Add Preset
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-display text-base font-semibold">Presets</h2>
+          <p className="text-xs text-muted-foreground">
+            Save sets of parameter values for quick reuse when running this script.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <SaveStatus status={saveStatus} />
+          <Button size="sm" variant={presets.length === 0 ? 'default' : 'outline'} onClick={handleAddPreset}>
+            <Plus />
+            Add preset
           </Button>
         </div>
       </div>
 
       {presets.length === 0 ? (
-        <div className="text-center py-8 text-muted-foreground text-sm">
-          No presets yet. Create one to save a set of parameter values.
+        <div className="rounded-lg border border-dashed border-border-strong">
+          <EmptyState
+            compact
+            icon={Layers}
+            title="No presets yet"
+            description="Create one to save a set of parameter values."
+            action={
+              <Button onClick={handleAddPreset}>
+                <Plus />
+                Add preset
+              </Button>
+            }
+          />
         </div>
       ) : (
-        <div className="space-y-2">
-          {presets.map((preset) => (
-            <div
-              key={preset.id}
-              className="flex items-center justify-between px-3 py-2 border rounded-md text-sm"
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-medium">{preset.name}</span>
-                {defaultPresetId === preset.id && (
-                  <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                    default
-                  </span>
-                )}
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+          {presets.map((preset) => {
+            const isDefault = defaultPresetId === preset.id;
+            const summary = presetSummary(preset);
+            return (
+              <div
+                key={preset.id}
+                className="group flex min-h-10 items-center gap-3 border-b border-border px-3 py-1.5 transition-colors last:border-b-0 hover:bg-accent/50"
+              >
+                <Layers className={cn('size-4 shrink-0', isDefault ? 'text-primary' : 'text-faint')} />
+                <span className="shrink-0 text-sm font-medium">{preset.name}</span>
+                {isDefault && <Badge>Default</Badge>}
+                <span className="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-faint md:block" title={summary}>
+                  {summary}
+                </span>
+                <span className="flex-1 md:hidden" />
+                <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 has-[[aria-expanded=true]]:opacity-100">
+                  <Button variant="ghost" size="sm" onClick={() => handleEditPreset(preset)}>
+                    <Pencil className="size-3.5" />
+                    Edit
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon-sm" aria-label="Preset actions">
+                        <MoreVertical className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setDefaultPresetId(isDefault ? '' : preset.id)}>
+                        {isDefault ? <StarOff /> : <Star />}
+                        {isDefault ? 'Unset default' : 'Set as default'}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleEditPreset(preset)}>
+                        <Pencil />
+                        Edit preset
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem variant="destructive" onClick={() => handleDeletePreset(preset.id)}>
+                        <Trash2 />
+                        Delete preset
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => {
-                    setDefaultPresetId(defaultPresetId === preset.id ? '' : preset.id);
-                  }}
-                >
-                  {defaultPresetId === preset.id ? 'Unset default' : 'Set as default'}
-                </Button>
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => handleEditPreset(preset)}>
-                  Edit
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 text-muted-foreground hover:text-destructive"
-                  onClick={() => handleDeletePreset(preset.id)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
       {/* Preset form dialog */}
       <Dialog open={showPresetForm} onOpenChange={setShowPresetForm}>
-        <DialogContent className="sm:max-w-md max-h-[70vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingPreset ? 'Edit Preset' : 'New Preset'}</DialogTitle>
+            <DialogTitle>{editingPreset ? 'Edit preset' : 'New preset'}</DialogTitle>
             <DialogDescription>
               Set the parameter values for this preset.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Preset name</Label>
+          <div className="-mx-6 min-h-0 flex-1 space-y-3 overflow-y-auto px-6">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Preset name</Label>
               <Input
                 value={presetName}
                 onChange={(e) => setPresetName(e.target.value)}
                 placeholder="e.g., Production, Debug"
-                className="h-8 text-sm"
               />
             </div>
+            <span className="eyebrow block pt-1">Parameters</span>
             {params.map((param) => {
               const isEnabled = presetEnabled[param.name] ?? false;
               const isOptional = !param.required;
@@ -264,9 +303,10 @@ export function PresetEditor({ script }: PresetEditorProps) {
               return (
                 <div
                   key={param.name}
-                  className={`space-y-1 rounded-md border p-2.5 transition-colors ${
-                    isEnabled ? 'border-border' : 'border-border/50 opacity-50'
-                  }`}
+                  className={cn(
+                    'space-y-1.5 rounded-sm border p-2.5 transition-[opacity,border-color]',
+                    isEnabled ? 'border-border bg-card/60' : 'border-border/60 opacity-60'
+                  )}
                 >
                   <div className="flex items-center gap-2">
                     {isOptional && (
@@ -279,9 +319,9 @@ export function PresetEditor({ script }: PresetEditorProps) {
                     )}
                     <Label className="text-xs">
                       <span className="font-medium">{param.name}</span>
-                      {param.required && <span className="text-destructive ml-0.5">*</span>}
+                      {param.required && <span className="ml-0.5 text-destructive">*</span>}
                       {param.longFlag && (
-                        <code className="text-muted-foreground ml-1.5 font-mono">{param.longFlag}</code>
+                        <code className="ml-1.5 font-mono text-[11px] text-faint">{param.longFlag}</code>
                       )}
                     </Label>
                   </div>
@@ -289,7 +329,7 @@ export function PresetEditor({ script }: PresetEditorProps) {
                   {isEnabled && (
                     <div className={isOptional ? 'pl-6' : ''}>
                       {param.paramType === 'bool' ? (
-                        <div className="flex items-center h-8">
+                        <div className="flex h-8 items-center">
                           <Switch
                             checked={presetValues[param.name] === 'true'}
                             onCheckedChange={(v) =>
@@ -302,8 +342,8 @@ export function PresetEditor({ script }: PresetEditorProps) {
                           value={presetValues[param.name] || ''}
                           onValueChange={(v) => setPresetValues((prev) => ({ ...prev, [param.name]: v }))}
                         >
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue placeholder="Select..." />
+                          <SelectTrigger size="sm" className="w-full text-xs">
+                            <SelectValue placeholder="Select…" />
                           </SelectTrigger>
                           <SelectContent>
                             {param.enumValues.map((v) => (
@@ -320,7 +360,7 @@ export function PresetEditor({ script }: PresetEditorProps) {
                             setPresetValues((prev) => ({ ...prev, [param.name]: e.target.value }))
                           }
                           placeholder={param.defaultValue || ''}
-                          className="h-8 text-xs font-mono"
+                          className="h-8 font-mono text-xs"
                         />
                       )}
                     </div>
@@ -330,7 +370,7 @@ export function PresetEditor({ script }: PresetEditorProps) {
             })}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowPresetForm(false)}>
+            <Button variant="ghost" onClick={() => setShowPresetForm(false)}>
               Cancel
             </Button>
             <Button onClick={handleSavePreset}>

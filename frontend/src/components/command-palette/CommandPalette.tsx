@@ -154,8 +154,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         onValueChange={setQuery}
       />
       {activeScope && (
-        <div className="border-b px-3 py-1.5 text-xs text-muted-foreground">
-          Filtered by scope: <span className="text-foreground font-medium">@{activeScope}</span>
+        <div className="border-b border-border bg-card/40 px-4 py-1.5 text-xs text-muted-foreground">
+          Filtered by scope: <span className="font-mono font-medium text-primary">@{activeScope}</span>
         </div>
       )}
       <CommandList>
@@ -177,16 +177,16 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     }}
                   >
                     {entity.icon}
-                    <div className="flex flex-col min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate">{entity.label}</span>
                       {entity.subtitle && (
-                        <span className="text-xs text-muted-foreground truncate">
+                        <span className="truncate text-xs text-faint">
                           {entity.subtitle}
                         </span>
                       )}
                     </div>
                     {entity.actions[0]?.label && (
-                      <span className="ml-auto text-xs text-muted-foreground">
+                      <span className="ml-auto shrink-0 text-xs text-faint">
                         {entity.actions[0].label}
                       </span>
                     )}
@@ -224,13 +224,13 @@ function ActionsPanel({
   onClose: () => void;
 }) {
   return (
-    <div className="border-t bg-muted/30 px-2 py-2 max-h-64 overflow-y-auto">
-      <div className="flex items-center justify-between px-2 py-1 text-xs text-muted-foreground">
-        <span>Actions for {entity.label}</span>
+    <div className="max-h-64 overflow-y-auto border-t border-border bg-card/40 px-2 py-2">
+      <div className="flex items-center justify-between px-2.5 py-1">
+        <span className="eyebrow truncate">Actions for {entity.label}</span>
         <button
           type="button"
           onClick={onClose}
-          className="hover:text-foreground"
+          className="text-xs text-muted-foreground hover:text-foreground"
         >
           Close
         </button>
@@ -241,7 +241,7 @@ function ActionsPanel({
             key={action.id}
             type="button"
             onClick={() => onPick(action)}
-            className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground"
+            className="flex items-center gap-2.5 rounded-[calc(var(--radius-sm)-2px)] px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground [&_svg]:size-4 [&_svg]:text-muted-foreground"
           >
             {action.icon}
             <span className="flex-1 truncate">{action.label}</span>
@@ -261,20 +261,20 @@ function Footer({
   hasActions: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
-      <div className="flex items-center gap-2">
-        <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground">↵</kbd>
+    <div className="flex items-center justify-between gap-3 border-t border-border bg-card/40 px-4 py-2 text-xs text-faint">
+      <div className="flex items-center gap-1.5">
+        <kbd className="kbd">↵</kbd>
         <span>{primaryLabel ?? 'Select'}</span>
       </div>
       <div className="flex items-center gap-3">
         {hasActions && (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <Kbd shortcut={SHORTCUTS.toggleActions} />
             <span>Actions</span>
           </div>
         )}
-        <div className="flex items-center gap-1">
-          <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground">Esc</kbd>
+        <div className="flex items-center gap-1.5">
+          <kbd className="kbd">Esc</kbd>
           <span>Close</span>
         </div>
       </div>
@@ -287,10 +287,7 @@ function Kbd({ shortcut }: { shortcut: import('./types').KeyBinding }) {
   return (
     <span className="inline-flex items-center gap-0.5">
       {parts.map((p, i) => (
-        <kbd
-          key={i}
-          className="px-1 py-0.5 rounded border bg-muted text-foreground text-[10px]"
-        >
+        <kbd key={i} className="kbd">
           {p}
         </kbd>
       ))}

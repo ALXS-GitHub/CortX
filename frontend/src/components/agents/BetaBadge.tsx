@@ -1,17 +1,15 @@
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
+/** Tiny accent pill flagging a section still in beta. */
 export function BetaBadge({ className }: { className?: string }) {
   return (
-    <Badge
-      variant="outline"
+    <span
       className={cn(
-        'h-4 px-1.5 text-[10px] font-semibold uppercase tracking-wide',
-        'border-violet-500/50 text-violet-600 dark:text-violet-400',
+        'inline-flex h-4 shrink-0 items-center rounded-full border border-accent-border bg-accent px-1.5 text-[10px] font-semibold uppercase leading-none tracking-wide text-primary',
         className,
       )}
     >
       beta
-    </Badge>
+    </span>
   );
 }

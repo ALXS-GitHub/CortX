@@ -358,9 +358,9 @@ export function entropyBits(options: GeneratorOptions): number {
 }
 
 export function entropyLabel(bits: number): { label: string; className: string } {
-  if (bits >= 128) return { label: 'Excellent', className: 'text-emerald-500' };
-  if (bits >= 80) return { label: 'Strong', className: 'text-emerald-500' };
-  if (bits >= 60) return { label: 'Good', className: 'text-amber-500' };
-  if (bits >= 40) return { label: 'Weak', className: 'text-orange-500' };
-  return { label: 'Very weak', className: 'text-red-500' };
+  if (bits >= 128) return { label: 'Excellent', className: 'text-st-done' };
+  if (bits >= 80) return { label: 'Strong', className: 'text-st-done' };
+  if (bits >= 60) return { label: 'Good', className: 'text-st-progress' };
+  if (bits >= 40) return { label: 'Weak', className: 'text-warning' };
+  return { label: 'Very weak', className: 'text-destructive' };
 }

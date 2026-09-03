@@ -78,7 +78,7 @@ export function ComboboxInput({
       {open && filtered.length > 0 && (
         <div
           ref={dropdownRef}
-          className="absolute top-full left-0 z-50 mt-1 w-full max-h-[200px] overflow-y-auto bg-popover border rounded-md shadow-md p-1"
+          className="glass-strong absolute top-full left-0 z-50 mt-1.5 max-h-[200px] w-full overflow-y-auto rounded-[var(--rad-menu)] border border-[var(--panel-border)] p-1.5 shadow-pop"
         >
           {filtered.map((opt) => (
             <button

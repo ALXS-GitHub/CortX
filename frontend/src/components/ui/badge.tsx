@@ -4,17 +4,32 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Halcyon pill. `secondary` is the neutral default for counts and metadata;
+ * `default` is accent-tinted; use <Chip> (ui/Chip) for colour-coded labels.
+ */
 const badgeVariants = cva(
-  "h-5 gap-1 rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium transition-all has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&>svg]:size-3! inline-flex items-center justify-center w-fit whitespace-nowrap shrink-0 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive transition-colors overflow-hidden group/badge",
+  "inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-none transition-colors [&>svg]:size-3! [&>svg]:pointer-events-none group/badge",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
-        secondary: "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
-        destructive: "bg-destructive/10 [a]:hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 text-destructive dark:bg-destructive/20",
-        outline: "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
-        ghost: "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
-        link: "text-primary underline-offset-4 hover:underline",
+        default:
+          "border-accent-border bg-accent text-foreground",
+        secondary:
+          "border-transparent bg-secondary text-secondary-foreground",
+        destructive:
+          "border-[color-mix(in_srgb,var(--destructive)_36%,var(--border))] bg-destructive/12 text-destructive",
+        success:
+          "border-[color-mix(in_srgb,var(--success)_36%,var(--border))] bg-success/14 text-[color-mix(in_srgb,var(--success)_72%,var(--foreground))]",
+        warning:
+          "border-[color-mix(in_srgb,var(--warning)_36%,var(--border))] bg-warning/14 text-[color-mix(in_srgb,var(--warning)_72%,var(--foreground))]",
+        info:
+          "border-[color-mix(in_srgb,var(--info)_36%,var(--border))] bg-info/14 text-[color-mix(in_srgb,var(--info)_72%,var(--foreground))]",
+        outline:
+          "border-border-strong bg-transparent text-muted-foreground",
+        ghost:
+          "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
+        link: "border-transparent text-primary underline-offset-4 hover:underline",
       },
     },
     defaultVariants: {

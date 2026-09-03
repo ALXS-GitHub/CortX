@@ -1,36 +1,22 @@
-import { Badge } from '@/components/ui/badge';
+import { Chip } from '@/components/ui/Chip';
 import type { TagDefinition } from '@/types';
 
 interface TagBadgeProps {
   tag: string;
   tagDefinitions?: TagDefinition[];
   className?: string;
+  onRemove?: () => void;
 }
 
-export function TagBadge({ tag, tagDefinitions, className }: TagBadgeProps) {
+/** Tag as a colour-coded chip (colour comes from the tag definitions). */
+export function TagBadge({ tag, tagDefinitions, className, onRemove }: TagBadgeProps) {
   const def = tagDefinitions?.find(
     (d) => d.name.toLowerCase() === tag.toLowerCase()
   );
 
-  if (def?.color) {
-    return (
-      <Badge
-        variant="outline"
-        className={className}
-        style={{
-          borderColor: def.color,
-          color: def.color,
-          backgroundColor: `${def.color}10`,
-        }}
-      >
-        {tag}
-      </Badge>
-    );
-  }
-
   return (
-    <Badge variant="outline" className={className}>
+    <Chip color={def?.color} neutral={!def?.color} dot={false} className={className} onRemove={onRemove}>
       {tag}
-    </Badge>
+    </Chip>
   );
 }

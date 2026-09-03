@@ -10,13 +10,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
+import { TagBadge } from '@/components/ui/TagBadge';
 import { Textarea } from '@/components/ui/textarea';
 import { useAppStore } from '@/stores/appStore';
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@/types';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ComboboxInput } from '@/components/ui/combobox-input';
-import { FolderOpen, X } from 'lucide-react';
+import { FolderOpen } from 'lucide-react';
 
 interface ProjectFormProps {
   open: boolean;
@@ -24,6 +24,8 @@ interface ProjectFormProps {
   project?: Project;
   onSubmit: (data: CreateProjectInput | UpdateProjectInput) => Promise<void>;
 }
+
+const LABEL = 'text-xs font-medium text-muted-foreground';
 
 export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: ProjectFormProps) {
   const { tagDefinitions, statusDefinitions } = useAppStore();
@@ -90,9 +92,6 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
     : tagDefinitions.filter(
         (d) => !tags.some((t) => t.toLowerCase() === d.name.toLowerCase())
       );
-
-  const getTagDef = (tag: string) =>
-    tagDefinitions.find((d) => d.name.toLowerCase() === tag.toLowerCase());
 
   const handleBrowse = async () => {
     try {
@@ -166,9 +165,9 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-5">
           <DialogHeader>
-            <DialogTitle>{isEditing ? 'Edit Project' : 'Add New Project'}</DialogTitle>
+            <DialogTitle>{isEditing ? 'Edit project' : 'Add new project'}</DialogTitle>
             <DialogDescription>
               {isEditing
                 ? 'Update your project details below.'
@@ -176,9 +175,9 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
+          <div className="-mx-6 min-h-0 flex-1 space-y-4 overflow-y-auto px-6">
             <div className="grid gap-2">
-              <Label htmlFor="name">Project Name *</Label>
+              <Label htmlFor="name" className={LABEL}>Project name *</Label>
               <Input
                 id="name"
                 value={name}
@@ -189,24 +188,24 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
 
             {!isEditing && (
               <div className="grid gap-2">
-                <Label htmlFor="path">Project Path *</Label>
+                <Label htmlFor="path" className={LABEL}>Project path *</Label>
                 <div className="flex gap-2">
                   <Input
                     id="path"
                     value={rootPath}
                     onChange={(e) => setRootPath(e.target.value)}
                     placeholder="C:\Projects\my-project"
-                    className="flex-1"
+                    className="flex-1 font-mono text-[12px]"
                   />
-                  <Button type="button" variant="outline" onClick={handleBrowse}>
-                    <FolderOpen className="size-4" />
+                  <Button type="button" variant="outline" size="icon" onClick={handleBrowse} aria-label="Browse">
+                    <FolderOpen />
                   </Button>
                 </div>
               </div>
             )}
 
             <div className="grid gap-2">
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description" className={LABEL}>Description</Label>
               <Textarea
                 id="description"
                 value={description}
@@ -216,59 +215,42 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
               />
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="proj-status">Status</Label>
-              <ComboboxInput
-                id="proj-status"
-                value={status}
-                onChange={setStatus}
-                options={statusDefinitions.map((d) => d.name)}
-                placeholder="e.g., Active, In Progress"
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="proj-status" className={LABEL}>Status</Label>
+                <ComboboxInput
+                  id="proj-status"
+                  value={status}
+                  onChange={setStatus}
+                  options={statusDefinitions.map((d) => d.name)}
+                  placeholder="e.g., Active, In Progress"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="proj-toolbox-url" className={LABEL}>Toolbox URL</Label>
+                <Input
+                  id="proj-toolbox-url"
+                  value={toolboxUrl}
+                  onChange={(e) => setToolboxUrl(e.target.value)}
+                  placeholder="https://toolbox.example.com/…"
+                  className="font-mono text-[12px]"
+                />
+              </div>
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="proj-toolbox-url">Toolbox URL</Label>
-              <Input
-                id="proj-toolbox-url"
-                value={toolboxUrl}
-                onChange={(e) => setToolboxUrl(e.target.value)}
-                placeholder="https://toolbox.example.com/projects/..."
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="proj-tags">Tags</Label>
+              <Label htmlFor="proj-tags" className={LABEL}>Tags</Label>
               <div className="relative">
-                <div className="flex flex-wrap gap-1 items-center border rounded-md px-2 py-1.5 min-h-[36px] focus-within:ring-1 focus-within:ring-ring">
-                  {tags.map((tag) => {
-                    const def = getTagDef(tag);
-                    return (
-                      <Badge
-                        key={tag}
-                        variant="outline"
-                        className="text-xs gap-1 py-0"
-                        style={
-                          def?.color
-                            ? {
-                                borderColor: def.color,
-                                color: def.color,
-                                backgroundColor: `${def.color}10`,
-                              }
-                            : undefined
-                        }
-                      >
-                        {tag}
-                        <button
-                          type="button"
-                          onClick={() => removeTag(tag)}
-                          className="hover:bg-muted rounded-sm p-0.5"
-                        >
-                          <X className="size-2.5" />
-                        </button>
-                      </Badge>
-                    );
-                  })}
+                <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-sm border border-input bg-[var(--bg-input)] px-2 py-1.5 shadow-soft transition-[border-color,box-shadow] focus-within:border-accent-border focus-within:ring-2 focus-within:ring-ring/40">
+                  {tags.map((tag) => (
+                    <TagBadge
+                      key={tag}
+                      tag={tag}
+                      tagDefinitions={tagDefinitions}
+                      onRemove={() => removeTag(tag)}
+                    />
+                  ))}
                   <input
                     ref={tagInputRef}
                     id="proj-tags"
@@ -283,27 +265,25 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
                     }}
                     onKeyDown={handleTagInputKeyDown}
                     placeholder={tags.length === 0 ? 'Type to add tags...' : ''}
-                    className="flex-1 min-w-[80px] bg-transparent outline-none text-sm"
+                    className="min-w-[80px] flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
                   />
                 </div>
                 {showTagSuggestions && tagSuggestions.length > 0 && (
-                  <div className="absolute z-10 top-full mt-1 w-full bg-popover border rounded-md shadow-md max-h-32 overflow-y-auto">
+                  <div className="glass-strong absolute top-full z-10 mt-1 max-h-32 w-full overflow-y-auto rounded-sm border border-border-strong p-1 shadow-pop">
                     {tagSuggestions.map((def) => (
                       <button
                         key={def.name}
                         type="button"
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted text-left"
+                        className="flex w-full items-center gap-2 rounded-xs px-2 py-1.5 text-left text-sm hover:bg-accent"
                         onMouseDown={(e) => {
                           e.preventDefault();
                           addTag(def.name);
                         }}
                       >
-                        {def.color && (
-                          <span
-                            className="size-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: def.color }}
-                          />
-                        )}
+                        <span
+                          className="size-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: def.color || 'var(--text-faint)' }}
+                        />
                         {def.name}
                       </button>
                     ))}
@@ -320,14 +300,14 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
           <DialogFooter>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               onClick={() => onOpenChange(false)}
               disabled={isSubmitting}
             >
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Add Project'}
+              {isSubmitting ? 'Saving...' : isEditing ? 'Save changes' : 'Add project'}
             </Button>
           </DialogFooter>
         </form>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { ScriptItem } from './ScriptItem';
 import { ScriptForm } from './ScriptForm';
 import type { Project, Script, CreateScriptInput, UpdateScriptInput } from '@/types';
@@ -12,12 +13,14 @@ interface ScriptsTabProps {
 }
 
 export function ScriptsTab({ project }: ScriptsTabProps) {
-  const { addScript, updateScript, deleteScript } = useAppStore();
+  const { addScript, updateScript, deleteScript, scriptRuntimes } = useAppStore();
   const [formOpen, setFormOpen] = useState(false);
   const [editingScript, setEditingScript] = useState<Script | undefined>();
 
   const scripts = project.scripts || [];
   const services = project.services || [];
+  const total = scripts.length;
+  const running = scripts.filter((s) => scriptRuntimes.get(s.id)?.status === 'running').length;
 
   const handleAdd = () => {
     setEditingScript(undefined);
@@ -48,61 +51,54 @@ export function ScriptsTab({ project }: ScriptsTabProps) {
     }
   };
 
-  if (scripts.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="rounded-full bg-muted p-4 mb-4">
-          <FileCode className="size-8 text-muted-foreground" />
-        </div>
-        <h3 className="text-lg font-semibold mb-1">No scripts yet</h3>
-        <p className="text-sm text-muted-foreground mb-4 max-w-sm">
-          Add scripts for common tasks like builds, tests, or deployments.
-        </p>
-        <Button onClick={handleAdd}>
-          <Plus className="size-4 mr-2" />
-          Add Script
-        </Button>
-
-        <ScriptForm
-          open={formOpen}
-          onOpenChange={setFormOpen}
-          script={editingScript}
-          services={services}
-          projectPath={project.rootPath}
-          onSubmit={handleSubmit}
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Scripts</h2>
-          <p className="text-sm text-muted-foreground">
-            Run builds, tests, deployments, and other tasks
+          <h2 className="font-display text-base font-semibold">Scripts</h2>
+          <p className="text-xs text-muted-foreground">
+            {total === 0
+              ? 'Builds, tests, deployments and other one-off tasks'
+              : `${total} script${total !== 1 ? 's' : ''}${running > 0 ? ` · ${running} running` : ''}`}
           </p>
         </div>
-        <Button onClick={handleAdd}>
-          <Plus className="size-4 mr-2" />
-          Add Script
+        <Button size="sm" variant={total === 0 ? 'default' : 'outline'} onClick={handleAdd}>
+          <Plus className="size-4" />
+          Add script
         </Button>
       </div>
 
-      <div className="space-y-2">
-        {scripts
-          .sort((a, b) => a.order - b.order)
-          .map((script) => (
-            <ScriptItem
-              key={script.id}
-              script={script}
-              services={services}
-              onEdit={() => handleEdit(script)}
-              onDelete={() => handleDelete(script)}
-            />
-          ))}
-      </div>
+      {total === 0 ? (
+        <div className="rounded-lg border border-dashed border-border-strong">
+          <EmptyState
+            compact
+            icon={FileCode}
+            title="No scripts yet"
+            description="Add scripts for common tasks like builds, tests, or deployments."
+            action={
+              <Button onClick={handleAdd}>
+                <Plus />
+                Add script
+              </Button>
+            }
+          />
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {scripts
+            .slice()
+            .sort((a, b) => a.order - b.order)
+            .map((script) => (
+              <ScriptItem
+                key={script.id}
+                script={script}
+                services={services}
+                onEdit={() => handleEdit(script)}
+                onDelete={() => handleDelete(script)}
+              />
+            ))}
+        </div>
+      )}
 
       <ScriptForm
         open={formOpen}

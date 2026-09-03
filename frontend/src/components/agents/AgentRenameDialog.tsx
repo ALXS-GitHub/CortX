@@ -53,8 +53,8 @@ function RenameForm({ session, onDone }: { session: AgentSession; onDone: () => 
         <DialogTitle>Rename session</DialogTitle>
         <DialogDescription>Only changes the name shown in CortX. Leave empty to use the provider's title.</DialogDescription>
       </DialogHeader>
-      <div className="grid gap-2">
-        <Label htmlFor="agent-rename">Name</Label>
+      <div className="space-y-1.5">
+        <Label htmlFor="agent-rename" className="text-xs font-medium text-muted-foreground">Name</Label>
         <Input
           id="agent-rename"
           value={name}
@@ -64,7 +64,7 @@ function RenameForm({ session, onDone }: { session: AgentSession; onDone: () => 
         />
       </div>
       <DialogFooter>
-        <Button variant="outline" onClick={onDone} disabled={saving}>Cancel</Button>
+        <Button variant="ghost" onClick={onDone} disabled={saving}>Cancel</Button>
         <Button onClick={() => void save()} disabled={saving}>Save</Button>
       </DialogFooter>
     </DialogContent>

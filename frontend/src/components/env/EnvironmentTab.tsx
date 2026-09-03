@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/EmptyState';
 import type { Project } from '@/types';
 import { EnvFileCard } from './EnvFileCard';
 import { AddEnvFileDialog } from './AddEnvFileDialog';
 import { RefreshCw, Plus, FileSearch, FolderOpen } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 interface EnvironmentTabProps {
@@ -78,13 +79,19 @@ export function EnvironmentTab({ project }: EnvironmentTabProps) {
     return a.localeCompare(b);
   });
 
+  const total = project.envFiles.length;
+  const variables = project.envFiles.reduce((n, f) => n + f.variables.length, 0);
+
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">Environment Files</h2>
-          <Badge variant="secondary">{project.envFiles.length}</Badge>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-display text-base font-semibold">Environment files</h2>
+          <p className="text-xs text-muted-foreground">
+            {total} file{total !== 1 ? 's' : ''} tracked
+            {total > 0 && ` · ${variables} variable${variables !== 1 ? 's' : ''}`}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -93,45 +100,51 @@ export function EnvironmentTab({ project }: EnvironmentTabProps) {
             onClick={handleRescan}
             disabled={isDiscoveringEnvFiles}
           >
-            <RefreshCw
-              className={`size-4 mr-2 ${isDiscoveringEnvFiles ? 'animate-spin' : ''}`}
-            />
+            <RefreshCw className={cn(isDiscoveringEnvFiles && 'animate-spin')} />
             Rescan
           </Button>
-          <Button size="sm" onClick={() => setIsAddDialogOpen(true)}>
-            <Plus className="size-4 mr-2" />
-            Add File
+          <Button size="sm" variant={total === 0 ? 'default' : 'outline'} onClick={() => setIsAddDialogOpen(true)}>
+            <Plus />
+            Add file
           </Button>
         </div>
       </div>
 
       {/* Content */}
-      {isDiscoveringEnvFiles && project.envFiles.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-          <FileSearch className="size-12 mb-4 animate-pulse" />
-          <p className="text-sm">Scanning for environment files...</p>
+      {isDiscoveringEnvFiles && total === 0 ? (
+        <div className="rounded-lg border border-dashed border-border-strong">
+          <EmptyState
+            compact
+            icon={FileSearch}
+            title="Scanning for environment files..."
+            description="Looking for .env files in the project tree."
+            className="[&_svg]:animate-pulse"
+          />
         </div>
-      ) : project.envFiles.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
-          <FolderOpen className="size-12 mb-4" />
-          <p className="text-sm mb-2">No environment files found</p>
-          <p className="text-xs mb-4">
-            Click "Rescan" to search again or "Add File" to manually add one
-          </p>
-          <Button variant="outline" size="sm" onClick={() => setIsAddDialogOpen(true)}>
-            <Plus className="size-4 mr-2" />
-            Add File Manually
-          </Button>
+      ) : total === 0 ? (
+        <div className="rounded-lg border border-dashed border-border-strong">
+          <EmptyState
+            compact
+            icon={FolderOpen}
+            title="No environment files found"
+            description='Click "Rescan" to search again or add a file manually.'
+            action={
+              <Button variant="outline" size="sm" onClick={() => setIsAddDialogOpen(true)}>
+                <Plus />
+                Add file manually
+              </Button>
+            }
+          />
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-5">
           {sortedDirs.map((dir) => (
             <div key={dir}>
               {/* Directory header */}
               {sortedDirs.length > 1 && (
-                <div className="flex items-center gap-2 mb-2">
-                  <FolderOpen className="size-4 text-muted-foreground" />
-                  <span className="text-sm font-medium text-muted-foreground font-mono">
+                <div className="mb-2 flex items-center gap-1.5">
+                  <FolderOpen className="size-3.5 text-faint" />
+                  <span className="eyebrow font-mono normal-case tracking-normal">
                     {dir === '.' ? 'Root' : dir}
                   </span>
                 </div>

@@ -12,17 +12,35 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Segmented } from '@/components/ui/Segmented';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { X, ChevronDown } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { ComboboxInput } from '@/components/ui/combobox-input';
+import { cn } from '@/lib/utils';
 import type { ShellAlias, Tool, TagDefinition, StatusDefinition, AliasType, CreateShellAliasInput, UpdateShellAliasInput } from '@/types';
 
 // Valid alias name: alphanumeric, hyphens, underscores, dots
 const ALIAS_NAME_REGEX = /^[a-zA-Z_][a-zA-Z0-9_\-\.]*$/;
 
 const SHELLS = ['powershell', 'bash', 'zsh', 'fish'] as const;
+const SHELL_LABELS: Record<string, string> = {
+  powershell: 'PowerShell',
+  bash: 'Bash',
+  zsh: 'Zsh',
+  fish: 'Fish',
+};
+
+const TYPE_OPTIONS: { value: AliasType; label: string }[] = [
+  { value: 'function', label: 'Function' },
+  { value: 'script', label: 'Script' },
+  { value: 'init', label: 'Init' },
+];
+
+const labelClass = 'text-xs font-medium text-muted-foreground';
+const hintClass = 'text-xs text-faint';
+const codeClass = 'rounded-xs bg-muted px-1 font-mono text-[11px] text-foreground/80';
 
 interface AliasFormProps {
   open: boolean;
@@ -256,10 +274,10 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
-        <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
-          <DialogHeader className="flex-shrink-0">
-            <DialogTitle>{isEditing ? 'Edit Shell Config' : 'Create Shell Config'}</DialogTitle>
+      <DialogContent className="sm:max-w-2xl">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-5">
+          <DialogHeader>
+            <DialogTitle>{isEditing ? 'Edit shell config' : 'Create shell config'}</DialogTitle>
             <DialogDescription>
               {isEditing
                 ? 'Update the shell config entry.'
@@ -267,270 +285,247 @@ export function AliasForm({ open, onOpenChange, alias, aliases, tools, tagDefini
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4 overflow-y-auto flex-1 px-1">
-            {/* Type selector */}
-            <div className="grid gap-2">
-              <Label>Type</Label>
-              <div className="flex gap-2">
-                {(['function', 'script', 'init'] as AliasType[]).map((t) => (
-                  <Button
-                    key={t}
-                    type="button"
-                    variant={aliasType === t ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setAliasType(t)}
-                  >
-                    {t === 'function' ? 'Function' : t === 'script' ? 'Script' : 'Init'}
-                  </Button>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {aliasType === 'function' && 'Wraps a command as a shell function — arguments are passed through automatically'}
-                {aliasType === 'script' && 'Raw per-shell code injected as-is — full control over function definition'}
-                {aliasType === 'init' && 'Evaluates command output (like `zoxide init`, `starship init`) — wrapped in eval/Invoke-Expression'}
-              </p>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="alias-name">Name *</Label>
-              <Input
-                id="alias-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., gs, ll, dcu"
-                className="font-mono"
-              />
-              <p className="text-xs text-muted-foreground">
-                The alias name used in your shell (e.g., typing <code className="bg-muted px-1 rounded">gs</code> instead of <code className="bg-muted px-1 rounded">git status</code>)
-              </p>
-            </div>
-
-            {/* Command field — only for function type */}
-            {aliasType === 'function' && (
-              <div className="grid gap-2">
-                <Label htmlFor="alias-command">Command *</Label>
-                <Textarea
-                  id="alias-command"
-                  value={command}
-                  onChange={(e) => setCommand(e.target.value)}
-                  placeholder="e.g., git status"
-                  rows={2}
-                  className="font-mono text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  The command that will be executed when the alias is invoked
-                </p>
-              </div>
-            )}
-
-            {/* Shim toggle — only meaningful for function aliases */}
-            {aliasType === 'function' && (
-              <div className="flex items-start justify-between gap-4 rounded-md border p-3">
-                <div className="grid gap-1">
-                  <Label htmlFor="alias-shim" className="cursor-pointer">Callable from anywhere (shim)</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Writes a real launcher file so this alias works in <strong>any</strong> process —
-                    agents, scheduled tasks, non-interactive shells — not just terminals that load
-                    <code className="bg-muted px-1 rounded mx-1">cortx init</code>. Requires the shim folder
-                    on your PATH (set up once in <strong>Settings → Shims</strong>).
-                  </p>
+          <div className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6">
+            <div className="space-y-4">
+              {/* Type selector */}
+              <div className="space-y-1.5">
+                <Label className={labelClass}>Type</Label>
+                <div>
+                  <Segmented<AliasType> value={aliasType} onChange={setAliasType} options={TYPE_OPTIONS} />
                 </div>
-                <Switch id="alias-shim" checked={shim} onCheckedChange={setShim} />
-              </div>
-            )}
-
-            {/* Per-shell script/init content — for script and init types */}
-            {aliasType !== 'function' && (
-              <div className="grid gap-2">
-                <Label>{aliasType === 'init' ? 'Init Command *' : 'Script *'}</Label>
-                <Tabs defaultValue="powershell">
-                  <TabsList className="h-8">
-                    {SHELLS.map((s) => (
-                      <TabsTrigger key={s} value={s} className="text-xs px-3">
-                        {s === 'powershell' ? 'PowerShell' : s === 'bash' ? 'Bash' : s === 'zsh' ? 'Zsh' : 'Fish'}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                  {SHELLS.map((s) => (
-                    <TabsContent key={s} value={s}>
-                      <Textarea
-                        value={script[s] || ''}
-                        onChange={(e) => updateScript(s, e.target.value)}
-                        placeholder={
-                          aliasType === 'init'
-                            ? `e.g., ${s === 'powershell' ? 'zoxide init powershell' : s === 'fish' ? 'zoxide init fish' : `zoxide init ${s}`}`
-                            : `${s === 'powershell' ? 'PowerShell' : s.charAt(0).toUpperCase() + s.slice(1)} script code...`
-                        }
-                        rows={4}
-                        className="font-mono text-sm"
-                      />
-                    </TabsContent>
-                  ))}
-                </Tabs>
-                <p className="text-xs text-muted-foreground">
-                  {aliasType === 'init'
-                    ? 'Command whose output will be evaluated (e.g., zoxide init, starship init)'
-                    : 'Raw shell code injected per shell — define functions, aliases, etc.'}
+                <p className={hintClass}>
+                  {aliasType === 'function' && 'Wraps a command as a shell function — arguments are passed through automatically.'}
+                  {aliasType === 'script' && 'Raw per-shell code injected as-is — full control over the function definition.'}
+                  {aliasType === 'init' && 'Evaluates the command output (like zoxide init, starship init) — wrapped in eval / Invoke-Expression.'}
                 </p>
               </div>
-            )}
 
-            {/* Setup section — collapsible, always available */}
-            <Collapsible open={setupOpen} onOpenChange={setSetupOpen}>
-              <CollapsibleTrigger asChild>
-                <Button type="button" variant="ghost" size="sm" className="flex items-center gap-1 w-full justify-start px-0 text-muted-foreground hover:text-foreground">
-                  <ChevronDown className={`size-4 transition-transform ${setupOpen ? '' : '-rotate-90'}`} />
-                  Setup Code (optional)
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <div className="grid gap-2 pt-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="alias-name" className={labelClass}>Name *</Label>
+                <Input
+                  id="alias-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g., gs, ll, dcu"
+                  className="font-mono"
+                />
+                <p className={hintClass}>
+                  The name used in your shell (e.g., typing <code className={codeClass}>gs</code> instead of <code className={codeClass}>git status</code>).
+                </p>
+              </div>
+
+              {/* Command field — only for function type */}
+              {aliasType === 'function' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="alias-command" className={labelClass}>Command *</Label>
+                  <Textarea
+                    id="alias-command"
+                    value={command}
+                    onChange={(e) => setCommand(e.target.value)}
+                    placeholder="e.g., git status"
+                    rows={2}
+                    className="font-mono text-[12px]"
+                  />
+                  <p className={hintClass}>The command executed when the alias is invoked.</p>
+                </div>
+              )}
+
+              {/* Shim toggle — only meaningful for function aliases */}
+              {aliasType === 'function' && (
+                <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-card/50 p-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="alias-shim" className="cursor-pointer text-sm">Callable from anywhere (shim)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Writes a real launcher file so this alias works in <strong>any</strong> process —
+                      agents, scheduled tasks, non-interactive shells — not just terminals that load
+                      <code className={cn(codeClass, 'mx-1')}>cortx init</code>. Requires the shim folder
+                      on your PATH (set up once in <strong>Settings → Shims</strong>).
+                    </p>
+                  </div>
+                  <Switch id="alias-shim" checked={shim} onCheckedChange={setShim} />
+                </div>
+              )}
+
+              {/* Per-shell script/init content — for script and init types */}
+              {aliasType !== 'function' && (
+                <div className="space-y-1.5">
+                  <Label className={labelClass}>{aliasType === 'init' ? 'Init command *' : 'Script *'}</Label>
                   <Tabs defaultValue="powershell">
-                    <TabsList className="h-8">
+                    <TabsList>
                       {SHELLS.map((s) => (
-                        <TabsTrigger key={s} value={s} className="text-xs px-3">
-                          {s === 'powershell' ? 'PowerShell' : s === 'bash' ? 'Bash' : s === 'zsh' ? 'Zsh' : 'Fish'}
+                        <TabsTrigger key={s} value={s}>
+                          {SHELL_LABELS[s]}
                         </TabsTrigger>
                       ))}
                     </TabsList>
                     {SHELLS.map((s) => (
                       <TabsContent key={s} value={s}>
                         <Textarea
-                          value={setup[s] || ''}
-                          onChange={(e) => updateSetup(s, e.target.value)}
-                          placeholder={`Setup code for ${s === 'powershell' ? 'PowerShell' : s}...`}
-                          rows={3}
-                          className="font-mono text-sm"
+                          value={script[s] || ''}
+                          onChange={(e) => updateScript(s, e.target.value)}
+                          placeholder={
+                            aliasType === 'init'
+                              ? `e.g., ${s === 'powershell' ? 'zoxide init powershell' : s === 'fish' ? 'zoxide init fish' : `zoxide init ${s}`}`
+                              : `${SHELL_LABELS[s]} script code…`
+                          }
+                          rows={4}
+                          className="font-mono text-[12px]"
                         />
                       </TabsContent>
                     ))}
                   </Tabs>
-                  <p className="text-xs text-muted-foreground">
-                    Code that runs before the alias definition (e.g., removing built-in aliases)
+                  <p className={hintClass}>
+                    {aliasType === 'init'
+                      ? 'Command whose output will be evaluated (e.g., zoxide init, starship init).'
+                      : 'Raw shell code injected per shell — define functions, aliases, etc.'}
                   </p>
                 </div>
-              </CollapsibleContent>
-            </Collapsible>
+              )}
 
-            <div className="grid gap-2">
-              <Label htmlFor="alias-description">Description</Label>
-              <Textarea
-                id="alias-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What does this alias do?"
-                rows={2}
-              />
-            </div>
-
-            {/* Tool selector */}
-            <div className="grid gap-2">
-              <Label htmlFor="alias-tool">Linked Tool</Label>
-              <ComboboxInput
-                id="alias-tool"
-                value={selectedToolName}
-                onChange={handleToolChange}
-                options={toolOptions}
-                placeholder="Select a tool..."
-              />
-              <p className="text-xs text-muted-foreground">
-                Link this alias to a tool — it will appear in the tool's detail page
-              </p>
-            </div>
-
-            {/* Execution Order */}
-            <div className="grid gap-2">
-              <Label htmlFor="alias-exec-order">Execution Order</Label>
-              <Input
-                id="alias-exec-order"
-                type="number"
-                min="0"
-                value={executionOrder}
-                onChange={(e) => setExecutionOrder(e.target.value)}
-                placeholder="None (default)"
-                className="w-32"
-              />
-              <p className="text-xs text-muted-foreground">
-                Controls position in <code className="bg-muted px-1 rounded">cortx init</code> output. Lower numbers run first. Leave empty to run after ordered aliases.
-              </p>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="alias-status">Status</Label>
-              <ComboboxInput
-                id="alias-status"
-                value={status}
-                onChange={setStatus}
-                options={statusDefinitions.map((d) => d.name)}
-                placeholder="e.g., Active, Archived"
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Tags</Label>
-              <div className="flex flex-wrap gap-1.5 p-2 border rounded-md min-h-[38px] focus-within:ring-2 focus-within:ring-ring">
-                {tags.map((tag) => (
-                  <span key={tag} className="flex items-center gap-1">
-                    <TagBadge tag={tag} tagDefinitions={tagDefinitions} />
-                    <button
-                      type="button"
-                      className="text-muted-foreground hover:text-foreground"
-                      onClick={() => removeTag(tag)}
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </span>
-                ))}
-                <div className="relative flex-1 min-w-[120px]">
-                  <input
-                    ref={tagInputRef}
-                    type="text"
-                    value={tagInput}
-                    onChange={(e) => {
-                      setTagInput(e.target.value);
-                      setShowTagSuggestions(true);
-                    }}
-                    onFocus={() => setShowTagSuggestions(true)}
-                    onKeyDown={handleTagInputKeyDown}
-                    placeholder={tags.length === 0 ? 'Add tags...' : ''}
-                    className="w-full bg-transparent border-none outline-none text-sm py-0.5"
-                  />
-                  {showTagSuggestions && tagSuggestions.length > 0 && (
-                    <div
-                      ref={suggestionsRef}
-                      className="absolute top-full left-0 z-50 mt-1 w-56 max-h-48 overflow-y-auto bg-popover border rounded-md shadow-md"
-                    >
-                      {tagSuggestions.map((suggestion) => (
-                        <button
-                          key={suggestion}
-                          type="button"
-                          className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted text-left cursor-pointer"
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            addTag(suggestion);
-                          }}
-                        >
-                          <TagBadge tag={suggestion} tagDefinitions={tagDefinitions} />
-                        </button>
+              {/* Setup section — collapsible, always available */}
+              <Collapsible open={setupOpen} onOpenChange={setSetupOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button type="button" variant="ghost" size="sm" className="-ml-2 text-muted-foreground hover:text-foreground">
+                    <ChevronDown className={cn('transition-transform', !setupOpen && '-rotate-90')} />
+                    Setup code (optional)
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="space-y-1.5 pt-2">
+                    <Tabs defaultValue="powershell">
+                      <TabsList>
+                        {SHELLS.map((s) => (
+                          <TabsTrigger key={s} value={s}>
+                            {SHELL_LABELS[s]}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                      {SHELLS.map((s) => (
+                        <TabsContent key={s} value={s}>
+                          <Textarea
+                            value={setup[s] || ''}
+                            onChange={(e) => updateSetup(s, e.target.value)}
+                            placeholder={`Setup code for ${SHELL_LABELS[s]}…`}
+                            rows={3}
+                            className="font-mono text-[12px]"
+                          />
+                        </TabsContent>
                       ))}
-                    </div>
-                  )}
+                    </Tabs>
+                    <p className={hintClass}>Code that runs before the alias definition (e.g., removing built-in aliases).</p>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="alias-description" className={labelClass}>Description</Label>
+                <Textarea
+                  id="alias-description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What does this alias do?"
+                  rows={2}
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* Tool selector */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="alias-tool" className={labelClass}>Linked tool</Label>
+                  <ComboboxInput
+                    id="alias-tool"
+                    value={selectedToolName}
+                    onChange={handleToolChange}
+                    options={toolOptions}
+                    placeholder="Select a tool…"
+                  />
+                  <p className={hintClass}>Shown on the tool's detail page.</p>
+                </div>
+
+                {/* Execution order */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="alias-exec-order" className={labelClass}>Execution order</Label>
+                  <Input
+                    id="alias-exec-order"
+                    type="number"
+                    min="0"
+                    value={executionOrder}
+                    onChange={(e) => setExecutionOrder(e.target.value)}
+                    placeholder="None (default)"
+                    className="font-mono"
+                  />
+                  <p className={hintClass}>
+                    Position in <code className={codeClass}>cortx init</code> output — lower runs first, empty runs after ordered aliases.
+                  </p>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Type and press Enter to add a tag, or select from suggestions
-              </p>
-            </div>
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
+              <div className="space-y-1.5">
+                <Label htmlFor="alias-status" className={labelClass}>Status</Label>
+                <ComboboxInput
+                  id="alias-status"
+                  value={status}
+                  onChange={setStatus}
+                  options={statusDefinitions.map((d) => d.name)}
+                  placeholder="e.g., Active, Archived"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className={labelClass}>Tags</Label>
+                <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-sm border border-input bg-[var(--bg-input)] px-2 py-1.5 shadow-soft transition-[border-color,box-shadow] focus-within:border-accent-border focus-within:ring-2 focus-within:ring-ring/40">
+                  {tags.map((tag) => (
+                    <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} onRemove={() => removeTag(tag)} />
+                  ))}
+                  <div className="relative min-w-[120px] flex-1">
+                    <input
+                      ref={tagInputRef}
+                      type="text"
+                      value={tagInput}
+                      onChange={(e) => {
+                        setTagInput(e.target.value);
+                        setShowTagSuggestions(true);
+                      }}
+                      onFocus={() => setShowTagSuggestions(true)}
+                      onKeyDown={handleTagInputKeyDown}
+                      placeholder={tags.length === 0 ? 'Add tags…' : ''}
+                      className="w-full border-none bg-transparent py-0.5 text-sm outline-none placeholder:text-faint"
+                    />
+                    {showTagSuggestions && tagSuggestions.length > 0 && (
+                      <div
+                        ref={suggestionsRef}
+                        className="glass-strong absolute left-0 top-full z-50 mt-1.5 max-h-48 w-56 overflow-y-auto rounded-sm border border-border-strong p-1 shadow-pop"
+                      >
+                        {tagSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion}
+                            type="button"
+                            className="flex w-full items-center gap-2 rounded-[calc(var(--radius-sm)-2px)] px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              addTag(suggestion);
+                            }}
+                          >
+                            <TagBadge tag={suggestion} tagDefinitions={tagDefinitions} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <p className={hintClass}>Type and press Enter to add a tag, or pick a suggestion.</p>
+              </div>
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+            </div>
           </div>
 
-          <DialogFooter className="flex-shrink-0 pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Create'}
+              {isSubmitting ? 'Saving…' : isEditing ? 'Save changes' : 'Create'}
             </Button>
           </DialogFooter>
         </form>

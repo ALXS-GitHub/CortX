@@ -1,7 +1,16 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "@fontsource-variable/outfit";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource-variable/inter";
+
+/* Themes ("skins"). Each file defines the full token set for light + dark;
+   see styles/tokens.md. Halcyon is the default, Classic is selected with
+   data-skin="classic" on <html> (Settings → Appearance). */
+@import "./styles/theme-halcyon.css";
+@import "./styles/theme-classic.css";
 
 /* Streamdown (markdown renderer used by the Agents transcript) ships Tailwind classes. */
 @source "../node_modules/streamdown/dist/*.js";
@@ -13,233 +22,381 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.93 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.93 0 0);
-  --muted-foreground: oklch(0.5 0 0);
-  --accent: oklch(0.92 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.58 0.22 27);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.809 0.105 251.813);
-  --chart-2: oklch(0.623 0.214 259.815);
-  --chart-3: oklch(0.546 0.245 262.881);
-  --chart-4: oklch(0.488 0.243 264.376);
-  --chart-5: oklch(0.424 0.199 265.638);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.92 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+
+  /* Layout metrics shared between the shell pieces */
+  --titlebar-h: 2.25rem;
+  --scrollbar-thumb: color-mix(in srgb, var(--text-faint) 40%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--text-faint) 65%, transparent);
 }
 
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
+/* ----- Font family (setting, resolved through data-font on <html>) ----- */
+:root[data-font="system"] {
+  --font-display: -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
+}
+:root[data-font="mono"] {
+  --font-display: var(--font-mono-stack);
+  --font-sans: var(--font-mono-stack);
+}
+:root:not([data-font]),
+:root[data-font="halcyon"] {
+  --font-display: var(--font-display-stack);
+  --font-sans: var(--font-sans-stack);
 }
 
-#root {
-  min-height: 100vh;
+/* Expose the tokens to Tailwind (bg-background, text-primary, rounded-lg,
+   shadow-soft, font-display, …). Only the mapping lives here: the values
+   come from the active theme file. */
+@theme inline {
+  --radius-xs: var(--rad-xs);
+  --radius-sm: var(--rad-sm);
+  --radius-md: var(--rad-md);
+  --radius-lg: var(--rad-lg);
+  --radius-xl: var(--rad-xl);
+  --radius-2xl: var(--rad-2xl);
+  --radius-3xl: calc(var(--rad-2xl) + 4px);
+  --radius-4xl: calc(var(--rad-2xl) + 8px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-faint: var(--text-faint);
+  --color-accent-border: var(--accent-border);
+  --color-terminal: var(--bg-terminal);
+
+  --color-st-open: var(--st-open);
+  --color-st-progress: var(--st-progress);
+  --color-st-blocked: var(--st-blocked);
+  --color-st-done: var(--st-done);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono-stack);
+
+  --shadow-soft: var(--elev-soft);
+  --shadow-pop: var(--elev-pop);
 }
 
-/* Custom window styling */
-html {
-  border-radius: 8px;
-  overflow: hidden;
+@layer base {
+  * {
+    border-color: var(--color-border);
+    outline-color: color-mix(in srgb, var(--ring) 50%, transparent);
+  }
+  html {
+    height: 100%;
+    font-family: var(--font-sans);
+    /* Custom window chrome (Tauri): rounded corners, no document scroll */
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    overflow: hidden;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: var(--body-size);
+    overscroll-behavior: none;
+    /* Canvas washes (Halcyon) / none (Classic) */
+    background-image: var(--canvas-wash);
+    background-attachment: fixed;
+  }
+  #root {
+    min-height: 100vh;
+    overflow: hidden;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 30%, transparent);
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: var(--display-tracking);
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--font-mono-stack);
+  }
+
+  /* Discreet scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
 }
 
-/* Title bar no-drag for interactive elements */
+/* Title bar: interactive elements must not drag the window */
 [data-tauri-drag-region] button,
 [data-tauri-drag-region] a,
 [data-tauri-drag-region] input {
   -webkit-app-region: no-drag;
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.87 0.00 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.371 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.809 0.105 251.813);
-  --chart-2: oklch(0.623 0.214 259.815);
-  --chart-3: oklch(0.546 0.245 262.881);
-  --chart-4: oklch(0.488 0.243 264.376);
-  --chart-5: oklch(0.424 0.199 265.638);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
-
-@theme inline {
-  --font-sans: 'Inter Variable', sans-serif;
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-foreground: var(--foreground);
-  --color-background: var(--background);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
-  --radius-4xl: calc(var(--radius) + 16px);
-}
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
+@layer utilities {
+  .shadow-soft {
+    box-shadow: var(--elev-soft);
   }
-  body {
-    @apply font-sans bg-background text-foreground;
+  .shadow-pop {
+    box-shadow: var(--elev-pop);
   }
-  html {
-    @apply font-sans;
+  .font-display {
+    font-family: var(--font-display);
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+
+  /* Frosted glass (sidebar, title bar, dialogs, popovers, toasts).
+     Opaque when the theme sets the blur to 0. */
+  .glass {
+    background: var(--bg-sidebar);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+  .glass-strong {
+    background: var(--bg-glass);
+    -webkit-backdrop-filter: blur(var(--glass-strong-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-strong-blur)) saturate(var(--glass-saturate));
+  }
+  /* Card that lifts on hover (clickable cards) */
+  .lift {
+    transition: transform 0.08s, box-shadow 0.14s, border-color 0.13s;
+  }
+  .lift:hover {
+    transform: translateY(var(--lift-y));
+    box-shadow: var(--elev-pop);
+  }
+  /* Section eyebrow (sidebar groups, settings sections) */
+  .eyebrow {
+    font-size: var(--eyebrow-size);
+    font-weight: 600;
+    text-transform: var(--eyebrow-transform);
+    letter-spacing: var(--eyebrow-tracking);
+    color: var(--text-faint);
+  }
+
+  @keyframes halcyon-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.99);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes halcyon-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes halcyon-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc, var(--primary)) 55%, transparent);
+    }
+    70% {
+      box-shadow: 0 0 0 5px transparent;
+    }
+  }
+  .animate-in-soft {
+    animation: halcyon-in 0.2s cubic-bezier(0.3, 0.8, 0.4, 1);
+  }
+  .animate-fade-soft {
+    animation: halcyon-fade 0.15s ease-out;
   }
 }
 
-/* Custom Scrollbar - Minimal, overlay style */
-:root {
-  --scrollbar-thumb: oklch(0.7 0 0 / 30%);
-  --scrollbar-thumb-hover: oklch(0.5 0 0 / 50%);
-}
+/* ============================================================
+   Shared components — chips, status dots, kbd. Driven by the tokens.
+   ============================================================ */
 
-.dark {
-  --scrollbar-thumb: oklch(0.5 0 0 / 30%);
-  --scrollbar-thumb-hover: oklch(0.7 0 0 / 50%);
+/* --- Chip (tag / status / label): pill tinted by its colour --- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+  border-radius: var(--chip-radius);
+  white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--chip-color, var(--primary)) var(--chip-border-mix), var(--border));
+  background: color-mix(in srgb, var(--chip-color, var(--primary)) var(--chip-bg-mix), transparent);
+  color: color-mix(in srgb, var(--chip-color, var(--primary)) var(--chip-text-mix), var(--foreground));
 }
-
-/* Firefox scrollbar */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+.chip-neutral {
+  --chip-color: var(--text-faint);
 }
-
-/* Webkit scrollbar (Chrome, Safari, Edge, Tauri) */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.chip-dot {
+  display: var(--chip-dot);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chip-color, var(--primary));
+  flex: none;
 }
-
-::-webkit-scrollbar-track {
+.chip-x {
+  display: inline-grid;
+  place-items: center;
+  border: 0;
   background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
-}
-
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-/* Hide scrollbar arrows */
-::-webkit-scrollbar-button {
-  display: none;
-  width: 0;
-  height: 0;
-}
-
-/* Overlay scrollbar - doesn't take layout space */
-.overlay-scroll {
-  overflow: overlay;
-}
-
-/* Apply overlay scroll to main scrollable areas */
-html {
-  overflow: overlay;
-}
-
-body, #root {
-  overflow: hidden;
-}
-
-/* Terminal clickable links */
-.terminal-link {
-  color: #569cd6;
-  text-decoration: underline;
+  color: inherit;
+  opacity: 0.65;
+  padding: 0;
+  margin-right: -3px;
   cursor: pointer;
 }
-
-.terminal-link:hover {
-  color: #7cb3f0;
+.chip-x:hover {
+  opacity: 1;
 }
-/* Integrated terminal (xterm.js). The session container is re-parented between
-   panes; give it the full pane and a little breathing room around the grid. */
+
+/* --- Status dot (services, scripts, agents, terminals) --- */
+.sdot {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--sc, var(--text-faint));
+  background: var(--dot-idle-fill);
+  flex: none;
+}
+.sdot.fill {
+  background: var(--sc, var(--text-faint));
+  border-color: transparent;
+}
+.sdot.half {
+  background: conic-gradient(var(--sc) 0 50%, transparent 50% 100%);
+}
+.sdot.live {
+  background: var(--sc, var(--primary));
+  border-color: transparent;
+  animation: halcyon-pulse 1.8s ease-out infinite;
+}
+
+/* --- Keyboard hint --- */
+.kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-family: var(--font-mono-stack);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--muted-foreground);
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--text-faint) 12%, transparent);
+}
+
+/* ============================================================
+   Integrated terminal (xterm.js). The session container is re-parented
+   between panes; give it the full pane and a little breathing room. The
+   canvas colour follows the theme (`--bg-terminal`); the xterm palette is
+   rebuilt when the `dark` class changes.
+   ============================================================ */
+.terminal-dock {
+  background: var(--bg-terminal);
+}
 .cortx-xterm {
   height: 100%;
   width: 100%;
-  padding: 4px 0 0 6px;
+  padding: 6px 0 0 8px;
   box-sizing: border-box;
+  background: var(--bg-terminal);
 }
 .cortx-xterm .xterm {
   height: 100%;
 }
 .cortx-xterm .xterm .xterm-viewport {
   scrollbar-width: thin;
+}
+
+/* Terminal clickable links (legacy log view) */
+.terminal-link {
+  color: var(--st-open);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

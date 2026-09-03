@@ -1,41 +1,18 @@
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Play, Square, MoreVertical, FileCode, Circle, Pencil, Trash2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useAppStore } from '@/stores/appStore';
+import { Card } from '@/components/ui/card';
+import { StatusBadge } from '@/components/ui/StatusBadge';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
-import type { GlobalScript, ScriptStatus } from '@/types';
+import { cn, formatCommandDisplay } from '@/lib/utils';
+import { useAppStore } from '@/stores/appStore';
+import {
+  ScriptGlyph,
+  ScriptMenu,
+  ScriptRunBadge,
+  ScriptRunButton,
+  type GlobalScriptCardProps,
+} from './GlobalScriptCard';
 
-interface GlobalScriptCardProps {
-  script: GlobalScript;
-  status: ScriptStatus;
-  onRun: () => void;
-  onStop: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onClick: () => void;
-  onToggleFavorite: () => void;
-}
-
-function StatusBadge({ status }: { status: ScriptStatus }) {
-  switch (status) {
-    case 'running':
-      return <Badge variant="secondary" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs">Running</Badge>;
-    case 'completed':
-      return <Badge variant="secondary" className="bg-green-500/10 text-green-600 dark:text-green-400 text-xs">Done</Badge>;
-    case 'failed':
-      return <Badge variant="secondary" className="bg-red-500/10 text-red-600 dark:text-red-400 text-xs">Failed</Badge>;
-    default:
-      return null;
-  }
-}
-
+/** Card (the "card" view mode). */
 export function GlobalScriptCardView({
   script,
   status,
@@ -50,86 +27,59 @@ export function GlobalScriptCardView({
   const isRunning = status === 'running';
 
   return (
-    <Card className="group cursor-pointer hover:border-primary/50 transition-colors h-full flex flex-col" onClick={onClick}>
-      <CardHeader className="pb-2 px-4 pt-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="relative flex-shrink-0">
-              <FileCode className="size-5" style={{ color: script.color || '#6b7280' }} />
-              {isRunning && (
-                <Circle className="absolute -top-1 -right-1 size-2 fill-blue-500 text-blue-500 animate-pulse" />
-              )}
+    <Card
+      interactive
+      size="sm"
+      className={cn('group h-full gap-3', isRunning && 'border-accent-border')}
+      onClick={onClick}
+    >
+      <div className="flex items-start gap-3 px-4">
+        <ScriptGlyph color={script.color} status={status} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="truncate font-display text-[15px] font-semibold tracking-tight">{script.name}</h3>
+            <StatusBadge status={script.status} className="shrink-0" />
+          </div>
+          {script.description ? (
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{script.description}</p>
+          ) : (
+            <p className="mt-0.5 truncate font-mono text-[11px] text-faint" title={script.command}>
+              {formatCommandDisplay(script.command, script.scriptPath)}
+            </p>
+          )}
+        </div>
+        <FavoriteButton favorite={script.favorite} onToggle={onToggleFavorite} />
+        <ScriptMenu onEdit={onEdit} onDelete={onDelete} className="opacity-0 transition-opacity group-hover:opacity-100" />
+      </div>
+
+      {(script.description || script.tags.length > 0) && (
+        <div className="flex flex-col gap-2 px-4">
+          {script.description && (
+            <p className="truncate font-mono text-[11px] text-faint" title={script.command}>
+              {formatCommandDisplay(script.command, script.scriptPath)}
+            </p>
+          )}
+          {script.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {script.tags.map((tag) => (
+                <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
+              ))}
             </div>
-            <h3 className="font-medium truncate">{script.name}</h3>
-          </div>
-          <FavoriteButton
-            favorite={script.favorite}
-            onToggle={onToggleFavorite}
-            className="flex-shrink-0 ml-auto"
-          />
-          <div
-            className={cn('opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0')}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-7">
-                  <MoreVertical className="size-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={onEdit}>
-                  <Pencil className="size-4 mr-2" />Edit
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={onDelete} className="text-destructive">
-                  <Trash2 className="size-4 mr-2" />Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          )}
         </div>
-      </CardHeader>
+      )}
 
-      <CardContent className="px-4 pb-2 pt-0 flex-1 flex flex-col">
-        {script.description && (
-          <p className="text-sm text-muted-foreground line-clamp-2">{script.description}</p>
-        )}
-        <div className="mt-2 text-xs text-muted-foreground font-mono truncate">
-          {script.command}
-        </div>
-        {script.tags.length > 0 && (
-          <div className="mt-auto pt-3 flex items-center gap-1.5 flex-wrap">
-            {script.tags.map((tag) => (
-              <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} className="text-xs py-0" />
-            ))}
-          </div>
-        )}
-      </CardContent>
-
-      <CardFooter className="px-4 pb-4 pt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-        {isRunning ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="outline" size="sm" className="w-full" onClick={onStop}>
-                <Square className="size-3.5 mr-1.5" />
-                Stop
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Stop script</TooltipContent>
-          </Tooltip>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="outline" size="sm" className="w-full" onClick={onRun}>
-                <Play className="size-3.5 mr-1.5" />
-                Run
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Run script</TooltipContent>
-          </Tooltip>
-        )}
-        <StatusBadge status={status} />
-      </CardFooter>
+      <div className="mt-auto flex items-center gap-2 border-t border-border px-4 pt-3">
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <ScriptRunBadge status={status} />
+          {status === 'idle' && (
+            <span className="truncate font-mono text-[11px] text-faint" title={script.workingDir}>
+              {script.workingDir || 'Idle'}
+            </span>
+          )}
+        </span>
+        <ScriptRunButton isRunning={isRunning} onRun={onRun} onStop={onStop} />
+      </div>
     </Card>
   );
 }

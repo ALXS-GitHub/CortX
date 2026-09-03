@@ -18,25 +18,25 @@ export function AgentHealthPopover({ health }: AgentHealthPopoverProps) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-muted-foreground" title="Provider status">
-          {indexing ? <Loader2 className="size-4 animate-spin" /> : <Activity className={cn('size-4', anyProblem && 'text-amber-500')} />}
+        <Button variant="ghost" size="sm" title="Provider status">
+          {indexing ? <Loader2 className="animate-spin" /> : <Activity className={cn(anyProblem && 'text-warning')} />}
           {indexing ? 'Indexing…' : 'Status'}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-3 space-y-3 text-xs">
+      <PopoverContent align="end" className="w-80 gap-3 p-3 text-xs">
         {!health && <p className="text-muted-foreground">Status not available yet.</p>}
         {health?.providers.map((p) => (
           <div key={p.provider} className="space-y-1">
             <div className="flex items-center gap-2">
               {p.detected
-                ? <CheckCircle2 className="size-3.5 text-emerald-500" />
-                : <XCircle className={cn('size-3.5', p.enabled ? 'text-amber-500' : 'text-muted-foreground')} />}
+                ? <CheckCircle2 className="size-3.5 text-st-done" />
+                : <XCircle className={cn('size-3.5', p.enabled ? 'text-warning' : 'text-faint')} />}
               <span className="font-medium">{PROVIDER_LABEL[p.provider]}</span>
-              {p.version && <span className="text-muted-foreground">v{p.version}</span>}
-              {!p.enabled && <span className="text-muted-foreground">(disabled)</span>}
+              {p.version && <span className="font-mono text-[11px] text-faint">v{p.version}</span>}
+              {!p.enabled && <span className="text-faint">(disabled)</span>}
             </div>
-            <p className="font-mono text-[11px] text-muted-foreground break-all pl-5" title={p.rootPath}>{p.rootPath}</p>
-            <p className="text-muted-foreground pl-5">
+            <p className="break-all pl-5 font-mono text-[11px] text-faint" title={p.rootPath}>{p.rootPath}</p>
+            <p className="pl-5 text-muted-foreground">
               {p.detected
                 ? <>
                     {p.sessionCount} session{p.sessionCount === 1 ? '' : 's'}
@@ -48,7 +48,7 @@ export function AgentHealthPopover({ health }: AgentHealthPopoverProps) {
           </div>
         ))}
         {health && (
-          <p className="text-muted-foreground border-t pt-2">
+          <p className="border-t border-border pt-2 text-faint">
             {health.indexing ? 'Indexing transcripts in the background…' : health.lastScanAt ? `Last scan ${formatRelativeTime(health.lastScanAt)}` : 'No scan yet'}
           </p>
         )}

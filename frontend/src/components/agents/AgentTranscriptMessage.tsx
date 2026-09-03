@@ -42,7 +42,7 @@ export function AgentTranscriptMessage({ message, toolResults, sessionState }: A
     const text = message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('').trim();
     if (!text) return null;
     return (
-      <p className="self-center max-w-[80%] text-center text-xs text-muted-foreground italic whitespace-pre-wrap break-words">
+      <p className="max-w-[80%] self-center whitespace-pre-wrap break-words text-center text-xs italic text-faint">
         {text}
       </p>
     );
@@ -53,10 +53,10 @@ export function AgentTranscriptMessage({ message, toolResults, sessionState }: A
   return (
     <Message
       from={isUser ? 'user' : 'assistant'}
-      className={cn(message.isSidechain && 'border-l-2 border-dashed border-muted-foreground/30 pl-3')}
+      className={cn(message.isSidechain && 'border-l-2 border-dashed border-border-strong pl-3')}
     >
       {message.isSidechain && (
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">subagent</span>
+        <span className="eyebrow">subagent</span>
       )}
       {isUser ? <UserParts parts={message.parts} /> : (
         message.parts.map((part, i) => (
@@ -64,7 +64,7 @@ export function AgentTranscriptMessage({ message, toolResults, sessionState }: A
         ))
       )}
       <time
-        className={cn('text-[10px] text-muted-foreground/70 tabular-nums', isUser && 'self-end')}
+        className={cn('text-[10px] tabular-nums text-faint', isUser && 'self-end')}
         dateTime={message.timestamp}
       >
         {formatTime(message.timestamp)}
@@ -129,14 +129,14 @@ function ToolBlock({ part, result, sessionState }: { part: ToolCallPart; result?
   const summary = toolSummary(part.input);
 
   return (
-    <Tool className="mb-0 bg-muted/20" defaultOpen={false}>
+    <Tool className="mb-0 bg-card/40" defaultOpen={false}>
       <ToolHeader
         type={`tool-${part.name}`}
         state={state}
         title={summary ? `${part.name} · ${summary}` : part.name}
         className="py-2 text-left [&>div>span]:truncate [&>div]:min-w-0"
       />
-      <ToolContent className="p-3 space-y-3">
+      <ToolContent className="space-y-3 p-3">
         <ToolInput input={part.input} />
         {result && <ToolResultOutput result={result} />}
       </ToolContent>
@@ -151,19 +151,19 @@ function ToolResultOutput({ result }: { result: ToolResultPart }) {
 
   return (
     <div className="space-y-1">
-      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+      <h4 className={cn('eyebrow', result.isError && 'text-destructive')}>
         {result.isError ? 'Error' : 'Result'}
       </h4>
       <pre
         className={cn(
-          'max-h-80 overflow-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap break-words',
+          'max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-sm p-3 font-mono text-xs',
           result.isError ? 'bg-destructive/10 text-destructive' : 'bg-muted/50 text-foreground',
         )}
       >
         {text ? (truncated ? text.slice(0, OUTPUT_LIMIT) : text) : '(no output)'}
       </pre>
       {truncated && (
-        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setShowAll(true)}>
+        <Button variant="ghost" size="xs" onClick={() => setShowAll(true)}>
           Show all ({text.length.toLocaleString()} chars)
         </Button>
       )}

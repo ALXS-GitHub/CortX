@@ -39,15 +39,19 @@ export function AgentList(props: AgentListProps) {
     });
     if (viewMode === 'card') {
       return (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {list.map((s) => <AgentCard key={s.id} {...itemProps(s)} />)}
         </div>
       );
     }
     if (viewMode === 'compact') {
-      return <div className="space-y-1">{list.map((s) => <AgentCompactItem key={s.id} {...itemProps(s)} />)}</div>;
+      return (
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+          {list.map((s) => <AgentCompactItem key={s.id} {...itemProps(s)} />)}
+        </div>
+      );
     }
-    return <div className="space-y-1.5">{list.map((s) => <AgentRow key={s.id} {...itemProps(s)} />)}</div>;
+    return <div className="space-y-2">{list.map((s) => <AgentRow key={s.id} {...itemProps(s)} />)}</div>;
   };
 
   if (groupMode === 'global') return renderItems(sessions);
@@ -70,7 +74,7 @@ export function AgentList(props: AgentListProps) {
 
       {noProjectGroups.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground pl-1">
+          <h2 className="eyebrow pl-1">
             No project ({noProjectGroups.reduce((n, g) => n + g.sessions.length, 0)})
           </h2>
           {noProjectGroups.map((group) => (

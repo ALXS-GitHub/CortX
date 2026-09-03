@@ -1,7 +1,10 @@
 import { useState, useMemo } from 'react';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Chip } from '@/components/ui/Chip';
+import { EmptyState } from '@/components/ui/EmptyState';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Search, ScanSearch, Check, Loader2, Star } from 'lucide-react';
+import { Plus, Search, ScanSearch, Check, Loader2, Star, FileCode } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -38,6 +41,7 @@ import { GlobalScriptCompactItem } from './GlobalScriptCompactItem';
 import { GlobalScriptForm } from './GlobalScriptForm';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import type { GlobalScript, ScriptStatus, CreateGlobalScriptInput, UpdateGlobalScriptInput, DiscoveredScript } from '@/types';
 
 type SortOption = 'name' | 'created';
@@ -100,6 +104,11 @@ export function GlobalScriptsView() {
     ]);
     return Array.from(set);
   }, [globalScripts, statusDefinitions]);
+
+  const runningCount = useMemo(
+    () => globalScripts.filter((s) => globalScriptRuntimes.get(s.id)?.status === 'running').length,
+    [globalScripts, globalScriptRuntimes]
+  );
 
   const filteredScripts = useMemo(() => {
     let scripts = globalScripts;
@@ -247,6 +256,11 @@ export function GlobalScriptsView() {
     }
   };
 
+  const openAddForm = () => {
+    setEditingScript(undefined);
+    setShowScriptForm(true);
+  };
+
   const scriptItemProps = (script: GlobalScript) => ({
     script,
     status: getScriptStatus(script.id),
@@ -262,14 +276,14 @@ export function GlobalScriptsView() {
     if (scripts.length === 0) return null;
     if (scriptsViewMode === 'card') {
       return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {scripts.map((script) => <GlobalScriptCardView key={script.id} {...scriptItemProps(script)} />)}
         </div>
       );
     }
     if (scriptsViewMode === 'compact') {
       return (
-        <div className="space-y-1">
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
           {scripts.map((script) => <GlobalScriptCompactItem key={script.id} {...scriptItemProps(script)} />)}
         </div>
       );
@@ -281,50 +295,30 @@ export function GlobalScriptsView() {
     );
   };
 
-  return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-bold">Global Scripts</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Manage your scripts, CLI tools, and automation tasks
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleScan}
-            disabled={isScanning}
-          >
-            {isScanning ? (
-              <Loader2 className="size-4 mr-2 animate-spin" />
-            ) : (
-              <ScanSearch className="size-4 mr-2" />
-            )}
-            Scan Folder
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditingScript(undefined);
-              setShowScriptForm(true);
-            }}
-          >
-            <Plus className="size-4 mr-2" />
-            Add Script
-          </Button>
-        </div>
-      </div>
+  const subtitle = `${globalScripts.length} script${globalScripts.length !== 1 ? 's' : ''}${runningCount > 0 ? ` · ${runningCount} running` : ''}`;
 
-      {/* Search + tag filter */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+  return (
+    <Screen
+      title="Scripts"
+      subtitle={subtitle}
+      actions={
+        <>
+          <Button variant="outline" onClick={handleScan} disabled={isScanning}>
+            {isScanning ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+            Scan folder
+          </Button>
+          <Button onClick={openAddForm}>
+            <Plus />
+            Add script
+          </Button>
+        </>
+      }
+      toolbar={
+        <>
+          <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
             <Input
-              placeholder="Search scripts..."
+              placeholder="Search scripts…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
@@ -335,7 +329,7 @@ export function GlobalScriptsView() {
               value={selectedStatus ?? '__all__'}
               onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
             >
-              <SelectTrigger size="sm" className="w-[140px]">
+              <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -347,88 +341,82 @@ export function GlobalScriptsView() {
             </Select>
           )}
           <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
-            <SelectTrigger size="sm" className="w-[140px]">
+            <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="name">Name</SelectItem>
-              <SelectItem value="created">Date Created</SelectItem>
+              <SelectItem value="created">Date created</SelectItem>
             </SelectContent>
           </Select>
           <Button
-            variant={favoritesOnly ? 'secondary' : 'outline'}
-            size="sm"
+            variant="outline"
             onClick={() => setFavoritesOnly((v) => !v)}
             aria-pressed={favoritesOnly}
             title="Show favorites only"
+            className={cn(favoritesOnly && 'border-accent-border bg-accent')}
           >
-            <Star className={favoritesOnly ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
+            <Star className={favoritesOnly ? 'fill-warning text-warning' : ''} />
             Favorites
           </Button>
-          <ViewModeToggle value={scriptsViewMode} onChange={setScriptsViewMode} />
-        </div>
-
-        {/* Tag filter pills */}
-        {sortedTagDefs.length > 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {sortedTagDefs.map((tag) => {
-              const isActive = selectedTags.has(tag.name.toLowerCase());
-              return (
-                <button
-                  key={tag.name}
-                  type="button"
-                  onClick={() => toggleTag(tag.name.toLowerCase())}
-                  className="inline-flex items-center transition-all"
-                >
-                  <Badge
-                    variant="outline"
-                    className={`text-xs cursor-pointer transition-all ${
-                      isActive ? 'ring-1 ring-offset-1 ring-primary' : 'opacity-60 hover:opacity-100'
-                    }`}
-                    style={
-                      tag.color
-                        ? {
-                            borderColor: tag.color,
-                            color: tag.color,
-                            backgroundColor: isActive ? `${tag.color}20` : `${tag.color}10`,
-                          }
-                        : undefined
-                    }
-                  >
-                    {tag.name}
-                  </Badge>
-                </button>
-              );
-            })}
-            {selectedTags.size > 0 && (
-              <button
-                type="button"
-                onClick={() => setSelectedTags(new Set())}
-                className="text-xs text-muted-foreground hover:text-foreground ml-1"
-              >
-                Clear
-              </button>
-            )}
+          <div className="ml-auto">
+            <ViewModeToggle value={scriptsViewMode} onChange={setScriptsViewMode} />
           </div>
-        )}
-      </div>
 
-      {/* Scripts list */}
+          {sortedTagDefs.length > 0 && (
+            <div className="flex w-full flex-wrap items-center gap-1.5">
+              {sortedTagDefs.map((tag) => {
+                const isActive = selectedTags.has(tag.name.toLowerCase());
+                return (
+                  <button
+                    key={tag.name}
+                    type="button"
+                    onClick={() => toggleTag(tag.name.toLowerCase())}
+                    aria-pressed={isActive}
+                    className={cn('rounded-full transition-opacity', isActive ? 'ring-2 ring-ring/50 ring-offset-1 ring-offset-background' : 'opacity-60 hover:opacity-100')}
+                  >
+                    <Chip color={tag.color} neutral={!tag.color} dot={false}>
+                      {tag.name}
+                    </Chip>
+                  </button>
+                );
+              })}
+              {selectedTags.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTags(new Set())}
+                  className="ml-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      }
+    >
       {filteredScripts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <p className="text-lg font-medium">No scripts yet</p>
-          <p className="text-sm mt-1">Create your first global script to get started</p>
-          <Button
-            className="mt-4"
-            onClick={() => {
-              setEditingScript(undefined);
-              setShowScriptForm(true);
-            }}
-          >
-            <Plus className="size-4 mr-2" />
-            Add Script
-          </Button>
-        </div>
+        globalScripts.length === 0 ? (
+          <EmptyState
+            icon={FileCode}
+            title="No scripts yet"
+            description="Register a CLI tool, an automation task or any command you run often, with its parameters and presets."
+            action={
+              <>
+                <Button variant="outline" onClick={handleScan} disabled={isScanning}>
+                  {isScanning ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+                  Scan folder
+                </Button>
+                <Button onClick={openAddForm}>
+                  <Plus />
+                  Add script
+                </Button>
+              </>
+            }
+          />
+        ) : (
+          <EmptyState icon={Search} title="No matching scripts" description="Try a different search or clear the filters." />
+        )
       ) : (
         renderScriptList(filteredScripts)
       )}
@@ -448,17 +436,14 @@ export function GlobalScriptsView() {
       <AlertDialog open={!!deletingScript} onOpenChange={(open) => !open && setDeletingScript(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Script</AlertDialogTitle>
+            <AlertDialogTitle>Delete script</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete "{deletingScript?.name}"? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteScript}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction variant="destructive" onClick={handleDeleteScript}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -467,9 +452,9 @@ export function GlobalScriptsView() {
 
       {/* Scan Results Dialog */}
       <Dialog open={showScanDialog} onOpenChange={setShowScanDialog}>
-        <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Discovered Scripts</DialogTitle>
+            <DialogTitle>Discovered scripts</DialogTitle>
             <DialogDescription>
               {discoveredScripts.length === 0 && scanTotal === 0
                 ? 'No script files found in the configured folder. Check your scan extensions in Settings.'
@@ -480,12 +465,12 @@ export function GlobalScriptsView() {
           </DialogHeader>
 
           {discoveredScripts.length > 0 && (
-            <div className="flex-1 min-h-0 overflow-y-auto border rounded-md">
-              <div className="space-y-1 p-2">
+            <div className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6">
+              <div className="overflow-hidden rounded-lg border border-border bg-card/60">
                 {discoveredScripts.map((script) => (
                   <label
                     key={script.path}
-                    className="flex items-start gap-3 p-2 rounded-md hover:bg-muted cursor-pointer"
+                    className="flex cursor-pointer items-start gap-3 border-b border-border px-3 py-2.5 transition-colors last:border-b-0 hover:bg-accent/50"
                   >
                     <Checkbox
                       checked={selectedDiscovered.has(script.path)}
@@ -494,15 +479,13 @@ export function GlobalScriptsView() {
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm">{script.name}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {script.extension}
-                        </Badge>
+                        <span className="truncate text-sm font-medium">{script.name}</span>
+                        <Badge variant="secondary" className="font-mono">{script.extension}</Badge>
                       </div>
                       {script.description && (
-                        <p className="text-xs text-muted-foreground mt-0.5">{script.description}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{script.description}</p>
                       )}
-                      <p className="text-xs text-muted-foreground/60 mt-0.5 truncate">{script.path}</p>
+                      <p className="mt-0.5 truncate font-mono text-[11px] text-faint" title={script.path}>{script.path}</p>
                     </div>
                   </label>
                 ))}
@@ -510,23 +493,19 @@ export function GlobalScriptsView() {
             </div>
           )}
 
-          <DialogFooter className="shrink-0">
-            <Button variant="outline" onClick={() => setShowScanDialog(false)}>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowScanDialog(false)}>
               Cancel
             </Button>
             {discoveredScripts.length > 0 && (
               <Button onClick={handleImportDiscovered} disabled={selectedDiscovered.size === 0 || isImporting}>
-                {isImporting ? (
-                  <Loader2 className="size-4 mr-2 animate-spin" />
-                ) : (
-                  <Check className="size-4 mr-2" />
-                )}
+                {isImporting ? <Loader2 className="animate-spin" /> : <Check />}
                 Import {selectedDiscovered.size} script(s)
               </Button>
             )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </Screen>
   );
 }

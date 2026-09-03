@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -20,14 +21,18 @@ import {
 } from '@/components/ui/select';
 import { ComboboxInput } from '@/components/ui/combobox-input';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { Plus, Trash2, FolderSearch, X } from 'lucide-react';
+import { Plus, Trash2, FolderSearch } from 'lucide-react';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { cn } from '@/lib/utils';
 import type { Tool, TagDefinition, StatusDefinition, CreateToolInput, UpdateToolInput, ToolConfigPath } from '@/types';
 
 const TOOL_COLORS = [
   '#8b5cf6', '#06b6d4', '#f97316', '#22c55e',
   '#ec4899', '#eab308', '#3b82f6', '#ef4444',
 ];
+
+const labelClass = 'text-xs font-medium text-muted-foreground';
+const hintClass = 'text-xs text-faint';
 
 interface ToolFormProps {
   open: boolean;
@@ -249,10 +254,10 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
-        <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
-          <DialogHeader className="flex-shrink-0">
-            <DialogTitle>{isEditing ? 'Edit Tool' : 'Add New Tool'}</DialogTitle>
+      <DialogContent className="sm:max-w-2xl">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-5">
+          <DialogHeader>
+            <DialogTitle>{isEditing ? 'Edit tool' : 'Add tool'}</DialogTitle>
             <DialogDescription>
               {isEditing
                 ? 'Update the tool configuration.'
@@ -260,139 +265,133 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4 overflow-y-auto flex-1 px-1">
-            {/* Main Section */}
-            <div className="grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="tool-name">Name *</Label>
-                <Input
-                  id="tool-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g., starship, wezterm, fzf"
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="tool-description">Description</Label>
-                <Textarea
-                  id="tool-description"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="What is this tool?"
-                  rows={2}
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="tool-status">Status</Label>
-                <ComboboxInput
-                  id="tool-status"
-                  value={status}
-                  onChange={setStatus}
-                  options={existingStatuses}
-                  placeholder="e.g., Active, To Test"
-                />
-              </div>
-
-              {status.toLowerCase() === 'replaced' && (
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-replaced-by">Replaced By</Label>
-                  <Select value={replacedBy || '__none__'} onValueChange={(v) => setReplacedBy(v === '__none__' ? '' : v)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select replacement tool" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">None</SelectItem>
-                      {tools.filter(t => t.id !== tool?.id).map((t) => (
-                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+          <div className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6">
+            <div className="space-y-5">
+              {/* Main */}
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="tool-name" className={labelClass}>Name *</Label>
+                  <Input
+                    id="tool-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g., starship, wezterm, fzf"
+                  />
                 </div>
-              )}
 
-              <div className="grid gap-2">
-                <Label>Tags</Label>
-                <div className="flex flex-wrap gap-1.5 p-2 border rounded-md min-h-[38px] focus-within:ring-2 focus-within:ring-ring">
-                  {tags.map((tag) => (
-                    <span key={tag} className="flex items-center gap-1">
-                      <TagBadge tag={tag} tagDefinitions={tagDefinitions} />
-                      <button
-                        type="button"
-                        className="text-muted-foreground hover:text-foreground"
-                        onClick={() => removeTag(tag)}
-                      >
-                        <X className="size-3" />
-                      </button>
-                    </span>
-                  ))}
-                  <div className="relative flex-1 min-w-[120px]">
-                    <input
-                      ref={tagInputRef}
-                      type="text"
-                      value={tagInput}
-                      onChange={(e) => {
-                        setTagInput(e.target.value);
-                        setShowTagSuggestions(true);
-                      }}
-                      onFocus={() => setShowTagSuggestions(true)}
-                      onKeyDown={handleTagInputKeyDown}
-                      placeholder={tags.length === 0 ? 'Add tags...' : ''}
-                      className="w-full bg-transparent border-none outline-none text-sm py-0.5"
+                <div className="space-y-1.5">
+                  <Label htmlFor="tool-description" className={labelClass}>Description</Label>
+                  <Textarea
+                    id="tool-description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="What is this tool?"
+                    rows={2}
+                  />
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="tool-status" className={labelClass}>Status</Label>
+                    <ComboboxInput
+                      id="tool-status"
+                      value={status}
+                      onChange={setStatus}
+                      options={existingStatuses}
+                      placeholder="e.g., Active, To Test"
                     />
-                    {showTagSuggestions && tagSuggestions.length > 0 && (
-                      <div
-                        ref={suggestionsRef}
-                        className="absolute top-full left-0 z-50 mt-1 w-56 max-h-48 overflow-y-auto bg-popover border rounded-md shadow-md"
-                      >
-                        {tagSuggestions.map((suggestion) => (
-                          <button
-                            key={suggestion}
-                            type="button"
-                            className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted text-left cursor-pointer"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              addTag(suggestion);
-                            }}
-                          >
-                            <TagBadge tag={suggestion} tagDefinitions={tagDefinitions} />
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className={labelClass}>Color</Label>
+                    <div className="flex h-9 items-center gap-2">
+                      {TOOL_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          title={c}
+                          aria-pressed={color === c}
+                          className={cn(
+                            'size-6 rounded-full transition-[transform,box-shadow] hover:scale-110',
+                            color === c && 'ring-2 ring-ring ring-offset-2 ring-offset-background'
+                          )}
+                          style={{ backgroundColor: c }}
+                          onClick={() => setColor(c)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Type and press Enter to add a tag, or select from suggestions
-                </p>
-              </div>
 
-              <div className="grid gap-2">
-                <Label>Color</Label>
-                <div className="flex gap-2 items-center h-9">
-                  {TOOL_COLORS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      className={`size-6 rounded-full transition-all ${
-                        color === c ? 'ring-2 ring-offset-2 ring-primary' : ''
-                      }`}
-                      style={{ backgroundColor: c }}
-                      onClick={() => setColor(c)}
-                    />
-                  ))}
+                {status.toLowerCase() === 'replaced' && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="tool-replaced-by" className={labelClass}>Replaced by</Label>
+                    <Select value={replacedBy || '__none__'} onValueChange={(v) => setReplacedBy(v === '__none__' ? '' : v)}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select replacement tool" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {tools.filter(t => t.id !== tool?.id).map((t) => (
+                          <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <Label className={labelClass}>Tags</Label>
+                  <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-sm border border-input bg-[var(--bg-input)] px-2 py-1.5 shadow-soft transition-[border-color,box-shadow] focus-within:border-accent-border focus-within:ring-2 focus-within:ring-ring/40">
+                    {tags.map((tag) => (
+                      <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} onRemove={() => removeTag(tag)} />
+                    ))}
+                    <div className="relative min-w-[120px] flex-1">
+                      <input
+                        ref={tagInputRef}
+                        type="text"
+                        value={tagInput}
+                        onChange={(e) => {
+                          setTagInput(e.target.value);
+                          setShowTagSuggestions(true);
+                        }}
+                        onFocus={() => setShowTagSuggestions(true)}
+                        onKeyDown={handleTagInputKeyDown}
+                        placeholder={tags.length === 0 ? 'Add tags…' : ''}
+                        className="w-full border-none bg-transparent py-0.5 text-sm outline-none placeholder:text-faint"
+                      />
+                      {showTagSuggestions && tagSuggestions.length > 0 && (
+                        <div
+                          ref={suggestionsRef}
+                          className="glass-strong absolute left-0 top-full z-50 mt-1.5 max-h-48 w-56 overflow-y-auto rounded-sm border border-border-strong p-1 shadow-pop"
+                        >
+                          {tagSuggestions.map((suggestion) => (
+                            <button
+                              key={suggestion}
+                              type="button"
+                              className="flex w-full items-center gap-2 rounded-[calc(var(--radius-sm)-2px)] px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                addTag(suggestion);
+                              }}
+                            >
+                              <TagBadge tag={suggestion} tagDefinitions={tagDefinitions} />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <p className={hintClass}>Type and press Enter to add a tag, or pick a suggestion.</p>
                 </div>
               </div>
-            </div>
 
-            {/* Installation Section */}
-            <div className="border-t pt-4">
-              <h4 className="text-sm font-medium mb-3">Installation</h4>
-              <div className="grid gap-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="tool-install-method">Install Method</Label>
+              {/* Installation */}
+              <div className="space-y-4 border-t border-border pt-4">
+                <span className="eyebrow">Installation</span>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="tool-install-method" className={labelClass}>Install method</Label>
                     <Input
                       id="tool-install-method"
                       value={installMethod}
@@ -400,142 +399,139 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
                       placeholder="e.g., scoop, cargo, winget"
                     />
                   </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="tool-version">Version</Label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="tool-version" className={labelClass}>Version</Label>
                     <Input
                       id="tool-version"
                       value={version}
                       onChange={(e) => setVersion(e.target.value)}
                       placeholder="e.g., 1.16.0"
+                      className="font-mono"
                     />
                   </div>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-install-location">Install Location</Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tool-install-location" className={labelClass}>Install location</Label>
                   <div className="flex gap-2">
                     <Input
                       id="tool-install-location"
                       value={installLocation}
                       onChange={(e) => setInstallLocation(e.target.value)}
                       placeholder="Path to installation directory"
-                      className="flex-1"
+                      className="flex-1 font-mono"
                     />
-                    <Button type="button" variant="outline" onClick={handleBrowseInstallLocation} title="Browse">
-                      <FolderSearch className="size-4" />
+                    <Button type="button" variant="outline" size="icon" onClick={handleBrowseInstallLocation} title="Browse" aria-label="Browse">
+                      <FolderSearch />
                     </Button>
                   </div>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-homepage">Homepage URL</Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tool-homepage" className={labelClass}>Homepage URL</Label>
                   <Input
                     id="tool-homepage"
                     value={homepage}
                     onChange={(e) => setHomepage(e.target.value)}
-                    placeholder="https://..."
+                    placeholder="https://…"
                   />
                 </div>
               </div>
-            </div>
 
-            {/* Configuration Section */}
-            <div className="border-t pt-4">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-medium">Configuration Paths</h4>
-                <Button type="button" variant="outline" size="sm" onClick={addConfigPath}>
-                  <Plus className="size-3.5 mr-1.5" />
-                  Add Config
-                </Button>
-              </div>
-              {configPaths.length > 0 ? (
-                <div className="space-y-3">
-                  {configPaths.map((cp, index) => (
-                    <div key={index} className="flex items-start gap-2 p-3 border rounded-md">
-                      <div className="flex-1 grid gap-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          <Input
-                            value={cp.label}
-                            onChange={(e) => updateConfigPath(index, 'label', e.target.value)}
-                            placeholder="Label (e.g., Main config)"
-                            className="text-sm"
-                          />
-                          <div className="flex items-center gap-2">
-                            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                              <input
-                                type="checkbox"
+              {/* Configuration paths */}
+              <div className="space-y-3 border-t border-border pt-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="eyebrow">Configuration paths</span>
+                  <Button type="button" variant="outline" size="xs" onClick={addConfigPath}>
+                    <Plus />
+                    Add config
+                  </Button>
+                </div>
+                {configPaths.length > 0 ? (
+                  <div className="space-y-2">
+                    {configPaths.map((cp, index) => (
+                      <div key={index} className="flex items-start gap-2 rounded-lg border border-border bg-card/50 p-3">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-3">
+                            <Input
+                              value={cp.label}
+                              onChange={(e) => updateConfigPath(index, 'label', e.target.value)}
+                              placeholder="Label (e.g., Main config)"
+                              className="flex-1"
+                            />
+                            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                              <Checkbox
                                 checked={cp.isDirectory}
-                                onChange={(e) => updateConfigPath(index, 'isDirectory', e.target.checked)}
-                                className="rounded"
+                                onCheckedChange={(v) => updateConfigPath(index, 'isDirectory', v === true)}
                               />
                               Directory
                             </label>
                           </div>
+                          <div className="flex gap-2">
+                            <Input
+                              value={cp.path}
+                              onChange={(e) => updateConfigPath(index, 'path', e.target.value)}
+                              placeholder="Path to config file or directory"
+                              className="flex-1 font-mono"
+                            />
+                            <Button type="button" variant="outline" size="icon" onClick={() => browseConfigPath(index)} title="Browse" aria-label="Browse">
+                              <FolderSearch />
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex gap-2">
-                          <Input
-                            value={cp.path}
-                            onChange={(e) => updateConfigPath(index, 'path', e.target.value)}
-                            placeholder="Path to config file or directory"
-                            className="flex-1 text-sm font-mono"
-                          />
-                          <Button type="button" variant="outline" size="sm" onClick={() => browseConfigPath(index)} title="Browse">
-                            <FolderSearch className="size-3.5" />
-                          </Button>
-                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0 text-destructive hover:text-destructive"
+                          onClick={() => removeConfigPath(index)}
+                          title="Remove"
+                          aria-label="Remove config path"
+                        >
+                          <Trash2 />
+                        </Button>
                       </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-7 text-destructive hover:text-destructive shrink-0"
-                        onClick={() => removeConfigPath(index)}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">No configuration paths added yet.</p>
-              )}
-            </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className={hintClass}>No configuration paths yet.</p>
+                )}
+              </div>
 
-            {/* Documentation Section */}
-            <div className="border-t pt-4">
-              <h4 className="text-sm font-medium mb-3">Documentation</h4>
-              <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-toolbox-url">Toolbox URL</Label>
+              {/* Documentation */}
+              <div className="space-y-4 border-t border-border pt-4">
+                <span className="eyebrow">Documentation</span>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tool-toolbox-url" className={labelClass}>Toolbox URL</Label>
                   <Input
                     id="tool-toolbox-url"
                     value={toolboxUrl}
                     onChange={(e) => setToolboxUrl(e.target.value)}
-                    placeholder="https://toolbox.example.com/tools/..."
+                    placeholder="https://toolbox.example.com/tools/…"
                   />
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-notes">Notes</Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tool-notes" className={labelClass}>Notes</Label>
                   <Textarea
                     id="tool-notes"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Any additional notes about this tool..."
+                    placeholder="Any additional notes about this tool…"
                     rows={3}
                   />
                 </div>
               </div>
-            </div>
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <p className="text-sm text-destructive">{error}</p>}
+            </div>
           </div>
 
-          <DialogFooter className="flex-shrink-0 pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Add Tool'}
+              {isSubmitting ? 'Saving…' : isEditing ? 'Save changes' : 'Add tool'}
             </Button>
           </DialogFooter>
         </form>

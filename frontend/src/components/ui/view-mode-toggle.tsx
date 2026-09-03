@@ -1,13 +1,11 @@
 import { LayoutGrid, List, Rows3 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { Segmented } from '@/components/ui/Segmented';
 import type { ListViewMode } from '@/types';
 
-const modes: { value: ListViewMode; icon: typeof LayoutGrid; label: string }[] = [
-  { value: 'card', icon: LayoutGrid, label: 'Card view' },
-  { value: 'list', icon: List, label: 'List view' },
-  { value: 'compact', icon: Rows3, label: 'Compact view' },
+const OPTIONS = [
+  { value: 'card' as const, icon: LayoutGrid, title: 'Card view' },
+  { value: 'list' as const, icon: List, title: 'List view' },
+  { value: 'compact' as const, icon: Rows3, title: 'Compact view' },
 ];
 
 interface ViewModeToggleProps {
@@ -15,27 +13,7 @@ interface ViewModeToggleProps {
   onChange: (value: ListViewMode) => void;
 }
 
+/** Card / list / compact switcher shared by every list screen. */
 export function ViewModeToggle({ value, onChange }: ViewModeToggleProps) {
-  return (
-    <div className="flex items-center border rounded-md">
-      {modes.map(({ value: mode, icon: Icon, label }) => (
-        <Tooltip key={mode}>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                'h-8 w-8 p-0 rounded-none first:rounded-l-md last:rounded-r-md',
-                value === mode && 'bg-muted'
-              )}
-              onClick={() => onChange(mode)}
-            >
-              <Icon className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{label}</TooltipContent>
-        </Tooltip>
-      ))}
-    </div>
-  );
+  return <Segmented<ListViewMode> value={value} onChange={onChange} options={OPTIONS} size="sm" />;
 }

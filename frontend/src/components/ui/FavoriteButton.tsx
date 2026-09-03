@@ -38,7 +38,7 @@ export function FavoriteButton({ favorite, onToggle, size = 'md', className }: F
       <Star
         className={cn(
           size === 'sm' ? 'size-3' : 'size-3.5',
-          favorite ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground'
+          favorite ? 'fill-warning text-warning' : 'text-muted-foreground'
         )}
       />
     </Button>

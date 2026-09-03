@@ -16,11 +16,11 @@ export function AgentLastExchange({ session, className, lines = 1 }: AgentLastEx
   const clamp = lines === 2 ? 'line-clamp-2' : 'truncate';
 
   if (kind === 'none') {
-    return <span className={cn('text-xs text-muted-foreground/60', className)}>—</span>;
+    return <span className={cn('text-xs text-faint', className)}>—</span>;
   }
   if (kind === 'tool') {
     return (
-      <span className={cn('inline-flex items-center gap-1 min-w-0 text-xs text-emerald-600 dark:text-emerald-400', className)}>
+      <span className={cn('inline-flex min-w-0 items-center gap-1 text-xs text-st-done', className)}>
         <Loader2 className="size-3 shrink-0 animate-spin" />
         <span className="truncate">{text}…</span>
       </span>
@@ -28,9 +28,9 @@ export function AgentLastExchange({ session, className, lines = 1 }: AgentLastEx
   }
   if (kind === 'waiting') {
     return (
-      <span className={cn('inline-flex items-center gap-1 min-w-0 text-xs', className)} title={text}>
-        <MessageCircleQuestion className="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
-        <span className={cn('text-amber-700 dark:text-amber-300', clamp)}>{text}</span>
+      <span className={cn('inline-flex min-w-0 items-center gap-1 text-xs', className)} title={text}>
+        <MessageCircleQuestion className="size-3 shrink-0 text-st-progress" />
+        <span className={cn('text-st-progress', clamp)}>{text}</span>
       </span>
     );
   }

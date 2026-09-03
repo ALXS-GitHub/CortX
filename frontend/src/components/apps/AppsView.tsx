@@ -1,6 +1,9 @@
 import { useState, useMemo } from 'react';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Chip } from '@/components/ui/Chip';
+import { EmptyState } from '@/components/ui/EmptyState';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Search, Star } from 'lucide-react';
+import { Plus, Search, Star, AppWindow } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { AppCard } from './AppCard';
@@ -26,8 +29,8 @@ import { AppCardView } from './AppCardView';
 import { AppCompactItem } from './AppCompactItem';
 import { AppForm } from './AppForm';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
-import { TagBadge } from '@/components/ui/TagBadge';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import type { App, CreateAppInput, UpdateAppInput } from '@/types';
 
 type SortOption = 'name' | 'created';
@@ -166,18 +169,23 @@ export function AppsView() {
     onToggleFavorite: () => handleToggleFavorite(app),
   });
 
+  const openAddForm = () => {
+    setEditingApp(undefined);
+    setShowAppForm(true);
+  };
+
   const renderAppList = (appList: App[]) => {
     if (appList.length === 0) return null;
     if (appsViewMode === 'card') {
       return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {appList.map((app) => <AppCardView key={app.id} {...appItemProps(app)} />)}
         </div>
       );
     }
     if (appsViewMode === 'compact') {
       return (
-        <div className="space-y-1">
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
           {appList.map((app) => <AppCompactItem key={app.id} {...appItemProps(app)} />)}
         </div>
       );
@@ -189,129 +197,119 @@ export function AppsView() {
     );
   };
 
+  const subtitle = `${apps.length} app${apps.length !== 1 ? 's' : ''}`;
+
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-bold">Apps</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Track your GUI applications and launch them quickly
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditingApp(undefined);
-              setShowAppForm(true);
-            }}
-          >
-            <Plus className="size-4 mr-2" />
-            Add App
-          </Button>
-        </div>
-      </div>
-
-      {/* Search + filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-          <Input
-            placeholder="Search apps..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-
-        <Select
-          value={selectedStatus ?? '__all__'}
-          onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
-        >
-          <SelectTrigger size="sm" className="w-[140px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">All statuses</SelectItem>
-            {allStatuses.map((s) => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
-          <SelectTrigger size="sm" className="w-[140px]">
-            <SelectValue placeholder="Sort by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="name">Name</SelectItem>
-            <SelectItem value="created">Date Created</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Button
-          variant={favoritesOnly ? 'secondary' : 'outline'}
-          size="sm"
-          onClick={() => setFavoritesOnly((v) => !v)}
-          aria-pressed={favoritesOnly}
-          title="Show favorites only"
-        >
-          <Star className={favoritesOnly ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
-          Favorites
+    <Screen
+      title="Apps"
+      subtitle={subtitle}
+      actions={
+        <Button onClick={openAddForm}>
+          <Plus />
+          Add app
         </Button>
+      }
+      toolbar={
+        <>
+          <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+            <Input
+              placeholder="Search apps…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
 
-        <ViewModeToggle value={appsViewMode} onChange={setAppsViewMode} />
-      </div>
-
-      {/* Tag filter pills */}
-      {allTags.length > 0 && (
-        <div className="flex gap-1.5 flex-wrap">
-          {allTags.map((tag) => {
-            const isActive = selectedTags.has(tag);
-            return (
-              <button
-                key={tag}
-                type="button"
-                className="cursor-pointer"
-                onClick={() => toggleTag(tag)}
-              >
-                <TagBadge
-                  tag={tag}
-                  tagDefinitions={tagDefinitions}
-                  className={isActive ? 'ring-2 ring-primary ring-offset-1' : 'opacity-60 hover:opacity-100'}
-                />
-              </button>
-            );
-          })}
-          {selectedTags.size > 0 && (
-            <button
-              type="button"
-              className="text-xs text-muted-foreground hover:text-foreground ml-1 cursor-pointer"
-              onClick={() => setSelectedTags(new Set())}
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Apps list */}
-      {filteredApps.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <p className="text-lg font-medium">No apps yet</p>
-          <p className="text-sm mt-1">Register your first app to get started</p>
-          <Button
-            className="mt-4"
-            onClick={() => {
-              setEditingApp(undefined);
-              setShowAppForm(true);
-            }}
+          <Select
+            value={selectedStatus ?? '__all__'}
+            onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
           >
-            <Plus className="size-4 mr-2" />
-            Add App
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All statuses</SelectItem>
+              {allStatuses.map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="created">Date created</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Button
+            variant="outline"
+            onClick={() => setFavoritesOnly((v) => !v)}
+            aria-pressed={favoritesOnly}
+            title="Show favorites only"
+            className={cn(favoritesOnly && 'border-accent-border bg-accent')}
+          >
+            <Star className={favoritesOnly ? 'fill-warning text-warning' : ''} />
+            Favorites
           </Button>
-        </div>
+
+          <div className="ml-auto">
+            <ViewModeToggle value={appsViewMode} onChange={setAppsViewMode} />
+          </div>
+
+          {allTags.length > 0 && (
+            <div className="flex w-full flex-wrap items-center gap-1.5">
+              {allTags.map((tag) => {
+                const isActive = selectedTags.has(tag);
+                const def = tagDefinitions.find((d) => d.name.toLowerCase() === tag.toLowerCase());
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => toggleTag(tag)}
+                    aria-pressed={isActive}
+                    className={cn('rounded-full transition-opacity', isActive ? 'ring-2 ring-ring/50 ring-offset-1 ring-offset-background' : 'opacity-60 hover:opacity-100')}
+                  >
+                    <Chip color={def?.color} neutral={!def?.color} dot={false}>
+                      {tag}
+                    </Chip>
+                  </button>
+                );
+              })}
+              {selectedTags.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTags(new Set())}
+                  className="ml-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      }
+    >
+      {filteredApps.length === 0 ? (
+        apps.length === 0 ? (
+          <EmptyState
+            icon={AppWindow}
+            title="No apps yet"
+            description="Register your GUI applications to track them and launch them from here."
+            action={
+              <Button onClick={openAddForm}>
+                <Plus />
+                Add app
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState icon={Search} title="No matching apps" description="Try a different search or clear the filters." />
+        )
       ) : (
         renderAppList(filteredApps)
       )}
@@ -334,22 +332,19 @@ export function AppsView() {
       <AlertDialog open={!!deletingApp} onOpenChange={(open) => !open && setDeletingApp(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete App</AlertDialogTitle>
+            <AlertDialogTitle>Delete app</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{deletingApp?.name}"? This cannot be undone.
+              Delete "{deletingApp?.name}"? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteApp}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction variant="destructive" onClick={handleDeleteApp}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </Screen>
   );
 }

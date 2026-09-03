@@ -1,7 +1,10 @@
 import { useState, useMemo } from 'react';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Chip } from '@/components/ui/Chip';
+import { EmptyState } from '@/components/ui/EmptyState';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Search, Loader2, Check, ScanSearch, Star } from 'lucide-react';
+import { Plus, Search, Loader2, Check, ScanSearch, Star, Wrench } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { ToolCard } from './ToolCard';
@@ -36,9 +39,9 @@ import { ToolCardView } from './ToolCardView';
 import { ToolCompactItem } from './ToolCompactItem';
 import { ToolForm } from './ToolForm';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
-import { TagBadge } from '@/components/ui/TagBadge';
 import { scanInstalledTools } from '@/lib/tauri';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import type { Tool, CreateToolInput, UpdateToolInput, DiscoveredTool } from '@/types';
 
 type SortOption = 'name' | 'created';
@@ -235,18 +238,23 @@ export function ToolsView() {
     }
   };
 
+  const openAddForm = () => {
+    setEditingTool(undefined);
+    setShowToolForm(true);
+  };
+
   const renderToolList = (toolList: Tool[]) => {
     if (toolList.length === 0) return null;
     if (toolsViewMode === 'card') {
       return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {toolList.map((tool) => <ToolCardView key={tool.id} {...toolItemProps(tool)} />)}
         </div>
       );
     }
     if (toolsViewMode === 'compact') {
       return (
-        <div className="space-y-1">
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
           {toolList.map((tool) => <ToolCompactItem key={tool.id} {...toolItemProps(tool)} />)}
         </div>
       );
@@ -258,133 +266,131 @@ export function ToolsView() {
     );
   };
 
+  const subtitle = `${tools.length} tool${tools.length !== 1 ? 's' : ''}`;
+
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-bold">Tools</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Track your dev tools, CLI utilities, and their configurations
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Button variant="outline" size="sm" onClick={handleScanTools} disabled={isScanning}>
-            {isScanning ? <Loader2 className="size-4 mr-2 animate-spin" /> : <ScanSearch className="size-4 mr-2" />}
-            {isScanning ? 'Scanning...' : 'Scan Installed'}
+    <Screen
+      title="Tools"
+      subtitle={subtitle}
+      actions={
+        <>
+          <Button variant="outline" onClick={handleScanTools} disabled={isScanning}>
+            {isScanning ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+            {isScanning ? 'Scanning…' : 'Scan installed'}
           </Button>
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditingTool(undefined);
-              setShowToolForm(true);
-            }}
+          <Button onClick={openAddForm}>
+            <Plus />
+            Add tool
+          </Button>
+        </>
+      }
+      toolbar={
+        <>
+          <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+            <Input
+              placeholder="Search tools…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+
+          <Select
+            value={selectedStatus ?? '__all__'}
+            onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
           >
-            <Plus className="size-4 mr-2" />
-            Add Tool
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All statuses</SelectItem>
+              {allStatuses.map(s => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="created">Date created</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Button
+            variant="outline"
+            onClick={() => setFavoritesOnly((v) => !v)}
+            aria-pressed={favoritesOnly}
+            title="Show favorites only"
+            className={cn(favoritesOnly && 'border-accent-border bg-accent')}
+          >
+            <Star className={favoritesOnly ? 'fill-warning text-warning' : ''} />
+            Favorites
           </Button>
-        </div>
-      </div>
 
-      {/* Search + filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-          <Input
-            placeholder="Search tools..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
-        </div>
+          <div className="ml-auto">
+            <ViewModeToggle value={toolsViewMode} onChange={setToolsViewMode} />
+          </div>
 
-        <Select
-          value={selectedStatus ?? '__all__'}
-          onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
-        >
-          <SelectTrigger size="sm" className="w-[140px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">All statuses</SelectItem>
-            {allStatuses.map(s => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
-          <SelectTrigger size="sm" className="w-[140px]">
-            <SelectValue placeholder="Sort by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="name">Name</SelectItem>
-            <SelectItem value="created">Date Created</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Button
-          variant={favoritesOnly ? 'secondary' : 'outline'}
-          size="sm"
-          onClick={() => setFavoritesOnly((v) => !v)}
-          aria-pressed={favoritesOnly}
-          title="Show favorites only"
-        >
-          <Star className={favoritesOnly ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
-          Favorites
-        </Button>
-
-        <ViewModeToggle value={toolsViewMode} onChange={setToolsViewMode} />
-      </div>
-
-      {/* Tag filter pills */}
-      {allTags.length > 0 && (
-        <div className="flex gap-1.5 flex-wrap">
-          {allTags.map((tag) => {
-            const isActive = selectedTags.has(tag);
-            return (
-              <button
-                key={tag}
-                type="button"
-                className="cursor-pointer"
-                onClick={() => toggleTag(tag)}
-              >
-                <TagBadge
-                  tag={tag}
-                  tagDefinitions={tagDefinitions}
-                  className={isActive ? 'ring-2 ring-primary ring-offset-1' : 'opacity-60 hover:opacity-100'}
-                />
-              </button>
-            );
-          })}
-          {selectedTags.size > 0 && (
-            <button
-              type="button"
-              className="text-xs text-muted-foreground hover:text-foreground ml-1 cursor-pointer"
-              onClick={() => setSelectedTags(new Set())}
-            >
-              Clear
-            </button>
+          {allTags.length > 0 && (
+            <div className="flex w-full flex-wrap items-center gap-1.5">
+              {allTags.map((tag) => {
+                const isActive = selectedTags.has(tag);
+                const def = tagDefinitions.find((d) => d.name.toLowerCase() === tag.toLowerCase());
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => toggleTag(tag)}
+                    aria-pressed={isActive}
+                    className={cn('rounded-full transition-opacity', isActive ? 'ring-2 ring-ring/50 ring-offset-1 ring-offset-background' : 'opacity-60 hover:opacity-100')}
+                  >
+                    <Chip color={def?.color} neutral={!def?.color} dot={false}>
+                      {tag}
+                    </Chip>
+                  </button>
+                );
+              })}
+              {selectedTags.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTags(new Set())}
+                  className="ml-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           )}
-        </div>
-      )}
-
-      {/* Tools list */}
+        </>
+      }
+    >
       {filteredTools.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <p className="text-lg font-medium">No tools yet</p>
-          <p className="text-sm mt-1">Register your first tool to get started</p>
-          <Button
-            className="mt-4"
-            onClick={() => {
-              setEditingTool(undefined);
-              setShowToolForm(true);
-            }}
-          >
-            <Plus className="size-4 mr-2" />
-            Add Tool
-          </Button>
-        </div>
+        tools.length === 0 ? (
+          <EmptyState
+            icon={Wrench}
+            title="No tools yet"
+            description="Track your dev tools, CLI utilities and their configurations from one place."
+            action={
+              <>
+                <Button variant="outline" onClick={handleScanTools} disabled={isScanning}>
+                  {isScanning ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+                  Scan installed
+                </Button>
+                <Button onClick={openAddForm}>
+                  <Plus />
+                  Add tool
+                </Button>
+              </>
+            }
+          />
+        ) : (
+          <EmptyState icon={Search} title="No matching tools" description="Try a different search or clear the filters." />
+        )
       ) : (
         renderToolList(filteredTools)
       )}
@@ -407,17 +413,14 @@ export function ToolsView() {
       <AlertDialog open={!!deletingTool} onOpenChange={(open) => !open && setDeletingTool(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Tool</AlertDialogTitle>
+            <AlertDialogTitle>Delete tool</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{deletingTool?.name}"? This cannot be undone.
+              Delete "{deletingTool?.name}"? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteTool}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction variant="destructive" onClick={handleDeleteTool}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -426,9 +429,9 @@ export function ToolsView() {
 
       {/* Scan Results Dialog */}
       <Dialog open={showScanDialog} onOpenChange={setShowScanDialog}>
-        <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Discovered Tools</DialogTitle>
+            <DialogTitle>Discovered tools</DialogTitle>
             <DialogDescription>
               {discoveredTools.length === 0 && scanTotal === 0
                 ? 'No tools found. Make sure Scoop or Chocolatey is installed.'
@@ -439,14 +442,14 @@ export function ToolsView() {
           </DialogHeader>
 
           {discoveredTools.length > 0 && (
-            <div className="flex-1 min-h-0 overflow-y-auto border rounded-md">
-              <div className="space-y-1 p-2">
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-card/50">
+              <div className="space-y-0.5 p-1.5">
                 {discoveredTools.map((tool) => {
                   const key = `${tool.source}:${tool.name}`;
                   return (
                     <label
                       key={key}
-                      className="flex items-start gap-3 p-2 rounded-md hover:bg-muted cursor-pointer"
+                      className="flex cursor-pointer items-start gap-3 rounded-sm px-2.5 py-2 transition-colors hover:bg-accent/60"
                     >
                       <Checkbox
                         checked={selectedDiscovered.has(key)}
@@ -454,25 +457,18 @@ export function ToolsView() {
                         className="mt-0.5"
                       />
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm">{tool.name}</span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-medium">{tool.name}</span>
                           {tool.version && (
-                            <Badge variant="outline" className="text-xs">
-                              {tool.version}
-                            </Badge>
+                            <Badge variant="outline" className="font-mono">{tool.version}</Badge>
                           )}
-                          <Badge
-                            variant="secondary"
-                            className={`text-xs ${tool.source === 'scoop' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'}`}
-                          >
-                            {tool.source}
-                          </Badge>
+                          <Badge variant={tool.source === 'scoop' ? 'info' : 'warning'}>{tool.source}</Badge>
                         </div>
                         {tool.description && (
-                          <p className="text-xs text-muted-foreground mt-0.5">{tool.description}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{tool.description}</p>
                         )}
                         {tool.installLocation && (
-                          <p className="text-xs text-muted-foreground/60 mt-0.5 truncate">{tool.installLocation}</p>
+                          <p className="mt-0.5 truncate font-mono text-[11px] text-faint">{tool.installLocation}</p>
                         )}
                       </div>
                     </label>
@@ -483,22 +479,18 @@ export function ToolsView() {
           )}
 
           <DialogFooter className="shrink-0">
-            <Button variant="outline" onClick={() => setShowScanDialog(false)}>
+            <Button variant="ghost" onClick={() => setShowScanDialog(false)}>
               Cancel
             </Button>
             {discoveredTools.length > 0 && (
               <Button onClick={handleImportDiscoveredTools} disabled={selectedDiscovered.size === 0 || isImporting}>
-                {isImporting ? (
-                  <Loader2 className="size-4 mr-2 animate-spin" />
-                ) : (
-                  <Check className="size-4 mr-2" />
-                )}
+                {isImporting ? <Loader2 className="animate-spin" /> : <Check />}
                 Import {selectedDiscovered.size} tool(s)
               </Button>
             )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </Screen>
   );
 }

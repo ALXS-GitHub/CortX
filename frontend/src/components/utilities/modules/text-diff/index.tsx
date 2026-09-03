@@ -25,9 +25,9 @@ const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
 
 const ROW_STYLES: Record<string, string> = {
   equal: '',
-  insert: 'bg-emerald-500/10',
-  delete: 'bg-red-500/10',
-  replace: 'bg-amber-500/10',
+  insert: 'bg-success/10',
+  delete: 'bg-destructive/10',
+  replace: 'bg-warning/10',
 };
 
 export default function TextDiffPanel({ ctx }: UtilityPanelProps) {
@@ -111,10 +111,10 @@ export default function TextDiffPanel({ ctx }: UtilityPanelProps) {
         output={
           <>
             <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-emerald-500">
+              <Badge variant="outline" className="text-st-done">
                 +{result.added}
               </Badge>
-              <Badge variant="outline" className="text-red-500">
+              <Badge variant="outline" className="text-st-blocked">
                 −{result.removed}
               </Badge>
               {result.added === 0 && result.removed === 0 && (left || right) && (
@@ -142,8 +142,8 @@ export default function TextDiffPanel({ ctx }: UtilityPanelProps) {
                     key={i}
                     className={cn(
                       'whitespace-pre-wrap break-words',
-                      segment.type === 'insert' && 'bg-emerald-500/20 text-emerald-500',
-                      segment.type === 'delete' && 'bg-red-500/20 text-red-500 line-through',
+                      segment.type === 'insert' && 'bg-success/20 text-st-done',
+                      segment.type === 'delete' && 'bg-destructive/20 text-destructive line-through',
                     )}
                   >
                     {segment.value}

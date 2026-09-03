@@ -1,7 +1,8 @@
 import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import type { Script, Service, ScriptStatus } from '@/types';
@@ -12,6 +13,8 @@ import {
   FileCode,
   Link2,
   Terminal,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -19,6 +22,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
@@ -66,145 +70,129 @@ export function ScriptItem({ script, services, onEdit, onDelete }: ScriptItemPro
     openTerminal('script', script.id);
   };
 
+  const color = script.color || 'var(--text-faint)';
+
   return (
-    <Card className="group">
-      <CardContent className="p-4">
-        <div className="flex items-start gap-4">
-          {/* Icon with status indicator */}
-          <div className="mt-1 flex-shrink-0 relative">
-            <FileCode
-              className="size-5"
-              style={{ color: script.color || '#6b7280' }}
-            />
-            <StatusDot status={status} />
-          </div>
+    <Card size="sm" className={cn('group py-0', isRunning && 'border-accent-border')}>
+      <div className="flex items-center gap-4 px-4 py-3">
+        {/* Colour tile + live state */}
+        <div className="relative shrink-0">
+          <span
+            className="grid size-9 place-items-center rounded-[var(--rad-sm)]"
+            style={{ backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)`, color }}
+          >
+            <FileCode className="size-4" />
+          </span>
+          <span className="absolute -bottom-1 -right-1 grid size-4 place-items-center rounded-full bg-card">
+            <StatusDot status={status} size={9} />
+          </span>
+        </div>
 
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <TruncatedText as="h3" className="font-medium">{script.name}</TruncatedText>
-              <div className="flex-shrink-0">
-                <ScriptStatusBadge status={status} />
-              </div>
-            </div>
-            {script.description && (
-              <p className="text-sm text-muted-foreground mt-0.5 break-words">{script.description}</p>
-            )}
-            <div className="mt-1 space-y-0.5 text-xs text-muted-foreground font-mono">
-              <div className="flex gap-1">
-                <span className="flex-shrink-0">$</span>
-                <TruncatedText className="flex-1 min-w-0">{script.command}</TruncatedText>
-              </div>
-              {script.scriptPath && (
-                <div className="flex gap-1">
-                  <span className="flex-shrink-0">Path:</span>
-                  <TruncatedText className="flex-1 min-w-0">{script.scriptPath}</TruncatedText>
-                </div>
-              )}
-            </div>
+        {/* Content */}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <TruncatedText as="h3" className="font-display text-[15px] font-semibold tracking-tight">{script.name}</TruncatedText>
+            <ScriptStatusBadge status={status} />
             {linkedServices.length > 0 && (
-              <div className="flex items-center gap-1 mt-2">
-                <Link2 className="size-3 text-muted-foreground flex-shrink-0" />
-                <div className="flex gap-1 flex-wrap">
-                  {linkedServices.map((service) => (
-                    <Badge key={service.id} variant="secondary" className="text-xs">
-                      {service.name}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
+              <span className="flex min-w-0 items-center gap-1" title="Linked services">
+                <Link2 className="size-3 shrink-0 text-faint" />
+                {linkedServices.map((service) => (
+                  <Badge key={service.id} variant="secondary">
+                    {service.name}
+                  </Badge>
+                ))}
+              </span>
             )}
           </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-1 flex-shrink-0">
-            {hasLogs && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" className="size-8" onClick={handleViewLogs}>
-                    <Terminal className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>View output</TooltipContent>
-              </Tooltip>
+          {script.description && (
+            <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{script.description}</p>
+          )}
+          <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 font-mono text-[11px] text-muted-foreground">
+            <span className="text-faint">cmd</span>
+            <TruncatedText className="min-w-0 text-foreground/80">{script.command}</TruncatedText>
+            {script.scriptPath && (
+              <>
+                <span className="text-faint">file</span>
+                <TruncatedText className="min-w-0">{script.scriptPath}</TruncatedText>
+              </>
             )}
-
-            {isRunning ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="destructive" size="icon" className="size-8" onClick={handleStop}>
-                    <Square className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Stop script</TooltipContent>
-              </Tooltip>
-            ) : (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="default" size="icon" className="size-8" onClick={handleRun}>
-                    <Play className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Run script</TooltipContent>
-              </Tooltip>
+            {script.workingDir && script.workingDir !== '.' && (
+              <>
+                <span className="text-faint">cwd</span>
+                <TruncatedText className="min-w-0">{script.workingDir}</TruncatedText>
+              </>
             )}
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-8 opacity-0 group-hover:opacity-100">
-                  <MoreVertical className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={onEdit}>Edit Script</DropdownMenuItem>
-                <DropdownMenuItem onClick={onDelete} className="text-destructive">
-                  Delete Script
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
         </div>
-      </CardContent>
+
+        {/* Actions */}
+        <div className="flex shrink-0 items-center gap-1">
+          {hasLogs && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" onClick={handleViewLogs} aria-label="View output">
+                  <Terminal className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>View output</TooltipContent>
+            </Tooltip>
+          )}
+
+          {isRunning ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" onClick={handleStop} className="ml-1 text-destructive hover:text-destructive">
+                  <Square className="size-3.5" />
+                  Stop
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Stop script</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="sm" className="ml-1" onClick={handleRun}>
+                  <Play className="size-3.5" />
+                  Run
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Run script</TooltipContent>
+            </Tooltip>
+          )}
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="Script actions">
+                <MoreVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onEdit}>
+                <Pencil />
+                Edit script
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={onDelete}>
+                <Trash2 />
+                Delete script
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
     </Card>
   );
 }
 
-function StatusDot({ status }: { status: ScriptStatus }) {
-  const colors = {
-    idle: 'bg-gray-400',
-    running: 'bg-blue-500 animate-pulse',
-    completed: 'bg-green-500',
-    failed: 'bg-red-500',
-  };
-
-  return (
-    <span
-      className={cn(
-        'absolute -top-0.5 -right-0.5 size-2 rounded-full',
-        colors[status]
-      )}
-    />
-  );
-}
-
 function ScriptStatusBadge({ status }: { status: ScriptStatus }) {
-  const styles = {
-    idle: 'bg-muted text-muted-foreground',
-    running: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-    completed: 'bg-green-500/10 text-green-600 dark:text-green-400',
-    failed: 'bg-red-500/10 text-red-600 dark:text-red-400',
-  };
-
-  const labels = {
-    idle: 'Idle',
-    running: 'Running',
-    completed: 'Completed',
-    failed: 'Failed',
-  };
-
-  return (
-    <span className={cn('text-xs px-1.5 py-0.5 rounded', styles[status])}>
-      {labels[status]}
-    </span>
-  );
+  switch (status) {
+    case 'running':
+      return <Badge variant="info" className="shrink-0">Running</Badge>;
+    case 'completed':
+      return <Badge variant="success" className="shrink-0">Completed</Badge>;
+    case 'failed':
+      return <Badge variant="destructive" className="shrink-0">Failed</Badge>;
+    default:
+      return null;
+  }
 }

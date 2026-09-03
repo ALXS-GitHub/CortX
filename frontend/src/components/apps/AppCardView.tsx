@@ -1,15 +1,10 @@
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AppWindow, MoreVertical, Pencil, Trash2, FileText, Rocket } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { FileText, Rocket } from 'lucide-react';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
-import { useAppStore } from '@/stores/appStore';
-import { toast } from 'sonner';
+import { AppIcon, AppMenu, hoverMenuClass, useLaunchApp } from './AppCard';
 import type { App, TagDefinition } from '@/types';
 
 interface AppCardViewProps {
@@ -21,76 +16,53 @@ interface AppCardViewProps {
   onToggleFavorite: () => void;
 }
 
+/** Card (the "card" view mode). */
 export function AppCardView({ app, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: AppCardViewProps) {
-  const { launchApp } = useAppStore();
-
-  const handleLaunch = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await launchApp(app.id);
-      toast.success(`Launched ${app.name}`);
-    } catch (err) {
-      toast.error('Failed to launch app', { description: String(err) });
-    }
-  };
+  const launch = useLaunchApp(app);
+  const configs = app.configPaths.length;
 
   return (
-    <Card className="group cursor-pointer hover:border-primary/50 transition-colors h-full flex flex-col" onClick={onClick}>
-      <CardHeader className="pb-2 px-4 pt-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <AppWindow className="size-5 flex-shrink-0" style={{ color: app.color || '#6b7280' }} />
-            <h3 className="font-medium truncate">{app.name}</h3>
+    <Card interactive size="sm" className="group h-full gap-3" onClick={onClick}>
+      <div className="flex items-start gap-3 px-4">
+        <AppIcon color={app.color} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="truncate font-display text-[15px] font-semibold tracking-tight">{app.name}</h3>
+            <StatusBadge status={app.status} className="shrink-0" />
           </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            <StatusBadge status={app.status} />
-            <FavoriteButton favorite={app.favorite} onToggle={onToggleFavorite} />
-            <div
-              className={cn('flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity')}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Button variant="ghost" size="icon" className="size-7" onClick={handleLaunch} title="Launch">
-                <Rocket className="size-3.5" />
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="size-7">
-                    <MoreVertical className="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={onEdit}>
-                    <Pencil className="size-4 mr-2" />Edit
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={onDelete} className="text-destructive">
-                    <Trash2 className="size-4 mr-2" />Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
+          {app.description ? (
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{app.description}</p>
+          ) : app.executablePath ? (
+            <p className="mt-0.5 truncate font-mono text-[11px] text-faint" title={app.executablePath}>{app.executablePath}</p>
+          ) : null}
         </div>
-      </CardHeader>
-      <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col">
-        {app.description && (
-          <p className="text-sm text-muted-foreground line-clamp-2">{app.description}</p>
+        <FavoriteButton favorite={app.favorite} onToggle={onToggleFavorite} />
+        <AppMenu onEdit={onEdit} onDelete={onDelete} className={hoverMenuClass} />
+      </div>
+
+      {app.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 px-4">
+          {app.tags.map((tag) => (
+            <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
+          ))}
+        </div>
+      )}
+
+      <div className="mt-auto flex items-center gap-2 border-t border-border px-4 pt-3">
+        <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 truncate font-mono text-[11px] text-faint">
+          <FileText className="size-3 shrink-0" />
+          {configs === 0 ? 'No config path' : `${configs} config${configs > 1 ? 's' : ''}`}
+        </span>
+        {app.version && (
+          <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title="Version">
+            v{app.version.replace(/^v/i, '')}
+          </span>
         )}
-        <div className="mt-auto pt-3 space-y-2">
-          {app.tags.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {app.tags.map((tag) => (
-                <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
-              ))}
-            </div>
-          )}
-          {app.configPaths.length > 0 && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <FileText className="size-3" />
-              <span>{app.configPaths.length} config{app.configPaths.length > 1 ? 's' : ''}</span>
-            </div>
-          )}
-        </div>
-      </CardContent>
+        <Button size="sm" onClick={launch}>
+          <Rocket className="size-3.5" />
+          Launch
+        </Button>
+      </div>
     </Card>
   );
 }

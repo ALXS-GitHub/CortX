@@ -31,11 +31,13 @@ export function ClosingModal() {
   return (
     <Dialog open={isClosing}>
       <DialogContent showCloseButton={false} className="sm:max-w-sm">
-        <DialogHeader className="items-center text-center">
-          <Loader2 className="size-8 animate-spin text-primary mb-2" />
-          <DialogTitle>Closing Application</DialogTitle>
+        <DialogHeader className="items-center pr-0 text-center">
+          <span className="mb-1 grid size-12 place-items-center rounded-2xl bg-accent text-primary">
+            <Loader2 className="size-6 animate-spin" />
+          </span>
+          <DialogTitle>Closing CortX</DialogTitle>
           <DialogDescription>
-            Stopping running processes...
+            Stopping running processes…
           </DialogDescription>
         </DialogHeader>
       </DialogContent>

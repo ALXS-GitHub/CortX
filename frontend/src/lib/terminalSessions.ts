@@ -129,8 +129,8 @@ function isDarkTheme(): boolean {
 
 export function buildTerminalTheme(): ITheme {
   const dark = isDarkTheme();
-  const bg = resolveCssColor('--card') ?? (dark ? [30, 30, 30] : [255, 255, 255]);
-  const fg = resolveCssColor('--foreground') ?? (dark ? [229, 229, 229] : [36, 36, 36]);
+  const bg = resolveCssColor('--bg-terminal') ?? resolveCssColor('--card') ?? (dark ? [30, 30, 30] : [255, 255, 255]);
+  const fg = resolveCssColor('--terminal-fg') ?? resolveCssColor('--foreground') ?? (dark ? [229, 229, 229] : [36, 36, 36]);
   const ansi = dark ? DARK_ANSI : LIGHT_ANSI;
   return {
     background: toHex(bg),

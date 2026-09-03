@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { FolderOpen, FileSearch } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import type { Script, Service, CreateScriptInput, UpdateScriptInput } from '@/types';
 
 // Calculate relative path from base to target
@@ -215,9 +216,9 @@ export function ScriptForm({ open, onOpenChange, script, services, projectPath, 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-5">
           <DialogHeader>
-            <DialogTitle>{isEditing ? 'Edit Script' : 'Add New Script'}</DialogTitle>
+            <DialogTitle>{isEditing ? 'Edit script' : 'Add script'}</DialogTitle>
             <DialogDescription>
               {isEditing
                 ? 'Update the script configuration.'
@@ -225,9 +226,9 @@ export function ScriptForm({ open, onOpenChange, script, services, projectPath, 
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="script-name">Script Name *</Label>
+          <div className="-mx-6 min-h-0 flex-1 space-y-4 overflow-y-auto px-6">
+            <div className="space-y-2">
+              <Label htmlFor="script-name">Script name *</Label>
               <Input
                 id="script-name"
                 value={name}
@@ -236,7 +237,7 @@ export function ScriptForm({ open, onOpenChange, script, services, projectPath, 
               />
             </div>
 
-            <div className="grid gap-2">
+            <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
               <Textarea
                 id="description"
@@ -247,34 +248,37 @@ export function ScriptForm({ open, onOpenChange, script, services, projectPath, 
               />
             </div>
 
-            <div className="grid gap-2">
+            <div className="space-y-2">
               <Label htmlFor="command">Command *</Label>
               <Input
                 id="command"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
                 placeholder="e.g., npm run build, ./deploy.sh"
+                className="font-mono text-[12px]"
               />
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="script-path">Script Path (optional)</Label>
+            <div className="space-y-2">
+              <Label htmlFor="script-path">Script path (optional)</Label>
               <div className="flex gap-2">
                 <Input
                   id="script-path"
                   value={scriptPath}
                   onChange={(e) => setScriptPath(e.target.value)}
                   placeholder="e.g., scripts/deploy.sh"
-                  className="flex-1"
+                  className="flex-1 font-mono text-[12px]"
                 />
                 {projectPath && (
                   <Button
                     type="button"
                     variant="outline"
+                    size="icon"
                     onClick={handleBrowseScriptPath}
                     title="Browse for script file"
+                    aria-label="Browse for script file"
                   >
-                    <FileSearch className="size-4" />
+                    <FileSearch />
                   </Button>
                 )}
               </div>
@@ -283,24 +287,26 @@ export function ScriptForm({ open, onOpenChange, script, services, projectPath, 
               </p>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="working-dir">Working Directory</Label>
+            <div className="space-y-2">
+              <Label htmlFor="working-dir">Working directory</Label>
               <div className="flex gap-2">
                 <Input
                   id="working-dir"
                   value={workingDir}
                   onChange={(e) => setWorkingDir(e.target.value)}
                   placeholder="."
-                  className="flex-1"
+                  className="flex-1 font-mono text-[12px]"
                 />
                 {projectPath && (
                   <Button
                     type="button"
                     variant="outline"
+                    size="icon"
                     onClick={handleBrowseWorkingDir}
                     title="Browse for working directory"
+                    aria-label="Browse for working directory"
                   >
-                    <FolderOpen className="size-4" />
+                    <FolderOpen />
                   </Button>
                 )}
               </div>
@@ -309,16 +315,19 @@ export function ScriptForm({ open, onOpenChange, script, services, projectPath, 
               </p>
             </div>
 
-            <div className="grid gap-2">
+            <div className="space-y-2">
               <Label>Color</Label>
               <div className="flex gap-2">
                 {SCRIPT_COLORS.map((c) => (
                   <button
                     key={c}
                     type="button"
-                    className={`size-6 rounded-full transition-all ${
-                      color === c ? 'ring-2 ring-offset-2 ring-primary' : ''
-                    }`}
+                    aria-label={`Use colour ${c}`}
+                    aria-pressed={color === c}
+                    className={cn(
+                      'size-6 rounded-full transition-[box-shadow,transform] hover:scale-110',
+                      color === c && 'ring-2 ring-ring ring-offset-2 ring-offset-background'
+                    )}
                     style={{ backgroundColor: c }}
                     onClick={() => setColor(c)}
                   />
@@ -327,9 +336,9 @@ export function ScriptForm({ open, onOpenChange, script, services, projectPath, 
             </div>
 
             {services.length > 0 && (
-              <div className="grid gap-2">
-                <Label>Linked Services (for reference)</Label>
-                <div className="space-y-2 max-h-32 overflow-y-auto">
+              <div className="space-y-2">
+                <Label>Linked services (for reference)</Label>
+                <div className="max-h-32 space-y-2 overflow-y-auto rounded-sm border border-border bg-card/60 p-2.5">
                   {services.map((service) => (
                     <div key={service.id} className="flex items-center gap-2">
                       <Checkbox
@@ -337,14 +346,18 @@ export function ScriptForm({ open, onOpenChange, script, services, projectPath, 
                         checked={linkedServiceIds.includes(service.id)}
                         onCheckedChange={() => toggleService(service.id)}
                       />
-                      <label htmlFor={`service-${service.id}`} className="text-sm">
+                      <label htmlFor={`service-${service.id}`} className="flex items-center gap-2 text-sm">
+                        <span
+                          className="size-2.5 rounded-full"
+                          style={{ backgroundColor: service.color || 'var(--text-faint)' }}
+                        />
                         {service.name}
                       </label>
                     </div>
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Optional: Link related services for organization
+                  Optional: link related services for organization
                 </p>
               </div>
             )}
@@ -353,11 +366,11 @@ export function ScriptForm({ open, onOpenChange, script, services, projectPath, 
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Add Script'}
+              {isSubmitting ? 'Saving…' : isEditing ? 'Save changes' : 'Add script'}
             </Button>
           </DialogFooter>
         </form>

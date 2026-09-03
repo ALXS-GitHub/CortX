@@ -6,6 +6,13 @@ export type AgentsGroupMode = 'global' | 'project';
 export type AgentsScope = 'active' | 'recent' | 'all';
 
 interface ViewPrefsState {
+  /** Sidebar collapsed to its icon rail. */
+  sidebarCollapsed: boolean;
+  /** Expanded sidebar width in px (user-resizable). */
+  sidebarWidth: number;
+  setSidebarCollapsed: (collapsed: boolean) => void;
+  toggleSidebar: () => void;
+  setSidebarWidth: (width: number) => void;
   projectsViewMode: ListViewMode;
   scriptsViewMode: ListViewMode;
   toolsViewMode: ListViewMode;
@@ -32,6 +39,11 @@ interface ViewPrefsState {
 export const useViewPrefsStore = create<ViewPrefsState>()(
   persist(
     (set) => ({
+      sidebarCollapsed: false,
+      sidebarWidth: 252,
+      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+      toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+      setSidebarWidth: (width) => set({ sidebarWidth: Math.min(Math.max(width, 200), 380) }),
       projectsViewMode: 'card',
       scriptsViewMode: 'list',
       toolsViewMode: 'list',

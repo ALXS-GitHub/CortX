@@ -1,8 +1,11 @@
-import { Card, CardContent } from '@/components/ui/card';
+import type { CSSProperties } from 'react';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
@@ -24,11 +27,27 @@ interface AppCardProps {
   onToggleFavorite: () => void;
 }
 
-export function AppCard({ app, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: AppCardProps) {
-  const { launchApp } = useAppStore();
+/** Tinted tile with the app icon, coloured with the app's colour. Shared by the list shapes and the detail header. */
+export function AppIcon({ color, size = 'md', className }: { color?: string | null; size?: 'sm' | 'md' | 'lg'; className?: string }) {
+  const c = color || 'var(--text-faint)';
+  const box = size === 'sm' ? 'size-6 rounded-[var(--rad-xs)]' : size === 'lg' ? 'size-10 rounded-[var(--rad-sm)]' : 'size-9 rounded-[var(--rad-sm)]';
+  const icon = size === 'sm' ? 'size-3.5' : size === 'lg' ? 'size-5' : 'size-4';
+  return (
+    <span
+      className={cn('grid shrink-0 place-items-center', box, className)}
+      style={{ color: c, backgroundColor: `color-mix(in srgb, ${c} 14%, transparent)` } as CSSProperties}
+      aria-hidden
+    >
+      <AppWindow className={icon} />
+    </span>
+  );
+}
 
-  const handleLaunch = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+/** Launch handler shared by the three app list shapes (never navigates to the row underneath). */
+export function useLaunchApp(app: App) {
+  const { launchApp } = useAppStore();
+  return async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     try {
       await launchApp(app.id);
       toast.success(`Launched ${app.name}`);
@@ -36,64 +55,80 @@ export function AppCard({ app, tagDefinitions, onEdit, onDelete, onClick, onTogg
       toast.error('Failed to launch app', { description: String(err) });
     }
   };
+}
+
+/** The "…" menu shared by the three app list shapes. */
+export function AppMenu({ onEdit, onDelete, className }: { onEdit: () => void; onDelete: () => void; className?: string }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+        <Button variant="ghost" size="icon-sm" className={className} aria-label="App actions">
+          <MoreVertical className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+          <Pencil />
+          Edit app
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+          <Trash2 />
+          Delete app
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Hover-only control classes (stay visible while a menu is open). */
+export const hoverMenuClass = 'opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100';
+
+/** List row (the "list" view mode). */
+export function AppCard({ app, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: AppCardProps) {
+  const launch = useLaunchApp(app);
+  const configs = app.configPaths.length;
 
   return (
-    <Card className="group cursor-pointer hover:border-primary/50 transition-colors" onClick={onClick}>
-      <CardContent className="p-4">
-        <div className="flex items-start gap-4">
-          <div className="mt-1 flex-shrink-0">
-            <AppWindow className="size-5" style={{ color: app.color || '#6b7280' }} />
-          </div>
+    <Card interactive size="sm" className="group py-3" onClick={onClick}>
+      <div className="flex items-center gap-4 px-4">
+        <AppIcon color={app.color} />
 
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h3 className="font-medium truncate">{app.name}</h3>
-              <StatusBadge status={app.status} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="truncate font-display text-[15px] font-semibold tracking-tight">{app.name}</h3>
+            <StatusBadge status={app.status} className="shrink-0" />
+          </div>
+          {app.description ? (
+            <p className="line-clamp-1 text-xs text-muted-foreground">{app.description}</p>
+          ) : app.executablePath ? (
+            <p className="truncate font-mono text-[11px] text-faint" title={app.executablePath}>{app.executablePath}</p>
+          ) : null}
+          {app.tags.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {app.tags.map((tag) => (
+                <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
+              ))}
             </div>
-            {app.description && (
-              <p className="text-sm text-muted-foreground mt-0.5 line-clamp-1">{app.description}</p>
-            )}
-            {app.tags.length > 0 && (
-              <div className="flex gap-1 flex-wrap mt-2">
-                {app.tags.map((tag) => (
-                  <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
-                ))}
-              </div>
-            )}
-            {app.configPaths.length > 0 && (
-              <div className="flex items-center gap-1 mt-1.5 text-xs text-muted-foreground">
-                <FileText className="size-3" />
-                <span>{app.configPaths.length} config{app.configPaths.length > 1 ? 's' : ''}</span>
-              </div>
-            )}
-          </div>
-
-          <FavoriteButton favorite={app.favorite} onToggle={onToggleFavorite} />
-
-          <div className={cn('flex items-center gap-1', 'opacity-0 group-hover:opacity-100 transition-opacity')} onClick={(e) => e.stopPropagation()}>
-            <Button variant="ghost" size="icon" className="size-7" onClick={handleLaunch} title="Launch">
-              <Rocket className="size-3.5" />
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-7">
-                  <MoreVertical className="size-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={onEdit}>
-                  <Pencil className="size-4 mr-2" />
-                  Edit
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={onDelete} className="text-destructive">
-                  <Trash2 className="size-4 mr-2" />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          )}
         </div>
-      </CardContent>
+
+        {configs > 0 && (
+          <Badge variant="secondary" className="hidden shrink-0 sm:inline-flex" title="Configuration paths">
+            <FileText />
+            {configs} config{configs > 1 ? 's' : ''}
+          </Badge>
+        )}
+
+        <div className="flex shrink-0 items-center gap-1.5">
+          <FavoriteButton favorite={app.favorite} onToggle={onToggleFavorite} />
+          <Button size="sm" variant="outline" onClick={launch} title="Launch">
+            <Rocket className="size-3.5" />
+            Launch
+          </Button>
+          <AppMenu onEdit={onEdit} onDelete={onDelete} className={hoverMenuClass} />
+        </div>
+      </div>
     </Card>
   );
 }

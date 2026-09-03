@@ -18,10 +18,10 @@ export function EnvComparisonBanner({
 
   if (!hasMissing && !hasExtra) {
     return (
-      <div className="flex items-center gap-2 p-3 bg-green-500/10 rounded-lg">
-        <CheckCircle className="size-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-        <span className="text-sm text-green-700 dark:text-green-400">
-          All variables from {exampleFileName} are present
+      <div className="flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-xs text-st-done">
+        <CheckCircle className="size-4 shrink-0" />
+        <span>
+          All variables from <span className="font-mono">{exampleFileName}</span> are present
         </span>
       </div>
     );
@@ -30,16 +30,16 @@ export function EnvComparisonBanner({
   return (
     <div className="space-y-2">
       {hasMissing && (
-        <div className="p-3 bg-amber-500/10 rounded-lg">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-            <span className="text-sm font-medium text-amber-700 dark:text-amber-400">
-              Missing in {baseFileName} ({comparison.missingInBase.length})
+        <div className="rounded-lg bg-warning/10 px-3 py-2">
+          <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-st-progress">
+            <AlertTriangle className="size-4 shrink-0" />
+            <span>
+              Missing in <span className="font-mono">{baseFileName}</span> ({comparison.missingInBase.length})
             </span>
           </div>
           <div className="flex flex-wrap gap-1">
             {comparison.missingInBase.map((key) => (
-              <Badge key={key} variant="outline" className="font-mono text-xs">
+              <Badge key={key} variant="outline" className="font-mono">
                 {key}
               </Badge>
             ))}
@@ -48,16 +48,16 @@ export function EnvComparisonBanner({
       )}
 
       {hasExtra && (
-        <div className="p-3 bg-blue-500/10 rounded-lg">
-          <div className="flex items-center gap-2 mb-2">
-            <Info className="size-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-            <span className="text-sm font-medium text-blue-700 dark:text-blue-400">
-              Extra in {baseFileName} ({comparison.extraInBase.length})
+        <div className="rounded-lg bg-info/10 px-3 py-2">
+          <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-st-open">
+            <Info className="size-4 shrink-0" />
+            <span>
+              Extra in <span className="font-mono">{baseFileName}</span> ({comparison.extraInBase.length})
             </span>
           </div>
           <div className="flex flex-wrap gap-1">
             {comparison.extraInBase.map((key) => (
-              <Badge key={key} variant="outline" className="font-mono text-xs">
+              <Badge key={key} variant="outline" className="font-mono">
                 {key}
               </Badge>
             ))}
