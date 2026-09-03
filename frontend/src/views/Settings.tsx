@@ -1002,7 +1002,11 @@ export function Settings() {
                   className="w-24 font-mono text-[12px]"
                 />
               </Field>
-              <Field label="Line height" htmlFor="terminal-line-height">
+              <Field
+                label="Line height"
+                htmlFor="terminal-line-height"
+                hint={terminalRenderer === 'dom' ? '1.0 keeps powerline separators joined with this renderer.' : undefined}
+              >
                 <Input
                   id="terminal-line-height"
                   type="number"
@@ -1087,7 +1091,7 @@ export function Settings() {
             <Field
               label="Renderer"
               htmlFor="terminal-renderer"
-              hint="The GPU renderer scales glyphs to the cell, so powerline separators line up; the browser one draws thinner text but block glyphs keep their own height."
+              hint="The GPU renderer redraws box and powerline glyphs at the cell size. The browser one draws finer text through the system rasteriser — set the line height to 1.0 with it so the separators still touch."
             >
               <Select value={terminalRenderer} onValueChange={(v: 'dom' | 'webgl') => { setTerminalRenderer(v); setHasChanges(true); }}>
                 <SelectTrigger id="terminal-renderer" className="w-[260px]">

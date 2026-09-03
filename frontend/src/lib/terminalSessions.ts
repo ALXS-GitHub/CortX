@@ -220,6 +220,7 @@ export function terminalFontOptions(): {
   const cfg = useAppStore.getState().settings?.terminal;
   const family = cfg?.fontFamily?.trim();
   const size = cfg?.fontSize;
+  const renderer = cfg?.renderer ?? 'webgl';
   const lh = cfg?.lineHeight;
   const ls = cfg?.letterSpacing;
   return {
@@ -229,11 +230,19 @@ export function terminalFontOptions(): {
     // A user font still falls back to the stack for glyphs it lacks.
     fontFamily: family ? `"${family.replace(/"/g, '')}", ${DEFAULT_FONT_STACK}` : DEFAULT_FONT_STACK,
     fontSize: size && size >= 8 && size <= 32 ? size : DEFAULT_FONT_SIZE,
-    lineHeight: lh && lh >= 1 && lh <= 2 ? lh : DEFAULT_LINE_HEIGHT,
+    lineHeight: lh && lh >= 1 && lh <= 2 ? lh : defaultLineHeight(renderer),
   };
 }
 
-const DEFAULT_LINE_HEIGHT = 1.2;
+/**
+ * Default line height per renderer. The GPU renderer redraws box / powerline
+ * glyphs to the cell, so it tolerates a roomier line; the browser renderer
+ * draws them at their own size, and only a line box of exactly 1 lets them
+ * touch cell to cell (a powerline prompt shows gaps otherwise).
+ */
+function defaultLineHeight(renderer: string): number {
+  return renderer === 'dom' ? 1 : 1.2;
+}
 /**
  * Extra spacing is **off** by default: powerline / Nerd Font glyphs are
  * designed to touch cell to cell, and a spacing of even one pixel tears the
