@@ -620,8 +620,10 @@ Plus Jakarta Sans / JetBrains Mono). The design guide lives in
 - **Terminal dock**: lives under the current screen in the main column (no
   longer overlays the sidebar), follows the light/dark mode.
 - **Appearance**: light / dark / system mode (app settings) + per-machine style
-  knobs — **skin** (Halcyon or the previous *Classic* neutral theme), accent
-  colour, corner radius, font family (`frontend/src/lib/theme.ts`).
+  knobs (`frontend/src/lib/theme.ts`) — **skin** (Halcyon, or the previous
+  *Classic* near-native shadcn theme; each skin is one token file under
+  `frontend/src/styles/`), accent colour (both skins; the theme default is teal
+  for Halcyon, black / white for Classic), corner radius (Halcyon), font family.
 
 ### 7.2 Key Views (Current Implementation)
 

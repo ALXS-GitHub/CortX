@@ -10,7 +10,8 @@ effects, component knobs — see `src/styles/tokens.md`): `theme-halcyon.css`
 `data-skin="classic"`). `src/index.css` only maps the tokens to Tailwind
 utilities and holds the shared component CSS. The runtime knobs (skin,
 accent, radius, font) live in `src/lib/theme.ts`, the light/dark mode in the
-app settings.
+app settings. Accent and font apply to both skins (accent `undefined` = the
+skin's own primary); the radius knob is Halcyon-only.
 
 Components must never hard-code a colour, radius, shadow or blur: use the
 utilities below (or `var(--token)` in an arbitrary value) so both skins stay

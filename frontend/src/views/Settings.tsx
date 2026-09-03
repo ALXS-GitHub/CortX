@@ -1227,9 +1227,8 @@ function AppearanceSection({
   onThemeChange: (value: 'light' | 'dark' | 'system') => void;
 }) {
   const { skin, accent, radius, font, setStyle, reset } = useThemeStore();
-  const defaultAccent = ACCENT_PRESETS[0].value;
-  const currentAccent = accent ?? defaultAccent;
-  const isPreset = ACCENT_PRESETS.some((p) => p.value.toLowerCase() === currentAccent.toLowerCase());
+  const isPreset = !!accent && ACCENT_PRESETS.some((p) => p.value.toLowerCase() === accent.toLowerCase());
+  const isCustom = !!accent && !isPreset;
   const radiusName = RADIUS_PRESETS.find((r) => r.value === radius)?.name ?? 'Soft';
   const isDefaultStyle = !accent && radius === 1 && font === 'halcyon';
   const isClassic = skin === 'classic';
@@ -1260,11 +1259,26 @@ function AppearanceSection({
 
       <Separator />
 
-      <div className={cn('space-y-5', isClassic && 'pointer-events-none opacity-50')} aria-disabled={isClassic}>
-        <Field label="Accent colour">
+      <div className="space-y-5">
+        <Field label="Accent colour" hint={isClassic ? 'Theme default is black in light mode and white in dark mode.' : undefined}>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              title="Theme default"
+              aria-label="Theme default"
+              aria-pressed={!accent}
+              onClick={() => setStyle({ accent: undefined })}
+              className={cn(
+                'grid size-7 place-items-center rounded-full border border-border-strong text-background transition-[transform,box-shadow] hover:scale-110',
+                !accent && 'ring-2 ring-ring ring-offset-2 ring-offset-card'
+              )}
+              style={{ backgroundColor: 'var(--theme-primary)' }}
+            >
+              {!accent && <Check className="size-3.5" />}
+            </button>
+            <span className="mx-1 h-5 w-px bg-border" />
             {ACCENT_PRESETS.map((preset) => {
-              const active = preset.value.toLowerCase() === currentAccent.toLowerCase();
+              const active = !!accent && preset.value.toLowerCase() === accent.toLowerCase();
               return (
                 <button
                   key={preset.value}
@@ -1272,7 +1286,7 @@ function AppearanceSection({
                   title={preset.name}
                   aria-label={preset.name}
                   aria-pressed={active}
-                  onClick={() => setStyle({ accent: preset.value === defaultAccent ? undefined : preset.value })}
+                  onClick={() => setStyle({ accent: preset.value })}
                   className={cn(
                     'grid size-7 place-items-center rounded-full transition-[transform,box-shadow] hover:scale-110',
                     active && 'ring-2 ring-offset-2 ring-offset-card'
@@ -1287,29 +1301,29 @@ function AppearanceSection({
             <label
               className={cn(
                 'relative grid size-7 cursor-pointer place-items-center rounded-full border border-dashed border-border-strong',
-                !isPreset && 'border-solid ring-2 ring-offset-2 ring-offset-card'
+                isCustom && 'border-solid ring-2 ring-offset-2 ring-offset-card'
               )}
               style={
-                !isPreset
-                  ? ({ backgroundColor: currentAccent, '--tw-ring-color': currentAccent } as CSSProperties)
+                isCustom && accent
+                  ? ({ backgroundColor: accent, '--tw-ring-color': accent } as CSSProperties)
                   : undefined
               }
               title="Custom colour"
             >
-              {isPreset ? (
-                <Palette className="size-3.5 text-faint" />
+              {isCustom && accent ? (
+                <Check className="size-3.5" style={{ color: accentForeground(accent) }} />
               ) : (
-                <Check className="size-3.5" style={{ color: accentForeground(currentAccent) }} />
+                <Palette className="size-3.5 text-faint" />
               )}
               <input
                 type="color"
-                value={currentAccent}
+                value={accent ?? '#0d9488'}
                 onChange={(e) => setStyle({ accent: e.target.value })}
                 className="absolute inset-0 size-full cursor-pointer opacity-0"
                 aria-label="Custom accent colour"
               />
             </label>
-            <span className="font-mono text-[11px] text-faint">{currentAccent.toLowerCase()}</span>
+            <span className="font-mono text-[11px] text-faint">{accent ? accent.toLowerCase() : 'theme default'}</span>
             <Button variant="ghost" size="sm" onClick={reset} disabled={isDefaultStyle} className="ml-auto">
               <RotateCcw />
               Reset
@@ -1317,7 +1331,7 @@ function AppearanceSection({
           </div>
         </Field>
 
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className={cn('grid gap-5 sm:grid-cols-2', isClassic && 'pointer-events-none opacity-50')} aria-disabled={isClassic}>
           <Field label="Corners">
             <Segmented
               value={radiusName}
@@ -1345,7 +1359,7 @@ function AppearanceSection({
       <p className="flex items-center gap-1 text-xs text-muted-foreground">
         <Info className="size-3" />
         {isClassic
-          ? 'Accent and corners are Halcyon only — switch the style back to adjust them. The font applies to both styles.'
+          ? 'Corners are fixed in the Classic style. Accent and font apply instantly on this machine — no need to save.'
           : 'Accent, corners and font apply instantly on this machine — no need to save.'}
       </p>
     </Section>

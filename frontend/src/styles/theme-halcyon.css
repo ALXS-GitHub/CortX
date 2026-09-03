@@ -22,6 +22,7 @@
 
   --primary: #0d9488;
   --primary-foreground: #ffffff;
+  --theme-primary: #0d9488; /* the skin's own accent (swatch "Theme default") */
   --secondary: hsl(186 30% 89%);
   --secondary-foreground: hsl(184 30% 22%);
   --muted: hsl(186 28% 90%);
@@ -150,6 +151,7 @@
 
   --primary: #2dd4bf;
   --primary-foreground: #06231f;
+  --theme-primary: #2dd4bf;
   --secondary: hsl(193 24% 18%);
   --secondary-foreground: hsl(180 30% 92%);
   --muted: hsl(194 26% 16%);

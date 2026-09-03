@@ -15,10 +15,11 @@ export type Skin = 'halcyon' | 'classic';
 
 export interface ThemeStyle {
   /** Skin. `classic` restores the pre-Halcyon neutral theme (Inter, greys,
-   *  small radii, no glass) — the accent / radius knobs only apply to
-   *  `halcyon`; the font family applies to both. */
+   *  small radii, no glass). Accent and font apply to both skins; the corner
+   *  radius is fixed by the Classic skin. */
   skin: Skin;
-  /** Accent colour (hex) — `undefined` = default Halcyon teal. */
+  /** Accent colour (hex) — `undefined` = the skin's own primary (Halcyon
+   *  teal, Classic black / white). */
   accent?: string;
   /** Corner radius in rem. */
   radius: number;
@@ -82,21 +83,20 @@ function applyStyleToDom(style: ThemeStyle): void {
   const root = document.documentElement;
   root.dataset.skin = style.skin;
   root.dataset.font = style.font;
-  if (style.skin === 'classic') {
-    // The classic skin owns its palette and radius (styles/theme-classic.css).
-    root.style.removeProperty('--primary');
-    root.style.removeProperty('--primary-foreground');
-    root.style.removeProperty('--radius');
-    return;
-  }
   if (style.accent) {
     root.style.setProperty('--primary', style.accent);
     root.style.setProperty('--primary-foreground', accentForeground(style.accent));
   } else {
+    // Theme default: Halcyon teal, Classic black (light) / white (dark).
     root.style.removeProperty('--primary');
     root.style.removeProperty('--primary-foreground');
   }
-  root.style.setProperty('--radius', `${style.radius}rem`);
+  if (style.skin === 'classic') {
+    // The classic skin owns its radius (styles/theme-classic.css).
+    root.style.removeProperty('--radius');
+  } else {
+    root.style.setProperty('--radius', `${style.radius}rem`);
+  }
 }
 
 interface ThemeStore extends ThemeStyle {
