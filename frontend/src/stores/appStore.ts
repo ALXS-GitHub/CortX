@@ -50,7 +50,7 @@ import type {
 import * as api from '@/lib/tauri';
 import { disposeTerminal } from '@/lib/terminalSessions';
 import type { TerminalSurface } from '@/lib/terminalLayout';
-import { focusInTerminalWindow } from '@/lib/terminalWindowBridge';
+import { focusInTerminalWindow, sendToTerminalWindow } from '@/lib/terminalWindowBridge';
 
 interface ServiceRuntime {
   status: ServiceStatus;
@@ -935,6 +935,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     // in this dock (sidebar clicks, "open terminal" from a project…).
     if (get().terminalSurfaces[terminalId(kind, runtimeKey)] === 'window') {
       if (focusInTerminalWindow(terminalId(kind, runtimeKey))) return;
+    }
+    // "Open processes in: Terminal window": a service / script whose tab
+    // does not exist yet goes straight to the window (shells opened from the
+    // dock stay in the dock).
+    if (
+      kind !== 'shell' &&
+      get().settings?.terminal.openProcessesIn === 'window' &&
+      !get().terminals.has(terminalId(kind, runtimeKey))
+    ) {
+      const projectId =
+        kind === 'global-script'
+          ? null
+          : get().projects.find((p) =>
+              kind === 'service' ? p.services.some((s) => s.id === runtimeKey) : p.scripts?.some((s) => s.id === runtimeKey)
+            )?.id ?? null;
+      if (sendToTerminalWindow(terminalId(kind, runtimeKey), projectId)) {
+        set((state) => {
+          const terminals = new Map(state.terminals);
+          const id = terminalId(kind, runtimeKey);
+          terminals.set(id, { id, kind, runtimeKey, paneId: null, visibility: 'window', order: Date.now(), createdAt: Date.now() });
+          return { terminals };
+        });
+        return;
+      }
     }
     set((state) => {
       const id = terminalId(kind, runtimeKey);

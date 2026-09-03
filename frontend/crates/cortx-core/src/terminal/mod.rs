@@ -17,10 +17,13 @@
 //! [`SinkFn`].
 
 pub mod history;
+pub mod launch;
 pub mod layout;
 pub mod osc;
+pub mod snapshot;
 
 pub use history::{CommandHistory, CommandRecord};
+pub use launch::{LaunchConfig, LaunchNode, LaunchStore, LaunchTab, LaunchTarget};
 pub use layout::{LayoutDoc, LayoutStore};
 pub use osc::{OscScanner, ShellEvent, ShellPhase, TerminalShellState, TerminalStateTracker};
 
@@ -158,6 +161,11 @@ impl TerminalHub {
     /// Forget the terminal entirely (scrollback and sinks).
     pub fn remove(&self, id: &str) {
         self.entries.lock().remove(id);
+    }
+
+    /// Ids of every terminal with a scrollback entry.
+    pub fn ids(&self) -> Vec<String> {
+        self.entries.lock().keys().cloned().collect()
     }
 
     /// Copy of the current scrollback (used by tests and diagnostics).

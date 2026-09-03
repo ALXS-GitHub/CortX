@@ -115,6 +115,46 @@ export interface TerminalConfig {
   fontFamily?: string;
   /** Font size in px. Default 12. */
   fontSize?: number;
+  /** Reopen the Terminal window's tabs on start (shells in their last cwd, nothing re-run). Default true. */
+  restoreSessions?: boolean;
+  /** Seed restored shells with the tail of their previous scrollback. Default true. */
+  restoreScrollback?: boolean;
+  /** Lines kept per terminal. Default 200. */
+  restoreScrollbackLines?: number;
+  /** Where a started service / script shows up. Default dock. */
+  openProcessesIn?: TerminalTargetSurface;
+  /** Where a launch configuration opens its tabs. Default window. */
+  openDevSessionsIn?: TerminalTargetSurface;
+}
+
+export type TerminalTargetSurface = 'dock' | 'window';
+
+// ---------------------------------------------------------------------------
+// Launch configurations (data/terminal/launch/*.yaml)
+// ---------------------------------------------------------------------------
+
+export type LaunchSplitDirection = 'horizontal' | 'vertical';
+
+export type LaunchNode =
+  | { split: LaunchSplitDirection; children: LaunchNode[]; sizes?: number[] }
+  | { cwd?: string; command?: string; shell?: string; title?: string };
+
+export interface LaunchTab {
+  title?: string;
+  layout: LaunchNode;
+}
+
+export interface LaunchConfig {
+  id: string;
+  name: string;
+  projectId?: string;
+  /** `terminal` (default) or `dock`. */
+  window: 'terminal' | 'dock';
+  tabs: LaunchTab[];
+}
+
+export function isLaunchSplit(node: LaunchNode): node is { split: LaunchSplitDirection; children: LaunchNode[]; sizes?: number[] } {
+  return typeof node === 'object' && node !== null && 'split' in node;
 }
 
 export type ShellPhase = 'unknown' | 'idle' | 'running';

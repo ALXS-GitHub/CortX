@@ -54,6 +54,27 @@ impl LayoutStore {
         doc.revision += 1;
         doc.layout = layout;
         let revision = doc.revision;
+        self.persist(&doc);
+        revision
+    }
+
+    /// Set one top-level key from the backend (e.g. `windowOpen`) and return
+    /// the new document so the caller can broadcast it. A null / non-object
+    /// document is turned into an object first.
+    pub fn patch(&self, key: &str, value: Value) -> LayoutDoc {
+        let mut doc = self.doc.lock();
+        if !doc.layout.is_object() {
+            doc.layout = Value::Object(Default::default());
+        }
+        if let Some(map) = doc.layout.as_object_mut() {
+            map.insert(key.to_string(), value);
+        }
+        doc.revision += 1;
+        self.persist(&doc);
+        doc.clone()
+    }
+
+    fn persist(&self, doc: &LayoutDoc) {
         if let Some(path) = &self.path {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
@@ -65,7 +86,6 @@ impl LayoutStore {
                 }
             }
         }
-        revision
     }
 }
 

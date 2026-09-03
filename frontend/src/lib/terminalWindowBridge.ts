@@ -15,3 +15,16 @@ export function focusInTerminalWindow(terminalId: string): boolean {
   focusHandler(terminalId);
   return true;
 }
+
+let sendHandler: ((terminalId: string, projectId?: string | null) => void) | null = null;
+
+export function registerSendToTerminalWindow(handler: (terminalId: string, projectId?: string | null) => void) {
+  sendHandler = handler;
+}
+
+/** Place a (new) terminal in the Terminal window instead of the dock. */
+export function sendToTerminalWindow(terminalId: string, projectId?: string | null): boolean {
+  if (!sendHandler) return false;
+  sendHandler(terminalId, projectId);
+  return true;
+}

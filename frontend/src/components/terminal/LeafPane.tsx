@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Columns2, Loader2, PanelBottom, Rows2, X } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Columns2, Loader2, PanelBottom, RotateCcw, Rows2, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeIcon';
@@ -10,8 +11,35 @@ import { formatDuration } from '@/lib/terminalNames';
 import type { LeafNode, TerminalTab } from '@/lib/terminalLayout';
 import { cn } from '@/lib/utils';
 import type { TerminalItem } from '@/components/layout/terminal-dnd/types';
+import type { GlobalScript } from '@/types';
 import { closeLeaf, sendLeafToDock, splitLeaf } from './actions';
 import { cwdLabel, hasEnded } from './model';
+
+/**
+ * How to start the process behind an ended service / script leaf again. The
+ * restarted process keeps its terminal id, so the leaf comes back alive by
+ * itself. `null` for shells and for global scripts that need parameters.
+ */
+function restartActionFor(item: TerminalItem | undefined, globalScripts: GlobalScript[]): (() => Promise<void>) | null {
+  if (!item || item.type === 'shell') return null;
+  const id = item.id.slice(item.id.indexOf(':') + 1);
+  const app = useAppStore.getState;
+  switch (item.type) {
+    case 'service':
+      return () => app().startService(id);
+    case 'script':
+      return () => app().runScript(id);
+    case 'global-script': {
+      const script = globalScripts.find((s) => s.id === id);
+      if (!script) return null;
+      const needsInput = script.parameters.some((p) => p.required && !p.defaultValue);
+      if (needsInput && !script.defaultPresetId) return null;
+      return () => app().runGlobalScript(id);
+    }
+    default:
+      return null;
+  }
+}
 
 interface LeafPaneProps {
   tab: TerminalTab;
@@ -96,7 +124,17 @@ function useSettled(delayMs: number): boolean {
 export function LeafPane({ tab, leaf, item, isActiveLeaf, isActiveTab, multi }: LeafPaneProps) {
   const setActiveLeaf = useTerminalLayoutStore((s) => s.setActiveLeaf);
   const markTerminalSeen = useAppStore((s) => s.markTerminalSeen);
+  const globalScripts = useAppStore((s) => s.globalScripts);
   const settled = useSettled(1500);
+  const restart = useMemo(() => restartActionFor(item, globalScripts), [item, globalScripts]);
+  const handleRestart = async () => {
+    if (!restart) return;
+    try {
+      await restart();
+    } catch (error) {
+      toast.error(`Failed to restart ${item?.name ?? 'the process'}`, { description: String(error) });
+    }
+  };
 
   const ended = item ? hasEnded(item) : settled;
   const exitCode = item?.lastExitCode ?? item?.shell?.lastExitCode ?? null;
@@ -165,6 +203,12 @@ export function LeafPane({ tab, leaf, item, isActiveLeaf, isActiveTab, multi }: 
                   <span className={cn('ml-1 font-mono', exitCode === 0 ? 'text-st-done' : 'text-st-blocked')}>· exit {exitCode}</span>
                 )}
               </span>
+              {restart && (
+                <Button variant="outline" size="xs" onClick={() => void handleRestart()}>
+                  <RotateCcw />
+                  Restart
+                </Button>
+              )}
               <Button variant="outline" size="xs" onClick={() => closeLeaf(leaf.terminalId)}>
                 Close
               </Button>

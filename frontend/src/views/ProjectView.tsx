@@ -3,6 +3,7 @@ import { useAppStore } from '@/stores/appStore';
 import { ServiceItem } from '@/components/projects/ServiceItem';
 import { ServiceForm } from '@/components/projects/ServiceForm';
 import { ProjectForm } from '@/components/projects/ProjectForm';
+import { OpenDevSessionButton } from '@/components/projects/OpenDevSessionButton';
 import { EnvironmentTab } from '@/components/env';
 import { ScriptsTab } from '@/components/scripts';
 import { AgentsView, BetaBadge } from '@/components/agents';
@@ -357,6 +358,7 @@ export function ProjectView() {
           <Button variant="outline" size="icon" onClick={handleOpenFolder} title="Open folder" aria-label="Open folder">
             <FolderOpen />
           </Button>
+          <OpenDevSessionButton project={project} />
           {launchControl}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

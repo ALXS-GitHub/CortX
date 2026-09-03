@@ -19,6 +19,7 @@ import type {
   TerminalCapabilities,
   TerminalShellState,
   CommandRecord,
+  LaunchConfig,
   ServiceExitPayload,
   ServicePortsPayload,
   ScriptLogPayload,
@@ -696,12 +697,15 @@ export async function spawnShell(options: {
   projectId?: string;
   cols?: number;
   rows?: number;
+  /** Session restore: terminal id this shell replaces (its scrollback snapshot is replayed first). */
+  restoreFrom?: string;
 }): Promise<ShellInfo> {
   return invoke('spawn_shell', {
     cwd: options.cwd ?? null,
     projectId: options.projectId ?? null,
     cols: options.cols ?? null,
     rows: options.rows ?? null,
+    restoreFrom: options.restoreFrom ?? null,
   });
 }
 
@@ -798,4 +802,60 @@ export async function showMainWindow(): Promise<void> {
 /** Project scope the Terminal window was created with (read once on boot). */
 export async function takeTerminalWindowScope(): Promise<string | null> {
   return invoke('take_terminal_window_scope');
+}
+
+// ============================================================================
+// Session restore + launch configurations (DEV-13 P2)
+// ============================================================================
+
+/** Launch configuration id requested by `cortx terminal --layout` (read once on boot). */
+export async function takeTerminalWindowLaunch(): Promise<string | null> {
+  return invoke('take_terminal_window_launch');
+}
+
+/** Pushed to an already-open Terminal window by `cortx terminal --layout`. */
+export async function onTerminalLaunch(callback: (launchId: string) => void): Promise<UnlistenFn> {
+  return listen<string>('terminal-launch', (event) => callback(event.payload));
+}
+
+/** Open / focus the Terminal window and run a launch configuration there. */
+export async function openTerminalWindowWithLaunch(launchId: string, projectId?: string | null): Promise<void> {
+  return invoke('open_terminal_window', { projectId: projectId ?? null, launch: launchId });
+}
+
+/** Write the scrollback tail of the given (or all) terminals to `runtime/terminal-snapshots/`. */
+export async function saveTerminalSnapshots(terminalIds?: string[]): Promise<void> {
+  return invoke('save_terminal_snapshots', { terminalIds: terminalIds ?? null });
+}
+
+export async function pruneTerminalSnapshots(keep: string[]): Promise<void> {
+  return invoke('prune_terminal_snapshots', { keep });
+}
+
+export async function listLaunchConfigs(): Promise<LaunchConfig[]> {
+  return invoke('list_launch_configs');
+}
+
+export async function getLaunchConfig(id: string): Promise<LaunchConfig | null> {
+  return invoke('get_launch_config', { id });
+}
+
+export async function readLaunchConfigYaml(id: string): Promise<string | null> {
+  return invoke('read_launch_config_yaml', { id });
+}
+
+export async function saveLaunchConfig(config: LaunchConfig): Promise<LaunchConfig> {
+  return invoke('save_launch_config', { config });
+}
+
+export async function saveLaunchConfigYaml(expectedId: string | null, yaml: string): Promise<LaunchConfig> {
+  return invoke('save_launch_config_yaml', { expectedId, yaml });
+}
+
+export async function deleteLaunchConfig(id: string): Promise<void> {
+  return invoke('delete_launch_config', { id });
+}
+
+export async function launchConfigToYaml(config: LaunchConfig): Promise<string> {
+  return invoke('launch_config_to_yaml', { config });
 }

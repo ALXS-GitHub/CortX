@@ -19,7 +19,16 @@ import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { useAppStore } from '@/stores/appStore';
 import { tabsInScope } from '@/lib/terminalLayout';
 import { bootstrapThemeStyle } from '@/lib/theme';
-import { onTerminalScope, showMainWindow, takeTerminalWindowScope } from '@/lib/tauri';
+import {
+  onTerminalScope,
+  showMainWindow,
+  takeTerminalWindowScope,
+  takeTerminalWindowLaunch,
+  onTerminalLaunch,
+  getLaunchConfig,
+} from '@/lib/tauri';
+import { runLaunchConfig } from '@/lib/launchConfigs';
+import { toast } from 'sonner';
 
 bootstrapThemeStyle();
 
@@ -52,6 +61,36 @@ export function TerminalWindow() {
       cancelled = true;
     };
   }, [loaded, setScope]);
+
+  // Launch configuration requested at creation (`cortx terminal --layout`,
+  // a project's "open a dev session"), then any pushed while open.
+  useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+    const run = async (launchId: string) => {
+      const config = await getLaunchConfig(launchId);
+      if (cancelled) return;
+      if (!config) {
+        toast.error('Launch configuration not found', { description: launchId });
+        return;
+      }
+      await runLaunchConfig(config, 'window');
+    };
+    takeTerminalWindowLaunch()
+      .then((id) => (id ? run(id) : undefined))
+      .catch((e) => toast.error('Launch failed', { description: String(e) }));
+    let unlisten: (() => void) | undefined;
+    onTerminalLaunch((id) => {
+      run(id).catch((e) => toast.error('Launch failed', { description: String(e) }));
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [loaded]);
 
   // Scope pushed while the window is already open.
   useEffect(() => {

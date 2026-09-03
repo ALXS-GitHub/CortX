@@ -273,6 +273,11 @@ Local App Launcher provides:
 | F4.3.34 | Terminal window UI: sessions rail grouped by project (status per tab: idle / running / attention), scope switcher Global / project (a display filter, never a wall), flat tab strip with reorder, rename, pin, colour, split right / split down trees with draggable dividers, per-leaf header actions (split, send to dock, close), status bar (cwd, program, running command with elapsed time or last exit), keyboard shortcuts | Must Have | Done |
 | F4.3.35 | Move terminals between surfaces: "Move to the Terminal window" from the dock toolbar, "Send to dock" from a leaf; the xterm session is re-created from the backend scrollback on the other side (one WebView = one DOM) | Must Have | Done |
 | F4.3.36 | Renderer pooling: hidden tabs release their WebGL context and keep their buffer; only on-screen panes hold a GPU renderer | Should Have | Done |
+| F4.3.37 | Session persistence (DEV-13 P2): the shared layout document is written to `data/terminal/sessions.json` on every change (git backup copies the whole `terminal/` folder); each pane records the shell's live directory (OSC 7, debounced) and the backend records whether the Terminal window was open | Must Have | Done |
+| F4.3.38 | Session restore, Warp-style: on start the main window recreates every shell of the layout in its last directory with a fresh id, re-runs nothing, keeps service / script panes as "ended" with a Restart action, and reopens the Terminal window if it was open at quit (`restoreSessions` setting) | Must Have | Done |
+| F4.3.39 | Scrollback snapshots: the tail (N lines, 256 KB cap) of every terminal is saved to `runtime/terminal-snapshots/` at quit and every minute; a restored shell replays it before its own output, separated by a "restored session" rule (`restoreScrollback`, `restoreScrollbackLines`) | Should Have | Done |
+| F4.3.40 | Launch configurations: CortX's own YAML format under `data/terminal/launch/<id>.yaml` (name, project, target, tabs with split trees of `{cwd, command, shell}` leaves; cwd relative to the project root); validated by Rust, run by the GUI (shells spawned, tabs added, commands typed into the shell); run from the project page ("Open a dev session"), the Terminal window rail, the palette and `cortx terminal --layout <name>`; capture the current window as a configuration; editor in Settings (form + raw YAML) | Must Have | Done |
+| F4.3.41 | Where things open: started services / scripts → dock or Terminal window (`openProcessesIn`), dev sessions → window or dock (`openDevSessionsIn`) | Should Have | Done |
 
 ---
 
@@ -293,6 +298,7 @@ Local App Launcher provides:
 | F5.8 | Data storage location configuration | Could Have | Pending |
 | F5.9 | Terminal: shell integration toggle, long-command notification toggle and threshold (Settings > Integrated terminal) | Should Have | Done |
 | F5.10 | Terminal: font family and size for every terminal (dock and window), Terminal window tab placement (sessions rail on the left by default, or a tab strip on top — never both). All in `settings.json`, so synced by the git backup | Should Have | Done |
+| F5.11 | Terminal: session restore toggle, scrollback snapshot toggle and line count, "processes open in" and "dev sessions open in", and the Launch configurations section (list, run, edit, duplicate, delete) | Should Have | Done |
 
 ---
 

@@ -361,10 +361,42 @@ pub struct TerminalConfig {
     /// Font size in px. None = 12.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size: Option<u16>,
+    /// Reopen the Terminal window's tabs (shells in their last directory,
+    /// nothing re-run) when the app starts.
+    #[serde(default = "default_true")]
+    pub restore_sessions: bool,
+    /// Seed restored shells with the tail of their previous scrollback.
+    #[serde(default = "default_true")]
+    pub restore_scrollback: bool,
+    #[serde(default = "default_restore_scrollback_lines")]
+    pub restore_scrollback_lines: u32,
+    /// Where a started service / script shows up.
+    #[serde(default)]
+    pub open_processes_in: TerminalTarget,
+    /// Where "open a dev session" (launch configuration) opens its tabs.
+    #[serde(default = "default_dev_sessions_target")]
+    pub open_dev_sessions_in: TerminalTarget,
 }
 
 fn default_long_command_seconds() -> u32 {
     10
+}
+
+fn default_restore_scrollback_lines() -> u32 {
+    200
+}
+
+fn default_dev_sessions_target() -> TerminalTarget {
+    TerminalTarget::Window
+}
+
+/// A surface terminals can be shown in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalTarget {
+    #[default]
+    Dock,
+    Window,
 }
 
 /// Terminal window layout for the list of tabs.
@@ -391,6 +423,11 @@ impl Default for TerminalConfig {
             tabs_placement: TabsPlacement::default(),
             font_family: None,
             font_size: None,
+            restore_sessions: true,
+            restore_scrollback: true,
+            restore_scrollback_lines: default_restore_scrollback_lines(),
+            open_processes_in: TerminalTarget::Dock,
+            open_dev_sessions_in: TerminalTarget::Window,
         }
     }
 }

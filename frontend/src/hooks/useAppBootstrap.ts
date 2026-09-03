@@ -22,6 +22,7 @@ import {
   onTerminalLayout,
 } from '@/lib/tauri';
 import { formatDuration, terminalDisplayName } from '@/lib/terminalNames';
+import { restoreTerminalSessions } from '@/lib/terminalRestore';
 import type { LogEntry } from '@/types';
 
 /**
@@ -53,7 +54,14 @@ export function useAppBootstrap() {
     useTerminalLayoutStore
       .getState()
       .load()
-      .finally(() => useAppStore.getState().loadShells());
+      .finally(() =>
+        useAppStore
+          .getState()
+          .loadShells()
+          // Session restore (main window only): reopen last time's tabs.
+          .then(() => restoreTerminalSessions())
+          .catch((e) => console.warn('Session restore failed', e))
+      );
     useAppStore.getState().loadTerminalStates();
 
     // Check for running services on startup
@@ -186,6 +194,8 @@ export function useAppBootstrap() {
         if (isCancelled) return;
         const store = useAppStore.getState();
         const finished = store.applyTerminalState(payload);
+        // Session restore reopens a terminal in its last directory.
+        if (payload.cwd) useTerminalLayoutStore.getState().updateLeafCwd(payload.terminalId, payload.cwd);
         if (!finished || finished.inView) return;
         const cfg = store.settings?.terminal;
         if (cfg?.notifyOnLongCommand === false) return;

@@ -73,7 +73,8 @@ import {
   type Skin,
   type ThemeMode,
 } from '@/lib/theme';
-import type { AppSettings, AgentsSettings, TerminalPreset, ExportSummary, ImportOptions, ShimStatus } from '@/types';
+import { LaunchConfigsSection } from '@/components/terminal/launch/LaunchConfigsSection';
+import type { AppSettings, AgentsSettings, TerminalPreset, TerminalTargetSurface, ExportSummary, ImportOptions, ShimStatus } from '@/types';
 
 const DEFAULT_GLOBAL_HOTKEY = 'CmdOrCtrl+Shift+Space';
 
@@ -253,6 +254,11 @@ export function Settings() {
   const [tabsPlacement, setTabsPlacement] = useState<'sidebar' | 'top'>('sidebar');
   const [terminalFontFamily, setTerminalFontFamily] = useState('');
   const [terminalFontSize, setTerminalFontSize] = useState(12);
+  const [restoreSessions, setRestoreSessions] = useState(true);
+  const [restoreScrollback, setRestoreScrollback] = useState(true);
+  const [restoreScrollbackLines, setRestoreScrollbackLines] = useState(200);
+  const [openProcessesIn, setOpenProcessesIn] = useState<TerminalTargetSurface>('dock');
+  const [openDevSessionsIn, setOpenDevSessionsIn] = useState<TerminalTargetSurface>('window');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [launchMethod, setLaunchMethod] = useState<'clipboard' | 'external' | 'integrated'>('integrated');
   const [toolboxBaseUrl, setToolboxBaseUrl] = useState('');
@@ -292,6 +298,11 @@ export function Settings() {
       setTabsPlacement(settings.terminal.tabsPlacement ?? 'sidebar');
       setTerminalFontFamily(settings.terminal.fontFamily ?? '');
       setTerminalFontSize(settings.terminal.fontSize ?? 12);
+      setRestoreSessions(settings.terminal.restoreSessions ?? true);
+      setRestoreScrollback(settings.terminal.restoreScrollback ?? true);
+      setRestoreScrollbackLines(settings.terminal.restoreScrollbackLines ?? 200);
+      setOpenProcessesIn(settings.terminal.openProcessesIn ?? 'dock');
+      setOpenDevSessionsIn(settings.terminal.openDevSessionsIn ?? 'window');
       setTheme(settings.appearance.theme);
       setLaunchMethod(settings.defaults.launchMethod);
       setToolboxBaseUrl(settings.toolboxBaseUrl ?? '');
@@ -495,6 +506,11 @@ export function Settings() {
         tabsPlacement,
         fontFamily: terminalFontFamily.trim() || undefined,
         fontSize: Math.min(32, Math.max(8, Math.round(terminalFontSize) || 12)),
+        restoreSessions,
+        restoreScrollback,
+        restoreScrollbackLines: Math.min(2000, Math.max(20, Math.round(restoreScrollbackLines) || 200)),
+        openProcessesIn,
+        openDevSessionsIn,
       },
       appearance: {
         theme,
@@ -815,7 +831,93 @@ export function Settings() {
               </SelectContent>
             </Select>
           </Field>
+
+          <Separator />
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label htmlFor="restore-sessions">Restore sessions on start</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Reopens the Terminal window's tabs where you left them — shells in their last directory, nothing re-run.
+              </p>
+            </div>
+            <Switch
+              id="restore-sessions"
+              checked={restoreSessions}
+              onCheckedChange={(v) => { setRestoreSessions(v); setHasChanges(true); }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label htmlFor="restore-scrollback">Restore scrollback</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Seeds each restored shell with the tail of its previous output, so you keep the context of what ran.
+              </p>
+            </div>
+            <Switch
+              id="restore-scrollback"
+              checked={restoreScrollback}
+              onCheckedChange={(v) => { setRestoreScrollback(v); setHasChanges(true); }}
+              disabled={!restoreSessions}
+            />
+          </div>
+
+          <Field label={<span className="text-xs text-muted-foreground">Lines</span>} htmlFor="restore-scrollback-lines">
+            <Input
+              id="restore-scrollback-lines"
+              type="number"
+              min={20}
+              max={2000}
+              value={restoreScrollbackLines}
+              onChange={(e) => { setRestoreScrollbackLines(Number(e.target.value)); setHasChanges(true); }}
+              className="w-28 font-mono text-[12px]"
+              disabled={!restoreSessions || !restoreScrollback}
+            />
+          </Field>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Started services and scripts open in"
+              htmlFor="open-processes-in"
+              hint="Where a service or script started from the app shows up."
+            >
+              <Select
+                value={openProcessesIn}
+                onValueChange={(v: TerminalTargetSurface) => { setOpenProcessesIn(v); setHasChanges(true); }}
+              >
+                <SelectTrigger id="open-processes-in" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dock">Dock (main window)</SelectItem>
+                  <SelectItem value="window">Terminal window</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field
+              label="Dev sessions (launch configurations) open in"
+              htmlFor="open-dev-sessions-in"
+              hint="A configuration can still pick its own target."
+            >
+              <Select
+                value={openDevSessionsIn}
+                onValueChange={(v: TerminalTargetSurface) => { setOpenDevSessionsIn(v); setHasChanges(true); }}
+              >
+                <SelectTrigger id="open-dev-sessions-in" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="window">Terminal window</SelectItem>
+                  <SelectItem value="dock">Dock (main window)</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
         </Section>
+
+        {/* Launch configurations */}
+        <LaunchConfigsSection />
 
         {/* Defaults */}
         <Section title="Default behavior" description="Set default behaviors for launching services.">

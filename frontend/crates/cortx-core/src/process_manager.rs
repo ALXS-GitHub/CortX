@@ -139,6 +139,10 @@ pub struct ShellSpawnRequest {
     pub shell: Option<String>,
     pub cols: u16,
     pub rows: u16,
+    /// Session restore: terminal id of the shell this one replaces. Its
+    /// scrollback snapshot (if any) is pushed into the hub before the PTY
+    /// starts, then deleted.
+    pub restore_from: Option<String>,
 }
 
 struct ShellEntry {
@@ -875,6 +879,17 @@ impl ProcessManager {
 
         let shell_id = uuid::Uuid::new_v4().to_string();
         let tid = terminal_id(TerminalKind::Shell, &shell_id);
+
+        // Session restore: replay the previous shell's tail before anything
+        // the new one prints.
+        if let Some(old_id) = request.restore_from.as_deref() {
+            let runtime_dir = self.runtime_store.dir();
+            if let Some(bytes) = crate::terminal::snapshot::load(runtime_dir, old_id) {
+                self.terminal_hub.push(&tid, &bytes);
+                self.terminal_hub.push(&tid, crate::terminal::snapshot::RESTORE_SEPARATOR);
+            }
+            crate::terminal::snapshot::remove(runtime_dir, old_id);
+        }
 
         let (program, args) = resolve_shell(request.shell.as_deref());
         let mut cmd = CommandBuilder::new(&program);
@@ -1639,6 +1654,7 @@ mod pty_integration_tests {
                     shell: Some(shell.to_string()),
                     cols: 100,
                     rows: 30,
+                    restore_from: None,
                 },
             )
             .expect("spawn shell");

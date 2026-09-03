@@ -39,6 +39,11 @@ pub struct AppState {
     /// Project scope requested for a Terminal window being created; the
     /// window takes it once on boot (`take_terminal_window_scope`).
     pub terminal_window_scope: std::sync::Mutex<Option<String>>,
+    /// Launch configuration (`cortx terminal --layout <name>`) to run once
+    /// the Terminal window is up (`take_terminal_window_launch`).
+    pub terminal_window_launch: std::sync::Mutex<Option<String>>,
+    /// `data/terminal/launch/*.yaml` (DEV-13 P2).
+    pub launch_configs: Arc<cortx_core::terminal::LaunchStore>,
 }
 
 // Project commands
@@ -2854,8 +2859,12 @@ pub fn set_terminal_layout(
 /// Windows creating a webview from there deadlocks its initialisation (the
 /// window shows up but stays on about:blank).
 #[tauri::command]
-pub async fn open_terminal_window(app_handle: AppHandle, project_id: Option<String>) -> Result<(), String> {
-    crate::open_terminal_window(&app_handle, project_id.as_deref())
+pub async fn open_terminal_window(
+    app_handle: AppHandle,
+    project_id: Option<String>,
+    launch: Option<String>,
+) -> Result<(), String> {
+    crate::open_terminal_window(&app_handle, project_id.as_deref(), launch.as_deref())
 }
 
 /// Show / focus the main window (from the Terminal window).
@@ -2869,6 +2878,89 @@ pub fn show_main_window(app_handle: AppHandle) {
 #[tauri::command]
 pub fn take_terminal_window_scope(state: State<AppState>) -> Option<String> {
     state.terminal_window_scope.lock().ok().and_then(|mut s| s.take())
+}
+
+/// Launch configuration name/id requested by `cortx terminal --layout`,
+/// cleared on read.
+#[tauri::command]
+pub fn take_terminal_window_launch(state: State<AppState>) -> Option<String> {
+    state.terminal_window_launch.lock().ok().and_then(|mut s| s.take())
+}
+
+// ---------------------------------------------------------------------------
+// Session restore + launch configurations (DEV-13 P2)
+// ---------------------------------------------------------------------------
+
+/// Write the scrollback tail of every live terminal to
+/// `runtime/terminal-snapshots/`. The backend also does this at quit and
+/// every minute; the GUI calls it before it recreates shells.
+#[tauri::command]
+pub fn save_terminal_snapshots(state: State<AppState>, terminal_ids: Option<Vec<String>>) {
+    let settings = state.storage.get_settings().terminal;
+    if !settings.restore_scrollback {
+        return;
+    }
+    cortx_core::terminal::snapshot::save_all(
+        state.process_manager.terminal_hub(),
+        state.storage.app_dir().join("runtime").as_path(),
+        terminal_ids.as_deref(),
+        settings.restore_scrollback_lines as usize,
+    );
+}
+
+/// Drop snapshots of terminals that are no longer in the layout.
+#[tauri::command]
+pub fn prune_terminal_snapshots(state: State<AppState>, keep: Vec<String>) {
+    cortx_core::terminal::snapshot::prune_except(state.storage.app_dir().join("runtime").as_path(), &keep);
+}
+
+#[tauri::command]
+pub fn list_launch_configs(state: State<AppState>) -> Vec<cortx_core::terminal::LaunchConfig> {
+    state.launch_configs.list()
+}
+
+#[tauri::command]
+pub fn get_launch_config(state: State<AppState>, id: String) -> Option<cortx_core::terminal::LaunchConfig> {
+    state.launch_configs.get(&id)
+}
+
+/// Raw YAML of a configuration (for the editor); a fresh template when `id`
+/// is unknown.
+#[tauri::command]
+pub fn read_launch_config_yaml(state: State<AppState>, id: String) -> Option<String> {
+    state.launch_configs.read_yaml(&id)
+}
+
+#[tauri::command]
+pub fn save_launch_config(
+    state: State<AppState>,
+    config: cortx_core::terminal::LaunchConfig,
+) -> Result<cortx_core::terminal::LaunchConfig, String> {
+    state.launch_configs.save(&config)?;
+    Ok(config)
+}
+
+/// Validate and store YAML as typed by the user. `expected_id` is the file
+/// being edited (renamed ids replace it).
+#[tauri::command]
+pub fn save_launch_config_yaml(
+    state: State<AppState>,
+    expected_id: Option<String>,
+    yaml: String,
+) -> Result<cortx_core::terminal::LaunchConfig, String> {
+    state.launch_configs.save_yaml(expected_id.as_deref(), &yaml)
+}
+
+#[tauri::command]
+pub fn delete_launch_config(state: State<AppState>, id: String) -> Result<(), String> {
+    state.launch_configs.delete(&id)
+}
+
+/// Serialise a configuration to YAML without saving (editor preview).
+#[tauri::command]
+pub fn launch_config_to_yaml(config: cortx_core::terminal::LaunchConfig) -> Result<String, String> {
+    config.validate()?;
+    config.to_yaml()
 }
 
 /// OS-level notification (toast centre). The GUI decides *when*; this only
@@ -2893,6 +2985,7 @@ pub fn spawn_shell(
     project_id: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
+    restore_from: Option<String>,
 ) -> Result<cortx_core::process_manager::ShellInfo, String> {
     // Default cwd: the project's root when a project is given.
     let cwd = match (cwd, &project_id) {
@@ -2914,6 +3007,7 @@ pub fn spawn_shell(
             shell,
             cols: cols.unwrap_or(0),
             rows: rows.unwrap_or(0),
+            restore_from: restore_from.filter(|s| !s.is_empty()),
         },
     )
 }

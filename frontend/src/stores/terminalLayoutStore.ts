@@ -9,6 +9,7 @@ import {
   insertLeafBeside,
   removeLeaf,
   setSplitSizes,
+  setLeafCwd,
   collectLeaves,
   findLeafByTerminal,
   tabContainingTerminal,
@@ -22,7 +23,11 @@ import {
   type SplitDirection,
 } from '@/lib/terminalLayout';
 import { useAppStore } from '@/stores/appStore';
-import { registerFocusInTerminalWindow } from '@/lib/terminalWindowBridge';
+import { registerFocusInTerminalWindow, registerSendToTerminalWindow } from '@/lib/terminalWindowBridge';
+
+// Debounced cwd writes (see updateLeafCwd).
+const pendingCwd = new Map<string, string>();
+let cwdTimer: number | null = null;
 
 /** `main` or `terminal` — every window keeps its own copy of this store. */
 export const WINDOW_LABEL: string = (() => {
@@ -83,6 +88,10 @@ interface TerminalLayoutState {
   sendToDock: (terminalId: string) => void;
   /** Remove a whole tab; returns the terminal ids it held. */
   closeTab: (tabId: string) => string[];
+  /** Record a terminal's live cwd on its leaf (debounced; session restore reopens it there). */
+  updateLeafCwd: (terminalId: string, cwd: string) => void;
+  /** Append ready-made tabs (launch configuration) and show the first one. */
+  addLaunchTabs: (tabs: TerminalTab[], projectId: string | null) => void;
 
   // Selectors
   scopedTabs: () => TerminalTab[];
@@ -317,6 +326,45 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     return ids;
   },
 
+  updateLeafCwd: (terminalId, cwd) => {
+    // The Terminal window writes while it is open; the main window only when
+    // it is not, so the two never race over the same leaf.
+    const { doc } = get();
+    if (!IS_TERMINAL_WINDOW && doc.windowOpen) return;
+    if (!tabContainingTerminal(doc.window, terminalId)) return;
+    pendingCwd.set(terminalId, cwd);
+    if (cwdTimer !== null) return;
+    cwdTimer = window.setTimeout(() => {
+      cwdTimer = null;
+      const updates = Array.from(pendingCwd.entries());
+      pendingCwd.clear();
+      get().commit((d) => {
+        let win = d.window;
+        for (const [id, dir] of updates) win = setLeafCwd(win, id, dir);
+        return win === d.window ? d : { ...d, window: win };
+      });
+    }, 500);
+  },
+
+  addLaunchTabs: (tabs, projectId) =>
+    get().commit((doc) => {
+      if (tabs.length === 0) return doc;
+      const surfaces = { ...doc.surfaces };
+      let order = nextTabOrder(doc.window);
+      const placed = tabs.map((t) => {
+        for (const leaf of collectLeaves(t.layout)) surfaces[leaf.terminalId] = 'window';
+        return { ...t, order: order++ };
+      });
+      const window = { ...doc.window, tabs: [...doc.window.tabs, ...placed] };
+      const scope: TerminalScope = projectId ? { projectId } : window.scope;
+      const first = placed[0];
+      return {
+        ...doc,
+        surfaces,
+        window: { ...window, scope: tabInScope(first, scope) ? scope : 'global', activeTabId: first.id },
+      };
+    }),
+
   scopedTabs: () => tabsInScope(get().doc.window, get().doc.window.scope),
   activeTab: () => {
     const { window } = get().doc;
@@ -334,5 +382,12 @@ if (import.meta.env.DEV) {
 // tab there and bring the window up (used by appStore.openTerminal).
 registerFocusInTerminalWindow((terminalId) => {
   useTerminalLayoutStore.getState().addTerminalToWindow(terminalId, { activate: true });
+  if (!IS_TERMINAL_WINDOW) api.openTerminalWindow().catch(() => {});
+});
+
+// A freshly started process placed in the window by the "open processes in"
+// setting (used by appStore.openTerminal).
+registerSendToTerminalWindow((terminalId, projectId) => {
+  useTerminalLayoutStore.getState().sendToWindow(terminalId, projectId);
   if (!IS_TERMINAL_WINDOW) api.openTerminalWindow().catch(() => {});
 });

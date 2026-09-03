@@ -152,6 +152,9 @@ enum Command {
         /// Scope the window to a project (name or id)
         #[arg(short, long)]
         project: Option<String>,
+        /// Run a launch configuration (name or id) in the window
+        #[arg(short, long)]
+        layout: Option<String>,
     },
 
     /// Manage global scripts
@@ -1076,7 +1079,7 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
         Some(Command::Tools { scan }) => cmd_tool_list(&storage, None, None, scan, json),
 
         Some(Command::Init { shell }) => cmd_init(&storage, &shell),
-        Some(Command::Terminal { project }) => cmd_terminal(&storage, project.as_deref()),
+        Some(Command::Terminal { project, layout }) => cmd_terminal(&storage, project.as_deref(), layout.as_deref()),
 
         // Script group
         Some(Command::Script { action }) => match action {
@@ -4154,7 +4157,31 @@ fn find_gui_executable() -> Option<std::path::PathBuf> {
         .find(|p| p.is_file())
 }
 
-fn cmd_terminal(storage: &Storage, project: Option<&str>) -> anyhow::Result<()> {
+fn cmd_terminal(storage: &Storage, project: Option<&str>, layout: Option<&str>) -> anyhow::Result<()> {
+    // Resolve a launch configuration name to its id (ids pass through).
+    let launch_id = match layout {
+        Some(needle) => {
+            let store = cortx_core::terminal::LaunchStore::new(&storage.terminal_dir());
+            let configs = store.list();
+            let found = configs
+                .iter()
+                .find(|c| c.id == needle)
+                .or_else(|| configs.iter().find(|c| c.name.eq_ignore_ascii_case(needle)));
+            match found {
+                Some(c) => Some(c.id.clone()),
+                None => anyhow::bail!(
+                    "No launch configuration named '{}'. Available: {}",
+                    needle,
+                    if configs.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        configs.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", ")
+                    }
+                ),
+            }
+        }
+        None => None,
+    };
     let project_id = match project {
         Some(needle) => {
             let projects = storage.get_all_projects();
@@ -4176,6 +4203,9 @@ fn cmd_terminal(storage: &Storage, project: Option<&str>) -> anyhow::Result<()> 
     cmd.arg("--terminal");
     if let Some(id) = &project_id {
         cmd.arg("--project").arg(id);
+    }
+    if let Some(id) = &launch_id {
+        cmd.arg("--layout").arg(id);
     }
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

@@ -23,6 +23,10 @@ export interface LeafNode {
   kind: 'leaf';
   id: string;
   terminalId: string;
+  /** Last directory the shell reported (OSC 7); where a restored shell reopens. */
+  cwd?: string | null;
+  /** Shell command line to use when restoring (launch configs). */
+  shell?: string | null;
 }
 
 export interface SplitNode {
@@ -59,6 +63,8 @@ export interface TerminalLayoutDoc {
   version: 1;
   surfaces: Record<string, TerminalSurface>;
   window: TerminalWindowLayout;
+  /** Maintained by the backend: was the Terminal window up at the last quit? */
+  windowOpen?: boolean;
 }
 
 export function emptyLayoutDoc(): TerminalLayoutDoc {
@@ -66,6 +72,7 @@ export function emptyLayoutDoc(): TerminalLayoutDoc {
     version: 1,
     surfaces: {},
     window: { scope: 'global', activeTabId: null, tabs: [] },
+    windowOpen: false,
   };
 }
 
@@ -83,6 +90,7 @@ export function normaliseLayoutDoc(raw: unknown): TerminalLayoutDoc {
       activeTabId: win.activeTabId ?? null,
       tabs: Array.isArray(win.tabs) ? win.tabs.slice() : [],
     },
+    windowOpen: doc.windowOpen === true,
   };
 }
 
@@ -223,4 +231,46 @@ export function makeTab(terminalId: string, workspaceId: string, order: number):
     layout: leaf,
     activeLeafId: leaf.id,
   };
+}
+
+/** Apply `fn` to every leaf, returning a new tree (unchanged leaves keep identity). */
+export function mapLeaves(node: LayoutNode, fn: (leaf: LeafNode) => LeafNode): LayoutNode {
+  if (node.kind === 'leaf') return fn(node);
+  let changed = false;
+  const children = node.children.map((c) => {
+    const next = mapLeaves(c, fn);
+    if (next !== c) changed = true;
+    return next;
+  });
+  return changed ? { ...node, children } : node;
+}
+
+/** Record the live cwd of a terminal on its leaf (session restore reopens it there). */
+export function setLeafCwd(layout: TerminalWindowLayout, terminalId: string, cwd: string): TerminalWindowLayout {
+  let changed = false;
+  const tabs = layout.tabs.map((t) => {
+    const next = mapLeaves(t.layout, (leaf) =>
+      leaf.terminalId === terminalId && leaf.cwd !== cwd ? { ...leaf, cwd } : leaf
+    );
+    if (next === t.layout) return t;
+    changed = true;
+    return { ...t, layout: next };
+  });
+  return changed ? { ...layout, tabs } : layout;
+}
+
+/** Swap terminal ids (restored shells get fresh ids). */
+export function replaceTerminalIds(layout: TerminalWindowLayout, mapping: Record<string, string>): TerminalWindowLayout {
+  const tabs = layout.tabs.map((t) => ({
+    ...t,
+    layout: mapLeaves(t.layout, (leaf) =>
+      mapping[leaf.terminalId] ? { ...leaf, terminalId: mapping[leaf.terminalId] } : leaf
+    ),
+  }));
+  return { ...layout, tabs };
+}
+
+/** Every leaf of the window with its tab. */
+export function allWindowLeaves(layout: TerminalWindowLayout): Array<{ tab: TerminalTab; leaf: LeafNode }> {
+  return layout.tabs.flatMap((tab) => collectLeaves(tab.layout).map((leaf) => ({ tab, leaf })));
 }
