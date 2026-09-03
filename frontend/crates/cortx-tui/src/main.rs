@@ -4110,8 +4110,15 @@ fn cmd_init(storage: &Storage, shell_name: &str) -> anyhow::Result<()> {
             shell_name,
         ))?;
     let aliases = storage.get_all_aliases();
-    let integration = storage.get_settings().terminal.shell_integration;
-    let script = cortx_core::shell_init::generate_init_script(&shell, &aliases, integration);
+    let tcfg = storage.get_settings().terminal;
+    let script = cortx_core::shell_init::generate_init_script_ext(
+        &shell,
+        &aliases,
+        cortx_core::shell_init::InitOptions {
+            shell_integration: tcfg.shell_integration,
+            disable_shell_predictions: tcfg.shell_integration && tcfg.inline_suggestions,
+        },
+    );
     print!("{}", script);
     Ok(())
 }

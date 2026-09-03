@@ -1,78 +1,88 @@
 import { useEffect } from 'react';
-import { useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
-import { closeActiveLeaf, cycleLeaf, cycleTab, openNewTerminal, splitActiveLeaf } from './actions';
-import { adjustTerminalZoom, resetTerminalZoom } from '@/lib/terminalSessions';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { useAppStore } from '@/stores/appStore';
+import { comboFromEvent, resolveKeybindings, type KeybindingActionId } from '@/lib/keybindings';
+import { pasteDroppedPaths, runAction } from './actions';
 
-function isTextField(target: EventTarget | null): boolean {
+/** Actions that must also work while a text field (palette, find, rename) has focus. */
+const ALWAYS_ON: ReadonlySet<KeybindingActionId> = new Set<KeybindingActionId>(['window.palette', 'terminal.find']);
+
+/** A text field that is not xterm's hidden textarea. */
+function isTextFieldOutsideXterm(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+  const field = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+  return field && !target.closest('.xterm');
+}
+
+/** While Control is held, the rail / strip show their tab numbers (`html[data-ctrl-held]`). */
+function setCtrlHeld(held: boolean) {
+  if (held) document.documentElement.setAttribute('data-ctrl-held', '');
+  else document.documentElement.removeAttribute('data-ctrl-held');
 }
 
 /**
- * Window-level shortcuts of the Terminal window. Registered in the capture
- * phase so they win over xterm.js, which otherwise swallows every key:
- *
- * - Ctrl+Shift+T new terminal · Ctrl+Shift+W close leaf
- * - Ctrl+Shift+D split right · Ctrl+Shift+E split down
- * - Ctrl+Tab / Ctrl+Shift+Tab next / previous tab
- * - Ctrl+B toggle the session rail
- * - Alt+Arrow move focus between leaves
+ * Window-level shortcuts of the Terminal window: a thin dispatcher over the
+ * keybinding registry (`@/lib/keybindings`, user overrides in
+ * `settings.terminal.keybindings`) and `runAction`. Registered in the
+ * capture phase so it wins over xterm.js, which otherwise swallows every key.
+ * An action that finds nothing to do (no pane that way, single tab) lets the
+ * key fall through to the shell.
  */
 export function useTerminalWindowShortcuts() {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
+  const overrides = useAppStore((s) => s.settings?.terminal.keybindings);
 
-      if (mod && key === 'tab') {
+  useEffect(() => {
+    const bindings = resolveKeybindings(overrides);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Control' || (e.key === 'Meta' && navigator.platform.startsWith('Mac'))) setCtrlHeld(true);
+      const combo = comboFromEvent(e);
+      if (!combo) return;
+      const actionId = bindings.get(combo);
+      if (!actionId) return;
+      if (!ALWAYS_ON.has(actionId) && isTextFieldOutsideXterm(e.target)) return;
+      if (runAction(actionId)) {
         e.preventDefault();
-        cycleTab(e.shiftKey ? -1 : 1);
-        return;
-      }
-      // Zoom: Ctrl+= / Ctrl++ / Ctrl+- / Ctrl+0 (numpad included).
-      if (mod && !e.altKey && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0')) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.key === '0') resetTerminalZoom();
-        else adjustTerminalZoom(e.key === '-' ? -1 : 1);
-        return;
-      }
-      if (mod && e.shiftKey && !e.altKey) {
-        switch (key) {
-          case 't':
-            e.preventDefault();
-            void openNewTerminal();
-            return;
-          case 'w':
-            e.preventDefault();
-            closeActiveLeaf();
-            return;
-          case 'd':
-            e.preventDefault();
-            void splitActiveLeaf('horizontal');
-            return;
-          case 'e':
-            e.preventDefault();
-            void splitActiveLeaf('vertical');
-            return;
-        }
-      }
-      if (mod && !e.shiftKey && !e.altKey && key === 'b') {
-        e.preventDefault();
-        useTerminalWindowPrefsStore.getState().toggleRail();
-        return;
-      }
-      // Alt+Arrow only steals the key when there is another leaf to go to;
-      // otherwise the shell keeps its own Alt+Arrow bindings.
-      if (e.altKey && !mod && !e.shiftKey && !isTextField(e.target)) {
-        if (key === 'arrowright' || key === 'arrowdown') {
-          if (cycleLeaf(1)) e.preventDefault();
-        } else if (key === 'arrowleft' || key === 'arrowup') {
-          if (cycleLeaf(-1)) e.preventDefault();
-        }
+        // Also silences the older listeners of the same window (palette).
+        e.stopImmediatePropagation();
       }
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(false);
+    };
+    const onBlur = () => setCtrlHeld(false);
     window.addEventListener('keydown', onKey, { capture: true });
-    return () => window.removeEventListener('keydown', onKey, { capture: true });
+    window.addEventListener('keyup', onKeyUp, { capture: true });
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKey, { capture: true });
+      window.removeEventListener('keyup', onKeyUp, { capture: true });
+      window.removeEventListener('blur', onBlur);
+      setCtrlHeld(false);
+    };
+  }, [overrides]);
+}
+
+/**
+ * Files dragged from the OS onto a pane: their paths are typed into the
+ * terminal under the pointer (quoted when needed). Mount once in the window.
+ */
+export function useTerminalFileDrop() {
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type !== 'drop') return;
+        pasteDroppedPaths(event.payload.paths, event.payload.position);
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 }

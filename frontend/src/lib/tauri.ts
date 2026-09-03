@@ -20,6 +20,9 @@ import type {
   TerminalShellState,
   CommandRecord,
   LaunchConfig,
+  TerminalTheme,
+  TerminalThemeSummary,
+  TerminalThemeImportReport,
   ServiceExitPayload,
   ServicePortsPayload,
   ScriptLogPayload,
@@ -863,4 +866,51 @@ export async function deleteLaunchConfig(id: string): Promise<void> {
 
 export async function launchConfigToYaml(config: LaunchConfig): Promise<string> {
   return invoke('launch_config_to_yaml', { config });
+}
+
+// ---------------------------------------------------------------------------
+// Terminal themes (DEV-13 P3)
+// ---------------------------------------------------------------------------
+
+export async function listTerminalThemes(): Promise<TerminalThemeSummary[]> {
+  return invoke('list_terminal_themes');
+}
+
+export async function getTerminalTheme(name: string): Promise<TerminalTheme | null> {
+  return invoke('get_terminal_theme', { name });
+}
+
+export async function importTerminalThemeFile(path: string): Promise<TerminalTheme> {
+  return invoke('import_terminal_theme_file', { path });
+}
+
+export async function importTerminalThemeFolder(path: string): Promise<TerminalThemeImportReport> {
+  return invoke('import_terminal_theme_folder', { path });
+}
+
+export async function deleteTerminalTheme(name: string): Promise<void> {
+  return invoke('delete_terminal_theme', { name });
+}
+
+export async function saveTerminalTheme(theme: TerminalTheme): Promise<TerminalTheme> {
+  return invoke('save_terminal_theme', { theme });
+}
+
+/** The theme's wallpaper as a `data:` URL, `null` when it has none. */
+export async function readTerminalThemeImage(name: string): Promise<string | null> {
+  return invoke('read_terminal_theme_image', { name });
+}
+
+/**
+ * Backdrop effect of the Terminal window (acrylic / mica on Windows,
+ * vibrancy on macOS). `tint` = theme background (acrylic tint), `dark` picks
+ * the material. Opacity itself is CSS (`--terminal-window-alpha`).
+ */
+export async function setTerminalWindowEffect(
+  effect: 'none' | 'acrylic' | 'mica' | 'vibrancy',
+  opacity: number,
+  tint?: string | null,
+  dark?: boolean
+): Promise<void> {
+  return invoke('set_terminal_window_effect', { effect, opacity, tint: tint ?? null, dark: dark ?? null });
 }

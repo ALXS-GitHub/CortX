@@ -10,20 +10,24 @@ import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeI
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { RAIL_WIDTH_COLLAPSED, useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
-import { FREE_WORKSPACE_ID, projectIdOfWorkspace, tabsInScope, type TerminalTab } from '@/lib/terminalLayout';
+import { tabsInScope, type TerminalTab } from '@/lib/terminalLayout';
+import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { closeTabAndRelease, openNewTerminal } from './actions';
-import { cwdLabel, describeItem, projectColor, tabItem, tabLiveState, tabTitle, useItemMap, type ItemMap } from './model';
+import {
+  cwdLabel,
+  describeItem,
+  groupTabsByWorkspace,
+  tabItem,
+  tabLiveState,
+  tabTitle,
+  useItemMap,
+  type ItemMap,
+  type WorkspaceGroup,
+} from './model';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
 import { useTabContextMenu, useTabRename } from './useTabMenu';
-
-interface RailGroup {
-  workspaceId: string;
-  name: string;
-  color: string | null;
-  tabs: TerminalTab[];
-}
 
 /**
  * Icon button with a tooltip. Extra props (and the ref) land on the button so
@@ -63,9 +67,24 @@ function RailIconButton({
  * One session row (expanded rail): sortable within its group, renamable on
  * double-click, with the tab's colour as a left accent bar (and a faint tint
  * when active) and a right-click menu. The second line is the live cwd, or
- * the command while one runs — the only place this is shown now.
+ * the command while one runs — the only place this is shown now. `index` is
+ * the tab's position for Ctrl+N, shown faintly on hover / while Ctrl is held.
  */
-function SessionRow({ tab, items, active, onSelect, onClose }: { tab: TerminalTab; items: ItemMap; active: boolean; onSelect: () => void; onClose: () => void }) {
+function SessionRow({
+  tab,
+  items,
+  active,
+  index,
+  onSelect,
+  onClose,
+}: {
+  tab: TerminalTab;
+  items: ItemMap;
+  active: boolean;
+  index: number;
+  onSelect: () => void;
+  onClose: () => void;
+}) {
   const item = tabItem(tab, items);
   const live = tabLiveState(tab, items);
   const title = tabTitle(tab, items);
@@ -143,6 +162,14 @@ function SessionRow({ tab, items, active, onSelect, onClose }: { tab: TerminalTa
         </span>
       )}
       {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
+      {index <= 9 && !rename.editing && (
+        <span
+          className="pointer-events-none shrink-0 font-mono text-[10px] tabular-nums text-faint opacity-0 transition-opacity group-hover:opacity-100 [html[data-ctrl-held]_&]:opacity-100"
+          aria-hidden
+        >
+          {index}
+        </span>
+      )}
       <TerminalStatusGlyph live={live} className="pointer-events-none" />
       <button
         type="button"
@@ -173,12 +200,15 @@ function SessionGroupRows({
   group,
   items,
   activeTabId,
+  firstIndex,
   onSelect,
   onReorder,
 }: {
-  group: RailGroup;
+  group: WorkspaceGroup;
   items: ItemMap;
   activeTabId: string | null;
+  /** Position of the group's first tab in the whole rail (Ctrl+N numbering). */
+  firstIndex: number;
   onSelect: (tabId: string) => void;
   onReorder: (workspaceId: string, orderedIds: string[]) => void;
 }) {
@@ -203,12 +233,13 @@ function SessionGroupRows({
     <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis, restrictToParentElement]} onDragEnd={onDragEnd}>
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
         <div className="flex flex-col gap-0.5">
-          {group.tabs.map((tab) => (
+          {group.tabs.map((tab, i) => (
             <SessionRow
               key={tab.id}
               tab={tab}
               items={items}
               active={tab.id === activeTabId}
+              index={firstIndex + i}
               onSelect={() => onSelect(tab.id)}
               onClose={() => closeTabAndRelease(tab.id)}
             />
@@ -258,6 +289,7 @@ function SessionIcon({ tab, items, active, onSelect }: { tab: TerminalTab; items
 export function SessionRail() {
   const items = useItemMap();
   const projects = useAppStore((s) => s.projects);
+  const keybindings = useAppStore((s) => s.settings?.terminal.keybindings);
   // Selectors must return stable references: derive the scoped list here.
   const win = useTerminalLayoutStore((s) => s.doc.window);
   const scopedTabs = useMemo(() => tabsInScope(win, win.scope), [win]);
@@ -266,31 +298,19 @@ export function SessionRail() {
   const reorderTabs = useTerminalLayoutStore((s) => s.reorderTabs);
   const { railCollapsed, toggleRail, railWidth, setRailWidth } = useTerminalWindowPrefsStore();
 
-  const groups = useMemo<RailGroup[]>(() => {
-    const byWorkspace = new Map<string, TerminalTab[]>();
-    for (const tab of scopedTabs) {
-      const list = byWorkspace.get(tab.workspaceId) ?? [];
-      list.push(tab);
-      byWorkspace.set(tab.workspaceId, list);
+  const groups = useMemo(() => groupTabsByWorkspace(scopedTabs, projects), [scopedTabs, projects]);
+  // Where each group's numbering starts (Ctrl+N counts across groups).
+  const groupOffsets = useMemo(() => {
+    const out: number[] = [];
+    let n = 1;
+    for (const g of groups) {
+      out.push(n);
+      n += g.tabs.length;
     }
-    const out: RailGroup[] = [];
-    for (const [workspaceId, tabs] of byWorkspace) {
-      const projectId = projectIdOfWorkspace(workspaceId);
-      const project = projectId ? projects.find((p) => p.id === projectId) : undefined;
-      out.push({
-        workspaceId,
-        name: workspaceId === FREE_WORKSPACE_ID ? 'Free' : project?.name ?? 'Unknown project',
-        color: projectId ? projectColor(projectId) : null,
-        tabs: tabs.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.order - b.order),
-      });
-    }
-    // Free shells last; projects in their sidebar order.
-    return out.sort((a, b) => {
-      if (a.workspaceId === FREE_WORKSPACE_ID) return 1;
-      if (b.workspaceId === FREE_WORKSPACE_ID) return -1;
-      return projects.findIndex((p) => `project:${p.id}` === a.workspaceId) - projects.findIndex((p) => `project:${p.id}` === b.workspaceId);
-    });
-  }, [scopedTabs, projects]);
+    return out;
+  }, [groups]);
+  const newCombo = comboLabelFor('tab.new', keybindings);
+  const railCombo = comboLabelFor('window.rail', keybindings);
 
   // A drop reorders one group; the other groups keep their relative order in
   // the full list the store expects.
@@ -357,7 +377,10 @@ export function SessionRail() {
             </span>
           </>
         )}
-        <RailIconButton label={collapsed ? 'Expand sessions (Ctrl+B)' : 'Collapse sessions (Ctrl+B)'} onClick={toggleRail}>
+        <RailIconButton
+          label={`${collapsed ? 'Expand sessions' : 'Collapse sessions'}${railCombo ? ` (${railCombo})` : ''}`}
+          onClick={toggleRail}
+        >
           {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
         </RailIconButton>
       </div>
@@ -367,7 +390,7 @@ export function SessionRail() {
         {groups.length === 0 && !collapsed && (
           <p className="px-2 py-3 text-xs text-faint">No terminal in this scope.</p>
         )}
-        {groups.map((g) => (
+        {groups.map((g, gi) => (
           <div key={g.workspaceId} className="mb-2">
             {collapsed ? (
               <div className="mx-auto mb-1.5 h-px w-5 bg-border first:hidden" />
@@ -385,7 +408,14 @@ export function SessionRail() {
                 ))}
               </div>
             ) : (
-              <SessionGroupRows group={g} items={items} activeTabId={activeTabId} onSelect={setActiveTab} onReorder={reorderGroup} />
+              <SessionGroupRows
+                group={g}
+                items={items}
+                activeTabId={activeTabId}
+                firstIndex={groupOffsets[gi] ?? 1}
+                onSelect={setActiveTab}
+                onReorder={reorderGroup}
+              />
             )}
           </div>
         ))}
@@ -394,11 +424,11 @@ export function SessionRail() {
       {/* Footer */}
       <div className={cn('flex shrink-0 items-center border-t border-border', collapsed ? 'flex-col justify-center gap-1 py-2' : 'gap-1.5 p-2')}>
         {collapsed ? (
-          <RailIconButton label="New terminal (Ctrl+Shift+T)" onClick={() => void openNewTerminal()}>
+          <RailIconButton label={newCombo ? `New terminal (${newCombo})` : 'New terminal'} onClick={() => void openNewTerminal()}>
             <Plus className="size-4" />
           </RailIconButton>
         ) : (
-          <Button variant="outline" size="sm" className="min-w-0 flex-1" onClick={() => void openNewTerminal()} title="Ctrl+Shift+T">
+          <Button variant="outline" size="sm" className="min-w-0 flex-1" onClick={() => void openNewTerminal()} title={newCombo ?? undefined}>
             <Plus />
             New terminal
           </Button>

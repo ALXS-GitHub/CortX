@@ -63,6 +63,11 @@ pub fn open_terminal_window(app: &AppHandle, project_id: Option<&str>, launch: O
         .inner_size(1180.0, 760.0)
         .min_inner_size(720.0, 460.0)
         .resizable(true)
+        // Transparent so the theme's window opacity / acrylic / mica show
+        // the desktop through (DEV-13 P3). The frontend paints the theme
+        // background itself (`--terminal-window-alpha`), so an opaque theme
+        // looks exactly as before.
+        .transparent(true)
         .visible(false);
     #[cfg(target_os = "macos")]
     let builder = builder
@@ -71,6 +76,20 @@ pub fn open_terminal_window(app: &AppHandle, project_id: Option<&str>, launch: O
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
     let window = builder.build().map_err(|e| e.to_string())?;
+    // Backdrop effect + opacity from the settings, before the first paint.
+    if let Some(state) = app.try_state::<AppState>() {
+        let terminal = state.storage.get_settings().terminal;
+        let dark = !matches!(state.storage.get_settings().appearance.theme, cortx_core::models::Theme::Light);
+        if let Err(e) = commands::apply_terminal_window_effect(
+            &window,
+            terminal.window_effect,
+            terminal.window_opacity,
+            None,
+            dark,
+        ) {
+            log::warn!("Terminal window effect not applied: {}", e);
+        }
+    }
     let _ = window.show();
     let _ = window.set_focus();
     Ok(())
@@ -507,6 +526,14 @@ pub fn run() {
             commands::save_launch_config_yaml,
             commands::delete_launch_config,
             commands::launch_config_to_yaml,
+            commands::list_terminal_themes,
+            commands::get_terminal_theme,
+            commands::import_terminal_theme_file,
+            commands::import_terminal_theme_folder,
+            commands::delete_terminal_theme,
+            commands::save_terminal_theme,
+            commands::read_terminal_theme_image,
+            commands::set_terminal_window_effect,
             commands::spawn_shell,
             commands::kill_shell,
             commands::list_shells,

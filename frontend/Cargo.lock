@@ -907,6 +907,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "walkdir",
+ "window-vibrancy",
 ]
 
 [[package]]

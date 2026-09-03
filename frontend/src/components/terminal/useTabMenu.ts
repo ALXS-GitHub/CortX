@@ -1,13 +1,18 @@
-import { useCallback, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useState, type MouseEvent } from 'react';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import type { TerminalTab } from '@/lib/terminalLayout';
+import { TERMINAL_EVENTS, type RenameTabEventDetail } from './actions';
 
 /**
  * State hooks shared by the tab strip and the sessions rail (kept apart from
  * the components in `tabMenu.tsx` so fast refresh stays happy).
  */
 
-/** Inline rename of a tab: the draft lives here until Enter / blur commits it. */
+/**
+ * Inline rename of a tab: the draft lives here until Enter / blur commits it.
+ * Also answers the `tab.rename` shortcut, which asks the row of the active
+ * tab to start editing through a window event.
+ */
 export function useTabRename(tab: TerminalTab, fallbackTitle: string) {
   const renameTab = useTerminalLayoutStore((s) => s.renameTab);
   const [editing, setEditing] = useState(false);
@@ -21,6 +26,18 @@ export function useTabRename(tab: TerminalTab, fallbackTitle: string) {
     renameTab(tab.id, draft);
   }, [draft, renameTab, tab.id]);
   const cancel = useCallback(() => setEditing(false), []);
+
+  useEffect(() => {
+    const onRename = (e: Event) => {
+      const detail = (e as CustomEvent<RenameTabEventDetail>).detail;
+      if (!detail || detail.tabId !== tab.id || detail.handled) return;
+      detail.handled = true;
+      start();
+    };
+    window.addEventListener(TERMINAL_EVENTS.renameTab, onRename);
+    return () => window.removeEventListener(TERMINAL_EVENTS.renameTab, onRename);
+  }, [tab.id, start]);
+
   return { editing, draft, setDraft, start, commit, cancel };
 }
 

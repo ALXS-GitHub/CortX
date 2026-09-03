@@ -1,17 +1,49 @@
+import { create } from 'zustand';
 import { toast } from 'sonner';
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { emit } from '@tauri-apps/api/event';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
-import { activeLeafOf } from './model';
-import { collectLeaves, projectIdOfWorkspace, type SplitDirection, type TerminalTab } from '@/lib/terminalLayout';
+import { useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
+import { adjustTerminalZoom, clearTerminal, focusTerminal, resetTerminalZoom } from '@/lib/terminalSessions';
+import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
+import type { KeybindingActionId } from '@/lib/keybindings';
+import { activeLeafOf, splitPathTo, visibleTabOrder } from './model';
+import {
+  collectLeaves,
+  mapLeaves,
+  newLayoutId,
+  projectIdOfWorkspace,
+  removeLeaf,
+  tabContainingTerminal,
+  type LayoutNode,
+  type SplitDirection,
+  type TerminalTab,
+} from '@/lib/terminalLayout';
 
 /**
  * Imperative actions of the Terminal window. They read the stores at call
  * time (no stale closures) so every entry point — rail footer, "+" button,
- * empty state, leaf header, keyboard shortcuts — shares one implementation.
+ * empty state, leaf header, keyboard shortcuts, palette, context menus —
+ * shares one implementation. `runAction` maps a keybinding action id to
+ * the matching function.
  */
 
+/** Custom DOM events the window components listen to (no store needed). */
+export const TERMINAL_EVENTS = {
+  /** Toggle the command palette (`detail` unused). */
+  palette: 'cortx:terminal-palette',
+  /** Start renaming a tab inline: `detail: { tabId, handled }` — the row that owns it sets `handled`. */
+  renameTab: 'cortx:terminal-rename-tab',
+} as const;
+
+export interface RenameTabEventDetail {
+  tabId: string;
+  handled: boolean;
+}
+
 /** Live cwd of a terminal (shell integration), else the cwd its shell opened in. */
-function terminalCwd(terminalId: string): string | undefined {
+export function terminalCwd(terminalId: string): string | undefined {
   const app = useAppStore.getState();
   const live = app.terminalStates.get(terminalId)?.cwd;
   if (live) return live;
@@ -58,7 +90,10 @@ export async function splitLeaf(tabId: string, leafId: string, direction: SplitD
   const { projectId, cwd } = resolveSpawnTarget(tab, leafTerminalId);
   try {
     const shellId = await useAppStore.getState().openShell({ projectId, cwd, surface: 'window' });
-    useTerminalLayoutStore.getState().addTerminalToWindow(`shell:${shellId}`, {
+    const store = useTerminalLayoutStore.getState();
+    // A split while maximized would be invisible: restore the layout first.
+    if (tab?.maximizedLeafId) store.toggleMaximizeLeaf(tabId, null);
+    store.addTerminalToWindow(`shell:${shellId}`, {
       projectId,
       splitFrom: { tabId, leafId, direction },
     });
@@ -125,6 +160,23 @@ export function cycleTab(delta: 1 | -1): void {
   layout.setActiveTab(next.id);
 }
 
+/** The tabs in the order the user sees them (rail groups, or strip order). */
+export function orderedTabs(): TerminalTab[] {
+  const { doc } = useTerminalLayoutStore.getState();
+  const app = useAppStore.getState();
+  return visibleTabOrder(doc.window, app.projects, app.settings?.terminal.tabsPlacement ?? 'sidebar');
+}
+
+/** Ctrl+1…9: the Nth visible tab; 9 (or anything past the end) is the last one. */
+export function gotoTab(n: number): boolean {
+  const tabs = orderedTabs();
+  if (tabs.length === 0) return false;
+  const target = n >= 9 || n > tabs.length ? tabs[tabs.length - 1] : tabs[n - 1];
+  if (!target) return false;
+  useTerminalLayoutStore.getState().setActiveTab(target.id);
+  return true;
+}
+
 /**
  * Move the active leaf of the active tab in visual order (Alt+Arrow).
  * Returns false when there is nothing to move to, so the key can fall
@@ -141,4 +193,444 @@ export function cycleLeaf(delta: 1 | -1): boolean {
   layout.setActiveLeaf(tab.id, next.id);
   useAppStore.getState().markTerminalSeen(next.terminalId);
   return true;
+}
+
+export type PaneDirection = 'left' | 'right' | 'up' | 'down';
+
+function leafElement(leafId: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-leaf-id="${CSS.escape(leafId)}"]`);
+}
+
+/**
+ * Focus the pane in a direction (Ctrl+Alt+Arrow), judged on the panes' real
+ * rectangles on screen. Returns false when there is no pane that way.
+ */
+export function focusLeafInDirection(direction: PaneDirection): boolean {
+  const layout = useTerminalLayoutStore.getState();
+  const tab = layout.activeTab();
+  if (!tab || tab.maximizedLeafId) return false;
+  const leaves = collectLeaves(tab.layout);
+  if (leaves.length < 2) return false;
+  const from = leafElement(tab.activeLeafId)?.getBoundingClientRect();
+  if (!from) return cycleLeaf(direction === 'right' || direction === 'down' ? 1 : -1);
+  const fromCx = (from.left + from.right) / 2;
+  const fromCy = (from.top + from.bottom) / 2;
+
+  let best: { id: string; terminalId: string; score: number } | null = null;
+  for (const leaf of leaves) {
+    if (leaf.id === tab.activeLeafId) continue;
+    const r = leafElement(leaf.id)?.getBoundingClientRect();
+    if (!r || r.width === 0) continue;
+    let gap: number;
+    let offAxis: number;
+    switch (direction) {
+      case 'left':
+        gap = from.left - r.right;
+        offAxis = Math.abs((r.top + r.bottom) / 2 - fromCy);
+        break;
+      case 'right':
+        gap = r.left - from.right;
+        offAxis = Math.abs((r.top + r.bottom) / 2 - fromCy);
+        break;
+      case 'up':
+        gap = from.top - r.bottom;
+        offAxis = Math.abs((r.left + r.right) / 2 - fromCx);
+        break;
+      case 'down':
+        gap = r.top - from.bottom;
+        offAxis = Math.abs((r.left + r.right) / 2 - fromCx);
+        break;
+    }
+    if (gap < -2) continue; // not on that side
+    // Panes that share an edge with us come first, then the closest sideways.
+    const overlaps =
+      direction === 'left' || direction === 'right'
+        ? r.bottom > from.top && r.top < from.bottom
+        : r.right > from.left && r.left < from.right;
+    const score = gap * 10 + (overlaps ? 0 : 100_000) + offAxis;
+    if (!best || score < best.score) best = { id: leaf.id, terminalId: leaf.terminalId, score };
+  }
+  if (!best) return false;
+  layout.setActiveLeaf(tab.id, best.id);
+  useAppStore.getState().markTerminalSeen(best.terminalId);
+  return true;
+}
+
+const RESIZE_STEP = 0.05;
+const MIN_FRACTION = 0.1;
+
+/**
+ * Move the active pane's divider by 5 % (Ctrl+Alt+Shift+Arrow): "right"
+ * pushes its right edge right — or, for the last child, its left edge — in
+ * the nearest split of that orientation.
+ */
+export function resizeActiveLeaf(direction: PaneDirection): boolean {
+  const layout = useTerminalLayoutStore.getState();
+  const tab = layout.activeTab();
+  if (!tab || tab.maximizedLeafId) return false;
+  const path = splitPathTo(tab.layout, tab.activeLeafId);
+  if (!path) return false;
+  const wanted: SplitDirection = direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical';
+  const step = [...path].reverse().find((p) => p.split.direction === wanted);
+  if (!step) return false;
+  const { split, index } = step;
+  const sizes = split.sizes.slice();
+  const positive = direction === 'right' || direction === 'down';
+  // The divider we move: after the child when growing towards the end and
+  // there is a neighbour there, otherwise the one before it.
+  let a: number;
+  let b: number;
+  let delta: number;
+  if (positive) {
+    if (index < sizes.length - 1) {
+      a = index;
+      b = index + 1;
+      delta = RESIZE_STEP;
+    } else if (index > 0) {
+      a = index - 1;
+      b = index;
+      delta = RESIZE_STEP;
+    } else return false;
+  } else if (index > 0) {
+    a = index - 1;
+    b = index;
+    delta = -RESIZE_STEP;
+  } else if (index < sizes.length - 1) {
+    a = index;
+    b = index + 1;
+    delta = -RESIZE_STEP;
+  } else return false;
+  const clamped = Math.max(MIN_FRACTION - sizes[a], Math.min(sizes[b] - MIN_FRACTION, delta));
+  if (Math.abs(clamped) < 1e-4) return true;
+  sizes[a] += clamped;
+  sizes[b] -= clamped;
+  layout.setSplitSizes(tab.id, split.id, sizes);
+  return true;
+}
+
+/** Ctrl+Shift+Enter: the active leaf alone in its tab, or the split back. */
+export function toggleMaximizeActiveLeaf(): boolean {
+  const layout = useTerminalLayoutStore.getState();
+  const tab = layout.activeTab();
+  if (!tab) return false;
+  if (tab.maximizedLeafId) {
+    layout.toggleMaximizeLeaf(tab.id, null);
+    return true;
+  }
+  if (collectLeaves(tab.layout).length < 2) return false;
+  layout.toggleMaximizeLeaf(tab.id, activeLeafOf(tab).id);
+  return true;
+}
+
+/** Ask the rail / strip row of a tab to start its inline rename. */
+export function renameTabInline(tabId: string): boolean {
+  const detail: RenameTabEventDetail = { tabId, handled: false };
+  window.dispatchEvent(new CustomEvent<RenameTabEventDetail>(TERMINAL_EVENTS.renameTab, { detail }));
+  if (!detail.handled) {
+    toast.message('Expand the sessions rail to rename this tab', { description: 'Or right-click it in the tab strip.' });
+  }
+  return true;
+}
+
+/** Duplicate a tab: a new shell in the active leaf's cwd, same workspace, colour and title. */
+export async function duplicateTab(tabId: string): Promise<void> {
+  const layout = useTerminalLayoutStore.getState();
+  const tab = layout.doc.window.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  const projectId = projectIdOfWorkspace(tab.workspaceId) ?? undefined;
+  const cwd = terminalCwd(activeLeafOf(tab).terminalId) ?? activeLeafOf(tab).cwd ?? undefined;
+  try {
+    const shellId = await useAppStore.getState().openShell({ projectId, cwd, surface: 'window' });
+    const terminalId = `shell:${shellId}`;
+    const store = useTerminalLayoutStore.getState();
+    store.addTerminalToWindow(terminalId, { projectId });
+    const created = tabContainingTerminal(useTerminalLayoutStore.getState().doc.window, terminalId);
+    if (!created) return;
+    if (tab.color) store.setTabColor(created.id, tab.color);
+    if (tab.title) store.renameTab(created.id, tab.title);
+  } catch (error) {
+    console.error('Failed to duplicate the tab:', error);
+    toast.error(`Failed to open terminal: ${String(error)}`);
+  }
+}
+
+/**
+ * Bring the most recently closed tab back: same workspace, title, colour
+ * and split shape, with fresh shells in the leaves' last directories.
+ * Nothing is re-run; service / script leaves are dropped.
+ */
+export async function reopenClosedTab(): Promise<boolean> {
+  const layout = useTerminalLayoutStore.getState();
+  const closed = layout.popClosedTab();
+  if (!closed) {
+    toast.message('No closed tab to reopen');
+    return false;
+  }
+  const projectId = projectIdOfWorkspace(closed.workspaceId) ?? undefined;
+  const app = useAppStore.getState();
+  // Shells only: everything else cannot be brought back by reopening.
+  let shape: LayoutNode | null = closed.layout;
+  for (const leaf of collectLeaves(closed.layout)) {
+    if (!leaf.terminalId.startsWith('shell:')) shape = shape ? removeLeaf(shape, leaf.id) : null;
+  }
+  if (!shape) return false;
+  const mapping = new Map<string, string>();
+  try {
+    for (const leaf of collectLeaves(shape)) {
+      const shellId = await app.openShell({ projectId, cwd: leaf.cwd ?? undefined, surface: 'window' });
+      mapping.set(leaf.id, `shell:${shellId}`);
+    }
+  } catch (error) {
+    console.error('Failed to reopen the tab:', error);
+    toast.error(`Failed to reopen tab: ${String(error)}`);
+    // Whatever was spawned is placed anyway so nothing leaks.
+  }
+  let tree = mapLeaves(shape, (leaf) => {
+    const terminalId = mapping.get(leaf.id);
+    return terminalId ? { ...leaf, id: newLayoutId(), terminalId, shell: null } : leaf;
+  });
+  // Leaves whose shell could not start are dropped from the tree.
+  for (const leaf of collectLeaves(shape)) {
+    if (mapping.has(leaf.id)) continue;
+    const next = removeLeaf(tree, leaf.id);
+    if (!next) return false;
+    tree = next;
+  }
+  const leaves = collectLeaves(tree);
+  useTerminalLayoutStore.getState().addLaunchTabs(
+    [
+      {
+        id: newLayoutId(),
+        workspaceId: closed.workspaceId,
+        title: closed.title,
+        color: closed.color,
+        pinned: false,
+        order: 0,
+        layout: tree,
+        activeLeafId: leaves[0].id,
+      },
+    ],
+    projectId ?? null
+  );
+  return true;
+}
+
+/** The terminal of the active leaf of the active tab, if any. */
+export function activeTerminalId(): string | null {
+  const tab = useTerminalLayoutStore.getState().activeTab();
+  return tab ? activeLeafOf(tab).terminalId : null;
+}
+
+/** Copy a terminal's working directory to the clipboard. */
+export async function copyTerminalCwd(terminalId: string): Promise<boolean> {
+  const cwd = terminalCwd(terminalId);
+  if (!cwd) {
+    toast.message('No working directory known for this terminal');
+    return false;
+  }
+  try {
+    await writeText(cwd);
+    toast.success('Path copied', { description: cwd });
+  } catch (error) {
+    toast.error(`Failed to copy: ${String(error)}`);
+  }
+  return true;
+}
+
+/** Open a terminal's working directory in the OS file explorer. */
+export async function openTerminalCwd(terminalId: string): Promise<boolean> {
+  const cwd = terminalCwd(terminalId);
+  if (!cwd) {
+    toast.message('No working directory known for this terminal');
+    return false;
+  }
+  try {
+    await openInExplorer(cwd);
+  } catch (error) {
+    toast.error(`Failed to open ${cwd}`, { description: String(error) });
+  }
+  return true;
+}
+
+/** Quote a path for the shell when it needs it. */
+export function quotePath(path: string): string {
+  if (!/[\s"'()&;|<>$`]/.test(path)) return path;
+  return `"${path.replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * A file dropped on a pane (Tauri drag-drop event): its path(s) are typed
+ * into the terminal under the pointer. `position` is in physical pixels.
+ */
+export function pasteDroppedPaths(paths: string[], position: { x: number; y: number }): boolean {
+  if (paths.length === 0) return false;
+  const ratio = window.devicePixelRatio || 1;
+  const el = document.elementFromPoint(position.x / ratio, position.y / ratio);
+  const pane = el?.closest<HTMLElement>('[data-terminal-id]');
+  const terminalId = pane?.dataset.terminalId;
+  if (!terminalId) return false;
+  const tab = tabContainingTerminal(useTerminalLayoutStore.getState().doc.window, terminalId);
+  const leaf = tab ? collectLeaves(tab.layout).find((l) => l.terminalId === terminalId) : undefined;
+  if (tab && leaf) useTerminalLayoutStore.getState().setActiveLeaf(tab.id, leaf.id);
+  writeTerminal(terminalId, paths.map(quotePath).join(' ')).catch((error) => {
+    toast.error(`Failed to paste the path: ${String(error)}`);
+  });
+  focusTerminal(terminalId);
+  return true;
+}
+
+/** Toggle the command palette of the window. */
+export function togglePalette(): boolean {
+  window.dispatchEvent(new CustomEvent(TERMINAL_EVENTS.palette));
+  return true;
+}
+
+/** Bring the main window up on its Settings page. */
+export async function openTerminalSettings(): Promise<void> {
+  await showMainWindow();
+  // Another webview: a DOM event would stay in this window. Tauri events
+  // reach every window; the main one navigates to Settings.
+  await emit('cortx-open-settings', { section: 'terminal' }).catch(() => {});
+}
+
+/** Ask the theme picker (owned by the terminal theme feature) to open. */
+export function openThemePicker(): void {
+  window.dispatchEvent(new CustomEvent('cortx:open-theme-picker'));
+}
+
+// ---------------------------------------------------------------------------
+// Find in terminal
+// ---------------------------------------------------------------------------
+
+interface FindState {
+  open: boolean;
+  /** The terminal being searched (the active leaf when the bar opened). */
+  terminalId: string | null;
+  openFind: (terminalId: string) => void;
+  closeFind: () => void;
+}
+
+/** State of the floating find bar (see `FindBar.tsx`). */
+export const useFindStore = create<FindState>((set) => ({
+  open: false,
+  terminalId: null,
+  openFind: (terminalId) => set({ open: true, terminalId }),
+  closeFind: () => set({ open: false }),
+}));
+
+/** Ctrl+Shift+F: the find bar over the active pane (re-focuses it when already open). */
+export function openFindInActiveTerminal(): boolean {
+  const terminalId = activeTerminalId();
+  if (!terminalId) return false;
+  useFindStore.getState().openFind(terminalId);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a keybinding action. Returns false when there was nothing to do (no
+ * pane that way, single tab…) so the key can fall through to the shell.
+ */
+export function runAction(id: KeybindingActionId): boolean {
+  switch (id) {
+    case 'tab.new':
+      void openNewTerminal();
+      return true;
+    case 'tab.close':
+      closeActiveLeaf();
+      return true;
+    case 'tab.next':
+      cycleTab(1);
+      return true;
+    case 'tab.prev':
+      cycleTab(-1);
+      return true;
+    case 'tab.goto1':
+    case 'tab.goto2':
+    case 'tab.goto3':
+    case 'tab.goto4':
+    case 'tab.goto5':
+    case 'tab.goto6':
+    case 'tab.goto7':
+    case 'tab.goto8':
+    case 'tab.goto9':
+      return gotoTab(Number(id.slice('tab.goto'.length)));
+    case 'tab.rename': {
+      const tab = useTerminalLayoutStore.getState().activeTab();
+      return tab ? renameTabInline(tab.id) : false;
+    }
+    case 'tab.duplicate': {
+      const tab = useTerminalLayoutStore.getState().activeTab();
+      if (!tab) return false;
+      void duplicateTab(tab.id);
+      return true;
+    }
+    case 'tab.reopen':
+      void reopenClosedTab();
+      return true;
+    case 'pane.splitRight':
+      void splitActiveLeaf('horizontal');
+      return true;
+    case 'pane.splitDown':
+      void splitActiveLeaf('vertical');
+      return true;
+    case 'pane.focusLeft':
+      return focusLeafInDirection('left');
+    case 'pane.focusRight':
+      return focusLeafInDirection('right');
+    case 'pane.focusUp':
+      return focusLeafInDirection('up');
+    case 'pane.focusDown':
+      return focusLeafInDirection('down');
+    case 'pane.resizeLeft':
+      return resizeActiveLeaf('left');
+    case 'pane.resizeRight':
+      return resizeActiveLeaf('right');
+    case 'pane.resizeUp':
+      return resizeActiveLeaf('up');
+    case 'pane.resizeDown':
+      return resizeActiveLeaf('down');
+    case 'pane.maximize':
+      return toggleMaximizeActiveLeaf();
+    case 'terminal.find':
+      return openFindInActiveTerminal();
+    case 'terminal.clear': {
+      const terminalId = activeTerminalId();
+      if (!terminalId) return false;
+      clearTerminal(terminalId);
+      return true;
+    }
+    case 'terminal.zoomIn':
+      adjustTerminalZoom(1);
+      return true;
+    case 'terminal.zoomOut':
+      adjustTerminalZoom(-1);
+      return true;
+    case 'terminal.zoomReset':
+      resetTerminalZoom();
+      return true;
+    case 'terminal.copyCwd': {
+      const terminalId = activeTerminalId();
+      if (!terminalId) return false;
+      void copyTerminalCwd(terminalId);
+      return true;
+    }
+    case 'terminal.openCwd': {
+      const terminalId = activeTerminalId();
+      if (!terminalId) return false;
+      void openTerminalCwd(terminalId);
+      return true;
+    }
+    case 'window.palette':
+      return togglePalette();
+    case 'window.rail':
+      useTerminalWindowPrefsStore.getState().toggleRail();
+      return true;
+    case 'window.scopeGlobal':
+      useTerminalLayoutStore.getState().setScope('global');
+      return true;
+  }
 }

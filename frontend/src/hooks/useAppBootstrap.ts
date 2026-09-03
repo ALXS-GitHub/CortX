@@ -24,6 +24,8 @@ import {
 import { formatDuration, terminalDisplayName } from '@/lib/terminalNames';
 import { restoreTerminalSessions } from '@/lib/terminalRestore';
 import { startTerminalSnapshotScheduler, storeTerminalSnapshots } from '@/lib/terminalSnapshots';
+import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
+import { IS_TERMINAL_WINDOW } from '@/stores/terminalLayoutStore';
 import { listen } from '@tauri-apps/api/event';
 import type { LogEntry } from '@/types';
 
@@ -259,6 +261,13 @@ export function useAppBootstrap() {
     const onFocus = () => useAppStore.getState().markVisibleTerminalsSeen();
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  // Main window: dock terminals use the terminal theme's palette too (the
+  // Terminal window initialises the store itself, with the window chrome).
+  useEffect(() => {
+    if (IS_TERMINAL_WINDOW) return;
+    return initTerminalThemeStore({ windowChrome: false });
   }, []);
 
   // Restore snapshots: this window serialises its own xterm buffers every

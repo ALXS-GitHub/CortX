@@ -1,0 +1,25 @@
+# VS Code "Dark Modern" — CortX bundled theme (Warp format).
+name: Dark Modern
+background: "#1f1f1f"
+accent: "#0078d4"
+foreground: "#cccccc"
+details: darker
+terminal_colors:
+  normal:
+    black: "#1e1e1e"
+    red: "#f14c4c"
+    green: "#23d18b"
+    yellow: "#f5f543"
+    blue: "#3b8eea"
+    magenta: "#d670d6"
+    cyan: "#29b8db"
+    white: "#e5e5e5"
+  bright:
+    black: "#666666"
+    red: "#f14c4c"
+    green: "#23d18b"
+    yellow: "#f5f543"
+    blue: "#3b8eea"
+    magenta: "#d670d6"
+    cyan: "#29b8db"
+    white: "#ffffff"

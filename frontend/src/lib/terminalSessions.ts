@@ -23,8 +23,10 @@ import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
+import { getXtermThemeOverride, isWindowThemeActive, themeToXterm } from '@/lib/terminalTheme';
 
 export interface TerminalSession {
   id: string;
@@ -53,11 +55,23 @@ if (import.meta.env.DEV) {
 
 const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
 
+/** True inside the dedicated Terminal window (whose panes are see-through
+ *  so the theme's window opacity / wallpaper show behind the text). */
+const IS_TERMINAL_WINDOW = (() => {
+  try {
+    return getCurrentWindow().label === 'terminal';
+  } catch {
+    return false;
+  }
+})();
+
 // ---------------------------------------------------------------------------
 // Theme
 // ---------------------------------------------------------------------------
 
-/** VS Code "Dark Modern" ANSI palette. */
+// Fallback palettes for windows where no terminal theme is loaded (the
+// dock in the main window): VS Code "Dark Modern" / "Light Modern", the same
+// values as the bundled `dark-modern` / `light-modern` themes.
 const DARK_ANSI = {
   black: '#1e1e1e',
   red: '#f14c4c',
@@ -77,7 +91,6 @@ const DARK_ANSI = {
   brightWhite: '#ffffff',
 };
 
-/** VS Code "Light Modern" ANSI palette. */
 const LIGHT_ANSI = {
   black: '#000000',
   red: '#cd3131',
@@ -131,7 +144,16 @@ function isDarkTheme(): boolean {
   return document.documentElement.classList.contains('dark');
 }
 
+/**
+ * xterm palette: the active / previewed terminal theme when the theme store
+ * has one (see `stores/terminalThemeStore`), else derived from the app's
+ * CSS tokens.
+ */
 export function buildTerminalTheme(): ITheme {
+  const override = getXtermThemeOverride();
+  if (override) {
+    return themeToXterm(override, { transparentBackground: IS_TERMINAL_WINDOW && isWindowThemeActive() });
+  }
   const dark = isDarkTheme();
   const bg = resolveCssColor('--bg-terminal') ?? resolveCssColor('--card') ?? (dark ? [30, 30, 30] : [255, 255, 255]);
   const fg = resolveCssColor('--terminal-fg') ?? resolveCssColor('--foreground') ?? (dark ? [229, 229, 229] : [36, 36, 36]);
@@ -175,22 +197,70 @@ export function terminalFontOptions(): { fontFamily: string; fontSize: number } 
   };
 }
 
-let fontSubscribed = false;
+// ---------------------------------------------------------------------------
+// Cursor + padding (Settings > Terminal appearance; DEV-13 P3)
+// ---------------------------------------------------------------------------
 
-/** Re-apply the font to every session when the settings change. */
-function ensureFontSubscription() {
-  if (fontSubscribed) return;
-  fontSubscribed = true;
-  let last = JSON.stringify(terminalFontOptions());
+const DEFAULT_PADDING = 8;
+
+/** xterm cursor options from the user's settings. */
+export function terminalCursorOptions(): { cursorStyle: 'block' | 'underline' | 'bar'; cursorBlink: boolean } {
+  const cfg = useAppStore.getState().settings?.terminal;
+  return {
+    cursorStyle: cfg?.cursorStyle ?? 'bar',
+    cursorBlink: cfg?.cursorBlink ?? true,
+  };
+}
+
+/** Inner padding of every terminal, in px (clamped 0–48). */
+export function terminalPadding(): number {
+  const raw = useAppStore.getState().settings?.terminal.padding;
+  if (raw === undefined || !Number.isFinite(raw)) return DEFAULT_PADDING;
+  return Math.min(48, Math.max(0, Math.round(raw)));
+}
+
+/** Push the padding to `.cortx-xterm` (via `--terminal-padding`) and refit. */
+export function applyTerminalPadding() {
+  document.documentElement.style.setProperty('--terminal-padding', `${terminalPadding()}px`);
+  for (const s of sessions.values()) {
+    if (s.container.isConnected) fitTerminal(s.id);
+  }
+}
+
+let settingsSubscribed = false;
+
+/** Re-apply font, cursor and padding to every session when the settings change. */
+function ensureSettingsSubscription() {
+  if (settingsSubscribed) return;
+  settingsSubscribed = true;
+  applyTerminalPadding();
+  let lastFont = JSON.stringify(terminalFontOptions());
+  let lastCursor = JSON.stringify(terminalCursorOptions());
+  let lastPadding = terminalPadding();
   useAppStore.subscribe(() => {
-    const next = terminalFontOptions();
-    const key = JSON.stringify(next);
-    if (key === last) return;
-    last = key;
-    for (const s of sessions.values()) {
-      s.term.options.fontFamily = next.fontFamily;
-      s.term.options.fontSize = Math.max(6, next.fontSize + zoomDelta);
-      if (s.container.isConnected) fitTerminal(s.id);
+    const font = terminalFontOptions();
+    const fontKey = JSON.stringify(font);
+    if (fontKey !== lastFont) {
+      lastFont = fontKey;
+      for (const s of sessions.values()) {
+        s.term.options.fontFamily = font.fontFamily;
+        s.term.options.fontSize = Math.max(6, font.fontSize + zoomDelta);
+        if (s.container.isConnected) fitTerminal(s.id);
+      }
+    }
+    const cursor = terminalCursorOptions();
+    const cursorKey = JSON.stringify(cursor);
+    if (cursorKey !== lastCursor) {
+      lastCursor = cursorKey;
+      for (const s of sessions.values()) {
+        s.term.options.cursorStyle = cursor.cursorStyle;
+        s.term.options.cursorBlink = cursor.cursorBlink;
+      }
+    }
+    const padding = terminalPadding();
+    if (padding !== lastPadding) {
+      lastPadding = padding;
+      applyTerminalPadding();
     }
   });
 }
@@ -234,13 +304,17 @@ async function pasteFromClipboard(term: Terminal) {
 
 function createSession(id: string): TerminalSession {
   ensureThemeObserver();
-  ensureFontSubscription();
+  ensureSettingsSubscription();
   const font = terminalFontOptions();
+  const cursor = terminalCursorOptions();
 
   const term = new Terminal({
     allowProposedApi: true, // needed by addon-image / unicode11
-    cursorBlink: true,
-    cursorStyle: 'bar',
+    cursorBlink: cursor.cursorBlink,
+    cursorStyle: cursor.cursorStyle,
+    // Terminal window: the canvas is see-through so the theme's window
+    // opacity and wallpaper show behind the text (see lib/terminalTheme).
+    allowTransparency: IS_TERMINAL_WINDOW,
     fontFamily: font.fontFamily,
     fontSize: Math.max(6, font.fontSize + zoomDelta),
     lineHeight: 1.2,

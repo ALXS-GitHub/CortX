@@ -1,0 +1,25 @@
+# VS Code "Light Modern" — CortX bundled theme (Warp format).
+name: Light Modern
+background: "#ffffff"
+accent: "#005fb8"
+foreground: "#3b3b3b"
+details: lighter
+terminal_colors:
+  normal:
+    black: "#000000"
+    red: "#cd3131"
+    green: "#107c10"
+    yellow: "#949800"
+    blue: "#0451a5"
+    magenta: "#bc05bc"
+    cyan: "#0598bc"
+    white: "#555555"
+  bright:
+    black: "#666666"
+    red: "#cd3131"
+    green: "#14ce14"
+    yellow: "#b5ba00"
+    blue: "#0451a5"
+    magenta: "#bc05bc"
+    cyan: "#0598bc"
+    white: "#a5a5a5"

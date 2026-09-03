@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { TitleBar } from '@/components/layout/TitleBar';
@@ -64,6 +65,21 @@ function App() {
   }, []);
 
   useAppBootstrap();
+
+  // "Terminal settings…" from the Terminal window's palette: it brings this
+  // window up and asks for the Settings screen.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen('cortx-open-settings', () => useAppStore.getState().setCurrentView('settings')).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   const renderView = () => {
     switch (currentView) {

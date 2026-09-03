@@ -2152,8 +2152,15 @@ pub fn generate_shell_init(state: State<AppState>, shell: String) -> Result<Stri
     let shell_type = cortx_core::shell_init::Shell::from_str(&shell)
         .ok_or_else(|| format!("Unknown shell: {}. Supported: powershell, bash, zsh, fish", shell))?;
     let aliases = state.storage.get_all_aliases();
-    let integration = state.storage.get_settings().terminal.shell_integration;
-    Ok(cortx_core::shell_init::generate_init_script(&shell_type, &aliases, integration))
+    let tcfg = state.storage.get_settings().terminal;
+    Ok(cortx_core::shell_init::generate_init_script_ext(
+        &shell_type,
+        &aliases,
+        cortx_core::shell_init::InitOptions {
+            shell_integration: tcfg.shell_integration,
+            disable_shell_predictions: tcfg.shell_integration && tcfg.inline_suggestions,
+        },
+    ))
 }
 
 // ============================================================================
@@ -3036,4 +3043,155 @@ pub fn kill_shell(app_handle: AppHandle, state: State<AppState>, shell_id: Strin
 #[tauri::command]
 pub fn list_shells(state: State<AppState>) -> Vec<cortx_core::process_manager::ShellInfo> {
     state.process_manager.list_shells()
+}
+
+// ============================================================================
+// Terminal themes (DEV-13 P3) — data/terminal/themes/*.yaml in Warp's format
+// ============================================================================
+
+fn theme_store(state: &State<AppState>) -> cortx_core::terminal::ThemeStore {
+    cortx_core::terminal::ThemeStore::new(&state.storage.terminal_dir())
+}
+
+#[tauri::command]
+pub fn list_terminal_themes(state: State<AppState>) -> Vec<cortx_core::terminal::ThemeSummary> {
+    theme_store(&state).list()
+}
+
+#[tauri::command]
+pub fn get_terminal_theme(state: State<AppState>, name: String) -> Option<cortx_core::terminal::TerminalTheme> {
+    theme_store(&state).get(&name)
+}
+
+#[tauri::command]
+pub fn import_terminal_theme_file(
+    state: State<AppState>,
+    path: String,
+) -> Result<cortx_core::terminal::TerminalTheme, String> {
+    theme_store(&state).import_file(Path::new(&path))
+}
+
+#[tauri::command]
+pub fn import_terminal_theme_folder(
+    state: State<AppState>,
+    path: String,
+) -> Result<cortx_core::terminal::themes::ImportReport, String> {
+    theme_store(&state).import_folder(Path::new(&path))
+}
+
+#[tauri::command]
+pub fn delete_terminal_theme(state: State<AppState>, name: String) -> Result<(), String> {
+    theme_store(&state).delete(&name)
+}
+
+#[tauri::command]
+pub fn save_terminal_theme(
+    state: State<AppState>,
+    theme: cortx_core::terminal::TerminalTheme,
+) -> Result<cortx_core::terminal::TerminalTheme, String> {
+    theme_store(&state).save(theme)
+}
+
+/// The theme's wallpaper as a `data:` URL (`None` when the theme has none).
+#[tauri::command]
+pub fn read_terminal_theme_image(state: State<AppState>, name: String) -> Result<Option<String>, String> {
+    theme_store(&state).read_image(&name)
+}
+
+/// Apply a backdrop effect to the Terminal window (`window-vibrancy`).
+///
+/// - Windows: `acrylic` (tinted blur, Windows 10 1809+) or `mica` (Windows
+///   11). Both need the window to be transparent, which `open_terminal_window`
+///   guarantees. `opacity` (50–100) only feeds the acrylic tint's alpha — the
+///   real window opacity is done in CSS (`--terminal-window-alpha`), Tauri has
+///   no per-window alpha on Windows.
+/// - macOS: `vibrancy` (NSVisualEffectView, hud / under-window material).
+/// - `none`: clear every effect; the transparent window then shows the
+///   desktop through whatever alpha the CSS leaves.
+///
+/// `tint` is the theme background (`#rrggbb`) used as the acrylic tint, and
+/// `dark` picks the mica / vibrancy material.
+pub fn apply_terminal_window_effect(
+    window: &tauri::WebviewWindow,
+    effect: cortx_core::models::WindowEffect,
+    opacity: u8,
+    tint: Option<&str>,
+    dark: bool,
+) -> Result<(), String> {
+    use cortx_core::models::WindowEffect;
+    let opacity = opacity.clamp(50, 100);
+    let _ = (opacity, tint, dark);
+
+    #[cfg(target_os = "windows")]
+    {
+        // Always clear first: switching acrylic ↔ mica needs a clean slate.
+        let _ = window_vibrancy::clear_acrylic(window);
+        let _ = window_vibrancy::clear_mica(window);
+        match effect {
+            WindowEffect::None | WindowEffect::Vibrancy => Ok(()),
+            WindowEffect::Acrylic => {
+                let (r, g, b) = tint.and_then(parse_rgb).unwrap_or(if dark { (18, 18, 18) } else { (240, 240, 240) });
+                // The tint alpha is what makes acrylic look opaque-ish; map 50–100 % to 40–200.
+                let a = (40.0 + (opacity as f32 - 50.0) / 50.0 * 160.0).round() as u8;
+                window_vibrancy::apply_acrylic(window, Some((r, g, b, a))).map_err(|e| e.to_string())
+            }
+            WindowEffect::Mica => window_vibrancy::apply_mica(window, Some(dark)).map_err(|e| e.to_string()),
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use window_vibrancy::{NSVisualEffectMaterial, NSVisualEffectState};
+        let _ = window_vibrancy::clear_vibrancy(window);
+        match effect {
+            WindowEffect::None | WindowEffect::Acrylic | WindowEffect::Mica => Ok(()),
+            WindowEffect::Vibrancy => window_vibrancy::apply_vibrancy(
+                window,
+                if dark { NSVisualEffectMaterial::HudWindow } else { NSVisualEffectMaterial::UnderWindowBackground },
+                Some(NSVisualEffectState::Active),
+                None,
+            )
+            .map_err(|e| e.to_string()),
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = (window, effect);
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn parse_rgb(hex: &str) -> Option<(u8, u8, u8)> {
+    let h = hex.trim().strip_prefix('#')?;
+    let full: String = match h.len() {
+        3 | 4 => h.chars().take(3).flat_map(|c| [c, c]).collect(),
+        6 | 8 => h[..6].to_string(),
+        _ => return None,
+    };
+    let v = u32::from_str_radix(&full, 16).ok()?;
+    Some(((v >> 16) as u8, (v >> 8 & 0xff) as u8, (v & 0xff) as u8))
+}
+
+/// Set the Terminal window's backdrop effect from the GUI (see
+/// [`apply_terminal_window_effect`]). No-op when the window is not open.
+#[tauri::command]
+pub fn set_terminal_window_effect(
+    app_handle: AppHandle,
+    effect: String,
+    opacity: u8,
+    tint: Option<String>,
+    dark: Option<bool>,
+) -> Result<(), String> {
+    use cortx_core::models::WindowEffect;
+    use tauri::Manager;
+    let effect = match effect.as_str() {
+        "acrylic" => WindowEffect::Acrylic,
+        "mica" => WindowEffect::Mica,
+        "vibrancy" => WindowEffect::Vibrancy,
+        _ => WindowEffect::None,
+    };
+    let Some(window) = app_handle.get_webview_window(crate::TERMINAL_WINDOW_LABEL) else {
+        return Ok(());
+    };
+    apply_terminal_window_effect(&window, effect, opacity, tint.as_deref(), dark.unwrap_or(true))
 }

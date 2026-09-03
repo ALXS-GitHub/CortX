@@ -1,19 +1,30 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   AppWindow,
   Columns2,
+  Copy,
+  CopyPlus,
+  Eraser,
+  FolderOpen,
   Globe,
+  Hash,
+  History,
+  Maximize2,
+  Minimize2,
   PanelLeft,
+  Pencil,
   Plus,
   Rocket,
   Rows2,
   Save,
+  Search,
+  Settings2,
   SquareArrowOutDownLeft,
+  SwatchBook,
   X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { adjustTerminalZoom, resetTerminalZoom } from '@/lib/terminalSessions';
 import {
   CommandDialog,
   CommandEmpty,
@@ -25,11 +36,11 @@ import {
 } from '@/components/ui/command';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
-import { useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
 import { showMainWindow } from '@/lib/tauri';
-import { projectIdOfWorkspace } from '@/lib/terminalLayout';
-import { closeActiveLeaf, openNewTerminal, sendLeafToDock, splitActiveLeaf } from './actions';
-import { activeLeafOf } from './model';
+import { collectLeaves, projectIdOfWorkspace } from '@/lib/terminalLayout';
+import { comboLabelFor, type KeybindingActionId } from '@/lib/keybindings';
+import { openTerminalSettings, openThemePicker, runAction, sendLeafToDock, terminalCwd } from './actions';
+import { activeLeafOf, tabTitle, useItemMap, visibleTabOrder } from './model';
 import { SaveLaunchConfigDialog } from './launch/SaveLaunchConfigDialog';
 import { launchProjectName, runLaunchConfigWithToast, sortLaunchConfigs, useLaunchConfigs } from './launch/useLaunchConfigs';
 
@@ -38,18 +49,27 @@ interface TerminalPaletteProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/** Right-aligned shortcut hint of a palette row. */
+function Hint({ children }: { children: ReactNode }) {
+  return children ? <span className="ml-auto pl-3 text-xs text-faint">{children}</span> : null;
+}
+
 /**
  * Command palette of the Terminal window (Ctrl+K). Everything that would
- * otherwise need a button in the way: launch configurations (run, save the
- * current tabs), scope, splits, dock hand-off, rail.
+ * otherwise need a button in the way: every keyboard action with its current
+ * combo, launch configurations (run, save the current tabs), scope, theme,
+ * settings.
  */
 export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
   const [query, setQuery] = useState('');
   const [saveOpen, setSaveOpen] = useState(false);
   const projects = useAppStore((s) => s.projects);
+  const keybindings = useAppStore((s) => s.settings?.terminal.keybindings);
+  const tabsPlacement = useAppStore((s) => s.settings?.terminal.tabsPlacement ?? 'sidebar');
   const win = useTerminalLayoutStore((s) => s.doc.window);
+  const closedTabs = useTerminalLayoutStore((s) => s.closedTabs);
   const setScope = useTerminalLayoutStore((s) => s.setScope);
-  const toggleRail = useTerminalWindowPrefsStore((s) => s.toggleRail);
+  const items = useItemMap();
   const { configs } = useLaunchConfigs(open);
 
   const scopedProjectId = win.scope === 'global' ? null : win.scope.projectId;
@@ -60,8 +80,14 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
     if (scopedProjectId) withTabs.add(scopedProjectId);
     return projects.filter((p) => withTabs.has(p.id));
   }, [projects, win.tabs, scopedProjectId]);
+  const orderedTabs = useMemo(() => visibleTabOrder(win, projects, tabsPlacement), [win, projects, tabsPlacement]);
   const activeTab = win.tabs.find((t) => t.id === win.activeTabId) ?? null;
   const activeLeaf = activeTab ? activeLeafOf(activeTab) : null;
+  const multi = activeTab ? collectLeaves(activeTab.layout).length > 1 : false;
+  const maximized = Boolean(activeTab?.maximizedLeafId);
+  const cwd = activeLeaf ? terminalCwd(activeLeaf.terminalId) ?? activeLeaf.cwd ?? null : null;
+
+  const combo = (id: KeybindingActionId) => comboLabelFor(id, keybindings);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setQuery('');
@@ -72,6 +98,9 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
     handleOpenChange(false);
     void fn();
   };
+  // Actions that want the keyboard focus afterwards (find, rename) must run
+  // once the dialog has given it back — after its 200 ms exit animation.
+  const runAfterClose = (id: KeybindingActionId) => run(() => void setTimeout(() => runAction(id), 300));
 
   return (
     <>
@@ -80,59 +109,134 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
         <CommandList>
           <CommandEmpty>No results.</CommandEmpty>
           <CommandGroup heading="Terminal">
-            <CommandItem value="new terminal" onSelect={() => run(openNewTerminal)}>
+            <CommandItem value="new terminal" onSelect={() => run(() => void runAction('tab.new'))}>
               <Plus />
               New terminal
-              <span className="ml-auto text-xs text-faint">Ctrl Shift T</span>
+              <Hint>{combo('tab.new')}</Hint>
             </CommandItem>
             {activeLeaf && (
               <>
-                <CommandItem value="split right" onSelect={() => run(() => splitActiveLeaf('horizontal'))}>
+                <CommandItem value="split right" onSelect={() => run(() => void runAction('pane.splitRight'))}>
                   <Columns2 />
                   Split right
-                  <span className="ml-auto text-xs text-faint">Ctrl Shift D</span>
+                  <Hint>{combo('pane.splitRight')}</Hint>
                 </CommandItem>
-                <CommandItem value="split down" onSelect={() => run(() => splitActiveLeaf('vertical'))}>
+                <CommandItem value="split down" onSelect={() => run(() => void runAction('pane.splitDown'))}>
                   <Rows2 />
                   Split down
-                  <span className="ml-auto text-xs text-faint">Ctrl Shift E</span>
+                  <Hint>{combo('pane.splitDown')}</Hint>
                 </CommandItem>
+                {(multi || maximized) && (
+                  <CommandItem value="maximize restore pane layout" onSelect={() => run(() => void runAction('pane.maximize'))}>
+                    {maximized ? <Minimize2 /> : <Maximize2 />}
+                    {maximized ? 'Restore layout' : 'Maximize pane'}
+                    <Hint>{combo('pane.maximize')}</Hint>
+                  </CommandItem>
+                )}
+                <CommandItem value="find in terminal search" onSelect={() => runAfterClose('terminal.find')}>
+                  <Search />
+                  Find in terminal
+                  <Hint>{combo('terminal.find')}</Hint>
+                </CommandItem>
+                <CommandItem value="clear terminal scrollback" onSelect={() => run(() => void runAction('terminal.clear'))}>
+                  <Eraser />
+                  Clear terminal
+                  <Hint>{combo('terminal.clear')}</Hint>
+                </CommandItem>
+                <CommandItem value="rename tab" onSelect={() => runAfterClose('tab.rename')}>
+                  <Pencil />
+                  Rename tab
+                  <Hint>{combo('tab.rename')}</Hint>
+                </CommandItem>
+                <CommandItem value="duplicate tab" onSelect={() => run(() => void runAction('tab.duplicate'))}>
+                  <CopyPlus />
+                  Duplicate tab
+                  <Hint>{combo('tab.duplicate')}</Hint>
+                </CommandItem>
+                {cwd && (
+                  <>
+                    <CommandItem value="copy path working directory cwd" onSelect={() => run(() => void runAction('terminal.copyCwd'))}>
+                      <Copy />
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <span>Copy path</span>
+                        <span className="truncate font-mono text-[11px] text-faint">{cwd}</span>
+                      </div>
+                      <Hint>{combo('terminal.copyCwd')}</Hint>
+                    </CommandItem>
+                    <CommandItem value="open in explorer finder working directory" onSelect={() => run(() => void runAction('terminal.openCwd'))}>
+                      <FolderOpen />
+                      Open in Explorer
+                      <Hint>{combo('terminal.openCwd')}</Hint>
+                    </CommandItem>
+                  </>
+                )}
                 <CommandItem value="send to dock" onSelect={() => run(() => sendLeafToDock(activeLeaf.terminalId))}>
                   <SquareArrowOutDownLeft />
                   Send this pane to the dock
                 </CommandItem>
-                <CommandItem value="close pane" onSelect={() => run(closeActiveLeaf)}>
+                <CommandItem value="close pane" onSelect={() => run(() => void runAction('tab.close'))}>
                   <X />
                   Close this pane
-                  <span className="ml-auto text-xs text-faint">Ctrl Shift W</span>
+                  <Hint>{combo('tab.close')}</Hint>
                 </CommandItem>
               </>
             )}
-            <CommandItem value="zoom in bigger font" onSelect={() => run(() => void adjustTerminalZoom(1))}>
+            {closedTabs.length > 0 && (
+              <CommandItem value="reopen closed tab" onSelect={() => run(() => void runAction('tab.reopen'))}>
+                <History />
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span>Reopen closed tab</span>
+                  <span className="truncate text-xs text-faint">{closedTabs[0].title ?? 'Untitled'}</span>
+                </div>
+                <Hint>{combo('tab.reopen')}</Hint>
+              </CommandItem>
+            )}
+            <CommandItem value="zoom in bigger font" onSelect={() => run(() => void runAction('terminal.zoomIn'))}>
               <ZoomIn />
               Zoom in
-              <span className="ml-auto text-xs text-faint">Ctrl +</span>
+              <Hint>{combo('terminal.zoomIn')}</Hint>
             </CommandItem>
-            <CommandItem value="zoom out smaller font" onSelect={() => run(() => void adjustTerminalZoom(-1))}>
+            <CommandItem value="zoom out smaller font" onSelect={() => run(() => void runAction('terminal.zoomOut'))}>
               <ZoomOut />
               Zoom out
-              <span className="ml-auto text-xs text-faint">Ctrl -</span>
+              <Hint>{combo('terminal.zoomOut')}</Hint>
             </CommandItem>
-            <CommandItem value="zoom reset font size" onSelect={() => run(() => void resetTerminalZoom())}>
+            <CommandItem value="zoom reset font size" onSelect={() => run(() => void runAction('terminal.zoomReset'))}>
               <ZoomOut className="opacity-0" />
               Reset zoom
-              <span className="ml-auto text-xs text-faint">Ctrl 0</span>
+              <Hint>{combo('terminal.zoomReset')}</Hint>
             </CommandItem>
-            <CommandItem value="toggle sessions rail sidebar" onSelect={() => run(toggleRail)}>
+            <CommandItem value="toggle sessions rail sidebar" onSelect={() => run(() => void runAction('window.rail'))}>
               <PanelLeft />
               Toggle the sessions rail
-              <span className="ml-auto text-xs text-faint">Ctrl B</span>
-            </CommandItem>
-            <CommandItem value="open cortx main window" onSelect={() => run(() => showMainWindow())}>
-              <AppWindow />
-              Open CortX
+              <Hint>{combo('window.rail')}</Hint>
             </CommandItem>
           </CommandGroup>
+
+          {orderedTabs.length > 1 && (
+            <>
+              <CommandSeparator />
+              <CommandGroup heading="Tabs">
+                {orderedTabs.map((tab, i) => {
+                  const n = i + 1;
+                  const actionId = n <= 9 ? (`tab.goto${n}` as KeybindingActionId) : null;
+                  return (
+                    <CommandItem
+                      key={tab.id}
+                      value={`go to tab ${n} ${tabTitle(tab, items)}`}
+                      onSelect={() => run(() => useTerminalLayoutStore.getState().setActiveTab(tab.id))}
+                    >
+                      <Hash />
+                      <span className="w-4 text-right font-mono text-xs tabular-nums text-faint">{n}</span>
+                      <span className="truncate">{tabTitle(tab, items)}</span>
+                      {tab.id === win.activeTabId && <span className="text-xs text-faint">· current</span>}
+                      <Hint>{actionId ? combo(actionId) : null}</Hint>
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            </>
+          )}
 
           <CommandSeparator />
           <CommandGroup heading="Launch configurations">
@@ -160,15 +264,31 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
             <CommandItem value="scope global all projects" onSelect={() => run(() => setScope('global'))}>
               <Globe />
               Global
-              {win.scope === 'global' && <span className="ml-auto text-xs text-faint">current</span>}
+              {win.scope === 'global' ? <Hint>current</Hint> : <Hint>{combo('window.scopeGlobal')}</Hint>}
             </CommandItem>
             {scopeProjects.map((p) => (
               <CommandItem key={p.id} value={`scope project ${p.name}`} onSelect={() => run(() => setScope({ projectId: p.id }))}>
                 <Globe className="opacity-0" />
                 {p.name}
-                {scopedProjectId === p.id && <span className="ml-auto text-xs text-faint">current</span>}
+                {scopedProjectId === p.id && <Hint>current</Hint>}
               </CommandItem>
             ))}
+          </CommandGroup>
+
+          <CommandSeparator />
+          <CommandGroup heading="Window">
+            <CommandItem value="open theme picker terminal themes colours" onSelect={() => run(openThemePicker)}>
+              <SwatchBook />
+              Open theme picker
+            </CommandItem>
+            <CommandItem value="terminal settings shortcuts keybindings preferences" onSelect={() => run(openTerminalSettings)}>
+              <Settings2 />
+              Terminal settings…
+            </CommandItem>
+            <CommandItem value="open cortx main window" onSelect={() => run(() => showMainWindow())}>
+              <AppWindow />
+              Open CortX
+            </CommandItem>
           </CommandGroup>
         </CommandList>
       </CommandDialog>

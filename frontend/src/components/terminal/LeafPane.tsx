@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Columns2, PanelBottom, RotateCcw, Rows2, X } from 'lucide-react';
+import { Columns2, Maximize2, Minimize2, PanelBottom, RotateCcw, Rows2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -7,6 +7,7 @@ import { XtermView } from '@/components/layout/XtermView';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import type { LeafNode, TerminalTab } from '@/lib/terminalLayout';
+import { comboLabelFor, type KeybindingActionId } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import type { TerminalItem } from '@/components/layout/terminal-dnd/types';
 import type { GlobalScript } from '@/types';
@@ -49,6 +50,8 @@ interface LeafPaneProps {
   isActiveTab: boolean;
   /** The tab holds several leaves (show the active ring). */
   multi: boolean;
+  /** Shown alone, the rest of the split hidden. */
+  maximized?: boolean;
 }
 
 /** One ghost icon button of the floating cluster. */
@@ -89,16 +92,23 @@ function useSettled(delayMs: number): boolean {
   return settled;
 }
 
+/** `Label (Ctrl+Shift+X)` for a tooltip, from the user's bindings. */
+function withCombo(label: string, combo: string | null): string {
+  return combo ? `${label} (${combo})` : label;
+}
+
 /**
  * One terminal of a tab: the persistent xterm session filling the pane, with
- * a floating cluster of actions (split, dock, close) at the top-right that
- * shows on hover — or stays while this is the active leaf of a split tab.
- * Clicking anywhere makes it the tab's active leaf.
+ * a floating cluster of actions (split, maximize, dock, close) at the
+ * top-right that shows on hover — or stays while this is the active leaf of
+ * a split tab. Clicking anywhere makes it the tab's active leaf.
  */
-export function LeafPane({ tab, leaf, item, isActiveLeaf, isActiveTab, multi }: LeafPaneProps) {
+export function LeafPane({ tab, leaf, item, isActiveLeaf, isActiveTab, multi, maximized = false }: LeafPaneProps) {
   const setActiveLeaf = useTerminalLayoutStore((s) => s.setActiveLeaf);
+  const toggleMaximizeLeaf = useTerminalLayoutStore((s) => s.toggleMaximizeLeaf);
   const markTerminalSeen = useAppStore((s) => s.markTerminalSeen);
   const globalScripts = useAppStore((s) => s.globalScripts);
+  const keybindings = useAppStore((s) => s.settings?.terminal.keybindings);
   const settled = useSettled(1500);
   const restart = useMemo(() => restartActionFor(item, globalScripts), [item, globalScripts]);
   const handleRestart = async () => {
@@ -118,8 +128,12 @@ export function LeafPane({ tab, leaf, item, isActiveLeaf, isActiveTab, multi }: 
     markTerminalSeen(leaf.terminalId);
   };
 
+  const combo = (id: KeybindingActionId) => comboLabelFor(id, keybindings);
+
   return (
     <div
+      data-terminal-id={leaf.terminalId}
+      data-leaf-id={leaf.id}
       className={cn(
         'group/leaf relative flex min-h-0 min-w-0 flex-1 flex-col',
         multi && isActiveLeaf && 'ring-1 ring-inset ring-primary/40'
@@ -156,19 +170,38 @@ export function LeafPane({ tab, leaf, item, isActiveLeaf, isActiveTab, multi }: 
       <div
         className={cn(
           'glass absolute right-3 top-2 z-20 flex items-center gap-0.5 rounded-[var(--rad-sm)] border border-border p-0.5 shadow-soft transition-opacity',
-          multi && isActiveLeaf ? 'opacity-100' : 'opacity-0 focus-within:opacity-100 group-hover/leaf:opacity-100'
+          (multi && isActiveLeaf) || maximized ? 'opacity-100' : 'opacity-0 focus-within:opacity-100 group-hover/leaf:opacity-100'
         )}
       >
-        <PaneAction label="Split right (Ctrl+Shift+D)" onClick={() => void splitLeaf(tab.id, leaf.id, 'horizontal')}>
+        {maximized && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleMaximizeLeaf(tab.id, null);
+            }}
+            className="flex h-6 items-center gap-1 rounded-[var(--rad-xs)] px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            title={withCombo('Restore layout', combo('pane.maximize'))}
+          >
+            <Minimize2 className="size-3.5" />
+            Restore layout
+          </button>
+        )}
+        <PaneAction label={withCombo('Split right', combo('pane.splitRight'))} onClick={() => void splitLeaf(tab.id, leaf.id, 'horizontal')}>
           <Columns2 className="size-3.5" />
         </PaneAction>
-        <PaneAction label="Split down (Ctrl+Shift+E)" onClick={() => void splitLeaf(tab.id, leaf.id, 'vertical')}>
+        <PaneAction label={withCombo('Split down', combo('pane.splitDown'))} onClick={() => void splitLeaf(tab.id, leaf.id, 'vertical')}>
           <Rows2 className="size-3.5" />
         </PaneAction>
+        {multi && !maximized && (
+          <PaneAction label={withCombo('Maximize pane', combo('pane.maximize'))} onClick={() => toggleMaximizeLeaf(tab.id, leaf.id)}>
+            <Maximize2 className="size-3.5" />
+          </PaneAction>
+        )}
         <PaneAction label="Send to dock" onClick={() => sendLeafToDock(leaf.terminalId)}>
           <PanelBottom className="size-3.5" />
         </PaneAction>
-        <PaneAction label="Close (Ctrl+Shift+W)" danger onClick={() => closeLeaf(leaf.terminalId)}>
+        <PaneAction label={withCombo('Close', combo('tab.close'))} danger onClick={() => closeLeaf(leaf.terminalId)}>
           <X className="size-3.5" />
         </PaneAction>
       </div>

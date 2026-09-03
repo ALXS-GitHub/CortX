@@ -73,6 +73,29 @@ pub fn is_shell_builtin(name: &str) -> bool {
 /// last, so it wraps whatever prompt the aliases (starship, oh-my-posh…)
 /// installed.
 pub fn generate_init_script(shell: &Shell, aliases: &[ShellAlias], shell_integration: bool) -> String {
+    generate_init_script_ext(
+        shell,
+        aliases,
+        InitOptions {
+            shell_integration,
+            disable_shell_predictions: false,
+        },
+    )
+}
+
+/// Knobs of the generated init script (from `settings.terminal`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InitOptions {
+    /// Emit the OSC 7 / 133 block.
+    pub shell_integration: bool,
+    /// CortX draws its own history ghost text, so the shell's inline
+    /// prediction (PSReadLine) is switched off inside CortX terminals to
+    /// avoid two suggestions at once.
+    pub disable_shell_predictions: bool,
+}
+
+pub fn generate_init_script_ext(shell: &Shell, aliases: &[ShellAlias], opts: InitOptions) -> String {
+    let shell_integration = opts.shell_integration;
     let shell_key = shell.key();
 
     // Sort: execution_order set first (ascending), then the rest by order
@@ -210,6 +233,13 @@ pub fn generate_init_script(shell: &Shell, aliases: &[ShellAlias], shell_integra
     if shell_integration {
         output.push('\n');
         output.push_str(&shell_integration_block(shell));
+    }
+
+    if opts.disable_shell_predictions && *shell == Shell::PowerShell {
+        // One line on purpose (survives a line-by-line Invoke-Expression).
+        output.push_str(
+            "if ($env:CORTX_TERMINAL_ID -and (Get-Module -Name PSReadLine)) { Set-PSReadLineOption -PredictionSource None }\n",
+        );
     }
 
     output

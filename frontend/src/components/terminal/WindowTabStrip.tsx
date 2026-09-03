@@ -16,10 +16,11 @@ import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeI
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { tabsInScope, type TerminalTab } from '@/lib/terminalLayout';
+import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { closeTabAndRelease, openNewTerminal } from './actions';
-import { describeItem, projectColor, tabItem, tabLiveState, tabProject, tabTitle, useItemMap, type ItemMap } from './model';
+import { describeItem, projectColor, sortTabs, tabItem, tabLiveState, tabProject, tabTitle, useItemMap, type ItemMap } from './model';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
 import { useTabContextMenu, useTabRename } from './useTabMenu';
 import type { Project } from '@/types';
@@ -29,6 +30,8 @@ interface WindowTabProps {
   items: ItemMap;
   projects: Project[];
   isActive: boolean;
+  /** 1-based position in the strip (Ctrl+N jumps there); shown faintly on hover / while Ctrl is held. */
+  index: number;
   /** Show the project chip (global scope). */
   showProject: boolean;
   onSelect: () => void;
@@ -39,7 +42,7 @@ interface WindowTabProps {
  * One tab of the strip: sortable, renamable on double-click, closable with
  * the X or a middle click, with a right-click menu anchored at the pointer.
  */
-function WindowTab({ tab, items, projects, isActive, showProject, onSelect, onClose }: WindowTabProps) {
+function WindowTab({ tab, items, projects, isActive, index, showProject, onSelect, onClose }: WindowTabProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
 
@@ -113,9 +116,20 @@ function WindowTab({ tab, items, projects, isActive, showProject, onSelect, onCl
           <span className="truncate">{project.name}</span>
         </span>
       )}
+      {index <= 9 && !rename.editing && (
+        <span
+          className="pointer-events-none ml-auto shrink-0 font-mono text-[10px] tabular-nums text-faint opacity-0 transition-opacity group-hover/tab:opacity-100 [html[data-ctrl-held]_&]:opacity-100"
+          aria-hidden
+        >
+          {index}
+        </span>
+      )}
       <button
         type="button"
-        className="ml-auto grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/tab:opacity-100"
+        className={cn(
+          'grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/tab:opacity-100',
+          index > 9 || rename.editing ? 'ml-auto' : ''
+        )}
         onClick={(e) => {
           e.stopPropagation();
           e.preventDefault();
@@ -141,15 +155,14 @@ function WindowTab({ tab, items, projects, isActive, showProject, onSelect, onCl
 export function WindowTabStrip() {
   const items = useItemMap();
   const projects = useAppStore((s) => s.projects);
+  const keybindings = useAppStore((s) => s.settings?.terminal.keybindings);
   const win = useTerminalLayoutStore((s) => s.doc.window);
   const setActiveTab = useTerminalLayoutStore((s) => s.setActiveTab);
   const reorderTabs = useTerminalLayoutStore((s) => s.reorderTabs);
 
-  const tabs = useMemo(
-    () => tabsInScope(win, win.scope).sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.order - b.order),
-    [win]
-  );
+  const tabs = useMemo(() => sortTabs(tabsInScope(win, win.scope)), [win]);
   const ids = useMemo(() => tabs.map((t) => t.id), [tabs]);
+  const newCombo = comboLabelFor('tab.new', keybindings);
 
   // A small distance threshold keeps plain clicks (select, rename, close)
   // from being swallowed by the drag sensor.
@@ -172,13 +185,14 @@ export function WindowTabStrip() {
       <div className="no-scrollbar flex min-w-0 flex-1 items-stretch overflow-x-auto">
         <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToHorizontalAxis]} onDragEnd={onDragEnd}>
           <SortableContext items={ids} strategy={horizontalListSortingStrategy}>
-            {tabs.map((tab) => (
+            {tabs.map((tab, i) => (
               <WindowTab
                 key={tab.id}
                 tab={tab}
                 items={items}
                 projects={projects}
                 isActive={tab.id === win.activeTabId}
+                index={i + 1}
                 showProject={win.scope === 'global'}
                 onSelect={() => setActiveTab(tab.id)}
                 onClose={() => closeTabAndRelease(tab.id)}
@@ -192,7 +206,7 @@ export function WindowTabStrip() {
             size="icon-xs"
             className="size-7 rounded-[var(--rad-xs)]"
             onClick={() => void openNewTerminal()}
-            title="New terminal (Ctrl+Shift+T)"
+            title={newCombo ? `New terminal (${newCombo})` : 'New terminal'}
             aria-label="New terminal"
           >
             <Plus className="size-3.5" />

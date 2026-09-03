@@ -1,7 +1,18 @@
 import { useMemo } from 'react';
 import { ACCENT_PRESETS } from '@/lib/theme';
 import { basename, formatDuration } from '@/lib/terminalNames';
-import { collectLeaves, findLeaf, projectIdOfWorkspace, type LeafNode, type TerminalTab } from '@/lib/terminalLayout';
+import {
+  FREE_WORKSPACE_ID,
+  collectLeaves,
+  findLeaf,
+  projectIdOfWorkspace,
+  tabsInScope,
+  type LayoutNode,
+  type LeafNode,
+  type SplitNode,
+  type TerminalTab,
+  type TerminalWindowLayout,
+} from '@/lib/terminalLayout';
 import { useTerminalItems } from '@/hooks/useTerminalItems';
 import type { TerminalItem } from '@/components/layout/terminal-dnd/types';
 import type { TerminalAttention } from '@/stores/appStore';
@@ -120,4 +131,68 @@ export function projectColor(projectId: string): string {
 export function cwdLabel(item: TerminalItem | undefined): string | undefined {
   const cwd = itemCwd(item);
   return cwd ? basename(cwd) : undefined;
+}
+
+/** Pinned tabs first, then the user's order. */
+export function sortTabs(tabs: TerminalTab[]): TerminalTab[] {
+  return tabs.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.order - b.order);
+}
+
+export interface WorkspaceGroup {
+  workspaceId: string;
+  name: string;
+  color: string | null;
+  tabs: TerminalTab[];
+}
+
+/**
+ * The scoped tabs grouped by workspace the way the sessions rail shows them:
+ * projects in sidebar order, "Free" last, pinned tabs first in each group.
+ */
+export function groupTabsByWorkspace(scopedTabs: TerminalTab[], projects: Project[]): WorkspaceGroup[] {
+  const byWorkspace = new Map<string, TerminalTab[]>();
+  for (const tab of scopedTabs) {
+    const list = byWorkspace.get(tab.workspaceId) ?? [];
+    list.push(tab);
+    byWorkspace.set(tab.workspaceId, list);
+  }
+  const out: WorkspaceGroup[] = [];
+  for (const [workspaceId, tabs] of byWorkspace) {
+    const projectId = projectIdOfWorkspace(workspaceId);
+    const project = projectId ? projects.find((p) => p.id === projectId) : undefined;
+    out.push({
+      workspaceId,
+      name: workspaceId === FREE_WORKSPACE_ID ? 'Free' : project?.name ?? 'Unknown project',
+      color: projectId ? projectColor(projectId) : null,
+      tabs: sortTabs(tabs),
+    });
+  }
+  return out.sort((a, b) => {
+    if (a.workspaceId === FREE_WORKSPACE_ID) return 1;
+    if (b.workspaceId === FREE_WORKSPACE_ID) return -1;
+    return (
+      projects.findIndex((p) => `project:${p.id}` === a.workspaceId) -
+      projects.findIndex((p) => `project:${p.id}` === b.workspaceId)
+    );
+  });
+}
+
+/**
+ * The tabs in the order the user sees them — the rail groups by workspace,
+ * the tab strip does not — so "go to tab N" and the faint numbers agree.
+ */
+export function visibleTabOrder(win: TerminalWindowLayout, projects: Project[], placement: 'sidebar' | 'top'): TerminalTab[] {
+  const scoped = tabsInScope(win, win.scope);
+  if (placement === 'top') return sortTabs(scoped);
+  return groupTabsByWorkspace(scoped, projects).flatMap((g) => g.tabs);
+}
+
+/** The splits above a leaf, root first, with the index of the branch that leads to it. */
+export function splitPathTo(node: LayoutNode, leafId: string): Array<{ split: SplitNode; index: number }> | null {
+  if (node.kind === 'leaf') return node.id === leafId ? [] : null;
+  for (let i = 0; i < node.children.length; i++) {
+    const below = splitPathTo(node.children[i], leafId);
+    if (below) return [{ split: node, index: i }, ...below];
+  }
+  return null;
 }

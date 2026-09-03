@@ -21,11 +21,13 @@ pub mod launch;
 pub mod layout;
 pub mod osc;
 pub mod snapshot;
+pub mod themes;
 
 pub use history::{CommandHistory, CommandRecord};
 pub use launch::{LaunchConfig, LaunchNode, LaunchStore, LaunchTab, LaunchTarget};
 pub use layout::{LayoutDoc, LayoutStore};
 pub use osc::{OscScanner, ShellEvent, ShellPhase, TerminalShellState, TerminalStateTracker};
+pub use themes::{TerminalTheme, ThemeStore, ThemeSummary};
 
 use parking_lot::Mutex;
 use std::collections::HashMap;

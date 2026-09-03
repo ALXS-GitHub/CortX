@@ -125,6 +125,22 @@ export interface TerminalConfig {
   openProcessesIn?: TerminalTargetSurface;
   /** Where a launch configuration opens its tabs. Default window. */
   openDevSessionsIn?: TerminalTargetSurface;
+  /** Terminal window shortcuts: action id → combo (e.g. `{ "split.right": "Ctrl+Shift+D" }`). Missing = default. */
+  keybindings?: Record<string, string>;
+  /** Terminal theme names (files under data/terminal/themes/) for dark / light app mode. */
+  themeDark?: string;
+  themeLight?: string;
+  /** Pick the dark/light theme from the app mode (default true) or always use themeDark. */
+  themeFollowsApp?: boolean;
+  cursorStyle?: 'block' | 'underline' | 'bar';
+  cursorBlink?: boolean;
+  /** Inner padding in px. Default 8. */
+  padding?: number;
+  /** Terminal window opacity 50–100. Default 100. */
+  windowOpacity?: number;
+  windowEffect?: 'none' | 'acrylic' | 'mica' | 'vibrancy';
+  /** Ghost-text completions from the command history (→ accepts). Default true. */
+  inlineSuggestions?: boolean;
 }
 
 export type TerminalTargetSurface = 'dock' | 'window';
@@ -873,4 +889,73 @@ export interface ListAgentSessionsOptions {
 export interface AgentTranscriptQuery {
   end?: number | null;         // exclusive end index; null => totalMessages
   limit: number;               // e.g. 50
+}
+
+// ---------------------------------------------------------------------------
+// Terminal themes (data/terminal/themes/*.yaml, Warp's format) — DEV-13 P3.
+// Field names mirror the YAML (snake_case) so a file round-trips unchanged.
+// ---------------------------------------------------------------------------
+
+export type TerminalThemeDetails = 'darker' | 'lighter';
+export type TerminalThemeImageFit = 'cover' | 'contain' | 'tile' | 'center';
+export type TerminalThemeSource = 'bundled' | 'user';
+
+export interface TerminalAnsiColors {
+  black: string;
+  red: string;
+  green: string;
+  yellow: string;
+  blue: string;
+  magenta: string;
+  cyan: string;
+  white: string;
+}
+
+export interface TerminalThemeImage {
+  /** Absolute path once read through `getTerminalTheme` (bare file name on disk). */
+  path: string;
+  /** Percent, Warp semantics. Missing = 100. */
+  opacity?: number | null;
+}
+
+/** CortX-only knobs under the `cortx:` key (ignored by Warp). */
+export interface TerminalThemeCortxExt {
+  cursor?: string | null;
+  selection?: string | null;
+  /** Wallpaper blur in px. */
+  blur?: number | null;
+  imageFit?: TerminalThemeImageFit | null;
+}
+
+export interface TerminalTheme {
+  /** File stem — what the settings (`themeDark` / `themeLight`) refer to. */
+  key: string;
+  name: string;
+  background: string;
+  accent: string;
+  foreground: string;
+  details: TerminalThemeDetails;
+  background_image?: TerminalThemeImage | null;
+  terminal_colors: { normal: TerminalAnsiColors; bright: TerminalAnsiColors };
+  cortx?: TerminalThemeCortxExt | null;
+}
+
+/** One row of the theme picker. */
+export interface TerminalThemeSummary {
+  key: string;
+  name: string;
+  background: string;
+  accent: string;
+  foreground: string;
+  details: TerminalThemeDetails;
+  hasImage: boolean;
+  source: TerminalThemeSource;
+  /** The 8 normal ANSI colours. */
+  swatches: string[];
+}
+
+export interface TerminalThemeImportReport {
+  imported: number;
+  skipped: number;
+  keys: string[];
 }

@@ -21,6 +21,8 @@ import {
   type TerminalScope,
   type TerminalTab,
   type SplitDirection,
+  type LayoutNode,
+  mapLeaves,
 } from '@/lib/terminalLayout';
 import { useAppStore } from '@/stores/appStore';
 import { registerFocusInTerminalWindow, registerSendToTerminalWindow } from '@/lib/terminalWindowBridge';
@@ -47,6 +49,18 @@ export interface SplitFrom {
   after?: boolean;
 }
 
+/** Shape of a tab that was closed, kept so "reopen closed tab" can bring it back (shells only, in their last cwd). */
+export interface ClosedTab {
+  workspaceId: string;
+  title: string | null;
+  color: string | null;
+  /** The tab's tree with every leaf's cwd filled in (live cwd at close time). */
+  layout: LayoutNode;
+  closedAt: number;
+}
+
+const CLOSED_TABS_MAX = 10;
+
 export interface AddToWindowOptions {
   /** Workspace the new tab joins (ignored when `splitFrom` is given). */
   projectId?: string | null;
@@ -60,6 +74,8 @@ interface TerminalLayoutState {
   doc: TerminalLayoutDoc;
   revision: number;
   loaded: boolean;
+  /** Most recent first; in memory only (this window). */
+  closedTabs: ClosedTab[];
 
   /** Read the shared document from the backend (on boot). */
   load: () => Promise<void>;
@@ -77,6 +93,10 @@ interface TerminalLayoutState {
   togglePinTab: (tabId: string) => void;
   reorderTabs: (orderedTabIds: string[]) => void;
   setSplitSizes: (tabId: string, splitId: string, sizes: number[]) => void;
+  /** Show one leaf alone in its tab; call again (or with null) to restore the split. */
+  toggleMaximizeLeaf: (tabId: string, leafId: string | null) => void;
+  /** Take the most recently closed tab out of the memory (null when empty). */
+  popClosedTab: () => ClosedTab | null;
   /** Place a terminal in the window (new tab or split) and mark its surface. */
   addTerminalToWindow: (terminalId: string, options?: AddToWindowOptions) => void;
   /** Take a terminal out of the window layout. `surface` = where it goes:
@@ -97,6 +117,27 @@ interface TerminalLayoutState {
   scopedTabs: () => TerminalTab[];
   activeTab: () => TerminalTab | null;
   terminalsInWindow: () => string[];
+}
+
+/** Live cwd of a shell (shell integration, else where it opened), for the closed-tab memory. */
+function liveCwd(terminalId: string): string | undefined {
+  const app = useAppStore.getState();
+  const live = app.terminalStates.get(terminalId)?.cwd;
+  if (live) return live;
+  if (terminalId.startsWith('shell:')) return app.shellRuntimes.get(terminalId.slice('shell:'.length))?.cwd;
+  return undefined;
+}
+
+/** Snapshot a tab for "reopen closed tab" — only tabs that hold at least one shell are worth keeping. */
+function snapshotClosedTab(tab: TerminalTab): ClosedTab | null {
+  if (!collectLeaves(tab.layout).some((l) => l.terminalId.startsWith('shell:'))) return null;
+  return {
+    workspaceId: tab.workspaceId,
+    title: tab.title,
+    color: tab.color,
+    layout: mapLeaves(tab.layout, (leaf) => ({ ...leaf, cwd: liveCwd(leaf.terminalId) ?? leaf.cwd ?? null })),
+    closedAt: Date.now(),
+  };
 }
 
 function pickActiveTab(doc: TerminalLayoutDoc, preferred?: string | null): string | null {
@@ -130,6 +171,7 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
   doc: emptyLayoutDoc(),
   revision: 0,
   loaded: false,
+  closedTabs: [],
 
   load: async () => {
     try {
@@ -233,6 +275,24 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
       },
     })),
 
+  toggleMaximizeLeaf: (tabId, leafId) =>
+    get().commit((doc) => ({
+      ...doc,
+      window: {
+        ...doc.window,
+        tabs: doc.window.tabs.map((t) =>
+          t.id === tabId ? { ...t, maximizedLeafId: leafId && t.maximizedLeafId !== leafId ? leafId : null } : t
+        ),
+      },
+    })),
+
+  popClosedTab: () => {
+    const [first, ...rest] = get().closedTabs;
+    if (!first) return null;
+    set({ closedTabs: rest });
+    return first;
+  },
+
   addTerminalToWindow: (terminalId, options = {}) =>
     get().commit((doc) => {
       const activate = options.activate ?? true;
@@ -295,9 +355,17 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
           continue;
         }
         const layout = removeLeaf(t.layout, leaf.id);
-        if (!layout) continue; // tab is empty now
+        if (!layout) {
+          // Tab is empty now: closed for good (not docked) → worth reopening later.
+          if (surface === null) {
+            const snapshot = snapshotClosedTab(t);
+            if (snapshot) set({ closedTabs: [snapshot, ...get().closedTabs].slice(0, CLOSED_TABS_MAX) });
+          }
+          continue;
+        }
         const activeLeafId = t.activeLeafId === leaf.id ? collectLeaves(layout)[0].id : t.activeLeafId;
-        tabs.push({ ...t, layout, activeLeafId });
+        const maximizedLeafId = t.maximizedLeafId === leaf.id ? null : t.maximizedLeafId;
+        tabs.push({ ...t, layout, activeLeafId, maximizedLeafId });
       }
       const window = { ...doc.window, tabs };
       const next = { ...doc, surfaces, window };
@@ -316,6 +384,8 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     const tab = get().doc.window.tabs.find((t) => t.id === tabId);
     if (!tab) return [];
     const ids = collectLeaves(tab.layout).map((l) => l.terminalId);
+    const snapshot = snapshotClosedTab(tab);
+    if (snapshot) set({ closedTabs: [snapshot, ...get().closedTabs].slice(0, CLOSED_TABS_MAX) });
     get().commit((doc) => {
       const surfaces = { ...doc.surfaces };
       for (const id of ids) delete surfaces[id];

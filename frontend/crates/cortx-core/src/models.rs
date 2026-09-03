@@ -376,6 +376,65 @@ pub struct TerminalConfig {
     /// Where "open a dev session" (launch configuration) opens its tabs.
     #[serde(default = "default_dev_sessions_target")]
     pub open_dev_sessions_in: TerminalTarget,
+    /// Terminal window shortcuts: action id → key combo (e.g. `"split.right": "Ctrl+Shift+D"`).
+    /// Missing ids use the built-in defaults (`keybindings.ts`).
+    #[serde(default)]
+    pub keybindings: std::collections::HashMap<String, String>,
+    /// Terminal theme names (files under `data/terminal/themes/`) for the
+    /// app's dark and light modes. None = bundled defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_dark: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_light: Option<String>,
+    /// Pick `theme_dark` / `theme_light` from the app's light/dark mode
+    /// (true) or always use `theme_dark` (false).
+    #[serde(default = "default_true")]
+    pub theme_follows_app: bool,
+    #[serde(default)]
+    pub cursor_style: CursorStyle,
+    #[serde(default = "default_true")]
+    pub cursor_blink: bool,
+    /// Inner padding of every terminal, in px.
+    #[serde(default = "default_terminal_padding")]
+    pub padding: u16,
+    /// Terminal window opacity, 50–100 (%).
+    #[serde(default = "default_window_opacity")]
+    pub window_opacity: u8,
+    /// Terminal window backdrop effect (Windows: acrylic / mica; macOS: vibrancy).
+    #[serde(default)]
+    pub window_effect: WindowEffect,
+    /// Ghost-text completions from the command history (→ to accept). When
+    /// on, `cortx init` turns PSReadLine's own prediction off so only one
+    /// suggestion shows.
+    #[serde(default = "default_true")]
+    pub inline_suggestions: bool,
+}
+
+fn default_terminal_padding() -> u16 {
+    8
+}
+
+fn default_window_opacity() -> u8 {
+    100
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CursorStyle {
+    Block,
+    Underline,
+    #[default]
+    Bar,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowEffect {
+    #[default]
+    None,
+    Acrylic,
+    Mica,
+    Vibrancy,
 }
 
 fn default_long_command_seconds() -> u32 {
@@ -428,6 +487,16 @@ impl Default for TerminalConfig {
             restore_scrollback_lines: default_restore_scrollback_lines(),
             open_processes_in: TerminalTarget::Dock,
             open_dev_sessions_in: TerminalTarget::Window,
+            keybindings: std::collections::HashMap::new(),
+            theme_dark: None,
+            theme_light: None,
+            theme_follows_app: true,
+            cursor_style: CursorStyle::default(),
+            cursor_blink: true,
+            padding: default_terminal_padding(),
+            window_opacity: default_window_opacity(),
+            window_effect: WindowEffect::default(),
+            inline_suggestions: true,
         }
     }
 }

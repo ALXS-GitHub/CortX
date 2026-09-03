@@ -11,9 +11,13 @@ import { SessionRail } from '@/components/terminal/SessionRail';
 import { WindowTabStrip } from '@/components/terminal/WindowTabStrip';
 import { SplitTree } from '@/components/terminal/SplitTree';
 import { TerminalPalette } from '@/components/terminal/TerminalPalette';
-import { openNewTerminal } from '@/components/terminal/actions';
+import { FindBar } from '@/components/terminal/FindBar';
+import { TerminalThemeRoot } from '@/components/terminal/theme/TerminalThemeLayer';
+import { ThemePicker } from '@/components/terminal/theme/ThemePicker';
+import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
+import { TERMINAL_EVENTS, openNewTerminal } from '@/components/terminal/actions';
 import { useItemMap } from '@/components/terminal/model';
-import { useTerminalWindowShortcuts } from '@/components/terminal/useTerminalWindowShortcuts';
+import { useTerminalFileDrop, useTerminalWindowShortcuts } from '@/components/terminal/useTerminalWindowShortcuts';
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { useAppStore } from '@/stores/appStore';
@@ -36,27 +40,23 @@ bootstrapThemeStyle();
 export function TerminalWindow() {
   useAppBootstrap();
   useTerminalWindowShortcuts();
+  useTerminalFileDrop();
   const loaded = useTerminalLayoutStore((s) => s.loaded);
   const setScope = useTerminalLayoutStore((s) => s.setScope);
   const win = useTerminalLayoutStore((s) => s.doc.window);
   const items = useItemMap();
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  // Ctrl+K / Ctrl+Shift+P: the window's own command palette (launch
-  // configurations, scope, splits…). Capture phase so xterm never sees it.
+  // Terminal theme drives the whole window (title bar, rail, panes,
+  // wallpaper, opacity), like Warp. Returns its disposer.
+  useEffect(() => initTerminalThemeStore({ windowChrome: true }), []);
+
+  // The `window.palette` keybinding action (rebindable) and the palette's own
+  // items reach the dialog through this event.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-      const key = e.key.toLowerCase();
-      if ((key === 'k' && !e.shiftKey) || (key === 'p' && e.shiftKey)) {
-        e.preventDefault();
-        e.stopPropagation();
-        setPaletteOpen((v) => !v);
-      }
-    };
-    window.addEventListener('keydown', onKey, { capture: true });
-    return () => window.removeEventListener('keydown', onKey, { capture: true });
+    const onToggle = () => setPaletteOpen((v) => !v);
+    window.addEventListener(TERMINAL_EVENTS.palette, onToggle);
+    return () => window.removeEventListener(TERMINAL_EVENTS.palette, onToggle);
   }, []);
   // Sessions rail (default) or tab strip: one or the other, never both.
   const tabsPlacement = useAppStore((s) => s.settings?.terminal.tabsPlacement ?? 'sidebar');
@@ -132,6 +132,7 @@ export function TerminalWindow() {
 
   return (
     <TooltipProvider>
+      <TerminalThemeRoot>
       <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
         <TitleBar
           title="Terminal"
@@ -189,7 +190,10 @@ export function TerminalWindow() {
           </div>
         )}
       </div>
+      </TerminalThemeRoot>
       <TerminalPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <ThemePicker />
+      <FindBar />
       <Toaster position="bottom-right" />
     </TooltipProvider>
   );

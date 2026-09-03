@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
-import { collectLeaves, type LayoutNode, type SplitNode, type TerminalTab } from '@/lib/terminalLayout';
+import { collectLeaves, findLeaf, type LayoutNode, type SplitNode, type TerminalTab } from '@/lib/terminalLayout';
 import { cn } from '@/lib/utils';
 import { LeafPane } from './LeafPane';
 import type { ItemMap } from './model';
@@ -129,12 +129,29 @@ function SplitTreeNode({ node, tab, items, isActiveTab, multi }: TreeProps & { n
   return <SplitView node={node} tab={tab} items={items} isActiveTab={isActiveTab} multi={multi} />;
 }
 
-/** Recursive renderer of a tab's split layout. */
+/**
+ * Recursive renderer of a tab's split layout. A maximized leaf
+ * (`tab.maximizedLeafId`) is shown alone; the other panes keep their
+ * sessions and come back with "Restore layout".
+ */
 export function SplitTree({ tab, items, isActiveTab }: { tab: TerminalTab; items: ItemMap; isActiveTab: boolean }) {
   const multi = collectLeaves(tab.layout).length > 1;
+  const maximized = tab.maximizedLeafId ? findLeaf(tab.layout, tab.maximizedLeafId) : null;
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <SplitTreeNode node={tab.layout} tab={tab} items={items} isActiveTab={isActiveTab} multi={multi} />
+      {maximized ? (
+        <LeafPane
+          tab={tab}
+          leaf={maximized}
+          item={items.get(maximized.terminalId)}
+          isActiveLeaf
+          isActiveTab={isActiveTab}
+          multi={false}
+          maximized
+        />
+      ) : (
+        <SplitTreeNode node={tab.layout} tab={tab} items={items} isActiveTab={isActiveTab} multi={multi} />
+      )}
     </div>
   );
 }

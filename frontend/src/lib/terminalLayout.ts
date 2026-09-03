@@ -51,6 +51,8 @@ export interface TerminalTab {
   order: number;
   layout: LayoutNode;
   activeLeafId: string;
+  /** One leaf shown alone, the rest of the split hidden (Ctrl+Shift+Enter). */
+  maximizedLeafId?: string | null;
 }
 
 export interface TerminalWindowLayout {

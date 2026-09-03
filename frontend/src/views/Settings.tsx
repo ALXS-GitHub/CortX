@@ -74,6 +74,9 @@ import {
   type ThemeMode,
 } from '@/lib/theme';
 import { LaunchConfigsSection } from '@/components/terminal/launch/LaunchConfigsSection';
+import { TerminalAppearanceSection } from '@/components/terminal/settings/TerminalAppearanceSection';
+import { ShortcutsSection } from '@/components/terminal/settings/ShortcutsSection';
+import type { TerminalConfig } from '@/types';
 import type { AppSettings, AgentsSettings, TerminalPreset, TerminalTargetSurface, ExportSummary, ImportOptions, ShimStatus } from '@/types';
 
 const DEFAULT_GLOBAL_HOTKEY = 'CmdOrCtrl+Shift+Space';
@@ -259,6 +262,11 @@ export function Settings() {
   const [restoreScrollbackLines, setRestoreScrollbackLines] = useState(200);
   const [openProcessesIn, setOpenProcessesIn] = useState<TerminalTargetSurface>('dock');
   const [openDevSessionsIn, setOpenDevSessionsIn] = useState<TerminalTargetSurface>('window');
+  const [inlineSuggestions, setInlineSuggestions] = useState(true);
+  // Appearance of the terminals (theme, cursor, padding, window opacity /
+  // effect): held as one draft, edited by TerminalAppearanceSection.
+  const [terminalAppearance, setTerminalAppearance] = useState<Partial<TerminalConfig>>({});
+  const [keybindings, setKeybindings] = useState<Record<string, string>>({});
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [launchMethod, setLaunchMethod] = useState<'clipboard' | 'external' | 'integrated'>('integrated');
   const [toolboxBaseUrl, setToolboxBaseUrl] = useState('');
@@ -303,6 +311,18 @@ export function Settings() {
       setRestoreScrollbackLines(settings.terminal.restoreScrollbackLines ?? 200);
       setOpenProcessesIn(settings.terminal.openProcessesIn ?? 'dock');
       setOpenDevSessionsIn(settings.terminal.openDevSessionsIn ?? 'window');
+      setInlineSuggestions(settings.terminal.inlineSuggestions ?? true);
+      setTerminalAppearance({
+        themeDark: settings.terminal.themeDark,
+        themeLight: settings.terminal.themeLight,
+        themeFollowsApp: settings.terminal.themeFollowsApp ?? true,
+        cursorStyle: settings.terminal.cursorStyle ?? 'bar',
+        cursorBlink: settings.terminal.cursorBlink ?? true,
+        padding: settings.terminal.padding ?? 8,
+        windowOpacity: settings.terminal.windowOpacity ?? 100,
+        windowEffect: settings.terminal.windowEffect ?? 'none',
+      });
+      setKeybindings({ ...(settings.terminal.keybindings ?? {}) });
       setTheme(settings.appearance.theme);
       setLaunchMethod(settings.defaults.launchMethod);
       setToolboxBaseUrl(settings.toolboxBaseUrl ?? '');
@@ -511,6 +531,9 @@ export function Settings() {
         restoreScrollbackLines: Math.min(2000, Math.max(20, Math.round(restoreScrollbackLines) || 200)),
         openProcessesIn,
         openDevSessionsIn,
+        inlineSuggestions,
+        ...terminalAppearance,
+        keybindings,
       },
       appearance: {
         theme,
@@ -777,6 +800,23 @@ export function Settings() {
             />
           </Field>
 
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label htmlFor="inline-suggestions">Inline suggestions</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Ghost text from your command history while you type; → accepts it. Needs shell
+                integration. PowerShell's own prediction is switched off inside CortX to avoid a double
+                suggestion.
+              </p>
+            </div>
+            <Switch
+              id="inline-suggestions"
+              checked={inlineSuggestions}
+              onCheckedChange={(v) => { setInlineSuggestions(v); setHasChanges(true); }}
+              disabled={!shellIntegration}
+            />
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
             <Field
               label="Font"
@@ -917,6 +957,22 @@ export function Settings() {
         </Section>
 
         {/* Launch configurations */}
+        <TerminalAppearanceSection
+          value={{ ...(settings?.terminal ?? { preset: terminalPreset, customPath, customArgs: [] }), ...terminalAppearance }}
+          onChange={(patch) => {
+            setTerminalAppearance((prev) => ({ ...prev, ...patch }));
+            setHasChanges(true);
+          }}
+        />
+
+        <ShortcutsSection
+          value={keybindings}
+          onChange={(next) => {
+            setKeybindings(next);
+            setHasChanges(true);
+          }}
+        />
+
         <LaunchConfigsSection />
 
         {/* Defaults */}
