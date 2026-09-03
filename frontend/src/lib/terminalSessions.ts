@@ -796,12 +796,39 @@ export function serializeTerminalSession(id: string, scrollback = 200): string |
 const serializers = new Map<string, SerializeAddon>();
 
 // ---------------------------------------------------------------------------
-// Zoom (per window, not persisted): Ctrl+= / Ctrl+- / Ctrl+0
+// Zoom: Ctrl+= / Ctrl+- / Ctrl+0 and Ctrl+wheel
 // ---------------------------------------------------------------------------
 
-let zoomDelta = 0;
 const ZOOM_MIN = -6;
 const ZOOM_MAX = 12;
+// One level per window (the dock and the Terminal window each keep their
+// own), remembered across restarts: Settings owns the base font size, this
+// is the offset the user dialled on top of it and expects to find again.
+const ZOOM_KEY = `cortx-terminal-zoom:${IS_TERMINAL_WINDOW ? 'terminal' : 'main'}`;
+
+function readStoredZoom(): number {
+  try {
+    const raw = localStorage.getItem(ZOOM_KEY);
+    if (raw === null) return 0;
+    const n = Math.round(Number(raw));
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, n));
+  } catch {
+    // localStorage can be unavailable; the zoom is simply not remembered.
+    return 0;
+  }
+}
+
+function storeZoom() {
+  try {
+    if (zoomDelta === 0) localStorage.removeItem(ZOOM_KEY);
+    else localStorage.setItem(ZOOM_KEY, String(zoomDelta));
+  } catch {
+    // see readStoredZoom
+  }
+}
+
+let zoomDelta = readStoredZoom();
 
 function applyZoomToAll() {
   const font = terminalFontOptions();
@@ -814,12 +841,14 @@ function applyZoomToAll() {
 /** Grow / shrink every terminal of this window by `step` px. Returns the resulting font size. */
 export function adjustTerminalZoom(step: number): number {
   zoomDelta = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomDelta + step));
+  storeZoom();
   applyZoomToAll();
   return terminalFontOptions().fontSize + zoomDelta;
 }
 
 export function resetTerminalZoom(): number {
   zoomDelta = 0;
+  storeZoom();
   applyZoomToAll();
   return terminalFontOptions().fontSize;
 }
