@@ -404,6 +404,9 @@ pub(crate) fn spawn_in_terminal(
         const CREATE_NEW_CONSOLE: u32 = 0x00000010;
 
         match settings.terminal.preset {
+            TerminalPreset::CortxTerminal => {
+                return Err("The CortX Terminal preset runs services inside CortX; use the integrated launch".to_string());
+            }
             TerminalPreset::WindowsTerminal => {
                 // Windows Terminal - use -d for directory and pass the command
                 std::process::Command::new("wt.exe")
@@ -481,6 +484,9 @@ pub(crate) fn spawn_in_terminal(
     #[cfg(target_os = "macos")]
     {
         match settings.terminal.preset {
+            TerminalPreset::CortxTerminal => {
+                return Err("The CortX Terminal preset runs services inside CortX; use the integrated launch".to_string());
+            }
             TerminalPreset::MacTerminal => {
                 let script = format!(
                     r#"tell application "Terminal"
@@ -563,6 +569,9 @@ pub(crate) fn spawn_in_terminal(
         let full_command = format!("cd \"{}\" && {}; exec $SHELL", working_dir, command);
 
         match settings.terminal.preset {
+            TerminalPreset::CortxTerminal => {
+                return Err("The CortX Terminal preset runs services inside CortX; use the integrated launch".to_string());
+            }
             TerminalPreset::Custom => {
                 if settings.terminal.custom_path.is_empty() {
                     // Try common terminal emulators
@@ -3019,7 +3028,14 @@ pub fn spawn_shell(
             .unwrap_or_default(),
         _ => String::new(),
     };
-    let shell = state.storage.get_settings().terminal.integrated_shell;
+    let tcfg = state.storage.get_settings().terminal;
+    let shell = tcfg.integrated_shell.clone();
+    // Shell integration is injected by the app itself (start-up code after
+    // the profile), so it does not depend on the CLI in the user's profile.
+    let integration = tcfg.shell_integration.then_some(cortx_core::shell_init::InitOptions {
+        shell_integration: true,
+        disable_shell_predictions: tcfg.inline_suggestions,
+    });
     let emitter: Arc<dyn ProcessEventEmitter> = Arc::new(TauriEmitter::new(app_handle));
     state.process_manager.spawn_shell(
         emitter,
@@ -3030,6 +3046,7 @@ pub fn spawn_shell(
             cols: cols.unwrap_or(0),
             rows: rows.unwrap_or(0),
             restore_from: restore_from.filter(|s| !s.is_empty()),
+            integration,
         },
     )
 }

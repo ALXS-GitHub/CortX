@@ -138,7 +138,9 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
     const { activeTheme, previewTheme } = get();
     const theme = previewTheme ?? activeTheme;
     const settings = currentSettings();
-    setXtermThemeOverride(theme);
+    // The Terminal window always paints with the theme; the main window's
+    // dock only when asked (otherwise it keeps the app skin's palette).
+    setXtermThemeOverride(chrome || settings?.terminal.dockUsesTerminalTheme ? theme : null);
     if (chrome) {
       applyWindowTheme(theme, {
         opacity: settings?.terminal.windowOpacity,

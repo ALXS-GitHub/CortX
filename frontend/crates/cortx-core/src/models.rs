@@ -310,6 +310,10 @@ pub enum TerminalPreset {
     MacTerminal,
     ITerm2,
     Custom,
+    /// CortX's own Terminal window: "external" launches run in a PTY and
+    /// open there instead of in the dock (handled by the GUI, not by
+    /// `spawn_in_terminal`).
+    CortxTerminal,
 }
 
 impl Default for TerminalPreset {
@@ -425,6 +429,10 @@ pub struct TerminalConfig {
     /// Title bar + sessions rail backdrop blur, px.
     #[serde(default = "default_chrome_blur")]
     pub chrome_blur: u16,
+    /// Also colour the main window's dock terminals with the terminal theme
+    /// (off: the dock follows the app skin, as before).
+    #[serde(default)]
+    pub dock_uses_terminal_theme: bool,
 }
 
 fn default_chrome_opacity() -> u8 {
@@ -528,6 +536,7 @@ impl Default for TerminalConfig {
             wallpaper_dim: 0,
             chrome_opacity: default_chrome_opacity(),
             chrome_blur: default_chrome_blur(),
+            dock_uses_terminal_theme: false,
         }
     }
 }

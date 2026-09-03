@@ -101,6 +101,9 @@ export interface TerminalCommandFinished {
   command: string | null;
 }
 
+// Dev-only escape hatch for CDP-driven checks (see terminalSessions.ts).
+// Assigned after the store is created, at the bottom of this file.
+
 // Terminal entity — single source of truth for "which terminal is where, what state is it in"
 export type TerminalKind = 'service' | 'script' | 'global-script' | 'shell';
 /** 'window' = shown in the dedicated Terminal window, not in this dock. */
@@ -846,6 +849,32 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   launchExternal: async (serviceId) => {
+    // "CortX Terminal" preset: the service runs in a CortX PTY and shows up
+    // in the Terminal window rather than in an external emulator.
+    if (get().settings?.terminal.preset === 'cortxterminal') {
+      const project = get().projects.find((p) => p.services.some((s) => s.id === serviceId));
+      const id = terminalId('service', serviceId);
+      await api.startIntegratedService(serviceId);
+      if (sendToTerminalWindow(id, project?.id ?? null)) {
+        set((state) => {
+          const terminals = new Map(state.terminals);
+          const existing = terminals.get(id);
+          terminals.set(id, {
+            id,
+            kind: 'service',
+            runtimeKey: serviceId,
+            paneId: null,
+            visibility: 'window',
+            order: existing?.order ?? Date.now(),
+            createdAt: existing?.createdAt ?? Date.now(),
+          });
+          return { terminals };
+        });
+      } else {
+        get().openTerminal('service', serviceId);
+      }
+      return;
+    }
     await api.launchExternalTerminal(serviceId);
   },
 
@@ -2017,3 +2046,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 // (The Terminal entity already carries these as fields, so use those when you have the entity;
 // this helper is only useful when you only have the raw ID string.)
 export { parseTerminalId };
+
+if (import.meta.env.DEV) {
+  (window as unknown as { __cortxAppStore?: typeof useAppStore }).__cortxAppStore = useAppStore;
+}

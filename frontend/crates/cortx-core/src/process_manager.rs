@@ -143,6 +143,10 @@ pub struct ShellSpawnRequest {
     /// scrollback snapshot (if any) is pushed into the hub before the PTY
     /// starts, then deleted.
     pub restore_from: Option<String>,
+    /// Inject the shell integration at start-up (see
+    /// `shell_init::shell_integration_startup`), independently of whether the
+    /// user's profile calls `cortx init`. `None` = leave the shell alone.
+    pub integration: Option<crate::shell_init::InitOptions>,
 }
 
 struct ShellEntry {
@@ -895,11 +899,21 @@ impl ProcessManager {
             crate::terminal::snapshot::remove(runtime_dir, old_id);
         }
 
-        let (program, args) = resolve_shell(request.shell.as_deref());
+        let (program, mut args) = resolve_shell(request.shell.as_deref());
+        // App-side shell integration: the shell gets the OSC 7 / 133 block as
+        // start-up code (after its own profile), so cwd, command status and
+        // suggestions work without the deployed CLI being in the profile.
+        let extra_env = match request.integration {
+            Some(opts) => inject_shell_integration(&program, &mut args, opts, self.runtime_store.dir()),
+            None => Vec::new(),
+        };
         let mut cmd = CommandBuilder::new(&program);
         cmd.args(&args);
         cmd.cwd(&cwd);
         apply_pty_env(&mut cmd, &tid, None);
+        for (key, value) in extra_env {
+            cmd.env(key, value);
+        }
         let size = PtySize {
             rows: if request.rows == 0 { DEFAULT_PTY_ROWS } else { request.rows },
             cols: if request.cols == 0 { DEFAULT_PTY_COLS } else { request.cols },
@@ -1282,6 +1296,117 @@ fn build_shell_command(
     cmd
 }
 
+/// Give an interactive shell the CortX integration as start-up code, after
+/// its own profile (`shell_init::shell_integration_startup`):
+///
+/// - PowerShell: `-NoExit -Command "<stmt>; <stmt>"` (the block is a single
+///   base64 `Invoke-Expression` line, so it survives the command line).
+/// - bash: `--rcfile <file>` where the file sources the user's own rc (or
+///   profile when the shell was a login one) and then the block.
+/// - zsh: a private `ZDOTDIR` whose rc files chain to `$HOME`'s and add the block.
+/// - fish: `-C 'source <file>'`.
+///
+/// The files live under `runtime/shell-init/` and are rewritten on every
+/// spawn so setting changes apply to the next shell. Unknown shells are left
+/// alone (the profile's `cortx init`, if any, still applies).
+fn inject_shell_integration(
+    program: &str,
+    args: &mut Vec<String>,
+    opts: crate::shell_init::InitOptions,
+    runtime_dir: &Path,
+) -> Vec<(String, String)> {
+    use crate::shell_init::{shell_for_program, shell_integration_startup, Shell};
+    let Some(shell) = shell_for_program(program) else {
+        return Vec::new();
+    };
+    let block = shell_integration_startup(&shell, opts);
+    if block.trim().is_empty() {
+        return Vec::new();
+    }
+    let dir = runtime_dir.join("shell-init");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return Vec::new();
+    }
+    let write = |name: &str, content: &str| -> Option<PathBuf> {
+        let path = dir.join(name);
+        std::fs::write(&path, content).ok().map(|_| path)
+    };
+    match shell {
+        Shell::PowerShell => {
+            // Respect an explicit -Command / -File from the user's shell setting.
+            if args.iter().any(|a| {
+                let l = a.to_ascii_lowercase();
+                l == "-command" || l == "-c" || l == "-file" || l == "-f"
+            }) {
+                return Vec::new();
+            }
+            let stmt = block
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .collect::<Vec<_>>()
+                .join("; ");
+            if !args.iter().any(|a| a.eq_ignore_ascii_case("-noexit")) {
+                args.push("-NoExit".into());
+            }
+            args.push("-Command".into());
+            args.push(stmt);
+            Vec::new()
+        }
+        Shell::Bash => {
+            let login = args.iter().any(|a| a == "-l" || a == "--login");
+            args.retain(|a| a != "-l" && a != "--login");
+            let content = if login {
+                format!(
+                    "# CortX shell integration bootstrap (login shell)\n\
+                     if [ -f \"$HOME/.bash_profile\" ]; then . \"$HOME/.bash_profile\"; \
+                     elif [ -f \"$HOME/.bash_login\" ]; then . \"$HOME/.bash_login\"; \
+                     elif [ -f \"$HOME/.profile\" ]; then . \"$HOME/.profile\"; fi\n{}",
+                    block
+                )
+            } else {
+                format!(
+                    "# CortX shell integration bootstrap\n[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n{}",
+                    block
+                )
+            };
+            if let Some(path) = write("cortx.bash", &content) {
+                args.push("--rcfile".into());
+                args.push(path.to_string_lossy().into_owned());
+            }
+            Vec::new()
+        }
+        Shell::Zsh => {
+            let zdot = dir.join("zdotdir");
+            if std::fs::create_dir_all(&zdot).is_err() {
+                return Vec::new();
+            }
+            let chain = |file: &str| -> String {
+                format!("[ -f \"$HOME/{f}\" ] && . \"$HOME/{f}\"\n", f = file)
+            };
+            let _ = std::fs::write(&zdot.join(".zshenv"), chain(".zshenv"));
+            let _ = std::fs::write(&zdot.join(".zprofile"), chain(".zprofile"));
+            let _ = std::fs::write(&zdot.join(".zlogin"), chain(".zlogin"));
+            let zshrc = format!(
+                "# CortX shell integration bootstrap\nZDOTDIR=\"$HOME\"\n{}{}",
+                chain(".zshrc"),
+                block
+            );
+            if std::fs::write(zdot.join(".zshrc"), zshrc).is_err() {
+                return Vec::new();
+            }
+            vec![("ZDOTDIR".to_string(), zdot.to_string_lossy().into_owned())]
+        }
+        Shell::Fish => {
+            if let Some(path) = write("cortx.fish", &block) {
+                args.push("-C".into());
+                args.push(format!("source '{}'", path.to_string_lossy().replace('\'', "\\'")));
+            }
+            Vec::new()
+        }
+    }
+}
+
 /// Environment every PTY child gets: terminal identification so programs
 /// enable colours / truecolor, UTF-8 on Windows, plus the caller's own vars.
 fn apply_pty_env(
@@ -1295,6 +1420,12 @@ fn apply_pty_env(
     // `cortx init` only turns on shell integration (OSC 7 / 133) when this
     // is set, so external terminals stay untouched.
     cmd.env("CORTX_TERMINAL_ID", terminal_id);
+    // Whoever launched CortX (a Claude Code session in dev, a script…) must
+    // not leak its own session markers into every terminal: a nested
+    // `claude` would otherwise believe it is a child session.
+    for var in ["CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT"] {
+        cmd.env_remove(var);
+    }
     // Force UTF-8 output on Windows to avoid cp1252 encoding errors
     #[cfg(target_os = "windows")]
     {
@@ -1659,6 +1790,7 @@ mod pty_integration_tests {
                     cols: 100,
                     rows: 30,
                     restore_from: None,
+                    integration: None,
                 },
             )
             .expect("spawn shell");

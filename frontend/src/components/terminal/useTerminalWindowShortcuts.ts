@@ -3,6 +3,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { useAppStore } from '@/stores/appStore';
 import { comboFromEvent, resolveKeybindings, type KeybindingActionId } from '@/lib/keybindings';
 import { pasteDroppedPaths, runAction } from './actions';
+import { adjustTerminalZoom } from '@/lib/terminalSessions';
 
 /** Actions that must also work while a text field (palette, find, rename) has focus. */
 const ALWAYS_ON: ReadonlySet<KeybindingActionId> = new Set<KeybindingActionId>(['window.palette', 'terminal.find']);
@@ -84,5 +85,23 @@ export function useTerminalFileDrop() {
       cancelled = true;
       unlisten?.();
     };
+  }, []);
+}
+
+/**
+ * Ctrl + mouse wheel zooms every terminal of the window (like browsers and
+ * Warp). Registered in the capture phase on `window` with `passive: false`
+ * so xterm never scrolls the buffer instead.
+ */
+export function useTerminalWheelZoom() {
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.deltaY === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      adjustTerminalZoom(e.deltaY < 0 ? 1 : -1);
+    };
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    return () => window.removeEventListener('wheel', onWheel, { capture: true });
   }, []);
 }

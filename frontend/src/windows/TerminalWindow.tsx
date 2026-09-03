@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AppWindow, Loader2, Plus, Search, SquareTerminal } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -17,7 +17,7 @@ import { ThemePicker } from '@/components/terminal/theme/ThemePicker';
 import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { TERMINAL_EVENTS, openNewTerminal } from '@/components/terminal/actions';
 import { useItemMap } from '@/components/terminal/model';
-import { useTerminalFileDrop, useTerminalWindowShortcuts } from '@/components/terminal/useTerminalWindowShortcuts';
+import { useTerminalFileDrop, useTerminalWheelZoom, useTerminalWindowShortcuts } from '@/components/terminal/useTerminalWindowShortcuts';
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { useAppStore } from '@/stores/appStore';
@@ -40,6 +40,7 @@ bootstrapThemeStyle();
 export function TerminalWindow() {
   useAppBootstrap();
   useTerminalWindowShortcuts();
+  useTerminalWheelZoom();
   useTerminalFileDrop();
   const loaded = useTerminalLayoutStore((s) => s.loaded);
   const setScope = useTerminalLayoutStore((s) => s.setScope);
@@ -129,6 +130,21 @@ export function TerminalWindow() {
     const scoped = tabsInScope(win, win.scope);
     return scoped.find((t) => t.id === win.activeTabId) ?? scoped[0] ?? null;
   }, [win]);
+
+  // An empty scope is never shown: a shell opens right away (once per empty
+  // state, so closing the last tab on purpose does not fight the user).
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!loaded) return;
+    if (activeTab) {
+      autoOpenedRef.current = false;
+      return;
+    }
+    if (autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    const timer = window.setTimeout(() => void openNewTerminal(), 150);
+    return () => window.clearTimeout(timer);
+  }, [loaded, activeTab]);
 
   return (
     <TooltipProvider>

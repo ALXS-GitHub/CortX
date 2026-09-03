@@ -245,6 +245,40 @@ pub fn generate_init_script_ext(shell: &Shell, aliases: &[ShellAlias], opts: Ini
     output
 }
 
+/// Which shell a program name is, for the app-side injection (`pwsh.exe`,
+/// `/bin/zsh`, `fish`…). `None` for anything we have no snippet for.
+pub fn shell_for_program(program: &str) -> Option<Shell> {
+    let base = std::path::Path::new(program)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    match base.as_str() {
+        "pwsh" | "powershell" => Some(Shell::PowerShell),
+        "bash" => Some(Shell::Bash),
+        "zsh" => Some(Shell::Zsh),
+        "fish" => Some(Shell::Fish),
+        _ => None,
+    }
+}
+
+/// The integration as *startup code* the app hands to a shell it spawns, so
+/// it works even when the profile does not call `cortx init` (or calls an
+/// older CLI). PowerShell gets one `Invoke-Expression` statement per line
+/// (joined by `;` by the caller); other shells get the block verbatim.
+pub fn shell_integration_startup(shell: &Shell, opts: InitOptions) -> String {
+    let mut out = String::new();
+    if opts.shell_integration {
+        out.push_str(&shell_integration_block(shell));
+    }
+    if opts.disable_shell_predictions && *shell == Shell::PowerShell {
+        out.push_str(
+            "if ($env:CORTX_TERMINAL_ID -and (Get-Module -Name PSReadLine)) { Set-PSReadLineOption -PredictionSource None }\n",
+        );
+    }
+    out
+}
+
 /// The integration snippet in the form that goes into the init script.
 /// PowerShell gets a single `Invoke-Expression` line carrying the block as
 /// base64, so it survives both `| Out-String | Invoke-Expression` and a

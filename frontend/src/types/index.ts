@@ -92,7 +92,9 @@ export type TerminalPreset =
   | 'warp'
   | 'macterminal'
   | 'iterm2'
-  | 'custom';
+  | 'custom'
+  /** CortX's own Terminal window: "external" launches run in a PTY there. */
+  | 'cortxterminal';
 
 export interface TerminalConfig {
   preset: TerminalPreset;
@@ -151,6 +153,8 @@ export interface TerminalConfig {
   chromeOpacity?: number;
   /** Title bar + rail backdrop blur in px. Default 20. */
   chromeBlur?: number;
+  /** Colour the main window's dock terminals with the terminal theme too. Default false. */
+  dockUsesTerminalTheme?: boolean;
 }
 
 export type TerminalTargetSurface = 'dock' | 'window';
