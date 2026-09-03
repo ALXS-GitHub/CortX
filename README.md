@@ -172,7 +172,7 @@ Access settings from the sidebar to configure:
 
 - **Default terminal** - Choose between integrated or external terminal
 - **Integrated terminal shell** - Command line of the shell used by "new terminal" tabs (auto-detects PowerShell 7 / `$SHELL`)
-- **Theme** - Light or dark mode
+- **Appearance** - Light / dark / system mode, plus the style: *Halcyon* (the default look, shared with Zorg — accent colour, corner radius and font are adjustable) or *Classic* (the previous neutral theme)
 
 ## Tech Stack
 

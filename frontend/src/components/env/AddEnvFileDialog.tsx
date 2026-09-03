@@ -85,31 +85,31 @@ export function AddEnvFileDialog({
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Environment File</DialogTitle>
+          <DialogTitle>Add environment file</DialogTitle>
           <DialogDescription>
             Manually add an .env file to track. The file will be parsed and its
             variables displayed.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="path">File Path</Label>
+        <form onSubmit={handleSubmit} className="contents">
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <Label htmlFor="path" className="text-xs font-medium text-muted-foreground">File path</Label>
               <div className="flex gap-2">
                 <Input
                   id="path"
                   value={path}
                   onChange={(e) => setPath(e.target.value)}
                   placeholder="/path/to/.env"
-                  className="flex-1 font-mono text-sm"
+                  className="flex-1 font-mono text-[12px]"
                 />
                 <Button
                   type="button"
                   variant="outline"
                   onClick={handleBrowse}
                 >
-                  <FolderOpen className="size-4 mr-2" />
+                  <FolderOpen />
                   Browse
                 </Button>
               </div>
@@ -122,14 +122,14 @@ export function AddEnvFileDialog({
           <DialogFooter>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               onClick={handleClose}
               disabled={isSubmitting}
             >
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting || !path.trim()}>
-              {isSubmitting ? 'Adding...' : 'Add File'}
+              {isSubmitting ? 'Adding...' : 'Add file'}
             </Button>
           </DialogFooter>
         </form>

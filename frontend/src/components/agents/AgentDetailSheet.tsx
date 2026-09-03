@@ -42,7 +42,7 @@ export function AgentDetailSheet({ session, onClose, actions, changeToken }: Age
     <Sheet open={!!session} onOpenChange={(open) => { if (!open) onClose(); }} modal={false}>
       <SheetContent
         side="right"
-        className="data-[side=right]:w-full data-[side=right]:sm:w-[60vw] data-[side=right]:sm:max-w-none p-0 gap-0 shadow-2xl"
+        className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:w-[60vw] data-[side=right]:sm:max-w-none"
         // Stay below the custom title bar (h-9): the sheet must never cover the
         // window controls / drag region.
         style={{ top: TITLE_BAR_HEIGHT, height: `calc(100% - ${TITLE_BAR_HEIGHT})` }}
@@ -53,7 +53,7 @@ export function AgentDetailSheet({ session, onClose, actions, changeToken }: Age
       >
         {session && (
           <>
-            <SheetHeader className="border-b p-4 pr-12 gap-3">
+            <SheetHeader className="gap-3 border-b border-border bg-card/40 p-4 pr-12">
               <SheetTitle className="sr-only">{session.title}</SheetTitle>
               <SheetDescription className="sr-only">Agent session details and transcript</SheetDescription>
               <AgentDetailHeader session={session} project={projectLabel(session, projects)} actions={actions} />
@@ -61,7 +61,7 @@ export function AgentDetailSheet({ session, onClose, actions, changeToken }: Age
             </SheetHeader>
             <Suspense
               fallback={
-                <div className="flex-1 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" /> Loading transcript…
                 </div>
               }

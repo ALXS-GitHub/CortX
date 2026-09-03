@@ -1,6 +1,9 @@
 import { useState, useMemo } from 'react';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Chip } from '@/components/ui/Chip';
+import { EmptyState } from '@/components/ui/EmptyState';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Search, Star } from 'lucide-react';
+import { Plus, Search, Star, SquareTerminal } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
 import { AliasCard } from './AliasCard';
@@ -26,8 +29,8 @@ import { AliasCardView } from './AliasCardView';
 import { AliasCompactItem } from './AliasCompactItem';
 import { AliasForm } from './AliasForm';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
-import { TagBadge } from '@/components/ui/TagBadge';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import type { ShellAlias, CreateShellAliasInput, UpdateShellAliasInput } from '@/types';
 
 type SortOption = 'name' | 'created';
@@ -164,18 +167,23 @@ export function AliasesView() {
     onToggleFavorite: () => handleToggleFavorite(alias),
   });
 
+  const openAddForm = () => {
+    setEditingAlias(undefined);
+    setShowAliasForm(true);
+  };
+
   const renderAliasList = (aliasList: ShellAlias[]) => {
     if (aliasList.length === 0) return null;
     if (aliasesViewMode === 'card') {
       return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {aliasList.map((alias) => <AliasCardView key={alias.id} {...aliasItemProps(alias)} />)}
         </div>
       );
     }
     if (aliasesViewMode === 'compact') {
       return (
-        <div className="space-y-1">
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
           {aliasList.map((alias) => <AliasCompactItem key={alias.id} {...aliasItemProps(alias)} />)}
         </div>
       );
@@ -187,131 +195,121 @@ export function AliasesView() {
     );
   };
 
+  const subtitle = `${aliases.length} alias${aliases.length !== 1 ? 'es' : ''}`;
+
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-bold">Shell Config</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Manage shell functions, init scripts, and aliases for your terminal
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditingAlias(undefined);
-              setShowAliasForm(true);
-            }}
-          >
-            <Plus className="size-4 mr-2" />
-            Add Alias
-          </Button>
-        </div>
-      </div>
+    <Screen
+      title="Shell Config"
+      subtitle={subtitle}
+      actions={
+        <Button onClick={openAddForm}>
+          <Plus />
+          Add alias
+        </Button>
+      }
+      toolbar={
+        <>
+          <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+            <Input
+              placeholder="Search shell config…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
 
-      {/* Search + filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-          <Input
-            placeholder="Search shell config..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
-        </div>
+          {allStatuses.length > 0 && (
+            <Select
+              value={selectedStatus ?? '__all__'}
+              onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
+            >
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All statuses</SelectItem>
+                {allStatuses.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
-        {allStatuses.length > 0 && (
-          <Select
-            value={selectedStatus ?? '__all__'}
-            onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
-          >
-            <SelectTrigger size="sm" className="w-[140px]">
-              <SelectValue placeholder="Status" />
+          <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Sort by" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__all__">All statuses</SelectItem>
-              {allStatuses.map((s) => (
-                <SelectItem key={s} value={s}>{s}</SelectItem>
-              ))}
+              <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="created">Date created</SelectItem>
             </SelectContent>
           </Select>
-        )}
 
-        <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
-          <SelectTrigger size="sm" className="w-[140px]">
-            <SelectValue placeholder="Sort by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="name">Name</SelectItem>
-            <SelectItem value="created">Date Created</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Button
-          variant={favoritesOnly ? 'secondary' : 'outline'}
-          size="sm"
-          onClick={() => setFavoritesOnly((v) => !v)}
-          aria-pressed={favoritesOnly}
-          title="Show favorites only"
-        >
-          <Star className={favoritesOnly ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
-          Favorites
-        </Button>
-
-        <ViewModeToggle value={aliasesViewMode} onChange={setAliasesViewMode} />
-      </div>
-
-      {/* Tag filter pills */}
-      {allTags.length > 0 && (
-        <div className="flex gap-1.5 flex-wrap">
-          {allTags.map((tag) => {
-            const isActive = selectedTags.has(tag);
-            return (
-              <button
-                key={tag}
-                type="button"
-                className="cursor-pointer"
-                onClick={() => toggleTag(tag)}
-              >
-                <TagBadge
-                  tag={tag}
-                  tagDefinitions={tagDefinitions}
-                  className={isActive ? 'ring-2 ring-primary ring-offset-1' : 'opacity-60 hover:opacity-100'}
-                />
-              </button>
-            );
-          })}
-          {selectedTags.size > 0 && (
-            <button
-              type="button"
-              className="text-xs text-muted-foreground hover:text-foreground ml-1 cursor-pointer"
-              onClick={() => setSelectedTags(new Set())}
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Aliases list */}
-      {filteredAliases.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <p className="text-lg font-medium">No shell config yet</p>
-          <p className="text-sm mt-1">Create your first shell function, init, or script to get started</p>
           <Button
-            className="mt-4"
-            onClick={() => {
-              setEditingAlias(undefined);
-              setShowAliasForm(true);
-            }}
+            variant="outline"
+            onClick={() => setFavoritesOnly((v) => !v)}
+            aria-pressed={favoritesOnly}
+            title="Show favorites only"
+            className={cn(favoritesOnly && 'border-accent-border bg-accent')}
           >
-            <Plus className="size-4 mr-2" />
-            Add Alias
+            <Star className={favoritesOnly ? 'fill-warning text-warning' : ''} />
+            Favorites
           </Button>
-        </div>
+
+          <div className="ml-auto">
+            <ViewModeToggle value={aliasesViewMode} onChange={setAliasesViewMode} />
+          </div>
+
+          {allTags.length > 0 && (
+            <div className="flex w-full flex-wrap items-center gap-1.5">
+              {allTags.map((tag) => {
+                const isActive = selectedTags.has(tag);
+                const def = tagDefinitions.find((d) => d.name.toLowerCase() === tag.toLowerCase());
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => toggleTag(tag)}
+                    aria-pressed={isActive}
+                    className={cn('rounded-full transition-opacity', isActive ? 'ring-2 ring-ring/50 ring-offset-1 ring-offset-background' : 'opacity-60 hover:opacity-100')}
+                  >
+                    <Chip color={def?.color} neutral={!def?.color} dot={false}>
+                      {tag}
+                    </Chip>
+                  </button>
+                );
+              })}
+              {selectedTags.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTags(new Set())}
+                  className="ml-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      }
+    >
+      {filteredAliases.length === 0 ? (
+        aliases.length === 0 ? (
+          <EmptyState
+            icon={SquareTerminal}
+            title="No shell config yet"
+            description="Create your first shell function, init or script to get started."
+            action={
+              <Button onClick={openAddForm}>
+                <Plus />
+                Add alias
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState icon={Search} title="No matching entries" description="Try a different search or clear the filters." />
+        )
       ) : (
         renderAliasList(filteredAliases)
       )}
@@ -335,22 +333,19 @@ export function AliasesView() {
       <AlertDialog open={!!deletingAlias} onOpenChange={(open) => !open && setDeletingAlias(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Shell Config</AlertDialogTitle>
+            <AlertDialogTitle>Delete shell config</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{deletingAlias?.name}"? This cannot be undone.
+              Delete "{deletingAlias?.name}"? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteAlias}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction variant="destructive" onClick={handleDeleteAlias}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </Screen>
   );
 }

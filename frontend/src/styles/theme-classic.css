@@ -1,0 +1,187 @@
+/*
+ * Theme "Classic" — the pre-Halcyon look: near-native shadcn/ui ("radix-vega",
+ * neutral base colour) with Inter. Values come from the `main` branch's
+ * index.css and shadcn component classes: 10px base radius, hairline
+ * `ring-foreground/10` borders, `shadow-xs` cards, flat buttons, `bg-background`
+ * active tabs, opaque panels, `bg-black/10` overlays, no canvas wash.
+ *
+ * Selected with `data-skin="classic"` on <html> (Settings → Appearance).
+ */
+
+:root[data-skin="classic"] {
+  color-scheme: light;
+
+  /* ---------- Colours (shadcn neutral, light) ---------- */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.93 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.93 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: oklch(0.92 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --info: #2563eb;
+
+  --border: oklch(0.922 0 0);
+  --border-strong: oklch(0.85 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --text-faint: oklch(0.62 0 0);
+  --accent-border: oklch(0.8 0 0);
+
+  --bg-sidebar: oklch(0.985 0 0);
+  --bg-glass: oklch(1 0 0);
+  --bg-input: transparent;
+  --bg-terminal: oklch(1 0 0);
+  --terminal-fg: oklch(0.145 0 0);
+
+  /* Status colours = the Tailwind palette the old components used
+     (green-500 / yellow-500 / red-500 / blue-500). */
+  --st-open: #3b82f6;
+  --st-progress: #eab308;
+  --st-blocked: #ef4444;
+  --st-done: #22c55e;
+
+  --shadow-color: 0 0% 0%;
+
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.92 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+
+  /* ---------- Typography (Inter everywhere, 14px) ---------- */
+  --font-display-stack: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans-stack: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono-stack: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --body-size: 14px;
+  --display-tracking: 0;
+  --eyebrow-size: 12px;
+  --eyebrow-transform: none;
+  --eyebrow-tracking: 0;
+
+  /* ---------- Shape (shadcn: radius 0.625rem, sm/md/lg/xl = -4/-2/0/+4) ---------- */
+  --radius: 0.625rem;
+  --rad-xs: calc(var(--radius) - 6px);
+  --rad-sm: calc(var(--radius) - 2px); /* buttons, inputs, menu items (old rounded-md) */
+  --rad-md: calc(var(--radius) - 2px);
+  --rad-lg: calc(var(--radius) + 4px); /* cards (old rounded-xl) */
+  --rad-xl: calc(var(--radius) + 4px); /* dialogs (old rounded-xl) */
+  --rad-2xl: calc(var(--radius) + 8px);
+  --rad-menu: calc(var(--radius) - 2px); /* dropdowns / popovers (old rounded-md) */
+  --rad-nav: calc(var(--radius) - 2px);
+  --chip-radius: 999px;
+
+  /* ---------- Effects (flat) ---------- */
+  --elev-soft: 0 1px 2px 0 rgb(0 0 0 / 0.05); /* shadow-xs */
+  --elev-pop: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); /* shadow-md */
+  --glass-blur: 0px;
+  --glass-strong-blur: 0px;
+  --glass-saturate: 100%;
+  --overlay-bg: rgb(0 0 0 / 0.1);
+  --overlay-blur: 2px;
+  --lift-y: 0px;
+  --canvas-wash: none;
+
+  /* ---------- Component knobs (shadcn classes) ---------- */
+  --btn-primary-shadow: none;
+  --btn-primary-hover: color-mix(in srgb, var(--primary) 80%, transparent); /* hover:bg-primary/80 */
+  --btn-primary-active: color-mix(in srgb, var(--primary) 80%, transparent);
+  --btn-outline-bg: var(--background);
+  --btn-outline-border: var(--border);
+  --btn-outline-hover: var(--muted); /* hover:bg-muted */
+  --card-border: color-mix(in srgb, var(--foreground) 10%, transparent); /* ring-foreground/10 */
+  --panel-border: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --tab-active-bg: var(--background); /* data-active:bg-background */
+  --tab-active-fg: var(--foreground);
+  --tab-active-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); /* shadow-sm */
+  --chip-border-mix: 100%; /* old TagBadge: border = tag colour */
+  --chip-bg-mix: 6%; /* old: `${color}10` */
+  --chip-text-mix: 100%;
+  --chip-dot: none;
+  --footer-bg: transparent;
+  --footer-border: transparent;
+  --dot-idle-fill: var(--text-faint);
+}
+
+:root[data-skin="classic"].dark {
+  color-scheme: dark;
+
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+
+  --primary: oklch(0.87 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.371 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.145 0 0);
+  --success: #4ade80;
+  --warning: #facc15;
+  --info: #60a5fa;
+
+  --border: oklch(1 0 0 / 10%);
+  --border-strong: oklch(1 0 0 / 20%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --text-faint: oklch(0.55 0 0);
+  --accent-border: oklch(1 0 0 / 25%);
+
+  --bg-sidebar: oklch(0.205 0 0);
+  --bg-glass: oklch(0.205 0 0);
+  --bg-input: color-mix(in srgb, var(--input) 30%, transparent); /* dark:bg-input/30 */
+  --bg-terminal: oklch(0.145 0 0);
+  --terminal-fg: oklch(0.985 0 0);
+
+  --st-open: #60a5fa;
+  --st-progress: #facc15;
+  --st-blocked: #f87171;
+  --st-done: #4ade80;
+
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+
+  --btn-outline-bg: color-mix(in srgb, var(--input) 30%, transparent); /* dark:bg-input/30 */
+  --btn-outline-border: var(--input);
+  --btn-outline-hover: color-mix(in srgb, var(--input) 50%, transparent);
+  --tab-active-bg: color-mix(in srgb, var(--input) 30%, transparent); /* dark:data-active:bg-input/30 */
+  --tab-active-shadow: none;
+  --card-border: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --panel-border: color-mix(in srgb, var(--foreground) 10%, transparent);
+}

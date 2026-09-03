@@ -7,7 +7,7 @@ import { AgentProviderIcon } from './AgentProviderIcon';
 import { AgentActionsMenu } from './AgentActionsMenu';
 import type { AgentItemProps } from './agentUtils';
 
-/** Compact mode: dot, provider, title, project · branch, time. */
+/** Compact mode: dot, provider, title, project · branch, time. Rendered inside a bordered list container. */
 export function AgentCompactItem({ session, project, selected, onSelect, actions, now }: AgentItemProps) {
   const { pinned, hidden } = session.annotations;
 
@@ -19,23 +19,23 @@ export function AgentCompactItem({ session, project, selected, onSelect, actions
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
       aria-pressed={selected}
       className={cn(
-        'group flex items-center gap-2 h-8 px-2.5 rounded-md border cursor-pointer transition-colors',
-        'hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        selected && 'border-primary/60 bg-muted/40',
+        'group flex h-10 cursor-pointer items-center gap-2 border-b border-border px-3 transition-colors last:border-b-0',
+        'outline-none hover:bg-accent/50 focus-visible:bg-accent/50',
+        selected && 'bg-accent/60',
         hidden && 'opacity-60',
       )}
     >
-      <AgentStateDot state={session.state} className="size-2" />
+      <AgentStateDot state={session.state} size={7} />
       <AgentProviderIcon provider={session.provider} className="size-3" />
-      {pinned && <Pin className="size-3 shrink-0 text-muted-foreground" />}
-      {hidden && <EyeOff className="size-3 shrink-0 text-muted-foreground" />}
-      <TruncatedText className="text-sm flex-1 min-w-0">{session.title}</TruncatedText>
-      <span className="hidden sm:block max-w-48 truncate text-xs text-muted-foreground" title={session.cwd}>
+      {pinned && <Pin className="size-3 shrink-0 text-warning" />}
+      {hidden && <EyeOff className="size-3 shrink-0 text-faint" />}
+      <TruncatedText className="min-w-0 flex-1 text-sm font-medium">{session.title}</TruncatedText>
+      <span className="hidden max-w-48 truncate text-xs text-muted-foreground sm:block" title={session.cwd}>
         <span className={cn(!project.isProject && 'italic')}>{project.name}</span>
-        {session.gitBranch && ` · ${session.gitBranch}`}
+        {session.gitBranch && <span className="font-mono text-[11px] text-faint"> · {session.gitBranch}</span>}
       </span>
       <span
-        className="w-14 shrink-0 text-right text-[11px] text-muted-foreground tabular-nums whitespace-nowrap"
+        className="w-14 shrink-0 whitespace-nowrap text-right text-[11px] tabular-nums text-faint"
         title={formatDateTime(session.lastActivityAt)}
       >
         {formatRelativeTime(session.lastActivityAt, now)}
@@ -44,7 +44,7 @@ export function AgentCompactItem({ session, project, selected, onSelect, actions
         session={session}
         actions={actions}
         compact
-        className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+        className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
       />
     </div>
   );

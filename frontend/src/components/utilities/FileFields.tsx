@@ -103,15 +103,15 @@ export function FileDropZone({
       type="button"
       onClick={browse}
       className={cn(
-        'group flex w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed bg-muted/30 px-4 py-10 text-center transition-colors',
-        'hover:border-primary hover:bg-accent/50',
-        hovering ? 'border-primary bg-accent/70' : 'border-border',
+        'group flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-card/40 px-4 py-10 text-center outline-none transition-colors',
+        'hover:border-primary hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60',
+        hovering ? 'border-primary bg-accent' : 'border-border-strong',
         className,
       )}
     >
       <Upload
         className={cn(
-          'size-7 text-muted-foreground transition-colors group-hover:text-primary',
+          'size-7 text-faint transition-colors group-hover:text-primary',
           hovering && 'text-primary',
         )}
       />
@@ -120,7 +120,7 @@ export function FileDropZone({
         or click anywhere in this box to browse
       </span>
       {accepted.length > 0 && (
-        <span className="text-[11px] text-muted-foreground/80">
+        <span className="font-mono text-[11px] text-faint">
           {accepted.slice(0, 8).join(' · ')}
           {accepted.length > 8 ? ' · …' : ''}
         </span>
@@ -142,22 +142,22 @@ export function SelectedFiles({
 
   return (
     <Row label={paths.length > 1 ? `${paths.length} files` : 'Input file'}>
-      <div className="divide-y rounded-md border">
+      <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
         {paths.map((path) => (
           <div key={path} className="flex items-center gap-2 px-3 py-1.5">
-            <code className="min-w-0 flex-1 truncate font-mono text-xs" title={path}>
+            <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={path}>
               {path}
             </code>
             {onRemove && (
-              <Button size="icon" variant="ghost" className="size-6" onClick={() => onRemove(path)}>
-                <X className="size-3.5" />
+              <Button size="icon-xs" variant="ghost" onClick={() => onRemove(path)} title="Remove">
+                <X />
               </Button>
             )}
           </div>
         ))}
       </div>
       {onClear && paths.length > 1 && (
-        <Button size="sm" variant="ghost" className="mt-1 text-muted-foreground" onClick={onClear}>
+        <Button size="sm" variant="ghost" className="mt-1" onClick={onClear}>
           Clear all
         </Button>
       )}
@@ -195,7 +195,7 @@ export function OutputFields({
             className="font-mono text-xs"
           />
           <Button variant="outline" size="icon" onClick={browseFolder} title="Browse">
-            <FolderOpen className="size-4" />
+            <FolderOpen />
           </Button>
         </div>
       </Row>
@@ -266,7 +266,7 @@ export function JobInputs({
                     if (folder) job.target.setDir(folder);
                   }}
                 >
-                  <FolderOpen className="size-4" />
+                  <FolderOpen />
                 </Button>
               </div>
             </Row>
@@ -302,12 +302,12 @@ export function JobResults({
     <>
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={onRun} disabled={disabled || job.running || job.inputs.length === 0}>
-          {job.running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+          {job.running ? <Loader2 className="animate-spin" /> : <Play />}
           {actionLabel}
         </Button>
         {succeeded.length > 0 && !job.running && (
           <Button variant="outline" onClick={job.revealOutput}>
-            <FolderOpen className="size-4" />
+            <FolderOpen />
             Show in folder
           </Button>
         )}
@@ -320,16 +320,16 @@ export function JobResults({
       {children}
 
       {job.results.length > 0 && (
-        <div className="divide-y rounded-md border">
+        <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
           {job.results.map((result, i) => (
             <div key={`${result.input}-${i}`} className="flex items-start gap-2 px-3 py-2 text-xs">
               {result.error ? (
                 <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
               ) : (
-                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-st-done" />
               )}
               <div className="min-w-0 flex-1">
-                <code className="block truncate font-mono" title={result.output ?? result.input}>
+                <code className="block truncate font-mono text-[11px]" title={result.output ?? result.input}>
                   {result.output ?? result.input}
                 </code>
                 {result.error ? (
@@ -337,7 +337,7 @@ export function JobResults({
                 ) : (
                   result.sizeBefore !== undefined &&
                   result.sizeAfter !== undefined && (
-                    <span className="text-muted-foreground">
+                    <span className="tabular-nums text-muted-foreground">
                       {formatBytes(result.sizeBefore)} → {formatBytes(result.sizeAfter)}
                       {result.sizeBefore > 0 && (
                         <>

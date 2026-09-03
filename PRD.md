@@ -256,7 +256,8 @@ Local App Launcher provides:
 | F4.3.18 | Search within terminal output | Should Have | Pending |
 | F4.3.19 | Copy output to clipboard (selection + Ctrl+C / Ctrl+Shift+C, right-click) | Should Have | Done |
 | F4.3.20 | Terminal input (send keystrokes to the running process, answer prompts) | Could Have | Done |
-| F4.3.21 | Real PTY behind every service / script / shell (ConPTY on Windows, openpty elsewhere): colors, `` progress bars, TUIs | Must Have | Done |
+| F4.3.21 | Real PTY behind every service / script / shell (ConPTY on Windows, openpty elsewhere): colors, `
+` progress bars, TUIs | Must Have | Done |
 | F4.3.22 | xterm.js renderer (WebGL) with persistent per-tab session; buffer survives hide / restore / tab switch | Must Have | Done |
 | F4.3.23 | Inline images: Sixel and iTerm2 (OSC 1337). Windows ships Windows Terminal's `conpty.dll` so the sequences pass through. Kitty graphics: not yet (addon alpha, ConPTY drops APC) | Should Have | Done |
 | F4.3.24 | "New terminal" tab: interactive shell in the current project's root (shell configurable in Settings) | Should Have | Done |
@@ -581,29 +582,46 @@ local-app-launcher/
 
 ### 7.1 Layout Structure
 
+Since the September 2026 redesign the GUI follows the **Halcyon** design system shared with Zorg
+(tinted canvas, frosted-glass panels, one accent colour, large radii, Outfit /
+Plus Jakarta Sans / JetBrains Mono). The design guide lives in
+`frontend/DESIGN.md`; the tokens in `frontend/src/index.css`.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Local App Launcher                    [─] [□] [×] │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  SIDEBAR (240px)      │  MAIN CONTENT                               │
-│  ┌─────────────────┐  │  ┌───────────────────────────────────────┐ │
-│  │ Dashboard       │◀─┼─▶│                                       │ │
-│  │ Settings        │  │  │       (Dashboard / Project View)      │ │
-│  │                 │  │  │                                       │ │
-│  │ ─────────────── │  │  │                                       │ │
-│  │ Services        │  │  │                                       │ │
-│  │ ┌─Project A───┐ │  │  │                                       │ │
-│  │ │ ● API       │ │  │  └───────────────────────────────────────┘ │
-│  │ │ ● Web       │ │  │                                           │
-│  │ └─────────────┘ │  │  ┌───────────────────────────────────────┐ │
-│  │ ┌─Project B───┐ │  │  │  TERMINAL PANEL (resizable 100-600px) │ │
-│  │ │ ○ Server    │ │  │  │  [API :3000] [Web :5173]    [▼][─][×] │ │
-│  │ └─────────────┘ │  │  │  > Server running on localhost:3000   │ │
-│  └─────────────────┘  │  └───────────────────────────────────────┘ │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+│ ⌘ CortX v0.14   [ Search projects, scripts, tools…  Ctrl K ]  ▾ ─ □ × │  glass title bar
+├──────────────────┬──────────────────────────────────────────────────┤
+│ CortX        [«] │  Projects · 22 projects              [+ Add project] │  glass screen header
+│ WORKSPACE        │  [search] [status ▾] [sort ▾] [★ Favorites] [▦ ≡ ☰] │  toolbar
+│  ▸ Projects      │  (utils)(web)(gaming)…                                │
+│    Scripts       ├──────────────────────────────────────────────────┤
+│    Agents  BETA  │                                                  │
+│ LIBRARY          │   cards / list / compact rows                    │  scrolls
+│    Tools         │                                                  │
+│    Apps          │                                                  │
+│    Shell Config  ├──────────────────────────────────────────────────┤
+│    Utilities     │ ›_ Terminal · 2 open · 1 running      + 👁 🗑 ■ ⊗ ▾ │  terminal dock
+│ ACTIVITY         │ [● api :3000] [○ web]                            │  (in-flow,
+│  ▾ Project A     │ > server listening on :3000                      │   resizable,
+│     ● api  ■     │                                                  │   collapsible)
+├──────────────────┤                                                  │
+│ ⚙ Settings    ☀ │                                                  │
+└──────────────────┴──────────────────────────────────────────────────┘
 ```
+
+- **Sidebar** (glass, 252 px, resizable, collapses to an icon rail with
+  Ctrl+B): grouped navigation (Workspace: Projects, Scripts, Agents; Library:
+  Tools, Apps, Shell Config, Utilities), an **Activity** tree with the live
+  services / scripts per project (start / stop / close on hover), Settings and
+  the light/dark toggle in the footer.
+- **Screen header** (`layout/Screen`): every screen has the same sticky header
+  (back button, eyebrow, title + chips, subtitle, right-aligned actions) and an
+  optional toolbar row (search, filters, view switcher).
+- **Terminal dock**: lives under the current screen in the main column (no
+  longer overlays the sidebar), follows the light/dark mode.
+- **Appearance**: light / dark / system mode (app settings) + per-machine style
+  knobs — **skin** (Halcyon or the previous *Classic* neutral theme), accent
+  colour, corner radius, font family (`frontend/src/lib/theme.ts`).
 
 ### 7.2 Key Views (Current Implementation)
 
@@ -627,8 +645,8 @@ local-app-launcher/
 - Clickable URLs
 
 #### Settings View
+- Appearance: style (Halcyon / Classic), light/dark/system, accent, radius, font
 - Terminal configuration (path, arguments, presets)
-- Theme selection (light/dark/system)
 
 ### 7.3 Component Library
 

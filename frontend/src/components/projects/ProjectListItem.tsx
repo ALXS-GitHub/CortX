@@ -1,21 +1,14 @@
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import { useAppStore } from '@/stores/appStore';
 import type { Project } from '@/types';
-import { Play, FolderOpen, MoreVertical, Circle, Code } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { openInExplorer, openInVscode } from '@/lib/tauri';
-import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
+import { Play, Square } from 'lucide-react';
+import { ProjectMenu } from './ProjectCard';
+import { useProjectActions } from './useProjectActions';
 
 interface ProjectCardProps {
   project: Project;
@@ -25,159 +18,76 @@ interface ProjectCardProps {
 }
 
 export function ProjectListItem({ project, onEdit, onDelete, onToggleFavorite }: ProjectCardProps) {
-  const { selectProject, serviceRuntimes, startService, tagDefinitions } = useAppStore();
-
-  const handleStartAll = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    for (const service of project.services) {
-      const runtime = serviceRuntimes.get(service.id);
-      if (!runtime || runtime.status === 'stopped') {
-        try {
-          await startService(service.id);
-        } catch (error) {
-          console.error(`Failed to start ${service.name}:`, error);
-        }
-      }
-    }
-  };
-
-  const handleOpenFolder = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    openInExplorer(project.rootPath).catch(console.error);
-  };
-
-  const handleOpenInVscode = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    openInVscode(project.rootPath).catch((error) => {
-      toast.error('Failed to open VSCode', {
-        description: String(error),
-      });
-    });
-  };
-
-  const runningCount = project.services.filter((s) => {
-    const runtime = serviceRuntimes.get(s.id);
-    return runtime?.status === 'running';
-  }).length;
+  const { selectProject, serviceRuntimes, tagDefinitions } = useAppStore();
+  const { runningCount, startAll, stopAll } = useProjectActions(project);
+  const total = project.services.length;
+  const allRunning = total > 0 && runningCount === total;
 
   return (
     <Card
-      className="cursor-pointer hover:border-primary/50 transition-colors group"
+      interactive
+      size="sm"
+      className="group py-3"
       onClick={() => selectProject(project.id)}
     >
-      <CardContent className="p-4">
-        <div className="flex items-center gap-4">
-          {/* Left: name + description */}
-          <div className="flex-shrink-0 w-56 min-w-0">
-            <div className="flex items-center gap-2">
-              <h3 className="font-medium truncate">{project.name}</h3>
-              <StatusBadge status={project.status} />
+      <div className="flex items-center gap-4 px-4">
+        {/* Left: name + description */}
+        <div className="w-60 min-w-0 shrink-0">
+          <div className="flex items-center gap-2">
+            {runningCount > 0 && <StatusDot tone="running" size={8} />}
+            <h3 className="truncate font-display text-[15px] font-semibold tracking-tight">{project.name}</h3>
+            <StatusBadge status={project.status} className="shrink-0" />
+          </div>
+          {project.description && (
+            <p className="line-clamp-1 text-xs text-muted-foreground">{project.description}</p>
+          )}
+          {project.tags.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {project.tags.map((tag) => (
+                <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
+              ))}
             </div>
-            {project.description && (
-              <p className="text-sm text-muted-foreground line-clamp-1">
-                {project.description}
-              </p>
-            )}
-            {project.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {project.tags.map((tag) => (
-                  <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} className="text-xs py-0" />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Middle: root path + service badges */}
-          <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-            <p className="text-xs text-muted-foreground truncate font-mono">
-              {project.rootPath}
-            </p>
-            {project.services.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {project.services.map((service) => {
-                  const runtime = serviceRuntimes.get(service.id);
-                  const status = runtime?.status || 'stopped';
-                  return (
-                    <Badge
-                      key={service.id}
-                      variant="secondary"
-                      className="text-xs gap-1 py-0"
-                    >
-                      <ServiceStatusDot status={status} />
-                      {service.name}
-                    </Badge>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Right: start button + dropdown */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <FavoriteButton favorite={project.favorite} onToggle={onToggleFavorite} />
-            <Button
-              size="sm"
-              className="gap-1.5"
-              onClick={handleStartAll}
-              disabled={project.services.length === 0}
-            >
-              <Play className="size-3.5" />
-              {runningCount > 0
-                ? `${runningCount}/${project.services.length}`
-                : 'Start All'}
-            </Button>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <MoreVertical className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={handleOpenInVscode}>
-                  <Code className="size-4 mr-2" />
-                  Open in VSCode
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleOpenFolder}>
-                  <FolderOpen className="size-4 mr-2" />
-                  Open Folder
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(); }}>
-                  Edit Project
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                  className="text-destructive"
-                >
-                  Delete Project
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          )}
         </div>
-      </CardContent>
+
+        {/* Middle: root path + service pills */}
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <p className="truncate font-mono text-[11px] text-faint" title={project.rootPath}>{project.rootPath}</p>
+          {total > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {project.services.map((service) => {
+                const status = serviceRuntimes.get(service.id)?.status || 'stopped';
+                return (
+                  <span
+                    key={service.id}
+                    className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-background/60 px-2 text-[11px] font-medium text-muted-foreground"
+                  >
+                    <StatusDot status={status} size={7} />
+                    {service.name}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Right: actions */}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <FavoriteButton favorite={project.favorite} onToggle={onToggleFavorite} />
+          {allRunning ? (
+            <Button size="sm" variant="outline" onClick={stopAll} className="text-destructive hover:text-destructive">
+              <Square className="size-3.5" />
+              Stop all
+            </Button>
+          ) : (
+            <Button size="sm" variant={runningCount > 0 ? 'outline' : 'default'} onClick={startAll} disabled={total === 0}>
+              <Play className="size-3.5" />
+              {runningCount > 0 ? `${runningCount}/${total}` : 'Start all'}
+            </Button>
+          )}
+          <ProjectMenu project={project} onEdit={onEdit} onDelete={onDelete} className="opacity-0 transition-opacity group-hover:opacity-100" />
+        </div>
+      </div>
     </Card>
-  );
-}
-
-function ServiceStatusDot({ status }: { status: string }) {
-  const colors = {
-    stopped: 'text-muted-foreground',
-    starting: 'text-yellow-500',
-    running: 'text-green-500',
-    error: 'text-red-500',
-  };
-
-  return (
-    <Circle
-      className={cn(
-        'size-1.5 fill-current',
-        colors[status as keyof typeof colors] || colors.stopped
-      )}
-    />
   );
 }

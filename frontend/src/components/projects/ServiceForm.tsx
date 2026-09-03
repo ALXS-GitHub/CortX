@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { FolderOpen, Plus, X, Star } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import type { Service, CreateServiceInput, UpdateServiceInput } from '@/types';
 
 // Calculate relative path from base to target
@@ -54,6 +55,9 @@ const SERVICE_COLORS = [
   '#ef4444', // red
 ];
 
+const LABEL = 'text-xs font-medium text-muted-foreground';
+const MONO = 'font-mono text-[12px]';
+
 // Helper to convert modes object to array for editing
 function modesToArray(modes?: Record<string, string>): { name: string; command: string }[] {
   if (!modes) return [];
@@ -79,6 +83,28 @@ function arrayToPresets(arr: { name: string; args: string }[]): Record<string, s
   const filtered = arr.filter((p) => p.name.trim() && p.args.trim());
   if (filtered.length === 0) return undefined;
   return Object.fromEntries(filtered.map((p) => [p.name.trim(), p.args.trim()]));
+}
+
+/** Star toggle used for "default mode" / "default preset". */
+function DefaultStar({ isDefault, onClick, label }: { isDefault: boolean; onClick: () => void; label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={onClick}
+          aria-label={label}
+          aria-pressed={isDefault}
+          className={isDefault ? 'text-warning hover:text-warning' : 'text-faint'}
+        >
+          <Star className={cn('size-4', isDefault && 'fill-warning')} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, onSubmit }: ServiceFormProps) {
@@ -252,10 +278,10 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
-        <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
-          <DialogHeader className="flex-shrink-0">
-            <DialogTitle>{isEditing ? 'Edit Service' : 'Add New Service'}</DialogTitle>
+      <DialogContent className="sm:max-w-lg">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-5">
+          <DialogHeader>
+            <DialogTitle>{isEditing ? 'Edit service' : 'Add new service'}</DialogTitle>
             <DialogDescription>
               {isEditing
                 ? 'Update the service configuration.'
@@ -263,73 +289,114 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4 overflow-y-auto flex-1 px-1">
-            <div className="grid gap-2">
-              <Label htmlFor="service-name">Service Name *</Label>
-              <Input
-                id="service-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Frontend, Backend, API"
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="working-dir">Working Directory</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="working-dir"
-                  value={workingDir}
-                  onChange={(e) => setWorkingDir(e.target.value)}
-                  placeholder="Relative path from project root (e.g., ./frontend)"
-                  className="flex-1"
-                />
-                {projectPath && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleBrowseWorkingDir}
-                  >
-                    <FolderOpen className="size-4" />
-                  </Button>
-                )}
+          <div className="-mx-6 min-h-0 flex-1 space-y-5 overflow-y-auto px-6">
+            {/* Identity */}
+            <div className="space-y-4">
+              <div className="grid grid-cols-[1fr_auto] items-end gap-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="service-name" className={LABEL}>Service name *</Label>
+                  <Input
+                    id="service-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g., Frontend, Backend, API"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label className={LABEL}>Color</Label>
+                  <div className="flex h-9 items-center gap-1.5">
+                    {SERVICE_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-label={c}
+                        aria-pressed={color === c}
+                        className={cn(
+                          'size-5 rounded-full transition-transform hover:scale-110',
+                          color === c && 'ring-2 ring-primary ring-offset-2 ring-offset-background'
+                        )}
+                        style={{ backgroundColor: c }}
+                        onClick={() => setColor(c)}
+                      />
+                    ))}
+                  </div>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Leave as "." to use the project root directory
-              </p>
-            </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="command" className={hasValidDefaultMode ? 'text-muted-foreground' : ''}>
-                Default Command {hasValidDefaultMode ? '(using mode)' : '*'}
-              </Label>
-              <Input
-                id="command"
-                value={hasValidDefaultMode ? `Using "${defaultMode}" mode` : command}
-                onChange={(e) => setCommand(e.target.value)}
-                placeholder="e.g., npm run dev, cargo run"
-                disabled={hasValidDefaultMode}
-                className={hasValidDefaultMode ? 'bg-muted text-muted-foreground' : ''}
-              />
-              <p className="text-xs text-muted-foreground">
-                {hasValidDefaultMode
-                  ? `The "${defaultMode}" mode command will be used as default`
-                  : 'The command used when starting without a specific mode'}
-              </p>
+              <div className="grid gap-2">
+                <Label htmlFor="working-dir" className={LABEL}>Working directory</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="working-dir"
+                    value={workingDir}
+                    onChange={(e) => setWorkingDir(e.target.value)}
+                    placeholder="Relative path from project root (e.g., ./frontend)"
+                    className={cn('flex-1', MONO)}
+                  />
+                  {projectPath && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={handleBrowseWorkingDir}
+                      aria-label="Browse"
+                    >
+                      <FolderOpen />
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Leave as "." to use the project root directory
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="command" className={LABEL}>
+                  Default command {hasValidDefaultMode ? '(using mode)' : '*'}
+                </Label>
+                <Input
+                  id="command"
+                  value={hasValidDefaultMode ? `Using "${defaultMode}" mode` : command}
+                  onChange={(e) => setCommand(e.target.value)}
+                  placeholder="e.g., npm run dev, cargo run"
+                  disabled={hasValidDefaultMode}
+                  className={MONO}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {hasValidDefaultMode
+                    ? `The "${defaultMode}" mode command will be used as default`
+                    : 'The command used when starting without a specific mode'}
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="port" className={LABEL}>Port (optional)</Label>
+                <Input
+                  id="port"
+                  type="number"
+                  value={port}
+                  onChange={(e) => setPort(e.target.value)}
+                  placeholder="e.g., 3000"
+                  className={cn('w-40', MONO)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  The port this service runs on (for reference)
+                </p>
+              </div>
             </div>
 
             {/* Modes section */}
-            <div className="grid gap-2">
+            <div className="space-y-2 border-t border-border pt-4">
               <div className="flex items-center justify-between">
-                <Label>Modes (optional)</Label>
+                <span className="eyebrow">Modes (optional)</span>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="xs"
                   onClick={addMode}
                 >
-                  <Plus className="size-3 mr-1" />
-                  Add Mode
+                  <Plus />
+                  Add mode
                 </Button>
               </div>
               {modes.length > 0 ? (
@@ -337,45 +404,36 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
                   {modes.map((mode, index) => {
                     const isDefault = mode.name.trim() === defaultMode;
                     return (
-                      <div key={index} className="flex gap-2 items-start">
+                      <div key={index} className="flex items-start gap-2">
                         <Input
                           value={mode.name}
                           onChange={(e) => updateMode(index, 'name', e.target.value)}
                           placeholder="Mode name (e.g., dev)"
-                          className="w-28 flex-shrink-0"
+                          className={cn('w-28 shrink-0', MONO)}
                         />
                         <Input
                           value={mode.command}
                           onChange={(e) => updateMode(index, 'command', e.target.value)}
                           placeholder="Command for this mode"
-                          className="flex-1"
+                          className={cn('flex-1', MONO)}
                         />
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              onClick={() => {
-                                const modeName = mode.name.trim();
-                                if (modeName) {
-                                  setDefaultMode(isDefault ? undefined : modeName);
-                                }
-                              }}
-                              className={isDefault ? 'text-yellow-500' : 'text-muted-foreground'}
-                            >
-                              <Star className={`size-4 ${isDefault ? 'fill-current' : ''}`} />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {isDefault ? 'Remove as default' : 'Set as default mode'}
-                          </TooltipContent>
-                        </Tooltip>
+                        <DefaultStar
+                          isDefault={isDefault}
+                          label={isDefault ? 'Remove as default' : 'Set as default mode'}
+                          onClick={() => {
+                            const modeName = mode.name.trim();
+                            if (modeName) {
+                              setDefaultMode(isDefault ? undefined : modeName);
+                            }
+                          }}
+                        />
                         <Button
                           type="button"
                           variant="ghost"
-                          size="icon-sm"
+                          size="icon"
                           onClick={() => removeMode(index)}
+                          aria-label="Remove mode"
+                          className="text-faint hover:text-destructive"
                         >
                           <X className="size-4" />
                         </Button>
@@ -391,119 +449,83 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
             </div>
 
             {/* Arguments section */}
-            <div className="grid gap-2">
-              <Label htmlFor="extra-args">Extra Arguments (optional)</Label>
-              <Input
-                id="extra-args"
-                value={extraArgs}
-                onChange={(e) => setExtraArgs(e.target.value)}
-                placeholder="e.g., --verbose --debug"
-              />
-              <p className="text-xs text-muted-foreground">
-                Static arguments always appended to the command
-              </p>
-            </div>
-
-            {/* Arg Presets section */}
-            <div className="grid gap-2">
-              <div className="flex items-center justify-between">
-                <Label>Argument Presets (optional)</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addArgPreset}
-                >
-                  <Plus className="size-3 mr-1" />
-                  Add Preset
-                </Button>
-              </div>
-              {argPresets.length > 0 ? (
-                <div className="space-y-2">
-                  {argPresets.map((preset, index) => {
-                    const isDefault = preset.name.trim() === defaultArgPreset;
-                    return (
-                      <div key={index} className="flex gap-2 items-start">
-                        <Input
-                          value={preset.name}
-                          onChange={(e) => updateArgPreset(index, 'name', e.target.value)}
-                          placeholder="Preset name"
-                          className="w-28 flex-shrink-0"
-                        />
-                        <Input
-                          value={preset.args}
-                          onChange={(e) => updateArgPreset(index, 'args', e.target.value)}
-                          placeholder="Arguments (e.g., --config demo.toml)"
-                          className="flex-1"
-                        />
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              onClick={() => {
-                                const presetName = preset.name.trim();
-                                if (presetName && preset.args.trim()) {
-                                  setDefaultArgPreset(isDefault ? undefined : presetName);
-                                }
-                              }}
-                              className={isDefault ? 'text-yellow-500' : 'text-muted-foreground'}
-                            >
-                              <Star className={`size-4 ${isDefault ? 'fill-current' : ''}`} />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {isDefault ? 'Remove as default' : 'Set as default preset'}
-                          </TooltipContent>
-                        </Tooltip>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => removeArgPreset(index)}
-                        >
-                          <X className="size-4" />
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
+            <div className="space-y-4 border-t border-border pt-4">
+              <span className="eyebrow">Arguments</span>
+              <div className="grid gap-2">
+                <Label htmlFor="extra-args" className={LABEL}>Extra arguments (optional)</Label>
+                <Input
+                  id="extra-args"
+                  value={extraArgs}
+                  onChange={(e) => setExtraArgs(e.target.value)}
+                  placeholder="e.g., --verbose --debug"
+                  className={MONO}
+                />
                 <p className="text-xs text-muted-foreground">
-                  Add presets like "demo", "stress-test" to run with different argument sets
+                  Static arguments always appended to the command
                 </p>
-              )}
-            </div>
+              </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="port">Port (optional)</Label>
-              <Input
-                id="port"
-                type="number"
-                value={port}
-                onChange={(e) => setPort(e.target.value)}
-                placeholder="e.g., 3000"
-              />
-              <p className="text-xs text-muted-foreground">
-                The port this service runs on (for reference)
-              </p>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Color</Label>
-              <div className="flex gap-2">
-                {SERVICE_COLORS.map((c) => (
-                  <button
-                    key={c}
+              {/* Arg presets */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className={LABEL}>Argument presets (optional)</Label>
+                  <Button
                     type="button"
-                    className={`size-6 rounded-full transition-all ${
-                      color === c ? 'ring-2 ring-offset-2 ring-primary' : ''
-                    }`}
-                    style={{ backgroundColor: c }}
-                    onClick={() => setColor(c)}
-                  />
-                ))}
+                    variant="outline"
+                    size="xs"
+                    onClick={addArgPreset}
+                  >
+                    <Plus />
+                    Add preset
+                  </Button>
+                </div>
+                {argPresets.length > 0 ? (
+                  <div className="space-y-2">
+                    {argPresets.map((preset, index) => {
+                      const isDefault = preset.name.trim() === defaultArgPreset;
+                      return (
+                        <div key={index} className="flex items-start gap-2">
+                          <Input
+                            value={preset.name}
+                            onChange={(e) => updateArgPreset(index, 'name', e.target.value)}
+                            placeholder="Preset name"
+                            className={cn('w-28 shrink-0', MONO)}
+                          />
+                          <Input
+                            value={preset.args}
+                            onChange={(e) => updateArgPreset(index, 'args', e.target.value)}
+                            placeholder="Arguments (e.g., --config demo.toml)"
+                            className={cn('flex-1', MONO)}
+                          />
+                          <DefaultStar
+                            isDefault={isDefault}
+                            label={isDefault ? 'Remove as default' : 'Set as default preset'}
+                            onClick={() => {
+                              const presetName = preset.name.trim();
+                              if (presetName && preset.args.trim()) {
+                                setDefaultArgPreset(isDefault ? undefined : presetName);
+                              }
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeArgPreset(index)}
+                            aria-label="Remove preset"
+                            className="text-faint hover:text-destructive"
+                          >
+                            <X className="size-4" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Add presets like "demo", "stress-test" to run with different argument sets
+                  </p>
+                )}
               </div>
             </div>
 
@@ -512,17 +534,17 @@ export function ServiceForm({ open: isOpen, onOpenChange, service, projectPath, 
             )}
           </div>
 
-          <DialogFooter className="flex-shrink-0 pt-4">
+          <DialogFooter>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               onClick={() => onOpenChange(false)}
               disabled={isSubmitting}
             >
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Add Service'}
+              {isSubmitting ? 'Saving...' : isEditing ? 'Save changes' : 'Add service'}
             </Button>
           </DialogFooter>
         </form>

@@ -57,7 +57,7 @@ export function AgentDetailHeader({ session, project, actions }: AgentDetailHead
       {/* Title */}
       <div className="flex items-start gap-2">
         {editing ? (
-          <div className="flex-1 flex items-center gap-1">
+          <div className="flex flex-1 items-center gap-1">
             <Input
               value={draft}
               autoFocus
@@ -69,24 +69,24 @@ export function AgentDetailHeader({ session, project, actions }: AgentDetailHead
               className="h-8"
               placeholder="Custom name (empty = provider title)"
             />
-            <Button variant="ghost" size="icon" className="size-8" onClick={() => void commitTitle()} title="Save"><Check className="size-4" /></Button>
-            <Button variant="ghost" size="icon" className="size-8" onClick={() => setEditing(false)} title="Cancel"><X className="size-4" /></Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => void commitTitle()} title="Save"><Check /></Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => setEditing(false)} title="Cancel"><X /></Button>
           </div>
         ) : (
           <>
-            <h2 className="flex-1 min-w-0 text-base font-semibold leading-snug break-words">
+            <h2 className="min-w-0 flex-1 break-words font-display text-base font-semibold leading-snug tracking-tight">
               {session.title}
               {session.titleSource === 'first-prompt' && (
-                <span className="ml-2 text-[10px] font-normal uppercase tracking-wide text-muted-foreground/70">first prompt</span>
+                <span className="ml-2 align-middle text-[10px] font-normal uppercase tracking-wide text-faint">first prompt</span>
               )}
             </h2>
-            <Button variant="ghost" size="icon" className="size-7 shrink-0" onClick={startEdit} title="Rename">
+            <Button variant="ghost" size="icon-sm" className="shrink-0" onClick={startEdit} title="Rename">
               <Pencil className="size-3.5" />
             </Button>
             <Button
               variant="ghost"
-              size="icon"
-              className={cn('size-7 shrink-0', pinned && 'text-amber-500')}
+              size="icon-sm"
+              className={cn('shrink-0', pinned && 'text-warning hover:text-warning')}
               onClick={() => actions.togglePin(session)}
               title={pinned ? 'Unpin' : 'Pin'}
             >
@@ -97,15 +97,15 @@ export function AgentDetailHeader({ session, project, actions }: AgentDetailHead
       </div>
 
       {/* State · provider · project · branch */}
-      <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-xs">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <AgentStateDot state={session.state} withLabel />
         <span className="inline-flex items-center gap-1 text-muted-foreground">
           <AgentProviderIcon provider={session.provider} plain />
           {PROVIDER_LABEL[session.provider]}
         </span>
-        <span className="text-muted-foreground truncate max-w-full" title={session.cwd}>
+        <span className="max-w-full truncate text-muted-foreground" title={session.cwd}>
           <span className={cn(!project.isProject && 'italic')}>{project.name}</span>
-          {session.gitBranch && ` · ${session.gitBranch}`}
+          {session.gitBranch && <span className="font-mono text-[11px] text-faint"> · {session.gitBranch}</span>}
         </span>
         {hidden && <span className="inline-flex items-center gap-1 text-muted-foreground"><EyeOff className="size-3" />hidden</span>}
         <AgentTicketChips refs={session.ticketRefs} max={5} />
@@ -119,21 +119,25 @@ export function AgentDetailHeader({ session, project, actions }: AgentDetailHead
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={() => actions.resume(session)}>
-          <Play className="size-4" />Resume
+          <Play />
+          Resume
         </Button>
         <Button size="sm" variant="outline" onClick={() => actions.fork(session)}>
-          <GitFork className="size-4" />Fork
+          <GitFork />
+          Fork
         </Button>
         <Button size="sm" variant="outline" onClick={() => actions.copyResumeCommand(session)} title="Copy resume command">
-          <Copy className="size-4" />Copy command
+          <Copy />
+          Copy command
         </Button>
         <Button size="sm" variant="outline" onClick={() => actions.openFolder(session)} title={session.cwd}>
-          <FolderOpen className="size-4" />Open folder
+          <FolderOpen />
+          Open folder
         </Button>
-        <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => actions.toggleHidden(session)}>
-          {hidden ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+        <Button size="sm" variant="ghost" onClick={() => actions.toggleHidden(session)}>
+          {hidden ? <Eye /> : <EyeOff />}
           {hidden ? 'Unhide' : 'Hide'}
         </Button>
       </div>

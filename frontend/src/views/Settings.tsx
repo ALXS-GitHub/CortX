@@ -1,9 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
 import { useAppStore } from '@/stores/appStore';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Chip } from '@/components/ui/Chip';
+import { Segmented } from '@/components/ui/Segmented';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -24,12 +28,51 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { BetaBadge } from '@/components/agents/BetaBadge';
-import { FolderOpen, Save, Info, Download, Upload, Plus, Trash2, RotateCcw, Tags, Copy, Check, TerminalSquare, ChevronDown, ChevronUp, CircleDot, GitBranch, Globe, Bot } from 'lucide-react';
+import {
+  FolderOpen,
+  Save,
+  Info,
+  Download,
+  Upload,
+  Plus,
+  Trash2,
+  RotateCcw,
+  Tags,
+  Copy,
+  Check,
+  TerminalSquare,
+  ChevronDown,
+  ChevronUp,
+  CircleDot,
+  GitBranch,
+  Globe,
+  Bot,
+  Sun,
+  Moon,
+  MonitorCog,
+  Square,
+  Squircle,
+  Circle,
+  Palette,
+} from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import { TagDefinitionManager } from '@/components/global-scripts/TagDefinitionManager';
 import { StatusDefinitionManager } from '@/components/settings/StatusDefinitionManager';
 import { generateShellInit, setGlobalHotkey as setGlobalHotkeyApi, getShimStatus, syncShims, installShimPath } from '@/lib/tauri';
 import { HotkeyInput } from '@/components/settings/HotkeyInput';
+import {
+  useThemeStore,
+  applyThemeMode,
+  accentForeground,
+  ACCENT_PRESETS,
+  RADIUS_PRESETS,
+  FONT_PRESETS,
+  SKIN_PRESETS,
+  type FontChoice,
+  type Skin,
+  type ThemeMode,
+} from '@/lib/theme';
 import type { AppSettings, AgentsSettings, TerminalPreset, ExportSummary, ImportOptions, ShimStatus } from '@/types';
 
 const DEFAULT_GLOBAL_HOTKEY = 'CmdOrCtrl+Shift+Space';
@@ -95,6 +138,14 @@ const TERMINAL_PRESETS: {
   },
 ];
 
+const THEME_MODE_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'dark', label: 'Dark', icon: Moon },
+  { value: 'system', label: 'System', icon: MonitorCog },
+];
+
+const RADIUS_ICONS = { Square, Soft: Squircle, Round: Circle } as const;
+
 /** Parse a numeric field, falling back to `fallback` and clamping to [min, max]. */
 const clampInt = (raw: string, fallback: number, min: number, max: number): number => {
   const n = parseInt(raw, 10);
@@ -109,6 +160,69 @@ const getPlatform = (): 'windows' | 'macos' | 'linux' => {
   if (platform.includes('mac')) return 'macos';
   return 'linux';
 };
+
+// ============================================================================
+// Small layout helpers (local to the settings page)
+// ============================================================================
+
+/** One settings section: a card with a title, a description and optional header action. */
+function Section({
+  title,
+  description,
+  icon: Icon,
+  action,
+  children,
+  className,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  icon?: typeof Sun;
+  action?: ReactNode;
+  children?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          {Icon && <Icon className="size-4 text-faint" />}
+          {title}
+        </CardTitle>
+        {description && <CardDescription>{description}</CardDescription>}
+        {action && <CardAction>{action}</CardAction>}
+      </CardHeader>
+      {children && <CardContent className={cn('space-y-4', className)}>{children}</CardContent>}
+    </Card>
+  );
+}
+
+/** Label + control + hint. */
+function Field({
+  label,
+  htmlFor,
+  hint,
+  children,
+  className,
+}: {
+  label: ReactNode;
+  htmlFor?: string;
+  hint?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn('grid gap-2', className)}>
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {children}
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
+/** Inline code snippet inside a hint. */
+function Code({ children }: { children: ReactNode }) {
+  return <code className="rounded-xs bg-muted px-1 py-px font-mono text-[11px] text-foreground">{children}</code>;
+}
 
 export function Settings() {
   const { settings, loadSettings, updateSettings, isLoadingSettings, exportScriptsConfig, previewImport, importScriptsConfig, backupToGit } = useAppStore();
@@ -407,53 +521,67 @@ export function Settings() {
       toast.success('Settings saved');
 
       // Apply theme
-      applyTheme(theme);
+      applyThemeMode(theme);
     } catch (error) {
       toast.error(`Failed to save settings: ${error}`);
     }
   };
 
-  const applyTheme = (theme: 'light' | 'dark' | 'system') => {
-    const root = document.documentElement;
-    if (theme === 'system') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      root.classList.toggle('dark', prefersDark);
-    } else {
-      root.classList.toggle('dark', theme === 'dark');
-    }
-  };
-
   if (isLoadingSettings || !settings) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-muted-foreground">Loading settings...</div>
-      </div>
+      <Screen title="Settings" subtitle="Configure your CortX preferences" narrow>
+        <p className="py-10 text-center text-sm text-muted-foreground">Loading settings...</p>
+      </Screen>
     );
   }
 
   const selectedPresetInfo = TERMINAL_PRESETS.find((p) => p.value === terminalPreset);
 
-  return (
+  const saveActions = (
     <>
-    <div className="p-6 space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">
-          Configure your Cortx preferences
-        </p>
-      </div>
+      {hasChanges && (
+        <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:inline-flex">
+          <span className="size-1.5 rounded-full bg-warning" />
+          Unsaved changes
+        </span>
+      )}
+      <Button size="sm" onClick={handleSave} disabled={!hasChanges}>
+        <Save />
+        Save
+      </Button>
+    </>
+  );
 
-      {/* Terminal Configuration */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Terminal Configuration</CardTitle>
-          <CardDescription>
-            Configure the external terminal application to use when launching services
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="terminal-preset">Terminal Application</Label>
+  return (
+    <Screen title="Settings" subtitle="Configure your CortX preferences" narrow actions={saveActions}>
+      <div className="space-y-5">
+        {/* Appearance */}
+        <AppearanceSection
+          theme={theme}
+          onThemeChange={(value) => {
+            setTheme(value);
+            setHasChanges(true);
+          }}
+        />
+
+        {/* Terminal */}
+        <Section
+          title="Terminal"
+          icon={TerminalSquare}
+          description="External terminal application used when launching services outside the app."
+        >
+          <Field
+            label="Terminal application"
+            htmlFor="terminal-preset"
+            hint={
+              selectedPresetInfo && (
+                <span className="inline-flex items-center gap-1">
+                  <Info className="size-3" />
+                  {selectedPresetInfo.description}
+                </span>
+              )
+            }
+          >
             <Select
               value={terminalPreset}
               onValueChange={(value: TerminalPreset) => {
@@ -472,20 +600,13 @@ export function Settings() {
                 ))}
               </SelectContent>
             </Select>
-            {selectedPresetInfo && (
-              <p className="text-xs text-muted-foreground flex items-center gap-1">
-                <Info className="size-3" />
-                {selectedPresetInfo.description}
-              </p>
-            )}
-          </div>
+          </Field>
 
           {terminalPreset === 'custom' && (
             <>
               <Separator />
 
-              <div className="grid gap-2">
-                <Label htmlFor="custom-path">Custom Terminal Path</Label>
+              <Field label="Custom terminal path" htmlFor="custom-path" hint="Path to your terminal executable">
                 <div className="flex gap-2">
                   <Input
                     id="custom-path"
@@ -499,19 +620,24 @@ export function Settings() {
                         ? 'e.g., C:\\Program Files\\Terminal\\terminal.exe'
                         : '/usr/bin/terminal'
                     }
-                    className="flex-1"
+                    className="flex-1 font-mono text-[12px]"
                   />
-                  <Button variant="outline" onClick={handleBrowseTerminal}>
-                    <FolderOpen className="size-4" />
+                  <Button variant="outline" size="icon" onClick={handleBrowseTerminal} aria-label="Browse">
+                    <FolderOpen />
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Path to your terminal executable
-                </p>
-              </div>
+              </Field>
 
-              <div className="grid gap-2">
-                <Label htmlFor="custom-args">Custom Arguments</Label>
+              <Field
+                label="Custom arguments"
+                htmlFor="custom-args"
+                hint={
+                  <>
+                    Arguments passed to the terminal. Placeholders: <Code>{'{dir}'}</Code> (working directory),{' '}
+                    <Code>{'{command}'}</Code> (service command), <Code>{'{full_command}'}</Code> (cd + command)
+                  </>
+                }
+              >
                 <Input
                   id="custom-args"
                   value={customArgs}
@@ -520,17 +646,15 @@ export function Settings() {
                     setHasChanges(true);
                   }}
                   placeholder="e.g., -e bash -c {full_command}"
+                  className="font-mono text-[12px]"
                 />
-                <p className="text-xs text-muted-foreground">
-                  Arguments passed to the terminal. Placeholders: <code className="bg-muted px-1 rounded">{'{dir}'}</code> (working directory), <code className="bg-muted px-1 rounded">{'{command}'}</code> (service command), <code className="bg-muted px-1 rounded">{'{full_command}'}</code> (cd + command)
-                </p>
-              </div>
+              </Field>
             </>
           )}
 
           {terminalPreset === 'warp' && (
-            <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
-              <p className="font-medium mb-1">Note about Warp:</p>
+            <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+              <p className="mb-1 font-medium text-foreground">Note about Warp</p>
               <p>
                 Warp will open in the service's working directory, but cannot automatically execute
                 commands. You'll need to run the command manually or use the integrated terminal for
@@ -538,21 +662,23 @@ export function Settings() {
               </p>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </Section>
 
-      {/* Integrated terminal */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Integrated Terminal</CardTitle>
-          <CardDescription>
-            The terminal panel runs every service, script and shell tab in a real PTY. Configure the
-            shell used by the "New terminal" button.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="integrated-shell">Shell</Label>
+        {/* Integrated terminal */}
+        <Section
+          title="Integrated terminal"
+          description='The terminal panel runs every service, script and shell tab in a real PTY. Configure the shell used by the "New terminal" button.'
+        >
+          <Field
+            label="Shell"
+            htmlFor="integrated-shell"
+            hint={
+              <>
+                Command line of the shell to launch, e.g. <Code>pwsh -NoLogo</Code>, <Code>nu</Code> or{' '}
+                <Code>/bin/zsh -l</Code>. Leave empty to auto-detect. Applies to newly opened tabs.
+              </>
+            }
+          >
             <Input
               id="integrated-shell"
               value={integratedShell}
@@ -565,95 +691,14 @@ export function Settings() {
                   ? 'Auto (pwsh -NoLogo, falls back to powershell)'
                   : 'Auto ($SHELL)'
               }
+              className="font-mono text-[12px]"
             />
-            <p className="text-xs text-muted-foreground">
-              Command line of the shell to launch, e.g.{' '}
-              <code className="bg-muted px-1 rounded">pwsh -NoLogo</code>,{' '}
-              <code className="bg-muted px-1 rounded">nu</code> or{' '}
-              <code className="bg-muted px-1 rounded">/bin/zsh -l</code>. Leave empty to auto-detect.
-              Applies to newly opened tabs.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+          </Field>
+        </Section>
 
-      {/* Appearance */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Appearance</CardTitle>
-          <CardDescription>
-            Customize the look and feel of the application
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="theme">Theme</Label>
-            <Select
-              value={theme}
-              onValueChange={(value: 'light' | 'dark' | 'system') => {
-                setTheme(value);
-                setHasChanges(true);
-              }}
-            >
-              <SelectTrigger id="theme">
-                <SelectValue placeholder="Select theme" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="light">Light</SelectItem>
-                <SelectItem value="dark">Dark</SelectItem>
-                <SelectItem value="system">System</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Tags */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Tags</CardTitle>
-          <CardDescription>
-            Manage tag definitions shared across scripts, tools, and projects. Tags can have custom colors and display order.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button variant="outline" onClick={() => setShowTagManager(true)}>
-            <Tags className="size-4 mr-2" />
-            Manage Tags
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Statuses */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Statuses</CardTitle>
-          <CardDescription>
-            Manage status definitions shared across tools, scripts, projects, apps, and aliases. Statuses can have custom colors and display order.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button variant="outline" onClick={() => setShowStatusManager(true)}>
-            <CircleDot className="size-4 mr-2" />
-            Manage Statuses
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Shell Aliases Init */}
-      <ShellSetupCard />
-
-      {/* Defaults */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Default Behavior</CardTitle>
-          <CardDescription>
-            Set default behaviors for launching services
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="launch-method">Default Launch Method</Label>
+        {/* Defaults */}
+        <Section title="Default behavior" description="Set default behaviors for launching services.">
+          <Field label="Default launch method" htmlFor="launch-method" hint="The default method used when starting services">
             <Select
               value={launchMethod}
               onValueChange={(value: 'clipboard' | 'external' | 'integrated') => {
@@ -665,30 +710,28 @@ export function Settings() {
                 <SelectValue placeholder="Select launch method" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="integrated">Integrated Terminal</SelectItem>
-                <SelectItem value="external">External Terminal</SelectItem>
-                <SelectItem value="clipboard">Copy to Clipboard</SelectItem>
+                <SelectItem value="integrated">Integrated terminal</SelectItem>
+                <SelectItem value="external">External terminal</SelectItem>
+                <SelectItem value="clipboard">Copy to clipboard</SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              The default method used when starting services
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+          </Field>
+        </Section>
 
-      {/* Command Palette */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Command Palette</CardTitle>
-          <CardDescription>
-            Open the command palette from anywhere using a system-wide hotkey.
-            Inside the app, <kbd className="px-1 py-0.5 rounded border bg-muted text-foreground text-xs">Cmd/Ctrl+K</kbd> always works regardless of this setting.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2">
-            <Label>Global Hotkey</Label>
+        {/* Command palette */}
+        <Section
+          title="Command palette"
+          description={
+            <>
+              Open the command palette from anywhere using a system-wide hotkey. Inside the app,{' '}
+              <kbd className="kbd">Cmd/Ctrl+K</kbd> always works regardless of this setting.
+            </>
+          }
+        >
+          <Field
+            label="Global hotkey"
+            hint="Click the field, press your desired combo. Esc to cancel, Backspace to clear (disables). On macOS, the OS may prompt for Accessibility permission the first time."
+          >
             <HotkeyInput
               value={globalHotkey}
               defaultCombo={DEFAULT_GLOBAL_HOTKEY}
@@ -697,25 +740,28 @@ export function Settings() {
                 setHasChanges(true);
               }}
             />
-            <p className="text-xs text-muted-foreground">
-              Click the field, press your desired combo. Esc to cancel, Backspace to clear (disables).
-              On macOS, the OS may prompt for Accessibility permission the first time.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+          </Field>
+        </Section>
 
-      {/* Toolbox Base URL */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Toolbox Documentation</CardTitle>
-          <CardDescription>
-            Set a base URL for your toolbox documentation site. When a tool's toolbox URL starts with "/", it will be appended to this base URL.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="toolbox-base-url">Base URL</Label>
+        {/* Tags */}
+        <TagsSection onManage={() => setShowTagManager(true)} />
+
+        {/* Statuses */}
+        <StatusesSection onManage={() => setShowStatusManager(true)} />
+
+        {/* Shell aliases init */}
+        <ShellSetupCard />
+
+        {/* Toolbox base URL */}
+        <Section
+          title="Toolbox documentation"
+          description='Set a base URL for your toolbox documentation site. When a tool&apos;s toolbox URL starts with "/", it will be appended to this base URL.'
+        >
+          <Field
+            label="Base URL"
+            htmlFor="toolbox-base-url"
+            hint='Tool URLs starting with "/" will be resolved relative to this base URL. Full URLs (https://...) are used as-is.'
+          >
             <Input
               id="toolbox-base-url"
               value={toolboxBaseUrl}
@@ -724,44 +770,41 @@ export function Settings() {
                 setHasChanges(true);
               }}
               placeholder="e.g., https://docs.example.com"
+              className="font-mono text-[12px]"
             />
-            <p className="text-xs text-muted-foreground">
-              Tool URLs starting with "/" will be resolved relative to this base URL. Full URLs (https://...) are used as-is.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+          </Field>
+        </Section>
 
-      {/* Script Command Templates */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Script Command Templates</CardTitle>
-          <CardDescription>
-            Configure the default command used when importing scripts by file extension.
-            Use <code className="bg-muted px-1 rounded text-xs">{'{{SCRIPT_FILE}}'}</code> as a placeholder for the script path.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
+        {/* Script command templates */}
+        <Section
+          title="Script command templates"
+          description={
+            <>
+              Configure the default command used when importing scripts by file extension. Use{' '}
+              <Code>{'{{SCRIPT_FILE}}'}</Code> as a placeholder for the script path.
+            </>
+          }
+          className="space-y-2"
+        >
           {Object.entries(commandTemplates)
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([ext, template]) => (
-              <div key={ext} className="flex items-center gap-2">
-                <div className="w-16 shrink-0">
-                  <span className="text-sm font-mono text-muted-foreground">.{ext}</span>
-                </div>
+              <div key={ext} className="grid grid-cols-[4rem_1fr_auto] items-center gap-2">
+                <span className="truncate font-mono text-[12px] text-muted-foreground">.{ext}</span>
                 <Input
                   value={template}
                   onChange={(e) => {
                     setCommandTemplates((prev) => ({ ...prev, [ext]: e.target.value }));
                     setHasChanges(true);
                   }}
-                  className="flex-1 font-mono text-sm"
+                  className="h-8 font-mono text-[12px]"
                   placeholder={`Command for .${ext} files`}
                 />
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="shrink-0 size-8"
+                  size="icon-sm"
+                  aria-label={`Remove .${ext} template`}
+                  className="text-faint hover:text-destructive"
                   onClick={() => {
                     setCommandTemplates((prev) => {
                       const next = { ...prev };
@@ -771,20 +814,18 @@ export function Settings() {
                     setHasChanges(true);
                   }}
                 >
-                  <Trash2 className="size-3.5 text-muted-foreground" />
+                  <Trash2 className="size-3.5" />
                 </Button>
               </div>
             ))}
 
-          <div className="flex items-center gap-2 pt-1">
-            <div className="w-16 shrink-0">
-              <Input
-                value={newExtension}
-                onChange={(e) => setNewExtension(e.target.value.replace(/^\./, '').replace(/\s/g, ''))}
-                placeholder="ext"
-                className="font-mono text-sm h-8"
-              />
-            </div>
+          <div className="flex items-center gap-2 pt-2">
+            <Input
+              value={newExtension}
+              onChange={(e) => setNewExtension(e.target.value.replace(/^\./, '').replace(/\s/g, ''))}
+              placeholder="ext"
+              className="h-8 w-16 font-mono text-[12px]"
+            />
             <Button
               variant="outline"
               size="sm"
@@ -797,8 +838,8 @@ export function Settings() {
                 }
               }}
             >
-              <Plus className="size-3.5 mr-1" />
-              Add Extension
+              <Plus />
+              Add extension
             </Button>
             <div className="flex-1" />
             <Button
@@ -820,31 +861,26 @@ export function Settings() {
                 setHasChanges(true);
               }}
             >
-              <RotateCcw className="size-3.5 mr-1" />
-              Reset Defaults
+              <RotateCcw />
+              Reset defaults
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </Section>
 
-      <Separator />
-
-      {/* Agents (beta) */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Bot className="size-5 text-muted-foreground" />
-            <CardTitle className="flex items-center gap-2">Agents <BetaBadge /></CardTitle>
-          </div>
-          <CardDescription>
-            Where CortX reads Claude Code and Codex sessions from. Nothing is written to these folders.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        {/* Agents (beta) */}
+        <Section
+          title={
+            <>
+              Agents <BetaBadge />
+            </>
+          }
+          icon={Bot}
+          description="Where CortX reads Claude Code and Codex sessions from. Nothing is written to these folders."
+        >
           <div className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor="agents-claude-enabled">Claude Code</Label>
-              <p className="text-xs text-muted-foreground">Transcripts and live sessions from the config directory</p>
+              <p className="mt-1 text-xs text-muted-foreground">Transcripts and live sessions from the config directory</p>
             </div>
             <Switch
               id="agents-claude-enabled"
@@ -852,29 +888,28 @@ export function Settings() {
               onCheckedChange={(v) => { setAgentsClaudeEnabled(v); setHasChanges(true); }}
             />
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="agents-claude-dir" className="text-xs text-muted-foreground">Claude config directory</Label>
+          <Field label={<span className="text-xs text-muted-foreground">Claude config directory</span>} htmlFor="agents-claude-dir">
             <div className="flex gap-2">
               <Input
                 id="agents-claude-dir"
                 value={agentsClaudeDir}
                 onChange={(e) => { setAgentsClaudeDir(e.target.value); setHasChanges(true); }}
                 placeholder="~/.claude (default)"
-                className="flex-1"
+                className="flex-1 font-mono text-[12px]"
                 disabled={!agentsClaudeEnabled}
               />
-              <Button variant="outline" onClick={() => handleBrowseAgentsDir('claude')} disabled={!agentsClaudeEnabled}>
-                <FolderOpen className="size-4" />
+              <Button variant="outline" size="icon" onClick={() => handleBrowseAgentsDir('claude')} disabled={!agentsClaudeEnabled} aria-label="Browse">
+                <FolderOpen />
               </Button>
             </div>
-          </div>
+          </Field>
 
           <Separator />
 
           <div className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor="agents-codex-enabled">Codex</Label>
-              <p className="text-xs text-muted-foreground">Threads from the Codex home (state database and rollouts)</p>
+              <p className="mt-1 text-xs text-muted-foreground">Threads from the Codex home (state database and rollouts)</p>
             </div>
             <Switch
               id="agents-codex-enabled"
@@ -882,24 +917,31 @@ export function Settings() {
               onCheckedChange={(v) => { setAgentsCodexEnabled(v); setHasChanges(true); }}
             />
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="agents-codex-home" className="text-xs text-muted-foreground">Codex home</Label>
+          <Field label={<span className="text-xs text-muted-foreground">Codex home</span>} htmlFor="agents-codex-home">
             <div className="flex gap-2">
               <Input
                 id="agents-codex-home"
                 value={agentsCodexHome}
                 onChange={(e) => { setAgentsCodexHome(e.target.value); setHasChanges(true); }}
                 placeholder="~/.codex (default)"
-                className="flex-1"
+                className="flex-1 font-mono text-[12px]"
                 disabled={!agentsCodexEnabled}
               />
-              <Button variant="outline" onClick={() => handleBrowseAgentsDir('codex')} disabled={!agentsCodexEnabled}>
-                <FolderOpen className="size-4" />
+              <Button variant="outline" size="icon" onClick={() => handleBrowseAgentsDir('codex')} disabled={!agentsCodexEnabled} aria-label="Browse">
+                <FolderOpen />
               </Button>
             </div>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="agents-codex-live" className="text-xs text-muted-foreground">Codex "running" threshold (minutes)</Label>
+          </Field>
+          <Field
+            label={<span className="text-xs text-muted-foreground">Codex "running" threshold (minutes)</span>}
+            htmlFor="agents-codex-live"
+            hint={
+              <span className="inline-flex items-center gap-1">
+                <Info className="size-3" />
+                Codex has no live registry: a thread updated within this window is shown as running.
+              </span>
+            }
+          >
             <Input
               id="agents-codex-live"
               type="number"
@@ -907,19 +949,18 @@ export function Settings() {
               max={1440}
               value={agentsCodexLiveMinutes}
               onChange={(e) => { setAgentsCodexLiveMinutes(e.target.value); setHasChanges(true); }}
-              className="w-32"
+              className="w-32 font-mono text-[12px]"
               disabled={!agentsCodexEnabled}
             />
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              <Info className="size-3" />
-              Codex has no live registry: a thread updated within this window is shown as running.
-            </p>
-          </div>
+          </Field>
 
           <Separator />
 
-          <div className="grid gap-2">
-            <Label htmlFor="agents-recent-days" className="text-xs text-muted-foreground">Show finished sessions from the last (days)</Label>
+          <Field
+            label={<span className="text-xs text-muted-foreground">Show finished sessions from the last (days)</span>}
+            htmlFor="agents-recent-days"
+            hint='Running and waiting sessions are always listed. "Show all" in the Agents filters overrides this.'
+          >
             <Input
               id="agents-recent-days"
               type="number"
@@ -927,34 +968,23 @@ export function Settings() {
               max={3650}
               value={agentsRecentDays}
               onChange={(e) => { setAgentsRecentDays(e.target.value); setHasChanges(true); }}
-              className="w-32"
+              className="w-32 font-mono text-[12px]"
             />
-            <p className="text-xs text-muted-foreground">
-              Running and waiting sessions are always listed. "Show all" in the Agents filters overrides this.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+          </Field>
+        </Section>
 
-      {/* Data Management: Import / Export / Git Backup */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Data Management</CardTitle>
-          <CardDescription>
-            Export, import, or back up your full CortX configuration
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          {/* Import / Export */}
+        {/* Data management: import / export / git backup / shims */}
+        <Section title="Data management" description="Export, import, or back up your full CortX configuration." className="space-y-5">
+          {/* Import / export */}
           <div className="space-y-2">
-            <Label className="text-sm font-medium">Import / Export</Label>
+            <span className="eyebrow">Import / export</span>
             <div className="flex gap-2">
               <Button variant="outline" onClick={handleExport}>
-                <Download className="size-4 mr-2" />
+                <Download />
                 Export
               </Button>
               <Button variant="outline" onClick={handleImport}>
-                <Upload className="size-4 mr-2" />
+                <Upload />
                 Import
               </Button>
             </div>
@@ -962,14 +992,17 @@ export function Settings() {
 
           <Separator />
 
-          {/* Git Backup */}
+          {/* Git backup */}
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <GitBranch className="size-4 text-muted-foreground" />
-              <Label className="text-sm font-medium">Git Backup</Label>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="backup-repo-path" className="text-xs text-muted-foreground">Repository Path</Label>
+            <span className="eyebrow inline-flex items-center gap-1.5">
+              <GitBranch className="size-3.5" />
+              Git backup
+            </span>
+            <Field
+              label={<span className="text-xs text-muted-foreground">Repository path</span>}
+              htmlFor="backup-repo-path"
+              hint="Must be an existing git repo with a remote configured. Save settings before backing up."
+            >
               <div className="flex gap-2">
                 <Input
                   id="backup-repo-path"
@@ -979,43 +1012,43 @@ export function Settings() {
                     setHasChanges(true);
                   }}
                   placeholder="Path to a local git repo"
-                  className="flex-1"
+                  className="flex-1 font-mono text-[12px]"
                 />
-                <Button variant="outline" onClick={handleBrowseBackupRepo}>
-                  <FolderOpen className="size-4" />
+                <Button variant="outline" size="icon" onClick={handleBrowseBackupRepo} aria-label="Browse">
+                  <FolderOpen />
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Must be an existing git repo with a remote configured. Save settings before backing up.
-              </p>
-            </div>
+            </Field>
             <Button
               variant="outline"
               onClick={handleBackup}
               disabled={isBackingUp || !settings?.backupRepoPath}
             >
-              <Upload className="size-4 mr-2" />
-              {isBackingUp ? 'Backing up...' : 'Backup Now'}
+              <Upload />
+              {isBackingUp ? 'Backing up...' : 'Backup now'}
             </Button>
           </div>
 
           <Separator />
 
-          {/* Alias Shims */}
+          {/* Alias shims */}
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Globe className="size-4 text-muted-foreground" />
-              <Label className="text-sm font-medium">Alias Shims</Label>
-            </div>
+            <span className="eyebrow inline-flex items-center gap-1.5">
+              <Globe className="size-3.5" />
+              Alias shims
+            </span>
             <p className="text-xs text-muted-foreground">
               A shim is a real launcher file so an alias becomes callable from <strong>any</strong> process
-              — AI agents, scheduled tasks, non-interactive shells — not just terminals that load
-              <code className="bg-muted px-1 rounded mx-1">cortx init</code>. Enable per alias via the
+              — AI agents, scheduled tasks, non-interactive shells — not just terminals that load{' '}
+              <Code>cortx init</Code>. Enable per alias via the
               “Callable from anywhere” switch. The shim folder must be on your PATH (one-time).
             </p>
 
-            <div className="grid gap-2">
-              <Label htmlFor="shim-dir" className="text-xs text-muted-foreground">Shim Directory</Label>
+            <Field
+              label={<span className="text-xs text-muted-foreground">Shim directory</span>}
+              htmlFor="shim-dir"
+              hint="Leave empty to use the platform default. Save settings to apply (shims are re-synced automatically)."
+            >
               <div className="flex gap-2">
                 <Input
                   id="shim-dir"
@@ -1025,10 +1058,12 @@ export function Settings() {
                     setHasChanges(true);
                   }}
                   placeholder={shimStatus?.dir || 'Default: %LOCALAPPDATA%\\CortX\\bin'}
-                  className="flex-1 font-mono text-sm"
+                  className="flex-1 font-mono text-[12px]"
                 />
                 <Button
                   variant="outline"
+                  size="icon"
+                  aria-label="Browse"
                   onClick={async () => {
                     try {
                       const selected = await open({ directory: true, multiple: false, title: 'Select Shim Directory' });
@@ -1041,24 +1076,21 @@ export function Settings() {
                     }
                   }}
                 >
-                  <FolderOpen className="size-4" />
+                  <FolderOpen />
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Leave empty to use the platform default. Save settings to apply (shims are re-synced automatically).
-              </p>
-            </div>
+            </Field>
 
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Status:</span>
+              <span className="text-muted-foreground">Status</span>
               {shimStatus?.onPath ? (
-                <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-500">
-                  <Check className="size-3.5" /> On PATH
-                </span>
+                <Badge variant="success">
+                  <Check /> On PATH
+                </Badge>
               ) : (
-                <span className="text-amber-600 dark:text-amber-500">Not on PATH</span>
+                <Badge variant="warning">Not on PATH</Badge>
               )}
-              <span className="text-muted-foreground">·</span>
+              <span className="text-faint">·</span>
               <span className="text-muted-foreground">{shimStatus?.count ?? 0} shimmed alias{(shimStatus?.count ?? 0) === 1 ? '' : 'es'}</span>
             </div>
 
@@ -1067,7 +1099,7 @@ export function Settings() {
               onClick={handleInstallShimPath}
               disabled={isInstallingPath || !!shimStatus?.onPath}
             >
-              <Globe className="size-4 mr-2" />
+              <Globe />
               {isInstallingPath ? 'Adding…' : shimStatus?.onPath ? 'Already on PATH' : 'Add to PATH'}
             </Button>
             {!shimStatus?.onPath && (
@@ -1076,22 +1108,22 @@ export function Settings() {
               </p>
             )}
           </div>
-        </CardContent>
-      </Card>
+        </Section>
+      </div>
 
-      {/* Tag Definition Manager Dialog */}
+      {/* Tag definition manager dialog */}
       <TagDefinitionManager
         open={showTagManager}
         onOpenChange={setShowTagManager}
       />
 
-      {/* Status Definition Manager Dialog */}
+      {/* Status definition manager dialog */}
       <StatusDefinitionManager
         open={showStatusManager}
         onOpenChange={setShowStatusManager}
       />
 
-      {/* Import Preview Dialog */}
+      {/* Import preview dialog */}
       <Dialog open={importDialogOpen} onOpenChange={(open) => {
         if (!isImporting) {
           setImportDialogOpen(open);
@@ -1100,7 +1132,7 @@ export function Settings() {
       }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Import CortX Config</DialogTitle>
+            <DialogTitle>Import CortX config</DialogTitle>
             {importSummary && (
               <DialogDescription>
                 Version {importSummary.version} &middot; Exported {new Date(importSummary.exportedAt).toLocaleDateString()}
@@ -1108,7 +1140,7 @@ export function Settings() {
             )}
           </DialogHeader>
           {importSummary && (
-            <div className="space-y-3 py-2">
+            <div className="space-y-3">
               <ImportCheckboxRow
                 id="projects"
                 label="Projects"
@@ -1143,7 +1175,7 @@ export function Settings() {
               />
               <ImportCheckboxRow
                 id="shellConfig"
-                label="Shell Config"
+                label="Shell config"
                 count={importSummary.aliasesCount}
                 checked={importOptions.shellConfig}
                 disabled={importSummary.aliasesCount === 0}
@@ -1151,7 +1183,7 @@ export function Settings() {
               />
               <ImportCheckboxRow
                 id="tagsAndStatuses"
-                label="Tags & Statuses"
+                label="Tags & statuses"
                 count={importSummary.tagDefinitionsCount}
                 extra={importSummary.statusDefinitionsCount > 0 ? `${importSummary.statusDefinitionsCount} statuses` : undefined}
                 checked={importOptions.tagsAndStatuses}
@@ -1169,7 +1201,7 @@ export function Settings() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setImportDialogOpen(false); setImportJson(null); setImportSummary(null); }} disabled={isImporting}>
+            <Button variant="ghost" onClick={() => { setImportDialogOpen(false); setImportJson(null); setImportSummary(null); }} disabled={isImporting}>
               Cancel
             </Button>
             <Button onClick={handleConfirmImport} disabled={isImporting || !Object.values(importOptions).some(Boolean)}>
@@ -1178,23 +1210,209 @@ export function Settings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </Screen>
+  );
+}
 
-    {/* Save Bar — sticky at bottom of scroll container (MainContent) */}
-    <div className="sticky bottom-4 z-10 px-6">
-      <div className="max-w-2xl">
-        <div className="rounded-lg border bg-background/95 backdrop-blur shadow-lg px-4 py-3 flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            {hasChanges ? 'You have unsaved changes' : 'Settings saved'}
-          </p>
-          <Button onClick={handleSave} disabled={!hasChanges} size="sm">
-            <Save className="size-4 mr-2" />
-            Save Settings
-          </Button>
-        </div>
+// ============================================================================
+// Appearance (mode is saved in the app settings; accent / radius / font are
+// per-machine and applied instantly through the theme store)
+// ============================================================================
+
+function AppearanceSection({
+  theme,
+  onThemeChange,
+}: {
+  theme: 'light' | 'dark' | 'system';
+  onThemeChange: (value: 'light' | 'dark' | 'system') => void;
+}) {
+  const { skin, accent, radius, font, setStyle, reset } = useThemeStore();
+  const defaultAccent = ACCENT_PRESETS[0].value;
+  const currentAccent = accent ?? defaultAccent;
+  const isPreset = ACCENT_PRESETS.some((p) => p.value.toLowerCase() === currentAccent.toLowerCase());
+  const radiusName = RADIUS_PRESETS.find((r) => r.value === radius)?.name ?? 'Soft';
+  const isDefaultStyle = !accent && radius === 1 && font === 'halcyon';
+  const isClassic = skin === 'classic';
+  const skinPreset = SKIN_PRESETS.find((p) => p.value === skin) ?? SKIN_PRESETS[0];
+
+  return (
+    <Section
+      title="Appearance"
+      icon={Palette}
+      description="Customize the look and feel of the application."
+      className="space-y-5"
+    >
+      <Field label="Style" hint={skinPreset.description}>
+        <Segmented<Skin>
+          value={skin}
+          onChange={(value) => setStyle({ skin: value })}
+          options={SKIN_PRESETS.map((p) => ({ value: p.value, label: p.name, title: p.description }))}
+        />
+      </Field>
+
+      <Field label="Theme" hint="Saved with the settings. “System” follows the OS.">
+        <Segmented
+          value={theme}
+          onChange={onThemeChange}
+          options={THEME_MODE_OPTIONS}
+        />
+      </Field>
+
+      <Separator />
+
+      <div className={cn('space-y-5', isClassic && 'pointer-events-none opacity-50')} aria-disabled={isClassic}>
+        <Field label="Accent colour">
+          <div className="flex flex-wrap items-center gap-2">
+            {ACCENT_PRESETS.map((preset) => {
+              const active = preset.value.toLowerCase() === currentAccent.toLowerCase();
+              return (
+                <button
+                  key={preset.value}
+                  type="button"
+                  title={preset.name}
+                  aria-label={preset.name}
+                  aria-pressed={active}
+                  onClick={() => setStyle({ accent: preset.value === defaultAccent ? undefined : preset.value })}
+                  className={cn(
+                    'grid size-7 place-items-center rounded-full transition-[transform,box-shadow] hover:scale-110',
+                    active && 'ring-2 ring-offset-2 ring-offset-card'
+                  )}
+                  style={{ backgroundColor: preset.value, '--tw-ring-color': preset.value } as CSSProperties}
+                >
+                  {active && <Check className="size-3.5" style={{ color: accentForeground(preset.value) }} />}
+                </button>
+              );
+            })}
+            <span className="mx-1 h-5 w-px bg-border" />
+            <label
+              className={cn(
+                'relative grid size-7 cursor-pointer place-items-center rounded-full border border-dashed border-border-strong',
+                !isPreset && 'border-solid ring-2 ring-offset-2 ring-offset-card'
+              )}
+              style={
+                !isPreset
+                  ? ({ backgroundColor: currentAccent, '--tw-ring-color': currentAccent } as CSSProperties)
+                  : undefined
+              }
+              title="Custom colour"
+            >
+              {isPreset ? (
+                <Palette className="size-3.5 text-faint" />
+              ) : (
+                <Check className="size-3.5" style={{ color: accentForeground(currentAccent) }} />
+              )}
+              <input
+                type="color"
+                value={currentAccent}
+                onChange={(e) => setStyle({ accent: e.target.value })}
+                className="absolute inset-0 size-full cursor-pointer opacity-0"
+                aria-label="Custom accent colour"
+              />
+            </label>
+            <span className="font-mono text-[11px] text-faint">{currentAccent.toLowerCase()}</span>
+            <Button variant="ghost" size="sm" onClick={reset} disabled={isDefaultStyle} className="ml-auto">
+              <RotateCcw />
+              Reset
+            </Button>
+          </div>
+        </Field>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="Corners">
+            <Segmented
+              value={radiusName}
+              onChange={(name) => {
+                const preset = RADIUS_PRESETS.find((r) => r.name === name);
+                if (preset) setStyle({ radius: preset.value });
+              }}
+              options={RADIUS_PRESETS.map((r) => ({ value: r.name, label: r.name, icon: RADIUS_ICONS[r.name] }))}
+            />
+          </Field>
       </div>
-    </div>
-    </>
+
+      </div>
+
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field label="Font">
+          <Segmented<FontChoice>
+            value={font}
+            onChange={(value) => setStyle({ font: value })}
+            options={FONT_PRESETS.map((f) => ({ value: f.value, label: f.name }))}
+          />
+        </Field>
+      </div>
+
+      <p className="flex items-center gap-1 text-xs text-muted-foreground">
+        <Info className="size-3" />
+        {isClassic
+          ? 'Accent and corners are Halcyon only — switch the style back to adjust them. The font applies to both styles.'
+          : 'Accent, corners and font apply instantly on this machine — no need to save.'}
+      </p>
+    </Section>
+  );
+}
+
+// ============================================================================
+// Tags / statuses (definitions live in dialogs; the card shows a preview)
+// ============================================================================
+
+function TagsSection({ onManage }: { onManage: () => void }) {
+  const { tagDefinitions } = useAppStore();
+  const sorted = [...tagDefinitions].sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
+  return (
+    <Section
+      title="Tags"
+      icon={Tags}
+      description="Tag definitions shared across scripts, tools, and projects. Tags can have custom colors and display order."
+      action={
+        <Button variant="outline" size="sm" onClick={onManage}>
+          <Tags />
+          Manage tags
+        </Button>
+      }
+    >
+      {sorted.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {sorted.map((def) => (
+            <Chip key={def.name} color={def.color} neutral={!def.color} dot={false}>
+              {def.name}
+            </Chip>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">No tags defined yet.</p>
+      )}
+    </Section>
+  );
+}
+
+function StatusesSection({ onManage }: { onManage: () => void }) {
+  const { statusDefinitions } = useAppStore();
+  const sorted = [...statusDefinitions].sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
+  return (
+    <Section
+      title="Statuses"
+      icon={CircleDot}
+      description="Status definitions shared across tools, scripts, projects, apps, and aliases. Statuses can have custom colors and display order."
+      action={
+        <Button variant="outline" size="sm" onClick={onManage}>
+          <CircleDot />
+          Manage statuses
+        </Button>
+      }
+    >
+      {sorted.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {sorted.map((def) => (
+            <Chip key={def.name} color={def.color} neutral={!def.color}>
+              {def.name}
+            </Chip>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">No statuses defined yet.</p>
+      )}
+    </Section>
   );
 }
 
@@ -1268,75 +1486,59 @@ function ShellSetupCard() {
   };
 
   return (
-    <Card>
-      <CardHeader>
+    <Section
+      title="Shell aliases setup"
+      icon={TerminalSquare}
+      description={
+        <>
+          Add this line to your shell profile to enable all CortX aliases{' '}
+          <Badge variant="secondary">
+            {aliases.length} alias{aliases.length !== 1 ? 'es' : ''}
+          </Badge>
+        </>
+      }
+    >
+      {/* Shell selector */}
+      <Segmented
+        size="sm"
+        value={selectedShell}
+        onChange={(shell) => {
+          setSelectedShell(shell);
+          setShowPreview(false);
+          setPreviewOutput(null);
+        }}
+        options={SHELL_INIT_LINES.map((s) => ({ value: s.shell, label: s.label }))}
+      />
+
+      {/* Profile line to copy */}
+      <Field label={<span className="text-xs text-muted-foreground">Add to <Code>{selected.profileFile}</Code></span>}>
         <div className="flex items-center gap-2">
-          <TerminalSquare className="size-5 text-muted-foreground" />
-          <div>
-            <CardTitle>Shell Aliases Setup</CardTitle>
-            <CardDescription>
-              Add this line to your shell profile to enable all CortX aliases ({aliases.length} alias{aliases.length !== 1 ? 'es' : ''})
-            </CardDescription>
-          </div>
+          <code className="flex-1 select-all overflow-x-auto whitespace-nowrap rounded-sm border border-border bg-muted/50 px-3 py-2 font-mono text-[12px]">
+            {selected.profileLine}
+          </code>
+          <Button variant="outline" size="icon" className="shrink-0" onClick={handleCopyLine} aria-label="Copy line">
+            {copiedLine ? <Check className="text-st-done" /> : <Copy />}
+          </Button>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Shell selector */}
-        <div className="flex gap-1">
-          {SHELL_INIT_LINES.map((s) => (
-            <Button
-              key={s.shell}
-              variant={selectedShell === s.shell ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => {
-                setSelectedShell(s.shell);
-                setShowPreview(false);
-                setPreviewOutput(null);
-              }}
-            >
-              {s.label}
-            </Button>
-          ))}
-        </div>
+      </Field>
 
-        {/* Profile line to copy */}
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">
-            Add to <code className="bg-muted px-1 rounded">{selected.profileFile}</code>
-          </Label>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 bg-muted px-3 py-2 rounded-md text-sm font-mono select-all">
-              {selected.profileLine}
-            </code>
-            <Button variant="outline" size="icon" className="shrink-0" onClick={handleCopyLine}>
-              {copiedLine ? (
-                <Check className="size-4 text-green-500" />
-              ) : (
-                <Copy className="size-4" />
-              )}
-            </Button>
-          </div>
-        </div>
+      {/* Preview toggle */}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={handleTogglePreview}
+        disabled={isGenerating}
+      >
+        {showPreview ? <ChevronUp /> : <ChevronDown />}
+        {isGenerating ? 'Generating...' : showPreview ? 'Hide generated script' : 'Preview generated script'}
+      </Button>
 
-        {/* Preview toggle */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground"
-          onClick={handleTogglePreview}
-          disabled={isGenerating}
-        >
-          {showPreview ? <ChevronUp className="size-4 mr-1" /> : <ChevronDown className="size-4 mr-1" />}
-          {isGenerating ? 'Generating...' : showPreview ? 'Hide generated script' : 'Preview generated script'}
-        </Button>
-
-        {showPreview && previewOutput && (
-          <pre className="bg-muted p-4 rounded-md text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto">
-            {previewOutput}
-          </pre>
-        )}
-      </CardContent>
-    </Card>
+      {showPreview && previewOutput && (
+        <pre className="max-h-48 overflow-x-auto overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/50 p-4 font-mono text-[11px] text-muted-foreground">
+          {previewOutput}
+        </pre>
+      )}
+    </Section>
   );
 }
 
@@ -1368,17 +1570,17 @@ function ImportCheckboxRow({
     : undefined;
 
   return (
-    <div className={`flex items-center gap-3 ${disabled ? 'opacity-40' : ''}`}>
+    <div className={cn('flex items-center gap-3', disabled && 'opacity-40')}>
       <Checkbox
         id={`import-${id}`}
         checked={checked && !disabled}
         disabled={disabled}
         onCheckedChange={onCheckedChange}
       />
-      <label htmlFor={`import-${id}`} className="flex-1 text-sm cursor-pointer select-none">
+      <label htmlFor={`import-${id}`} className="flex-1 cursor-pointer select-none text-sm">
         {label}
-        {countLabel && <span className="text-muted-foreground ml-1">({countLabel})</span>}
-        {subtitle && <span className="text-muted-foreground ml-1 text-xs">({subtitle})</span>}
+        {countLabel && <span className="ml-1 text-muted-foreground">({countLabel})</span>}
+        {subtitle && <span className="ml-1 text-xs text-muted-foreground">({subtitle})</span>}
       </label>
     </div>
   );

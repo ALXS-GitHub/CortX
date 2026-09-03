@@ -1,50 +1,56 @@
+import { StatusDot, type DotTone } from '@/components/ui/StatusDot';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { AgentState } from '@/types';
 import { STATE_LABEL } from './agentUtils';
 
-const DOT_CLASS: Record<AgentState, string> = {
-  running: 'bg-emerald-500',
-  waiting: 'bg-amber-500',
-  stopped: 'bg-muted-foreground/40',
-  unknown: 'bg-transparent border border-muted-foreground/50',
+/** running pulses green, waiting is a solid amber dot, stopped / unknown are outlined. */
+const TONE: Record<AgentState, DotTone> = {
+  running: 'running',
+  waiting: 'warning',
+  stopped: 'idle',
+  unknown: 'idle',
+};
+
+const LABEL_CLASS: Record<AgentState, string> = {
+  running: 'text-st-done',
+  waiting: 'text-st-progress',
+  stopped: 'text-muted-foreground',
+  unknown: 'text-muted-foreground',
 };
 
 interface AgentStateDotProps {
   state: AgentState;
   /** Show the label next to the dot (detail view). */
   withLabel?: boolean;
+  size?: number;
   className?: string;
 }
 
-export function AgentStateDot({ state, withLabel = false, className }: AgentStateDotProps) {
+export function AgentStateDot({ state, withLabel = false, size = 9, className }: AgentStateDotProps) {
   const dot = (
-    <span className={cn('relative inline-flex size-2.5 shrink-0', className)} aria-label={STATE_LABEL[state]}>
-      {state === 'running' && (
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-60" />
-      )}
-      <span className={cn('relative inline-flex size-2.5 rounded-full', DOT_CLASS[state])} />
-    </span>
+    <StatusDot
+      tone={TONE[state]}
+      size={size}
+      title={STATE_LABEL[state]}
+      className={cn(state === 'unknown' && 'opacity-50', className)}
+    />
   );
 
   if (withLabel) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs">
         {dot}
-        <span className={cn(
-          state === 'running' && 'text-emerald-600 dark:text-emerald-400',
-          state === 'waiting' && 'text-amber-600 dark:text-amber-400',
-          (state === 'stopped' || state === 'unknown') && 'text-muted-foreground',
-        )}>
-          {STATE_LABEL[state]}
-        </span>
+        <span className={LABEL_CLASS[state]}>{STATE_LABEL[state]}</span>
       </span>
     );
   }
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{dot}</TooltipTrigger>
+      <TooltipTrigger asChild>
+        <span className="inline-flex shrink-0">{dot}</span>
+      </TooltipTrigger>
       <TooltipContent>{STATE_LABEL[state]}</TooltipContent>
     </Tooltip>
   );

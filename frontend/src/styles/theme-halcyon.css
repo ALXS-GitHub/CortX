@@ -1,0 +1,187 @@
+/*
+ * Theme "Halcyon" (default skin) — shared with Zorg.
+ * Calm premium desktop: faintly tinted canvas, frosted-glass panels, one accent
+ * colour, large radii, soft depth.
+ *
+ * Every theme file must define the FULL token set listed in `tokens.md`
+ * (colours + shape + effects + component knobs). Components only ever read
+ * these variables, so adding a theme = adding a file like this one and a
+ * `data-skin` value in `lib/theme.ts`.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---------- Colours ---------- */
+  --background: hsl(186 38% 94%);
+  --foreground: hsl(184 34% 14%);
+  --card: #ffffff;
+  --card-foreground: hsl(184 34% 14%);
+  --popover: hsl(0 0% 100% / 0.92);
+  --popover-foreground: hsl(184 34% 14%);
+
+  --primary: #0d9488;
+  --primary-foreground: #ffffff;
+  --secondary: hsl(186 30% 89%);
+  --secondary-foreground: hsl(184 30% 22%);
+  --muted: hsl(186 28% 90%);
+  --muted-foreground: hsl(190 14% 40%);
+  --accent: color-mix(in srgb, var(--primary) 12%, transparent);
+  --accent-foreground: hsl(184 34% 14%);
+
+  --destructive: #fb5d6b;
+  --destructive-foreground: #ffffff;
+  --success: #1bb89a;
+  --warning: #f0a517;
+  --info: #2aa6f0;
+
+  --border: hsl(176 67% 18% / 0.12);
+  --border-strong: hsl(176 67% 18% / 0.2);
+  --input: hsl(176 67% 18% / 0.16);
+  --ring: var(--primary);
+  --text-faint: hsl(190 11% 56%);
+  --accent-border: color-mix(in srgb, var(--primary) 40%, transparent);
+
+  --bg-sidebar: hsl(0 0% 100% / 0.55);
+  --bg-glass: hsl(0 0% 100% / 0.82);
+  --bg-input: hsl(0 0% 100% / 0.9);
+  --bg-terminal: #ffffff;
+  --terminal-fg: hsl(184 34% 16%);
+
+  --st-open: #2aa6f0;
+  --st-progress: #f0a517;
+  --st-blocked: #fb6f8e;
+  --st-done: #1bb89a;
+
+  --shadow-color: 176 67% 18%;
+
+  --sidebar: var(--bg-sidebar);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  --chart-1: var(--primary);
+  --chart-2: var(--st-open);
+  --chart-3: var(--st-progress);
+  --chart-4: var(--st-blocked);
+  --chart-5: var(--text-faint);
+
+  /* ---------- Typography ---------- */
+  --font-display-stack: "Outfit Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans-stack: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono-stack: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --body-size: 13.5px;
+  --display-tracking: -0.01em;
+  --eyebrow-size: 10.5px;
+  --eyebrow-transform: uppercase;
+  --eyebrow-tracking: 0.07em;
+
+  /* ---------- Shape (3 tiers: control ≈10, card ≈16, panel ≈22) ---------- */
+  --radius: 1rem;
+  --rad-xs: calc(var(--radius) - 9px);
+  --rad-sm: calc(var(--radius) - 6px); /* buttons, inputs, menu items, chips-square */
+  --rad-md: calc(var(--radius) - 3px);
+  --rad-lg: var(--radius); /* cards, menus, popovers */
+  --rad-xl: calc(var(--radius) + 6px); /* dialogs, large panels */
+  --rad-2xl: calc(var(--radius) + 12px);
+  --rad-menu: var(--radius);
+  --rad-nav: 10px;
+  --chip-radius: 999px;
+
+  /* ---------- Effects ---------- */
+  --elev-soft: 0 1px 2px hsl(var(--shadow-color) / 0.06), 0 6px 16px -10px hsl(var(--shadow-color) / 0.22);
+  --elev-pop: 0 12px 28px -12px hsl(var(--shadow-color) / 0.2), 0 28px 60px -20px hsl(var(--shadow-color) / 0.3);
+  --glass-blur: 20px;
+  --glass-strong-blur: 28px;
+  --glass-saturate: 150%;
+  --overlay-bg: hsl(195 40% 6% / 0.5);
+  --overlay-blur: 4px;
+  --lift-y: -2px;
+  --canvas-wash: radial-gradient(
+      60% 50% at 12% 0%,
+      color-mix(in srgb, var(--primary) 16%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      55% 50% at 100% 28%,
+      color-mix(in srgb, var(--st-blocked) 13%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      50% 60% at 72% 100%,
+      color-mix(in srgb, var(--st-open) 11%, transparent),
+      transparent 70%
+    );
+
+  /* ---------- Component knobs ---------- */
+  --btn-primary-shadow: 0 6px 16px -6px color-mix(in srgb, var(--primary) 70%, transparent);
+  --btn-primary-hover: color-mix(in srgb, var(--primary) 90%, white);
+  --btn-primary-active: color-mix(in srgb, var(--primary) 92%, black);
+  --btn-outline-bg: color-mix(in srgb, var(--card) 70%, transparent);
+  --btn-outline-border: var(--border);
+  --btn-outline-hover: var(--accent);
+  --card-border: var(--border);
+  --panel-border: var(--border-strong);
+  --tab-active-bg: color-mix(in srgb, var(--primary) 16%, transparent);
+  --tab-active-fg: var(--foreground);
+  --tab-active-shadow: var(--elev-soft);
+  --chip-border-mix: 36%;
+  --chip-bg-mix: 14%;
+  --chip-text-mix: 72%;
+  --chip-dot: inline-block;
+  --footer-bg: color-mix(in srgb, var(--card) 40%, transparent);
+  --footer-border: var(--border);
+  --dot-idle-fill: transparent;
+}
+
+:root.dark {
+  color-scheme: dark;
+
+  --background: hsl(196 36% 9%);
+  --foreground: hsl(180 30% 92%);
+  --card: hsl(192 27% 13%);
+  --card-foreground: hsl(180 30% 92%);
+  --popover: hsl(192 38% 13% / 0.92);
+  --popover-foreground: hsl(180 30% 92%);
+
+  --primary: #2dd4bf;
+  --primary-foreground: #06231f;
+  --secondary: hsl(193 24% 18%);
+  --secondary-foreground: hsl(180 30% 92%);
+  --muted: hsl(194 26% 16%);
+  --muted-foreground: hsl(186 16% 64%);
+  --accent: color-mix(in srgb, var(--primary) 16%, transparent);
+  --accent-foreground: hsl(180 30% 92%);
+
+  --destructive: #ff7a88;
+  --destructive-foreground: #2a0a10;
+  --success: #2dd4bf;
+  --warning: #f5b73a;
+  --info: #48b9f5;
+
+  --border: hsl(173 79% 68% / 0.12);
+  --border-strong: hsl(173 79% 68% / 0.22);
+  --input: hsl(173 79% 68% / 0.18);
+  --text-faint: hsl(186 12% 46%);
+  --accent-border: color-mix(in srgb, var(--primary) 45%, transparent);
+
+  --bg-sidebar: hsl(192 46% 10% / 0.6);
+  --bg-glass: hsl(192 40% 12% / 0.8);
+  --bg-input: hsl(192 47% 9% / 0.7);
+  --bg-terminal: hsl(196 40% 7%);
+  --terminal-fg: hsl(180 30% 92%);
+
+  --st-open: #48b9f5;
+  --st-progress: #f5b73a;
+  --st-blocked: #ff8aa0;
+  --st-done: #2dd4bf;
+
+  --shadow-color: 196 60% 2%;
+
+  --btn-primary-hover: color-mix(in srgb, var(--primary) 88%, white);
+  --btn-primary-active: color-mix(in srgb, var(--primary) 90%, black);
+}

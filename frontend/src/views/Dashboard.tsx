@@ -5,9 +5,11 @@ import { ProjectCard } from '@/components/projects/ProjectCard';
 import { ProjectListItem } from '@/components/projects/ProjectListItem';
 import { ProjectCompactItem } from '@/components/projects/ProjectCompactItem';
 import { ProjectForm } from '@/components/projects/ProjectForm';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { Chip } from '@/components/ui/Chip';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
 import {
   Select,
@@ -28,12 +30,13 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Plus, Search, LayoutGrid, Star } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@/types';
 
 type SortOption = 'recent' | 'name' | 'created' | 'status';
 
 export function Dashboard() {
-  const { projects, tagDefinitions, statusDefinitions, createProject, updateProject, deleteProject, isLoadingProjects } = useAppStore();
+  const { projects, tagDefinitions, statusDefinitions, createProject, updateProject, deleteProject, isLoadingProjects, serviceRuntimes } = useAppStore();
   const { projectsViewMode, setProjectsViewMode } = useViewPrefsStore();
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
@@ -65,6 +68,12 @@ export function Dashboard() {
     ]);
     return Array.from(set);
   }, [projects, statusDefinitions]);
+
+  const runningProjects = useMemo(
+    () =>
+      projects.filter((p) => p.services.some((s) => serviceRuntimes.get(s.id)?.status === 'running')).length,
+    [projects, serviceRuntimes]
+  );
 
   const filteredProjects = useMemo(() => {
     let result = projects;
@@ -146,152 +155,124 @@ export function Dashboard() {
     }
   };
 
-  if (isLoadingProjects) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-muted-foreground">Loading projects...</div>
-      </div>
-    );
-  }
+  const subtitle = isLoadingProjects
+    ? 'Loading…'
+    : `${projects.length} project${projects.length !== 1 ? 's' : ''}${runningProjects > 0 ? ` · ${runningProjects} running` : ''}`;
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-bold">My Projects</h1>
-          <p className="text-muted-foreground">
-            {projects.length} project{projects.length !== 1 ? 's' : ''} registered
-          </p>
-        </div>
-        <Button onClick={() => setShowAddForm(true)} className="gap-2 flex-shrink-0">
-          <Plus className="size-4" />
-          Add Project
+    <Screen
+      title="Projects"
+      subtitle={subtitle}
+      actions={
+        <Button onClick={() => setShowAddForm(true)}>
+          <Plus />
+          Add project
         </Button>
-      </div>
-
-      {/* Filters */}
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-          <Input
-            placeholder="Search projects..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        {allStatuses.length > 0 && (
-          <Select
-            value={selectedStatus ?? '__all__'}
-            onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
-          >
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="Status" />
+      }
+      toolbar={
+        <>
+          <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+            <Input
+              placeholder="Search projects…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          {allStatuses.length > 0 && (
+            <Select
+              value={selectedStatus ?? '__all__'}
+              onValueChange={(v) => setSelectedStatus(v === '__all__' ? null : v)}
+            >
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All statuses</SelectItem>
+                {allStatuses.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Sort by" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__all__">All statuses</SelectItem>
-              {allStatuses.map((s) => (
-                <SelectItem key={s} value={s}>{s}</SelectItem>
-              ))}
+              <SelectItem value="recent">Recently used</SelectItem>
+              <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="created">Date created</SelectItem>
+              <SelectItem value="status">Status</SelectItem>
             </SelectContent>
           </Select>
-        )}
-        <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="Sort by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="recent">Recently Used</SelectItem>
-            <SelectItem value="name">Name</SelectItem>
-            <SelectItem value="created">Date Created</SelectItem>
-            <SelectItem value="status">Status</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          variant={favoritesOnly ? 'secondary' : 'outline'}
-          onClick={() => setFavoritesOnly((v) => !v)}
-          aria-pressed={favoritesOnly}
-          title="Show favorites only"
-        >
-          <Star className={favoritesOnly ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
-          Favorites
-        </Button>
+          <Button
+            variant="outline"
+            onClick={() => setFavoritesOnly((v) => !v)}
+            aria-pressed={favoritesOnly}
+            title="Show favorites only"
+            className={cn(favoritesOnly && 'border-accent-border bg-accent')}
+          >
+            <Star className={favoritesOnly ? 'fill-warning text-warning' : ''} />
+            Favorites
+          </Button>
+          <div className="ml-auto">
+            <ViewModeToggle value={projectsViewMode} onChange={setProjectsViewMode} />
+          </div>
 
-        <ViewModeToggle value={projectsViewMode} onChange={setProjectsViewMode} />
-      </div>
-
-      {/* Tag filter pills */}
-      {sortedTagDefs.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {sortedTagDefs.map((tag) => {
-            const isActive = selectedTags.has(tag.name.toLowerCase());
-            return (
-              <button
-                key={tag.name}
-                type="button"
-                onClick={() => toggleTag(tag.name.toLowerCase())}
-                className="inline-flex items-center transition-all"
-              >
-                <Badge
-                  variant="outline"
-                  className={`text-xs cursor-pointer transition-all ${
-                    isActive ? 'ring-1 ring-offset-1 ring-primary' : 'opacity-60 hover:opacity-100'
-                  }`}
-                  style={
-                    tag.color
-                      ? {
-                          borderColor: tag.color,
-                          color: tag.color,
-                          backgroundColor: isActive ? `${tag.color}20` : `${tag.color}10`,
-                        }
-                      : undefined
-                  }
+          {sortedTagDefs.length > 0 && (
+            <div className="flex w-full flex-wrap items-center gap-1.5">
+              {sortedTagDefs.map((tag) => {
+                const isActive = selectedTags.has(tag.name.toLowerCase());
+                return (
+                  <button
+                    key={tag.name}
+                    type="button"
+                    onClick={() => toggleTag(tag.name.toLowerCase())}
+                    aria-pressed={isActive}
+                    className={cn('rounded-full transition-opacity', isActive ? 'ring-2 ring-ring/50 ring-offset-1 ring-offset-background' : 'opacity-60 hover:opacity-100')}
+                  >
+                    <Chip color={tag.color} neutral={!tag.color} dot={false}>
+                      {tag.name}
+                    </Chip>
+                  </button>
+                );
+              })}
+              {selectedTags.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTags(new Set())}
+                  className="ml-1 text-xs text-muted-foreground hover:text-foreground"
                 >
-                  {tag.name}
-                </Badge>
-              </button>
-            );
-          })}
-          {selectedTags.size > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelectedTags(new Set())}
-              className="text-xs text-muted-foreground hover:text-foreground ml-1"
-            >
-              Clear
-            </button>
+                  Clear
+                </button>
+              )}
+            </div>
           )}
-        </div>
-      )}
-
-      {/* Project Grid */}
-      {filteredProjects.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          {projects.length === 0 ? (
-            <>
-              <LayoutGrid className="size-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium">No projects yet</h3>
-              <p className="text-muted-foreground mb-4">
-                Add your first project to get started
-              </p>
-              <Button onClick={() => setShowAddForm(true)} className="gap-2">
-                <Plus className="size-4" />
-                Add Project
+        </>
+      }
+    >
+      {isLoadingProjects ? (
+        <div className="flex h-40 items-center justify-center text-muted-foreground">Loading projects…</div>
+      ) : filteredProjects.length === 0 ? (
+        projects.length === 0 ? (
+          <EmptyState
+            icon={LayoutGrid}
+            title="No projects yet"
+            description="Register a folder with its services, scripts and env files to launch it from one place."
+            action={
+              <Button onClick={() => setShowAddForm(true)}>
+                <Plus />
+                Add project
               </Button>
-            </>
-          ) : (
-            <>
-              <Search className="size-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium">No matching projects</h3>
-              <p className="text-muted-foreground">
-                Try a different search term
-              </p>
-            </>
-          )}
-        </div>
+            }
+          />
+        ) : (
+          <EmptyState icon={Search} title="No matching projects" description="Try a different search or clear the filters." />
+        )
       ) : projectsViewMode === 'card' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {filteredProjects.map((project) => (
             <ProjectCard
               key={project.id}
@@ -315,7 +296,7 @@ export function Dashboard() {
           ))}
         </div>
       ) : (
-        <div className="space-y-1">
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
           {filteredProjects.map((project) => (
             <ProjectCompactItem
               key={project.id}
@@ -349,19 +330,19 @@ export function Dashboard() {
       <AlertDialog open={!!deletingProject} onOpenChange={(open) => !open && setDeletingProject(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Project</AlertDialogTitle>
+            <AlertDialogTitle>Delete project</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{deletingProject?.name}"? This will remove the project from your dashboard. Your files will not be affected.
+              Remove "{deletingProject?.name}" from CortX? Your files on disk are not affected.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteProject} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction variant="destructive" onClick={handleDeleteProject}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </Screen>
   );
 }

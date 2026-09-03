@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -23,6 +25,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TruncatedText } from '@/components/ui/TruncatedText';
+import { StatusDot } from '@/components/ui/StatusDot';
 import type { Service } from '@/types';
 import {
   Play,
@@ -32,6 +35,8 @@ import {
   MoreVertical,
   Terminal,
   ChevronDown,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
@@ -124,273 +129,209 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
     ? projectPath
     : `${projectPath}/${service.workingDir.replace(/^\.\//, '')}`.replace(/\\/g, '/');
 
+  const ports = runtime && runtime.detectedPorts.length > 0
+    ? runtime.detectedPorts
+    : service.port
+      ? [service.port]
+      : [];
+
   return (
-    <Card className="group">
-      <CardContent className="p-4">
-        <div className="flex items-start gap-4">
-          {/* Status indicator */}
-          <div
-            className="mt-1.5 size-3 rounded-full flex-shrink-0"
-            style={{ backgroundColor: service.color || '#6b7280' }}
-          >
-            <StatusOverlay status={status} />
-          </div>
+    <Card size="sm" className={cn('group py-0', isRunning && 'border-accent-border')}>
+      <div className="flex items-center gap-4 px-4 py-3">
+        {/* Colour swatch + live state */}
+        <div className="relative shrink-0">
+          <span
+            className="block size-9 rounded-[var(--rad-sm)] shadow-soft"
+            style={{ backgroundColor: service.color || 'var(--text-faint)' }}
+          />
+          <span className="absolute -bottom-1 -right-1 grid size-4 place-items-center rounded-full bg-card">
+            <StatusDot status={status} size={9} />
+          </span>
+        </div>
 
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <TruncatedText as="h3" className="font-medium">{service.name}</TruncatedText>
-              <div className="flex-shrink-0">
-                <StatusBadge status={status} activeMode={activeMode} activeArgPreset={activeArgPreset} />
-              </div>
-            </div>
-            <div className="mt-1 space-y-0.5 text-xs text-muted-foreground font-mono">
-              <div className="flex gap-1">
-                <span className="flex-shrink-0">Path:</span>
-                <TruncatedText className="flex-1 min-w-0">{fullPath}</TruncatedText>
-              </div>
-              <div className="flex gap-1">
-                <span className="flex-shrink-0">Command:</span>
-                <TruncatedText className="flex-1 min-w-0">{service.command}</TruncatedText>
-              </div>
-              {/* Show OS-detected ports if any; fall back to the configured port from the service definition. */}
-              {runtime && runtime.detectedPorts.length > 0 ? (
-                <p>Port{runtime.detectedPorts.length > 1 ? 's' : ''}: {runtime.detectedPorts.join(', ')}</p>
-              ) : service.port ? (
-                <p>Port: {service.port}</p>
-              ) : null}
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  onClick={handleCopy}
-                >
-                  <Copy className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Copy launch command</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  onClick={handleExternal}
-                >
-                  <ExternalLink className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Open in external terminal</TooltipContent>
-            </Tooltip>
-
-            {isRunning || isStarting ? (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon-sm"
-                      onClick={handleViewLogs}
-                    >
-                      <Terminal className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>View logs</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="destructive"
-                      size="icon-sm"
-                      onClick={handleStop}
-                      disabled={isStarting}
-                    >
-                      <Square className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Stop service</TooltipContent>
-                </Tooltip>
-              </>
-            ) : (hasModes || hasPresets) ? (
-              // Has modes and/or presets - popover modal selector
-              <div className="flex items-center">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="default"
-                      size="icon-sm"
-                      className="rounded-r-none border-r-0"
-                      onClick={() => handleStart()}
-                    >
-                      <Play className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Start with defaults</TooltipContent>
-                </Tooltip>
-                <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="default"
-                      size="icon-sm"
-                      className="rounded-l-none px-1.5"
-                    >
-                      <ChevronDown className="size-3" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent align="end" className="w-56 p-3">
-                    <div className="space-y-3">
-                      {hasModes && (
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">Mode</Label>
-                          <Select
-                            value={selectedMode || '_default'}
-                            onValueChange={(v) => setSelectedMode(v === '_default' ? undefined : v)}
-                          >
-                            <SelectTrigger className="h-8">
-                              <SelectValue placeholder="Select mode" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="_default">Default</SelectItem>
-                              {modeNames.map((name) => (
-                                <SelectItem key={name} value={name}>
-                                  {name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
-                      {hasPresets && (
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">Preset</Label>
-                          <Select
-                            value={selectedPreset === null ? '_none' : selectedPreset || '_default'}
-                            onValueChange={(v) => setSelectedPreset(v === '_default' ? undefined : v === '_none' ? null : v)}
-                          >
-                            <SelectTrigger className="h-8">
-                              <SelectValue placeholder="Select preset" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="_default">Default</SelectItem>
-                              <SelectItem value="_none">None</SelectItem>
-                              {presetNames.map((name) => (
-                                <SelectItem key={name} value={name}>
-                                  {name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
-                      <Button
-                        size="sm"
-                        className="w-full"
-                        onClick={() => {
-                          // null means "None" (pass empty string to skip default), undefined means "Default"
-                          handleStart(selectedMode, selectedPreset === null ? '' : selectedPreset);
-                          setPopoverOpen(false);
-                        }}
-                      >
-                        <Play className="size-3.5 mr-2" />
-                        Start
-                      </Button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-            ) : (
-              // Simple play button when no modes and no presets
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="default"
-                    size="icon-sm"
-                    onClick={() => handleStart()}
-                  >
-                    <Play className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Start service</TooltipContent>
-              </Tooltip>
+        {/* Content */}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <TruncatedText as="h3" className="font-display text-[15px] font-semibold tracking-tight">{service.name}</TruncatedText>
+            <RunBadge status={status} activeMode={activeMode} activeArgPreset={activeArgPreset} />
+            {ports.length > 0 && (
+              <span className="shrink-0 rounded-full bg-primary/12 px-2 font-mono text-[11px] leading-5 text-primary" title="Listening ports">
+                {ports.map((p) => `:${p}`).join(' ')}
+              </span>
             )}
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <MoreVertical className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={onEdit}>
-                  Edit Service
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={onDelete} className="text-destructive">
-                  Delete Service
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          </div>
+          <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 font-mono text-[11px] text-muted-foreground">
+            <span className="text-faint">cmd</span>
+            <TruncatedText className="min-w-0 text-foreground/80">{service.command}</TruncatedText>
+            <span className="text-faint">cwd</span>
+            <TruncatedText className="min-w-0">{fullPath}</TruncatedText>
           </div>
         </div>
-      </CardContent>
+
+        {/* Actions */}
+        <div className="flex shrink-0 items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={handleCopy} aria-label="Copy launch command">
+                <Copy className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Copy launch command</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={handleExternal} aria-label="Open in external terminal">
+                <ExternalLink className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Open in external terminal</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={handleViewLogs} aria-label="Show terminal">
+                <Terminal className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Show terminal</TooltipContent>
+          </Tooltip>
+
+          {isRunning || isStarting ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" onClick={handleStop} disabled={isStarting} className="ml-1 text-destructive hover:text-destructive">
+                  <Square className="size-3.5" />
+                  Stop
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Stop service (Ctrl+C, then kill)</TooltipContent>
+            </Tooltip>
+          ) : (hasModes || hasPresets) ? (
+            // Has modes and/or presets - popover selector
+            <div className="ml-1 flex items-center">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" className="rounded-r-none" onClick={() => handleStart()}>
+                    <Play className="size-3.5" />
+                    Start
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Start with defaults</TooltipContent>
+              </Tooltip>
+              <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button size="sm" className="rounded-l-none border-l border-l-primary-foreground/25 px-1.5" aria-label="Start with options">
+                    <ChevronDown className="size-3.5" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-60 gap-3 p-3">
+                  {hasModes && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Mode</Label>
+                      <Select
+                        value={selectedMode || '_default'}
+                        onValueChange={(v) => setSelectedMode(v === '_default' ? undefined : v)}
+                      >
+                        <SelectTrigger className="h-8 w-full">
+                          <SelectValue placeholder="Select mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="_default">Default</SelectItem>
+                          {modeNames.map((name) => (
+                            <SelectItem key={name} value={name}>
+                              {name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {hasPresets && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Preset</Label>
+                      <Select
+                        value={selectedPreset === null ? '_none' : selectedPreset || '_default'}
+                        onValueChange={(v) => setSelectedPreset(v === '_default' ? undefined : v === '_none' ? null : v)}
+                      >
+                        <SelectTrigger className="h-8 w-full">
+                          <SelectValue placeholder="Select preset" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="_default">Default</SelectItem>
+                          <SelectItem value="_none">None</SelectItem>
+                          {presetNames.map((name) => (
+                            <SelectItem key={name} value={name}>
+                              {name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  <Button
+                    size="sm"
+                    className="w-full"
+                    onClick={() => {
+                      // null means "None" (pass empty string to skip default), undefined means "Default"
+                      handleStart(selectedMode, selectedPreset === null ? '' : selectedPreset);
+                      setPopoverOpen(false);
+                    }}
+                  >
+                    <Play className="size-3.5" />
+                    Start
+                  </Button>
+                </PopoverContent>
+              </Popover>
+            </div>
+          ) : (
+            <Button size="sm" className="ml-1" onClick={() => handleStart()}>
+              <Play className="size-3.5" />
+              Start
+            </Button>
+          )}
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="Service actions">
+                <MoreVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onEdit}>
+                <Pencil />
+                Edit service
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={onDelete}>
+                <Trash2 />
+                Delete service
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
     </Card>
   );
 }
 
-function StatusOverlay({ status }: { status: string }) {
-  if (status === 'running') {
-    return (
-      <div className="size-full rounded-full animate-pulse bg-green-500/50" />
-    );
-  }
-  if (status === 'starting') {
-    return (
-      <div className="size-full rounded-full animate-pulse bg-yellow-500/50" />
-    );
-  }
-  return null;
-}
-
-function StatusBadge({ status, activeMode, activeArgPreset }: { status: string; activeMode?: string; activeArgPreset?: string }) {
-  const styles = {
-    stopped: 'bg-muted text-muted-foreground',
-    starting: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400',
-    running: 'bg-green-500/10 text-green-600 dark:text-green-400',
-    error: 'bg-red-500/10 text-red-600 dark:text-red-400',
-  };
-
-  const labels = {
+function RunBadge({ status, activeMode, activeArgPreset }: { status: string; activeMode?: string; activeArgPreset?: string }) {
+  const variant = status === 'running' ? 'success' : status === 'starting' ? 'warning' : status === 'error' ? 'destructive' : 'secondary';
+  const labels: Record<string, string> = {
     stopped: 'Stopped',
     starting: 'Starting',
     running: 'Running',
     error: 'Error',
   };
-
-  const label = labels[status as keyof typeof labels] || 'Unknown';
-  // Build label from mode and preset
+  const label = labels[status] || 'Unknown';
   const activeLabels = [activeMode, activeArgPreset].filter(Boolean);
   const activeLabel = activeLabels.length > 0 && (status === 'running' || status === 'starting')
-    ? ` (${activeLabels.join(' + ')})`
+    ? ` · ${activeLabels.join(' + ')}`
     : '';
 
   return (
-    <span
-      className={cn(
-        'text-xs px-1.5 py-0.5 rounded',
-        styles[status as keyof typeof styles] || styles.stopped
-      )}
-    >
+    <Badge variant={variant} className="shrink-0">
       {label}{activeLabel}
-    </span>
+    </Badge>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '@/stores/appStore';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -14,7 +14,6 @@ import { getEnvFileContent } from '@/lib/tauri';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import {
-  ChevronDown,
   ChevronRight,
   RefreshCw,
   Trash2,
@@ -25,6 +24,7 @@ import {
   List,
   Code,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 type ViewMode = 'parsed' | 'raw';
@@ -47,15 +47,17 @@ const variantLabels: Record<string, string> = {
   other: 'Other',
 };
 
-const variantColors: Record<string, string> = {
-  base: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-  local: 'bg-purple-500/10 text-purple-600 dark:text-purple-400',
-  development: 'bg-green-500/10 text-green-600 dark:text-green-400',
-  production: 'bg-red-500/10 text-red-600 dark:text-red-400',
-  test: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400',
-  staging: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
-  example: 'bg-gray-500/10 text-gray-600 dark:text-gray-400',
-  other: 'bg-gray-500/10 text-gray-600 dark:text-gray-400',
+type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'info' | 'destructive';
+
+const variantBadge: Record<string, BadgeVariant> = {
+  base: 'info',
+  local: 'default',
+  development: 'success',
+  production: 'destructive',
+  test: 'warning',
+  staging: 'warning',
+  example: 'secondary',
+  other: 'secondary',
 };
 
 export function EnvFileCard({ envFile, projectId, services, exampleFile }: EnvFileCardProps) {
@@ -180,143 +182,126 @@ export function EnvFileCard({ envFile, projectId, services, exampleFile }: EnvFi
     await handleRefresh();
   };
 
+  const varCount = envFile.variables.length;
+
   return (
-    <Card>
+    <Card size="sm" className={cn('group gap-0 py-0', isOpen && 'border-accent-border')}>
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CardHeader className="p-4">
-          <CollapsibleTrigger className="w-full">
-            <div className="flex items-start gap-3">
-              {/* Expand/collapse icon */}
-              <div className="mt-0.5">
-                {isOpen ? (
-                  <ChevronDown className="size-4 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="size-4 text-muted-foreground" />
-                )}
-              </div>
+        <div className="flex items-center gap-2 px-3 py-2.5">
+          {/* Header — the whole left part toggles the card */}
+          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+            <ChevronRight
+              className={cn('size-4 shrink-0 text-faint transition-transform', isOpen && 'rotate-90')}
+            />
+            <span className="grid size-8 shrink-0 place-items-center rounded-[var(--rad-sm)] bg-muted text-muted-foreground">
+              <FileText className="size-4" />
+            </span>
 
-              {/* File icon */}
-              <FileText className="size-4 mt-0.5 text-muted-foreground flex-shrink-0" />
-
-              {/* Content */}
-              <div className="flex-1 min-w-0 text-left">
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                  <TruncatedText className="font-medium font-mono min-w-0">{envFile.filename}</TruncatedText>
-                  <Badge className={`${variantColors[envFile.variant]} flex-shrink-0`}>
-                    {variantLabels[envFile.variant]}
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <TruncatedText className="min-w-0 font-mono text-[13px] font-medium">{envFile.filename}</TruncatedText>
+                <Badge variant={variantBadge[envFile.variant] ?? 'secondary'} className="shrink-0">
+                  {variantLabels[envFile.variant]}
+                </Badge>
+                {envFile.isManuallyAdded && (
+                  <Badge variant="outline" className="shrink-0">
+                    Manual
                   </Badge>
-                  {envFile.isManuallyAdded && (
-                    <Badge variant="outline" className="text-xs flex-shrink-0">
-                      Manual
-                    </Badge>
-                  )}
-                  <span className="text-xs text-muted-foreground flex-shrink-0">
-                    {envFile.variables.length} vars
-                  </span>
-                </div>
-                <TruncatedText className="text-xs text-muted-foreground mt-0.5 block">
-                  {envFile.relativePath}
-                </TruncatedText>
-                {linkedService && (
-                  <div className="flex items-center gap-1 mt-1">
-                    <Link className="size-3 text-muted-foreground flex-shrink-0" />
-                    <TruncatedText className="text-xs text-muted-foreground min-w-0">
-                      {`Linked to ${linkedService.name}`}
-                    </TruncatedText>
-                  </div>
                 )}
+                <span className="shrink-0 text-[11px] text-faint">
+                  {varCount} var{varCount !== 1 ? 's' : ''}
+                </span>
               </div>
-
-              {/* Actions */}
-              <div
-                className="flex items-center gap-1 flex-shrink-0"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={handleToggleView}
-                      disabled={isLoadingRaw}
-                    >
-                      {viewMode === 'parsed' ? (
-                        <Code className="size-3.5" />
-                      ) : (
-                        <List className="size-3.5" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {viewMode === 'parsed' ? 'View raw content' : 'View parsed variables'}
-                  </TooltipContent>
-                </Tooltip>
-
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={handleCopyContent}
-                    >
-                      <Copy className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Copy content</TooltipContent>
-                </Tooltip>
-
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={handleExport}
-                    >
-                      <Download className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Export file</TooltipContent>
-                </Tooltip>
-
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={handleRefreshWithClear}
-                      disabled={isRefreshing}
-                    >
-                      <RefreshCw
-                        className={`size-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
-                      />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Refresh file contents</TooltipContent>
-                </Tooltip>
-
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={handleRemove}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Remove from tracking</TooltipContent>
-                </Tooltip>
+              <div className="mt-0.5 flex min-w-0 items-center gap-2 font-mono text-[11px] text-faint">
+                <TruncatedText className="min-w-0">{envFile.relativePath}</TruncatedText>
+                {linkedService && (
+                  <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+                    <Link className="size-3" />
+                    <span className="font-sans">Linked to {linkedService.name}</span>
+                  </span>
+                )}
               </div>
             </div>
           </CollapsibleTrigger>
-        </CardHeader>
+
+          {/* Actions */}
+          <div className="flex shrink-0 items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={handleToggleView}
+                  disabled={isLoadingRaw}
+                  aria-label={viewMode === 'parsed' ? 'View raw content' : 'View parsed variables'}
+                >
+                  {viewMode === 'parsed' ? (
+                    <Code className="size-3.5" />
+                  ) : (
+                    <List className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {viewMode === 'parsed' ? 'View raw content' : 'View parsed variables'}
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" onClick={handleCopyContent} aria-label="Copy content">
+                  <Copy className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Copy content</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" onClick={handleExport} aria-label="Export file">
+                  <Download className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Export file</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={handleRefreshWithClear}
+                  disabled={isRefreshing}
+                  aria-label="Refresh file contents"
+                >
+                  <RefreshCw className={cn('size-3.5', isRefreshing && 'animate-spin')} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Refresh file contents</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={handleRemove}
+                  className="text-destructive hover:text-destructive"
+                  aria-label="Remove from tracking"
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Remove from tracking</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
 
         <CollapsibleContent>
-          <CardContent className="px-4 pb-4 pt-0">
+          <div className="border-t border-border px-3 py-3">
             {/* Comparison banner - only show in parsed view */}
             {viewMode === 'parsed' && comparison && exampleFile && (
-              <div className="mb-4">
+              <div className="mb-3">
                 <EnvComparisonBanner
                   comparison={comparison}
                   baseFileName={envFile.filename}
@@ -327,7 +312,7 @@ export function EnvFileCard({ envFile, projectId, services, exampleFile }: EnvFi
 
             {viewMode === 'parsed' ? (
               /* Parsed variables list */
-              envFile.variables.length > 0 ? (
+              varCount > 0 ? (
                 <div className="space-y-1">
                   {envFile.variables.map((variable) => (
                     <EnvVariableRow
@@ -337,7 +322,7 @@ export function EnvFileCard({ envFile, projectId, services, exampleFile }: EnvFi
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground text-center py-4">
+                <p className="py-4 text-center text-xs text-muted-foreground">
                   No variables found in this file
                 </p>
               )
@@ -346,22 +331,22 @@ export function EnvFileCard({ envFile, projectId, services, exampleFile }: EnvFi
               <div className="relative">
                 {isLoadingRaw ? (
                   <div className="flex items-center justify-center py-8">
-                    <RefreshCw className="size-5 animate-spin text-muted-foreground" />
+                    <RefreshCw className="size-5 animate-spin text-faint" />
                   </div>
                 ) : rawContent !== null ? (
-                  <ScrollArea className="h-64 w-full rounded border bg-muted/30">
-                    <pre className="p-3 text-xs font-mono whitespace-pre-wrap break-all">
+                  <ScrollArea className="h-64 w-full rounded-sm border border-border bg-muted/40">
+                    <pre className="whitespace-pre-wrap break-all p-3 font-mono text-[11px] text-foreground/90">
                       {rawContent}
                     </pre>
                   </ScrollArea>
                 ) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">
+                  <p className="py-4 text-center text-xs text-muted-foreground">
                     Failed to load content
                   </p>
                 )}
               </div>
             )}
-          </CardContent>
+          </div>
         </CollapsibleContent>
       </Collapsible>
     </Card>

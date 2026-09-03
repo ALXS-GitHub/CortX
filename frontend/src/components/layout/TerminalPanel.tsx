@@ -5,32 +5,35 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ChevronDown,
   ChevronUp,
   X,
   Trash2,
   Square,
-  Circle,
   Eye,
   XCircle,
-  GripHorizontal,
   Terminal,
-  FileCode,
   AlertTriangle,
   Plus,
-  SquareTerminal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { XtermView } from './XtermView';
 import { clearTerminal } from '@/lib/terminalSessions';
-import { TerminalDndContext, type TerminalItem, type TerminalType } from './terminal-dnd';
+import { StatusDot } from '@/components/ui/StatusDot';
+import { TerminalDndContext, type TerminalItem } from './terminal-dnd';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
-import { SortableTerminalTab } from './terminal-dnd';
+import { SortableTerminalTab } from './terminal-dnd/SortableTerminalTab';
+import { TerminalTypeIcon } from './terminal-dnd/TerminalTypeIcon';
+
+/** Height of the collapsed dock strip. */
+export const TERMINAL_BAR_HEIGHT = 32;
 
 /** Last path segment, tolerant of both separators and trailing slashes. */
 function basename(path: string): string {
@@ -58,8 +61,8 @@ class TerminalErrorBoundary extends Component<{ children: ReactNode; onReset: ()
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex-1 flex flex-col items-center justify-center gap-2 p-4 text-muted-foreground">
-          <AlertTriangle className="size-8 text-yellow-500" />
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-muted-foreground">
+          <AlertTriangle className="size-8 text-warning" />
           <p className="text-sm">Terminal display error occurred</p>
           <Button
             variant="outline"
@@ -78,7 +81,36 @@ class TerminalErrorBoundary extends Component<{ children: ReactNode; onReset: ()
   }
 }
 
-// Create ANSI to HTML converter with dark theme colors
+/** Small icon button of the dock toolbar. */
+function DockButton({
+  label,
+  onClick,
+  children,
+  danger,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+  danger?: boolean;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onClick}
+          aria-label={label}
+          className={cn('size-7 rounded-[var(--rad-xs)]', danger && 'hover:bg-destructive/15 hover:text-destructive')}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 // Droppable pane component with edge drop zones
 function DroppablePaneContent({
   pane,
@@ -136,40 +168,40 @@ function DroppablePaneContent({
     <div
       ref={setPaneRef}
       className={cn(
-        'flex flex-col min-w-0 min-h-0 relative flex-1',
-        isFocused && 'ring-1 ring-primary/50 ring-inset'
+        'relative flex min-h-0 min-w-0 flex-1 flex-col',
+        isFocused && 'ring-1 ring-inset ring-primary/40'
       )}
       onClick={onFocusPane}
     >
       {/* Left edge drop zone - detection handled by custom collision detection, starts below tabs */}
       <div
         ref={setLeftEdgeRef}
-        className="absolute left-0 top-9 bottom-0 w-[25%] z-30 pointer-events-none"
+        className="pointer-events-none absolute bottom-0 left-0 top-9 z-30 w-[25%]"
       />
       {isOverLeftEdge && (
-        <div className="absolute left-0 top-9 bottom-0 w-[25%] bg-muted/50 border-2 border-dashed border-primary rounded-bl flex items-center justify-center z-20 pointer-events-none">
-          <span className="text-xs text-muted-foreground">New Pane</span>
+        <div className="pointer-events-none absolute bottom-0 left-0 top-9 z-20 flex w-[25%] items-center justify-center rounded-bl border-2 border-dashed border-primary bg-primary/10">
+          <span className="text-xs text-muted-foreground">New pane</span>
         </div>
       )}
 
       {/* Right edge drop zone - detection handled by custom collision detection, starts below tabs */}
       <div
         ref={setRightEdgeRef}
-        className="absolute right-0 top-9 bottom-0 w-[25%] z-30 pointer-events-none"
+        className="pointer-events-none absolute bottom-0 right-0 top-9 z-30 w-[25%]"
       />
       {isOverRightEdge && (
-        <div className="absolute right-0 top-9 bottom-0 w-[25%] bg-muted/50 border-2 border-dashed border-primary rounded-br flex items-center justify-center z-20 pointer-events-none">
-          <span className="text-xs text-muted-foreground">New Pane</span>
+        <div className="pointer-events-none absolute bottom-0 right-0 top-9 z-20 flex w-[25%] items-center justify-center rounded-br border-2 border-dashed border-primary bg-primary/10">
+          <span className="text-xs text-muted-foreground">New pane</span>
         </div>
       )}
 
       {/* Center pane drop indicator */}
       {isOverPane && !isOverLeftEdge && !isOverRightEdge && (
-        <div className="absolute inset-2 bg-primary/10 border-2 border-primary border-dashed rounded z-20 pointer-events-none" />
+        <div className="pointer-events-none absolute inset-2 z-20 rounded-sm border-2 border-dashed border-primary bg-primary/10" />
       )}
 
       {/* Tabs bar */}
-      <div className="flex items-center bg-muted/30 border-b text-xs shrink-0 overflow-x-auto">
+      <div className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-border bg-background/70 text-xs no-scrollbar">
         <SortableContext
           items={paneTerminals.map((t) => t.id)}
           strategy={horizontalListSortingStrategy}
@@ -186,14 +218,14 @@ function DroppablePaneContent({
               />
             ))
           ) : (
-            <div className="px-2 py-1.5 text-muted-foreground">Empty pane</div>
+            <div className="flex items-center px-3 text-faint">Empty pane</div>
           )}
         </SortableContext>
 
-        {/* Pane actions — Clear/Stop live in the top panel toolbar (one shared set
+        {/* Pane actions — Clear/Stop live in the dock toolbar (one shared set
             for the focused pane). Only the Close-pane button is per-pane. */}
-        <div className="ml-auto flex items-center shrink-0 px-1">
-          {showRemoveButton && (
+        {showRemoveButton && (
+          <div className="ml-auto flex shrink-0 items-center px-1.5">
             <Button
               variant="ghost"
               size="icon-xs"
@@ -202,23 +234,23 @@ function DroppablePaneContent({
                 onRemovePane();
               }}
               title="Close pane"
-              className="ml-1 border-l pl-1"
+              aria-label="Close pane"
             >
               <X className="size-3" />
             </Button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Pane content: the persistent xterm.js session for the active tab */}
       {activeTerminal ? (
         <TerminalErrorBoundary onReset={() => onClearLogs(activeTerminal.id)}>
-          <div className="flex-1 min-h-0 relative">
+          <div className="relative min-h-0 flex-1">
             <XtermView terminalId={activeTerminal.id} autoFocus={isFocused} />
           </div>
         </TerminalErrorBoundary>
       ) : (
-        <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-muted-foreground gap-2">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-faint">
           <p className="text-sm">Drop a terminal here or start a service</p>
         </div>
       )}
@@ -226,6 +258,11 @@ function DroppablePaneContent({
   );
 }
 
+/**
+ * Bottom terminal dock. Follows the app theme, sits under the current screen
+ * in the main column, resizable by dragging its top edge and collapsible to a
+ * one-line strip.
+ */
 export function TerminalPanel() {
   const {
     terminalPanelOpen,
@@ -297,10 +334,14 @@ export function TerminalPanel() {
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
   }, [isResizing, setTerminalHeight]);
 
@@ -447,6 +488,10 @@ export function TerminalPanel() {
 
   // Total active count (visible + hidden)
   const totalActiveCount = visibleTerminals.length + hiddenTerminals.length;
+  const runningCount = useMemo(
+    () => allTerminals.filter((t) => t.status === 'running' && terminals.get(t.id)?.visibility !== 'closed').length,
+    [allTerminals, terminals]
+  );
 
   // Resolve terminal kind + runtimeKey from the prefixed terminal ID.
   const resolveTerminal = useCallback((id: string) => {
@@ -513,14 +558,7 @@ export function TerminalPanel() {
   }, [activeTerminalId, allTerminals]);
 
   // Check if current terminal can be stopped
-  const canStopCurrent = useMemo(() => {
-    if (!currentTerminal) return false;
-    if (currentTerminal.type === 'service') {
-      return currentTerminal.status === 'running';
-    } else {
-      return currentTerminal.status === 'running';
-    }
-  }, [currentTerminal]);
+  const canStopCurrent = currentTerminal?.status === 'running';
 
   // Pane resize handlers
   const panesContainerRef = useRef<HTMLDivElement>(null);
@@ -608,140 +646,139 @@ export function TerminalPanel() {
     else if (parsed.kind === 'service') clearServiceLogs(parsed.runtimeKey);
   }, [resolveTerminal, clearScriptLogs, clearServiceLogs, clearGlobalScriptLogs]);
 
+  const newShellLabel = newShellProjectName ? `New terminal in ${newShellProjectName}` : 'New terminal';
+
+  // ---- Collapsed strip ----
   if (!terminalPanelOpen) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full h-8 rounded-none gap-2"
+      <div
+        className="glass flex shrink-0 items-center border-t border-border pl-3 pr-1.5"
+        style={{ height: TERMINAL_BAR_HEIGHT }}
+      >
+        <button
+          type="button"
           onClick={toggleTerminalPanel}
+          className="flex h-full min-w-0 flex-1 items-center gap-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          title="Show the terminal panel"
         >
-          <ChevronUp className="size-4" />
-          <span>Terminal ({totalActiveCount} active)</span>
-        </Button>
+          <Terminal className="size-3.5 text-faint" />
+          <span className="font-medium">Terminal</span>
+          {totalActiveCount > 0 ? (
+            <span className="inline-flex items-center gap-1.5 text-faint">
+              <span className="tabular-nums">{totalActiveCount} active</span>
+              {runningCount > 0 && (
+                <span className="inline-flex items-center gap-1 text-st-done">
+                  <StatusDot tone="running" size={6} />
+                  {runningCount} running
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="text-faint">No active terminal</span>
+          )}
+          <ChevronUp className="ml-auto size-3.5" />
+        </button>
+        <DockButton label={newShellLabel} onClick={handleNewShell}>
+          <Plus className="size-3.5" />
+        </DockButton>
       </div>
     );
   }
 
+  // ---- Expanded dock ----
   return (
     <TerminalDndContext allTerminals={allTerminals}>
       <div
         ref={containerRef}
         className={cn(
-          "fixed bottom-0 left-0 right-0 z-50 bg-card border-t flex flex-col",
-          isResizing && "select-none"
+          'terminal-dock relative flex shrink-0 flex-col border-t border-border shadow-[0_-8px_24px_-16px_hsl(var(--shadow-color)/0.4)]',
+          isResizing && 'select-none'
         )}
         style={{ height: terminalHeight }}
       >
-        {/* Resize handle */}
+        {/* Resize handle (top edge) */}
         <div
-          className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize hover:bg-primary/50 transition-colors flex items-center justify-center group"
+          className="group absolute -top-1 left-0 right-0 z-40 h-2 cursor-ns-resize"
           onMouseDown={handleResizeStart}
         >
-          <div className="absolute -top-1 left-0 right-0 h-3" /> {/* Larger hit area */}
-          <GripHorizontal className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className={cn('mx-auto mt-[3px] h-0.5 w-full transition-colors', isResizing ? 'bg-primary' : 'bg-transparent group-hover:bg-accent-border')} />
         </div>
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/50 mt-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">Terminal</span>
-            <span className="text-xs text-muted-foreground">
-              ({visibleTerminals.length} visible
-              {hiddenTerminals.length > 0 && `, ${hiddenTerminals.length} hidden`})
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={handleNewShell}
-              title={newShellProjectName ? `New terminal in ${newShellProjectName}` : 'New terminal'}
-            >
-              <Plus className="size-4" />
-            </Button>
+        {/* Toolbar */}
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-background/70 px-3">
+          <Terminal className="size-3.5 text-faint" />
+          <span className="text-xs font-medium">Terminal</span>
+          <span className="text-xs tabular-nums text-faint">
+            {visibleTerminals.length} open
+            {hiddenTerminals.length > 0 && ` · ${hiddenTerminals.length} hidden`}
+            {runningCount > 0 && ` · ${runningCount} running`}
+          </span>
 
-            {/* Hidden terminals dropdown */}
+          <div className="ml-auto flex items-center gap-0.5">
+            <DockButton label={newShellLabel} onClick={handleNewShell}>
+              <Plus className="size-3.5" />
+            </DockButton>
+
+            {/* Hidden terminals tray */}
             {hiddenTerminals.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" title="Show hidden terminals">
+                  <Button variant="ghost" size="icon-sm" className="size-7 rounded-[var(--rad-xs)]" title="Hidden terminals" aria-label="Hidden terminals">
                     <Eye className="size-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {hiddenTerminals.map((item) => (
-                    <DropdownMenuItem key={item.id} onClick={() => handleShowTerminal(item)}>
-                      {item.type === 'script' ? (
-                        <FileCode className="size-3 mr-2 text-muted-foreground" />
-                      ) : item.type === 'shell' ? (
-                        <SquareTerminal className="size-3 mr-2 text-muted-foreground" />
-                      ) : (
-                        <Terminal className="size-3 mr-2 text-muted-foreground" />
-                      )}
-                      <StatusIndicator status={item.status} type={item.type} />
-                      <span className="ml-2">
-                        {item.name}
-                        {item.projectName && (
-                          <span className="text-muted-foreground ml-1">({item.projectName})</span>
-                        )}
-                      </span>
-                    </DropdownMenuItem>
-                  ))}
+                <DropdownMenuContent align="end" className="min-w-56">
+                  <DropdownMenuLabel>Hidden terminals</DropdownMenuLabel>
+                  {hiddenTerminals.map((item) => {
+                    return (
+                      <DropdownMenuItem key={item.id} onClick={() => handleShowTerminal(item)}>
+                        <TerminalTypeIcon type={item.type} className="size-3.5" />
+                        <StatusDot status={item.status} size={7} />
+                        <span className="truncate">
+                          {item.name}
+                          {item.projectName && (
+                            <span className="ml-1 text-faint">· {item.projectName}</span>
+                          )}
+                        </span>
+                      </DropdownMenuItem>
+                    );
+                  })}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
 
             {currentTerminal && (
               <>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={handleClearCurrent}
-                  title="Clear logs"
-                >
+                <DockButton label="Clear output" onClick={handleClearCurrent}>
                   <Trash2 className="size-3.5" />
-                </Button>
+                </DockButton>
                 {canStopCurrent && (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={handleStopCurrent}
-                    title={
+                  <DockButton
+                    danger
+                    label={
                       currentTerminal.type === 'shell'
                         ? 'Kill shell'
                         : currentTerminal.type === 'service'
                           ? 'Stop service'
                           : 'Stop script'
                     }
+                    onClick={handleStopCurrent}
                   >
                     <Square className="size-3.5" />
-                  </Button>
+                  </DockButton>
                 )}
               </>
             )}
 
-            {/* Close all terminals button */}
             {visibleTerminals.length > 0 && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={closeAllTerminals}
-                title="Close all terminals"
-              >
+              <DockButton label="Close all terminals" onClick={closeAllTerminals}>
                 <XCircle className="size-3.5" />
-              </Button>
+              </DockButton>
             )}
 
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={toggleTerminalPanel}
-              title="Minimize"
-            >
+            <DockButton label="Minimize" onClick={toggleTerminalPanel}>
               <ChevronDown className="size-4" />
-            </Button>
+            </DockButton>
           </div>
         </div>
 
@@ -749,20 +786,20 @@ export function TerminalPanel() {
         <div
           ref={panesContainerRef}
           className={cn(
-            'flex-1 flex min-h-0',
+            'flex min-h-0 flex-1',
             (isResizing || resizingPaneIndex !== null) && 'select-none'
           )}
         >
           {visibleTerminals.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-foreground">
-              <p>
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+              <p className="text-sm">
                 {hiddenTerminals.length > 0
-                  ? 'All terminals are hidden. Click the eye icon to show them.'
-                  : 'No active terminals. Start a service or script, or open a shell.'}
+                  ? 'All terminals are hidden — use the eye button to bring one back.'
+                  : 'No active terminal. Start a service or a script, or open a shell.'}
               </p>
-              <Button variant="outline" size="sm" onClick={handleNewShell} className="gap-1.5">
+              <Button variant="outline" size="sm" onClick={handleNewShell}>
                 <Plus className="size-3.5" />
-                {newShellProjectName ? `New terminal in ${newShellProjectName}` : 'New terminal'}
+                {newShellLabel}
               </Button>
             </div>
           ) : (
@@ -777,7 +814,7 @@ export function TerminalPanel() {
                 return (
                   <Fragment key={pane.id}>
                     {/* Pane - flex container to allow children to use flex-1 */}
-                    <div className="flex flex-col min-h-0 min-w-0" style={{ width: `${widthPercent}%` }}>
+                    <div className="flex min-h-0 min-w-0 flex-col" style={{ width: `${widthPercent}%` }}>
                       <DroppablePaneContent
                         pane={pane}
                         paneTerminals={paneTerminals}
@@ -795,7 +832,7 @@ export function TerminalPanel() {
                     {/* Resize handle between panes */}
                     {paneIndex < terminalPanes.length - 1 && (
                       <div
-                        className="w-1 bg-border hover:bg-primary/50 cursor-col-resize flex-shrink-0 transition-colors"
+                        className="w-1 flex-shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/60"
                         onMouseDown={(e) => handlePaneResizeStart(e, paneIndex)}
                       />
                     )}
@@ -807,31 +844,5 @@ export function TerminalPanel() {
         </div>
       </div>
     </TerminalDndContext>
-  );
-}
-
-function StatusIndicator({ status, type }: { status: string; type?: TerminalType }) {
-  // Service statuses: stopped, starting, running, error
-  // Script statuses: idle, running, completed, failed
-  const serviceColors = {
-    stopped: 'text-muted-foreground',
-    starting: 'text-yellow-500 animate-pulse',
-    running: 'text-green-500',
-    error: 'text-red-500',
-  };
-
-  const scriptColors = {
-    idle: 'text-muted-foreground',
-    running: 'text-blue-500 animate-pulse',
-    completed: 'text-green-500',
-    failed: 'text-red-500',
-  };
-
-  const colors = type === 'service' ? serviceColors : scriptColors;
-
-  return (
-    <Circle
-      className={cn('size-2 fill-current', colors[status as keyof typeof colors] || 'text-muted-foreground')}
-    />
   );
 }

@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Download, RefreshCw } from 'lucide-react';
 
@@ -83,28 +84,29 @@ export function UpdateChecker() {
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle className="flex items-center gap-2">
-            <Download className="size-5" />
-            Update Available
+            <Download className="size-5 text-primary" />
+            Update available
+            <Badge variant="default" className="font-mono">v{update.version}</Badge>
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <div className="space-y-2">
+            <div className="space-y-3">
               <p>
-                A new version of Cortx is available: <strong>v{update.version}</strong>
+                A new version of CortX is ready to install.
               </p>
               {update.body && (
-                <div className="mt-2 p-3 bg-muted rounded-md text-sm max-h-32 overflow-y-auto">
-                  <p className="font-medium mb-1">Release Notes:</p>
-                  <p className="whitespace-pre-wrap">{update.body}</p>
+                <div className="max-h-32 overflow-y-auto rounded-lg border border-border bg-card/60 p-3 text-sm">
+                  <span className="eyebrow mb-1 block">Release notes</span>
+                  <p className="whitespace-pre-wrap text-foreground/90">{update.body}</p>
                 </div>
               )}
               {isDownloading && (
-                <div className="mt-4 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <RefreshCw className="size-4 animate-spin" />
-                    <span className="text-sm">Downloading update...</span>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-foreground">
+                    <RefreshCw className="size-4 animate-spin text-primary" />
+                    <span className="text-sm">Downloading update…</span>
                   </div>
                   <Progress value={downloadProgress} className="h-2" />
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs tabular-nums text-faint">
                     {Math.round(downloadProgress)}% complete
                   </p>
                 </div>
@@ -117,7 +119,7 @@ export function UpdateChecker() {
             Later
           </AlertDialogCancel>
           <AlertDialogAction onClick={handleUpdate} disabled={isDownloading}>
-            {isDownloading ? 'Installing...' : 'Update Now'}
+            {isDownloading ? 'Installing…' : 'Update now'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

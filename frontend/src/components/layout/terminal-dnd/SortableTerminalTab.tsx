@@ -1,33 +1,10 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Circle, FileCode, SquareTerminal, Terminal, X } from 'lucide-react';
+import { X } from 'lucide-react';
+import { TerminalTypeIcon } from './TerminalTypeIcon';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import type { TerminalItem, TerminalType } from './types';
-
-function StatusIndicator({ status, type }: { status: string; type?: TerminalType }) {
-  const serviceColors = {
-    stopped: 'text-muted-foreground',
-    starting: 'text-yellow-500 animate-pulse',
-    running: 'text-green-500',
-    error: 'text-red-500',
-  };
-
-  const scriptColors = {
-    idle: 'text-muted-foreground',
-    running: 'text-blue-500 animate-pulse',
-    completed: 'text-green-500',
-    failed: 'text-red-500',
-  };
-
-  const colors = type === 'service' ? serviceColors : scriptColors;
-
-  return (
-    <Circle
-      className={cn('size-2 fill-current', colors[status as keyof typeof colors] || 'text-muted-foreground')}
-    />
-  );
-}
+import { StatusDot } from '@/components/ui/StatusDot';
+import type { TerminalItem } from './types';
 
 interface SortableTerminalTabProps {
   terminal: TerminalItem;
@@ -37,6 +14,10 @@ interface SortableTerminalTabProps {
   onHide: () => void;
 }
 
+/**
+ * One tab of a terminal pane. Draggable between panes (dnd-kit); the active
+ * tab blends into the terminal canvas below it with an accent line on top.
+ */
 export function SortableTerminalTab({
   terminal,
   paneId,
@@ -71,10 +52,11 @@ export function SortableTerminalTab({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "group/tab flex items-center gap-1.5 px-2 py-1.5 border-r select-none min-w-0 max-w-[200px]",
-        "hover:bg-muted/50 transition-colors cursor-grab",
-        isActive && "bg-background border-b-2 border-b-primary",
-        isDragging && "opacity-50 bg-muted/30"
+        'group/tab relative flex h-9 min-w-0 max-w-[220px] cursor-grab select-none items-center gap-2 border-r border-border px-3 text-xs transition-colors',
+        isActive
+          ? 'bg-terminal text-foreground'
+          : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+        isDragging && 'opacity-50'
       )}
       onClick={(e) => {
         e.stopPropagation();
@@ -83,38 +65,33 @@ export function SortableTerminalTab({
       {...attributes}
       {...listeners}
     >
-      {terminal.type === 'script' ? (
-        <FileCode className="size-3 text-muted-foreground shrink-0 pointer-events-none" />
-      ) : terminal.type === 'shell' ? (
-        <SquareTerminal className="size-3 text-muted-foreground shrink-0 pointer-events-none" />
-      ) : (
-        <Terminal className="size-3 text-muted-foreground shrink-0 pointer-events-none" />
-      )}
-      <StatusIndicator status={terminal.status} type={terminal.type} />
-      <span className="truncate pointer-events-none" title={terminal.cwd}>{terminal.name}</span>
+      {isActive && <span className="pointer-events-none absolute inset-x-0 top-0 h-0.5 rounded-b-full bg-primary" />}
+      <TerminalTypeIcon type={terminal.type} className="pointer-events-none size-3.5 shrink-0 text-faint" />
+      <StatusDot status={terminal.status} size={7} className="pointer-events-none" />
+      <span className="pointer-events-none truncate" title={terminal.cwd}>{terminal.name}</span>
       {terminal.type === 'service' && terminal.detectedPorts.length > 0 && (
         <span
-          className="text-[10px] px-1 py-0.5 rounded bg-primary/20 text-primary font-mono shrink-0 pointer-events-none"
+          className="pointer-events-none shrink-0 rounded-full bg-primary/15 px-1.5 font-mono text-[10px] leading-4 text-primary"
           title={terminal.detectedPorts.length > 1 ? `Listening on: ${terminal.detectedPorts.join(', ')}` : undefined}
         >
           :{terminal.detectedPorts[0]}
           {terminal.detectedPorts.length > 1 && `+${terminal.detectedPorts.length - 1}`}
         </span>
       )}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        className="shrink-0 ml-auto opacity-0 group-hover/tab:opacity-100"
+      <button
+        type="button"
+        className="ml-auto grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/tab:opacity-100"
         onClick={(e) => {
           e.stopPropagation();
           e.preventDefault();
           onHide();
         }}
         onPointerDown={(e) => e.stopPropagation()}
-        title="Close tab"
+        title="Hide tab (the process keeps running)"
+        aria-label="Hide tab"
       >
-        <X className="size-3 pointer-events-none" />
-      </Button>
+        <X className="pointer-events-none size-3" />
+      </button>
     </div>
   );
 }

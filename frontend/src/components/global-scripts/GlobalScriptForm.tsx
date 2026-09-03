@@ -11,10 +11,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
+import { TagBadge } from '@/components/ui/TagBadge';
 import { ComboboxInput } from '@/components/ui/combobox-input';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { FileSearch, X } from 'lucide-react';
+import { FileSearch } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import type { GlobalScript, CreateGlobalScriptInput, UpdateGlobalScriptInput } from '@/types';
 
@@ -144,9 +145,6 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
         (d) => !tags.some((t) => t.toLowerCase() === d.name.toLowerCase())
       );
 
-  const getTagDef = (tag: string) =>
-    tagDefinitions.find((d) => d.name.toLowerCase() === tag.toLowerCase());
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -183,10 +181,10 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
-        <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
-          <DialogHeader className="flex-shrink-0">
-            <DialogTitle>{isEditing ? 'Edit Script' : 'Add New Global Script'}</DialogTitle>
+      <DialogContent className="sm:max-w-lg">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-5">
+          <DialogHeader>
+            <DialogTitle>{isEditing ? 'Edit script' : 'Add script'}</DialogTitle>
             <DialogDescription>
               {isEditing
                 ? 'Update the script configuration.'
@@ -194,8 +192,8 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4 overflow-y-auto flex-1 px-1">
-            <div className="grid gap-2">
+          <div className="-mx-6 min-h-0 flex-1 space-y-4 overflow-y-auto px-6">
+            <div className="space-y-2">
               <Label htmlFor="gs-name">Name *</Label>
               <Input
                 id="gs-name"
@@ -205,7 +203,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
               />
             </div>
 
-            <div className="grid gap-2">
+            <div className="space-y-2">
               <Label htmlFor="gs-description">Description</Label>
               <Textarea
                 id="gs-description"
@@ -216,72 +214,48 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
               />
             </div>
 
-            <div className="grid gap-2">
+            <div className="space-y-2">
               <Label htmlFor="gs-command">Command *</Label>
               <Input
                 id="gs-command"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
                 placeholder="e.g., python {{SCRIPT_FILE}} --verbose"
+                className="font-mono text-[12px]"
               />
               {scriptPath && command.includes('{{SCRIPT_FILE}}') && (
                 <p className="text-xs text-muted-foreground">
-                  <code className="bg-muted px-1 rounded">{'{{SCRIPT_FILE}}'}</code> will be replaced with the script file path at runtime.
+                  <code className="rounded-xs bg-muted px-1 font-mono">{'{{SCRIPT_FILE}}'}</code> will be replaced with the script file path at runtime.
                 </p>
               )}
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="gs-script-path">Script File (optional)</Label>
+            <div className="space-y-2">
+              <Label htmlFor="gs-script-path">Script file (optional)</Label>
               <div className="flex gap-2">
                 <Input
                   id="gs-script-path"
                   value={scriptPath}
                   onChange={(e) => setScriptPath(e.target.value)}
                   placeholder="Path to script file"
-                  className="flex-1"
+                  className="flex-1 font-mono text-[12px]"
                 />
-                <Button type="button" variant="outline" onClick={handleBrowseScriptPath} title="Browse">
-                  <FileSearch className="size-4" />
+                <Button type="button" variant="outline" size="icon" onClick={handleBrowseScriptPath} title="Browse" aria-label="Browse for script file">
+                  <FileSearch />
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Use <code className="bg-muted px-1 rounded">{'{{SCRIPT_FILE}}'}</code> in the command to reference this path.
+                Use <code className="rounded-xs bg-muted px-1 font-mono">{'{{SCRIPT_FILE}}'}</code> in the command to reference this path.
               </p>
             </div>
 
-            <div className="grid gap-2">
+            <div className="space-y-2">
               <Label htmlFor="gs-tags">Tags</Label>
               <div className="relative">
-                <div className="flex flex-wrap gap-1 items-center border rounded-md px-2 py-1.5 min-h-[36px] focus-within:ring-1 focus-within:ring-ring">
-                  {tags.map((tag) => {
-                    const def = getTagDef(tag);
-                    return (
-                      <Badge
-                        key={tag}
-                        variant="outline"
-                        className="text-xs gap-1 pr-1"
-                        style={
-                          def?.color
-                            ? {
-                                borderColor: def.color,
-                                color: def.color,
-                                backgroundColor: `${def.color}10`,
-                              }
-                            : undefined
-                        }
-                      >
-                        {tag}
-                        <button
-                          type="button"
-                          onClick={() => removeTag(tag)}
-                          className="hover:bg-muted rounded-sm p-0.5"
-                        >
-                          <X className="size-2.5" />
-                        </button>
-                      </Badge>
-                    );
-                  })}
+                <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-sm border border-input bg-[var(--bg-input)] px-2 py-1.5 shadow-soft transition-[border-color,box-shadow] focus-within:border-accent-border focus-within:ring-2 focus-within:ring-ring/40">
+                  {tags.map((tag) => (
+                    <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} onRemove={() => removeTag(tag)} />
+                  ))}
                   <input
                     ref={tagInputRef}
                     id="gs-tags"
@@ -296,28 +270,26 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
                       setTimeout(() => setShowTagSuggestions(false), 150);
                     }}
                     onKeyDown={handleTagInputKeyDown}
-                    placeholder={tags.length === 0 ? 'Type to add tags...' : ''}
-                    className="flex-1 min-w-[80px] bg-transparent outline-none text-sm"
+                    placeholder={tags.length === 0 ? 'Type to add tags…' : ''}
+                    className="min-w-[80px] flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
                   />
                 </div>
                 {showTagSuggestions && tagSuggestions.length > 0 && (
-                  <div className="absolute z-10 top-full mt-1 w-full bg-popover border rounded-md shadow-md max-h-32 overflow-y-auto">
+                  <div className="glass-strong absolute top-full z-10 mt-1 max-h-36 w-full overflow-y-auto rounded-lg border border-border-strong p-1.5 shadow-pop">
                     {tagSuggestions.map((def) => (
                       <button
                         key={def.name}
                         type="button"
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted text-left"
+                        className="flex w-full items-center gap-2 rounded-[calc(var(--radius-sm)-2px)] px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-accent"
                         onMouseDown={(e) => {
                           e.preventDefault();
                           addTag(def.name);
                         }}
                       >
-                        {def.color && (
-                          <span
-                            className="size-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: def.color }}
-                          />
-                        )}
+                        <span
+                          className="size-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: def.color || 'var(--text-faint)' }}
+                        />
                         {def.name}
                       </button>
                     ))}
@@ -329,7 +301,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
               </p>
             </div>
 
-            <div className="grid gap-2">
+            <div className="space-y-2">
               <Label htmlFor="gs-status">Status</Label>
               <ComboboxInput
                 id="gs-status"
@@ -340,16 +312,19 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
               />
             </div>
 
-            <div className="grid gap-2">
+            <div className="space-y-2">
               <Label>Color</Label>
               <div className="flex gap-2">
                 {SCRIPT_COLORS.map((c) => (
                   <button
                     key={c}
                     type="button"
-                    className={`size-6 rounded-full transition-all ${
-                      color === c ? 'ring-2 ring-offset-2 ring-primary' : ''
-                    }`}
+                    aria-label={`Use colour ${c}`}
+                    aria-pressed={color === c}
+                    className={cn(
+                      'size-6 rounded-full transition-[box-shadow,transform] hover:scale-110',
+                      color === c && 'ring-2 ring-ring ring-offset-2 ring-offset-background'
+                    )}
                     style={{ backgroundColor: c }}
                     onClick={() => setColor(c)}
                   />
@@ -360,12 +335,12 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
 
-          <DialogFooter className="flex-shrink-0 pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Add Script'}
+              {isSubmitting ? 'Saving…' : isEditing ? 'Save changes' : 'Add script'}
             </Button>
           </DialogFooter>
         </form>

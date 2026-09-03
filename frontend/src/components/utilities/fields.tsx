@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -33,7 +34,7 @@ export function Row({
     <div className={cn('space-y-1.5', className)}>
       {label && <Label className="text-xs font-medium text-muted-foreground">{label}</Label>}
       {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-xs text-faint">{hint}</p>}
     </div>
   );
 }
@@ -93,10 +94,10 @@ export function NumberField({
             const next = Number(e.target.value);
             onChange(clamp(Number.isFinite(next) ? next : (min ?? 0)));
           }}
-          className={suffix ? 'pr-10' : undefined}
+          className={cn('tabular-nums', suffix && 'pr-10')}
         />
         {suffix && (
-          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[11px] text-faint">
             {suffix}
           </span>
         )}
@@ -167,13 +168,15 @@ export function SelectField<T extends string>({
 }
 
 /**
- * Standard two-column panel: settings on the left, result on the right.
- * Collapses to a single column below `lg`.
+ * Standard two-column panel: settings on the left (in a card), result on the
+ * right. Collapses to a single column below `lg`.
  */
 export function PanelLayout({ options, output }: { options: ReactNode; output: ReactNode }) {
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-      <div className="space-y-4">{options}</div>
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+      <Card size="sm" className="self-start">
+        <CardContent className="space-y-4">{options}</CardContent>
+      </Card>
       <div className="min-w-0 space-y-3">{output}</div>
     </div>
   );

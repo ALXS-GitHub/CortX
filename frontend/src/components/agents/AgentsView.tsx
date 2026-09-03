@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Bot, RefreshCw, Search } from 'lucide-react';
+import { Bot, RefreshCw, Search, SearchX } from 'lucide-react';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/input';
+import { Segmented } from '@/components/ui/Segmented';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ViewModeToggle } from '@/components/ui/view-mode-toggle';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore, type AgentsGroupMode, type AgentsScope } from '@/stores/viewPrefsStore';
@@ -22,6 +24,11 @@ import { useAgentSessions, useNow } from './useAgentSessions';
 import { collectTags, defaultFilters, filterSessions, isLive, sortSessions } from './agentUtils';
 
 const DEFAULT_RECENT_DAYS = 7;
+
+const GROUP_OPTIONS: { value: AgentsGroupMode; label: string }[] = [
+  { value: 'global', label: 'Global' },
+  { value: 'project', label: 'By project' },
+];
 
 interface AgentsViewProps {
   /** When set, the view is embedded in a project tab: scoped to that project, no page header. */
@@ -92,57 +99,105 @@ export function AgentsView({ projectId }: AgentsViewProps) {
 
   const refreshButton = (
     <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isLoadingAgents} title="Rescan provider folders">
-      <RefreshCw className={cn('size-4', isLoadingAgents && 'animate-spin')} />
+      <RefreshCw className={cn(isLoadingAgents && 'animate-spin')} />
       Refresh
     </Button>
+  );
+
+  const scopeOptions: { value: AgentsScope; label: string; title: string }[] = [
+    { value: 'active', label: 'Active', title: 'Running or waiting for you' },
+    { value: 'recent', label: 'Recent', title: `Finished in the last ${recentDays} day${recentDays === 1 ? '' : 's'}` },
+    { value: 'all', label: 'All', title: 'Every session on this machine' },
+  ];
+
+  const toolbar = (
+    <>
+      <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+        <Input
+          placeholder="Search title, folder, prompt, ticket…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+        />
+      </div>
+      {agentsLoaded && scoped.length > 0 && (
+        <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+          {runningCount > 0 && <span className="text-st-done">{runningCount} running</span>}
+          {runningCount > 0 && waitingCount > 0 && ' · '}
+          {waitingCount > 0 && <span className="text-st-progress">{waitingCount} waiting</span>}
+          {(runningCount > 0 || waitingCount > 0) && ' · '}
+          {filtered.length}{filtered.length !== scoped.length ? ` of ${scoped.length}` : ''} shown
+        </span>
+      )}
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        <Segmented<AgentsScope> value={agentsScope} onChange={setAgentsScope} options={scopeOptions} size="sm" />
+        {!embedded && (
+          <Segmented<AgentsGroupMode> value={agentsGroupMode} onChange={setAgentsGroupMode} options={GROUP_OPTIONS} size="sm" />
+        )}
+        <AgentFilters
+          value={filters}
+          onChange={setFilters}
+          availableTags={collectTags(scoped, tagDefinitions)}
+          tagDefinitions={tagDefinitions}
+        />
+        <ViewModeToggle value={agentsViewMode} onChange={setAgentsViewMode} />
+      </div>
+    </>
   );
 
   const renderBody = () => {
     if (!agentsLoaded) {
       return (
-        <div className="space-y-1.5">
-          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-11 w-full rounded-md" />)}
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-11 w-full rounded-lg" />)}
         </div>
       );
     }
     if (scoped.length === 0 && agentsScope === 'active' && inProject.length > 0) {
       return (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground text-center">
-          <Bot className="size-8 mb-3 opacity-60" />
-          <p className="text-lg font-medium text-foreground">No active session{embedded ? ' for this project' : ''}</p>
-          <p className="text-sm mt-1 max-w-md">
-            Nothing is running or waiting for you right now. Switch to Recent or All to resume a finished session.
-          </p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={() => setAgentsScope('recent')}>
-            Show recent sessions
-          </Button>
-        </div>
+        <EmptyState
+          compact={embedded}
+          icon={Bot}
+          title={`No active session${embedded ? ' for this project' : ''}`}
+          description="Nothing is running or waiting for you right now. Switch to Recent or All to resume a finished session."
+          action={
+            <Button variant="outline" size="sm" onClick={() => setAgentsScope('recent')}>
+              Show recent sessions
+            </Button>
+          }
+        />
       );
     }
     if (scoped.length === 0) {
       return (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground text-center">
-          <Bot className="size-8 mb-3 opacity-60" />
-          <p className="text-lg font-medium text-foreground">No agent sessions{embedded ? ' for this project' : ''}</p>
-          <p className="text-sm mt-1 max-w-md">
-            Claude Code and Codex sessions show up here automatically. Start one in a terminal, or check the provider
-            status if you expected some.
-          </p>
-          <div className="mt-4 flex items-center gap-2">
-            {refreshButton}
-            {!embedded && <AgentHealthPopover health={agentsHealth} />}
-          </div>
-        </div>
+        <EmptyState
+          compact={embedded}
+          icon={Bot}
+          title={`No agent sessions${embedded ? ' for this project' : ''}`}
+          description="Claude Code and Codex sessions show up here automatically. Start one in a terminal, or check the provider status if you expected some."
+          action={
+            <>
+              {refreshButton}
+              {!embedded && <AgentHealthPopover health={agentsHealth} />}
+            </>
+          }
+        />
       );
     }
     if (filtered.length === 0) {
       return (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <p className="text-sm">No sessions match the current search or filters.</p>
-          <Button variant="ghost" size="sm" className="mt-2" onClick={() => { setSearch(''); setFilters(defaultFilters()); }}>
-            Clear
-          </Button>
-        </div>
+        <EmptyState
+          compact={embedded}
+          icon={SearchX}
+          title="No matching sessions"
+          description="No sessions match the current search or filters."
+          action={
+            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setFilters(defaultFilters()); }}>
+              Clear
+            </Button>
+          }
+        />
       );
     }
     return (
@@ -164,77 +219,8 @@ export function AgentsView({ projectId }: AgentsViewProps) {
     );
   };
 
-  return (
-    <div className={cn(embedded ? 'space-y-4' : 'p-6 space-y-6')} data-agents-list>
-      {!embedded && (
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-2xl font-bold flex items-center gap-2">Agents <BetaBadge /></h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Claude Code and Codex sessions: who is running, who is waiting for you, what to resume
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <AgentHealthPopover health={agentsHealth} />
-            {refreshButton}
-          </div>
-        </div>
-      )}
-
-      {/* Toolbar */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[180px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-          <Input
-            placeholder="Search title, folder, prompt, ticket…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        {agentsLoaded && scoped.length > 0 && (
-          <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">
-            {runningCount > 0 && <span className="text-emerald-600 dark:text-emerald-400">{runningCount} running</span>}
-            {runningCount > 0 && waitingCount > 0 && ' · '}
-            {waitingCount > 0 && <span className="text-amber-600 dark:text-amber-400">{waitingCount} waiting</span>}
-            {(runningCount > 0 || waitingCount > 0) && ' · '}
-            {filtered.length}{filtered.length !== scoped.length ? ` of ${scoped.length}` : ''} shown
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          <Tabs value={agentsScope} onValueChange={(v) => setAgentsScope(v as AgentsScope)}>
-            <TabsList className="h-8">
-              <TabsTrigger value="active" className="text-xs px-2.5" title="Running or waiting for you">Active</TabsTrigger>
-              <TabsTrigger value="recent" className="text-xs px-2.5" title={`Finished in the last ${recentDays} day${recentDays === 1 ? '' : 's'}`}>Recent</TabsTrigger>
-              <TabsTrigger value="all" className="text-xs px-2.5" title="Every session on this machine">All</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          {!embedded && (
-            <Tabs value={agentsGroupMode} onValueChange={(v) => setAgentsGroupMode(v as AgentsGroupMode)}>
-              <TabsList className="h-8">
-                <TabsTrigger value="global" className="text-xs px-2.5">Global</TabsTrigger>
-                <TabsTrigger value="project" className="text-xs px-2.5">By project</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-          <AgentFilters
-            value={filters}
-            onChange={setFilters}
-            availableTags={collectTags(scoped, tagDefinitions)}
-            tagDefinitions={tagDefinitions}
-          />
-          <ViewModeToggle value={agentsViewMode} onChange={setAgentsViewMode} />
-          {embedded && (
-            <>
-              <AgentHealthPopover health={agentsHealth} />
-              {refreshButton}
-            </>
-          )}
-        </div>
-      </div>
-
-      {renderBody()}
-
+  const dialogs = (
+    <>
       <AgentRenameDialog session={renaming} onOpenChange={(open) => { if (!open) setRenaming(null); }} />
       <AgentDetailSheet
         session={selected}
@@ -242,6 +228,59 @@ export function AgentsView({ projectId }: AgentsViewProps) {
         actions={actions}
         changeToken={changeToken}
       />
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="space-y-4" data-agents-list>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 font-display text-base font-semibold">
+              Agents
+              <BetaBadge />
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {agentsLoaded
+                ? `${scoped.length} session${scoped.length !== 1 ? 's' : ''}${runningCount > 0 ? ` · ${runningCount} running` : ''}`
+                : 'Loading…'}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <AgentHealthPopover health={agentsHealth} />
+            {refreshButton}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">{toolbar}</div>
+
+        {renderBody()}
+        {dialogs}
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full min-h-0" data-agents-list>
+      <Screen
+        title={
+          <span className="inline-flex items-center gap-2">
+            Agents
+            <BetaBadge />
+          </span>
+        }
+        subtitle="Claude Code and Codex sessions: who is running, who is waiting for you, what to resume"
+        actions={
+          <>
+            <AgentHealthPopover health={agentsHealth} />
+            {refreshButton}
+          </>
+        }
+        toolbar={toolbar}
+      >
+        {renderBody()}
+        {dialogs}
+      </Screen>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { History, Trash2, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { getExecutionHistory, clearExecutionHistory } from '@/lib/tauri';
 import type { ExecutionRecord } from '@/types';
@@ -60,62 +60,68 @@ export function ExecutionHistory({ scriptId }: ExecutionHistoryProps) {
   };
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <History className="size-4" />
-            Execution History
-          </CardTitle>
-          {records.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={handleClear}>
-              <Trash2 className="size-3.5 mr-1" />
-              Clear
-            </Button>
-          )}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-display text-base font-semibold">Execution history</h2>
+          <p className="text-xs text-muted-foreground">
+            {isLoading
+              ? 'Loading…'
+              : records.length === 0
+                ? 'No execution recorded'
+                : `Last ${records.length} run${records.length !== 1 ? 's' : ''}`}
+          </p>
         </div>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
-        ) : records.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No executions yet</p>
-        ) : (
-          <div className="space-y-2">
-            {records.map((record) => (
-              <div
-                key={record.id}
-                className="flex items-center gap-3 text-sm py-1.5 px-2 rounded hover:bg-muted/50"
-              >
-                {record.success ? (
-                  <CheckCircle2 className="size-4 text-green-500 flex-shrink-0" />
-                ) : (
-                  <XCircle className="size-4 text-red-500 flex-shrink-0" />
-                )}
-                <span className="text-muted-foreground flex-shrink-0">
-                  {formatDate(record.startedAt)}
-                </span>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <Clock className="size-3 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">
-                    {formatDuration(record.durationMs)}
-                  </span>
-                </div>
+        {records.length > 0 && (
+          <Button variant="outline" size="sm" onClick={handleClear}>
+            <Trash2 />
+            Clear
+          </Button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">Loading…</div>
+      ) : records.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border-strong">
+          <EmptyState
+            compact
+            icon={History}
+            title="No executions yet"
+            description="Each run of this script is recorded here with its duration and exit code."
+          />
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+          {records.map((record) => (
+            <div
+              key={record.id}
+              className="flex h-10 items-center gap-3 border-b border-border px-3 text-sm transition-colors last:border-b-0 hover:bg-accent/50"
+            >
+              {record.success ? (
+                <CheckCircle2 className="size-4 shrink-0 text-st-done" />
+              ) : (
+                <XCircle className="size-4 shrink-0 text-st-blocked" />
+              )}
+              <span className="w-32 shrink-0 text-xs tabular-nums text-muted-foreground">
+                {formatDate(record.startedAt)}
+              </span>
+              <span className="flex shrink-0 items-center gap-1 font-mono text-[11px] tabular-nums text-faint">
+                <Clock className="size-3" />
+                {formatDuration(record.durationMs)}
+              </span>
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
                 {record.exitCode !== undefined && record.exitCode !== 0 && (
-                  <Badge variant="outline" className="text-xs py-0">
-                    exit {record.exitCode}
-                  </Badge>
+                  <Badge variant="destructive" className="font-mono">exit {record.exitCode}</Badge>
                 )}
                 {record.presetName && (
-                  <Badge variant="secondary" className="text-xs py-0">
-                    {record.presetName}
-                  </Badge>
+                  <Badge variant="secondary">{record.presetName}</Badge>
                 )}
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

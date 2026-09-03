@@ -1,14 +1,31 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ComponentType, type ReactNode } from 'react';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   ArrowLeft,
   Pencil,
   SquareTerminal,
-  FileCode,
-  Zap,
   Tag,
   Copy,
   Check,
@@ -16,23 +33,16 @@ import {
   Settings,
   Globe,
   Star,
+  MoreVertical,
+  Trash2,
 } from 'lucide-react';
-import type { AliasType } from '@/types';
-
-const aliasTypeIcon = (type: AliasType, size = 'size-8') => {
-  switch (type) {
-    case 'script': return <FileCode className={`${size} text-muted-foreground`} />;
-    case 'init': return <Zap className={`${size} text-muted-foreground`} />;
-    default: return <SquareTerminal className={`${size} text-muted-foreground`} />;
-  }
-};
 import { useAppStore } from '@/stores/appStore';
 import { AliasForm } from './AliasForm';
+import { AliasTypeIcon } from './AliasCard';
 import { TagBadge } from '@/components/ui/TagBadge';
-import { TruncatedText } from '@/components/ui/TruncatedText';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { toast } from 'sonner';
-import type { UpdateShellAliasInput } from '@/types';
+import type { AliasType, UpdateShellAliasInput } from '@/types';
 
 const SHELLS = ['powershell', 'bash', 'zsh', 'fish'] as const;
 const SHELL_LABELS: Record<string, string> = {
@@ -41,6 +51,65 @@ const SHELL_LABELS: Record<string, string> = {
   zsh: 'Zsh',
   fish: 'Fish',
 };
+
+const preClass = 'overflow-x-auto whitespace-pre-wrap rounded-sm bg-muted/70 p-3 font-mono text-[12px] leading-relaxed';
+
+/** Card with a titled header row (icon, title, optional actions). */
+function Section({
+  icon: Icon,
+  title,
+  actions,
+  children,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  title: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <Card size="sm" className="gap-3">
+      <div className="flex items-center justify-between gap-3 px-4">
+        <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold">
+          <Icon className="size-4 text-faint" />
+          {title}
+        </h2>
+        {actions}
+      </div>
+      <div className="px-4">{children}</div>
+    </Card>
+  );
+}
+
+/** Label / value row of the information grid. */
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 items-center gap-2 text-sm">{children}</div>
+    </>
+  );
+}
+
+/** Per-shell code viewer (script / setup). */
+function ShellCodeTabs({ code }: { code: Partial<Record<string, string>> }) {
+  const shells = SHELLS.filter((s) => code[s]?.trim());
+  return (
+    <Tabs defaultValue={shells[0] || 'powershell'}>
+      <TabsList>
+        {shells.map((s) => (
+          <TabsTrigger key={s} value={s}>
+            {SHELL_LABELS[s]}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      {shells.map((s) => (
+        <TabsContent key={s} value={s}>
+          <pre className={preClass}>{code[s]}</pre>
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
+}
 
 export function AliasDetail() {
   const {
@@ -51,10 +120,12 @@ export function AliasDetail() {
     selectedAliasId,
     setCurrentView,
     updateAlias,
+    deleteAlias,
     selectTool,
   } = useAppStore();
 
   const [showEditForm, setShowEditForm] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [commandCopied, setCommandCopied] = useState(false);
 
   const alias = useMemo(
@@ -82,6 +153,18 @@ export function AliasDetail() {
     toast.success('Alias updated');
   };
 
+  const handleDelete = async () => {
+    if (!alias) return;
+    try {
+      await deleteAlias(alias.id);
+      toast.success('Alias deleted');
+      setCurrentView('aliases');
+    } catch (e) {
+      toast.error('Failed to delete alias', { description: String(e) });
+    }
+    setShowDeleteDialog(false);
+  };
+
   const handleCopyCommand = async () => {
     if (!alias) return;
     try {
@@ -96,197 +179,151 @@ export function AliasDetail() {
 
   if (!alias) {
     return (
-      <div className="p-6">
-        <Button variant="ghost" onClick={() => setCurrentView('aliases')}>
-          <ArrowLeft className="size-4 mr-2" />
-          Back to Shell Config
-        </Button>
-        <p className="text-muted-foreground mt-4">Alias not found.</p>
-      </div>
+      <Screen title="Shell config" eyebrow="Shell Config" onBack={() => setCurrentView('aliases')} backLabel="Back to shell config">
+        <EmptyState
+          icon={SquareTerminal}
+          title="Alias not found"
+          description="It may have been removed from another window or from the CLI."
+          action={
+            <Button onClick={() => setCurrentView('aliases')}>
+              <ArrowLeft />
+              Back to shell config
+            </Button>
+          }
+        />
+      </Screen>
     );
   }
 
-  const aliasType = alias.aliasType || 'function';
+  const aliasType = (alias.aliasType || 'function') as AliasType;
   const hasSetup = alias.setup && Object.values(alias.setup).some((v) => v.trim());
   const hasScript = alias.script && Object.values(alias.script).some((v) => v.trim());
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Back + Header */}
-      <div>
-        <Button variant="ghost" size="sm" onClick={() => setCurrentView('aliases')} className="mb-4">
-          <ArrowLeft className="size-4 mr-2" />
-          Back to Shell Config
-        </Button>
+    <Screen
+      eyebrow="Shell Config"
+      title={
+        <span className="inline-flex items-center gap-2">
+          <AliasTypeIcon type={aliasType} size="sm" />
+          <span className="font-mono">{alias.name}</span>
+          <Badge variant="outline">{aliasType}</Badge>
+          {alias.shim && (
+            <Badge variant="secondary" title="Shim enabled — callable from any process (agents, scheduled tasks)">
+              <Globe />
+              shim
+            </Badge>
+          )}
+          <StatusBadge status={alias.status} />
+        </span>
+      }
+      subtitle={alias.description}
+      onBack={() => setCurrentView('aliases')}
+      backLabel="Back to shell config"
+      actions={
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-pressed={alias.favorite}
+            onClick={handleToggleFavorite}
+            title={alias.favorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Star className={alias.favorite ? 'fill-warning text-warning' : ''} />
+          </Button>
+          {linkedTool && (
+            <Button variant="outline" onClick={() => selectTool(linkedTool.id)} title="Open the linked tool">
+              <Wrench />
+              {linkedTool.name}
+            </Button>
+          )}
+          {aliasType === 'function' && (
+            <Button variant="outline" onClick={handleCopyCommand}>
+              {commandCopied ? <Check className="text-st-done" /> : <Copy />}
+              {commandCopied ? 'Copied' : 'Copy command'}
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="More actions">
+                <MoreVertical />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setShowEditForm(true)}>
+                <Pencil />
+                Edit alias
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => setShowDeleteDialog(true)}>
+                <Trash2 />
+                Delete alias
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {/* Command — for function type */}
+        {aliasType === 'function' && (
+          <Section
+            icon={SquareTerminal}
+            title="Command"
+            actions={
+              <Button variant="ghost" size="sm" onClick={handleCopyCommand}>
+                {commandCopied ? <Check className="text-st-done" /> : <Copy />}
+                {commandCopied ? 'Copied' : 'Copy'}
+              </Button>
+            }
+          >
+            <pre className={preClass}>{alias.command}</pre>
+          </Section>
+        )}
 
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="flex-shrink-0">
-              {aliasTypeIcon(aliasType as AliasType)}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 min-w-0">
-                <TruncatedText as="h1" className="text-2xl font-bold font-mono min-w-0">{alias.name}</TruncatedText>
-                <Badge variant="outline" className="text-xs flex-shrink-0">{aliasType}</Badge>
-                {alias.shim && (
-                  <Badge variant="secondary" className="text-xs flex-shrink-0 gap-1" title="Shim enabled — callable from any process (agents, scheduled tasks)">
-                    <Globe className="size-3" />
-                    shim
-                  </Badge>
-                )}
-                <div className="flex-shrink-0">
-                  <StatusBadge status={alias.status} />
-                </div>
-              </div>
-              {alias.description && (
-                <p className="text-sm text-muted-foreground mt-0.5 break-words">{alias.description}</p>
+        {/* Script / Init — for script and init types */}
+        {aliasType !== 'function' && hasScript && (
+          <Section icon={SquareTerminal} title={aliasType === 'init' ? 'Init command' : 'Script'}>
+            <ShellCodeTabs code={alias.script!} />
+          </Section>
+        )}
+
+        {/* Setup */}
+        {hasSetup && (
+          <Section icon={Settings} title="Setup code">
+            <ShellCodeTabs code={alias.setup!} />
+          </Section>
+        )}
+
+        {/* Information */}
+        {(alias.tags.length > 0 || linkedTool || alias.executionOrder != null) && (
+          <Section icon={Tag} title="Information">
+            <div className="grid grid-cols-[120px_1fr] items-center gap-x-4 gap-y-2.5">
+              {linkedTool && (
+                <Row label="Linked tool">
+                  <Button variant="link" size="sm" className="h-auto p-0" onClick={() => selectTool(linkedTool.id)}>
+                    <Wrench className="size-3.5" />
+                    {linkedTool.name}
+                  </Button>
+                </Row>
+              )}
+              {alias.executionOrder != null && (
+                <Row label="Execution order">
+                  <code className="rounded-xs bg-muted px-1.5 py-0.5 font-mono text-[11px]">{alias.executionOrder}</code>
+                </Row>
+              )}
+              {alias.tags.length > 0 && (
+                <Row label="Tags">
+                  <div className="flex flex-wrap gap-1">
+                    {alias.tags.map((tag) => (
+                      <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
+                    ))}
+                  </div>
+                </Row>
               )}
             </div>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              aria-pressed={alias.favorite}
-              onClick={handleToggleFavorite}
-              title={alias.favorite ? 'Remove from favorites' : 'Add to favorites'}
-            >
-              <Star className={alias.favorite ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
-              {alias.favorite ? 'Favorite' : 'Add to favorites'}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
-              <Pencil className="size-4 mr-2" />
-              Edit
-            </Button>
-          </div>
-        </div>
+          </Section>
+        )}
       </div>
-
-      {/* Info Card */}
-      {(alias.tags.length > 0 || linkedTool) && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Tag className="size-4" />
-              Information
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            {alias.tags.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                {alias.tags.map((tag) => (
-                  <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
-                ))}
-              </div>
-            )}
-            {linkedTool && (
-              <div className="flex items-center gap-2">
-                <Wrench className="size-3.5 text-muted-foreground" />
-                <span className="text-muted-foreground">Linked tool:</span>
-                <Button
-                  variant="link"
-                  size="sm"
-                  className="h-auto p-0 text-sm"
-                  onClick={() => selectTool(linkedTool.id)}
-                >
-                  {linkedTool.name}
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Command Card — for function type */}
-      {aliasType === 'function' && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <SquareTerminal className="size-4" />
-              Command
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="relative">
-              <pre className="bg-muted p-4 rounded-md text-sm font-mono overflow-x-auto whitespace-pre-wrap">
-                {alias.command}
-              </pre>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="absolute top-2 right-2"
-                onClick={handleCopyCommand}
-              >
-                {commandCopied ? (
-                  <Check className="size-4 text-green-500" />
-                ) : (
-                  <Copy className="size-4" />
-                )}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Script/Init Card — for script and init types */}
-      {aliasType !== 'function' && hasScript && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <SquareTerminal className="size-4" />
-              {aliasType === 'init' ? 'Init Command' : 'Script'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue={SHELLS.find((s) => alias.script?.[s]?.trim()) || 'powershell'}>
-              <TabsList className="h-8">
-                {SHELLS.filter((s) => alias.script?.[s]?.trim()).map((s) => (
-                  <TabsTrigger key={s} value={s} className="text-xs px-3">
-                    {SHELL_LABELS[s]}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              {SHELLS.filter((s) => alias.script?.[s]?.trim()).map((s) => (
-                <TabsContent key={s} value={s}>
-                  <pre className="bg-muted p-4 rounded-md text-sm font-mono overflow-x-auto whitespace-pre-wrap">
-                    {alias.script![s]}
-                  </pre>
-                </TabsContent>
-              ))}
-            </Tabs>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Setup Card */}
-      {hasSetup && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Settings className="size-4" />
-              Setup Code
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue={SHELLS.find((s) => alias.setup?.[s]?.trim()) || 'powershell'}>
-              <TabsList className="h-8">
-                {SHELLS.filter((s) => alias.setup?.[s]?.trim()).map((s) => (
-                  <TabsTrigger key={s} value={s} className="text-xs px-3">
-                    {SHELL_LABELS[s]}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              {SHELLS.filter((s) => alias.setup?.[s]?.trim()).map((s) => (
-                <TabsContent key={s} value={s}>
-                  <pre className="bg-muted p-4 rounded-md text-sm font-mono overflow-x-auto whitespace-pre-wrap">
-                    {alias.setup![s]}
-                  </pre>
-                </TabsContent>
-              ))}
-            </Tabs>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Edit Form */}
       <AliasForm
@@ -299,6 +336,24 @@ export function AliasDetail() {
         statusDefinitions={statusDefinitions}
         onSubmit={handleUpdate}
       />
-    </div>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete shell config</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete "{alias.name}"? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Screen>
   );
 }

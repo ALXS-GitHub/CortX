@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { RotateCcw, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface HotkeyInputProps {
   /** Current binding in tauri-plugin format, e.g. "CmdOrCtrl+Shift+Space". Empty = disabled. */
@@ -95,23 +96,22 @@ export function HotkeyInput({ value, onChange, defaultCombo }: HotkeyInputProps)
         role="button"
         onClick={() => setCapturing(true)}
         onBlur={() => setCapturing(false)}
-        className={
-          'flex flex-1 items-center gap-1 rounded-md border px-3 py-2 min-h-9 text-sm cursor-pointer ' +
-          (capturing ? 'ring-2 ring-ring border-ring' : 'hover:bg-accent/30')
-        }
+        className={cn(
+          'flex min-h-9 flex-1 cursor-pointer items-center gap-1.5 rounded-sm border border-input bg-[var(--bg-input)] px-3 py-2 text-sm shadow-soft outline-none transition-[border-color,box-shadow]',
+          capturing
+            ? 'border-accent-border ring-2 ring-ring/40'
+            : 'hover:border-border-strong focus-visible:border-accent-border focus-visible:ring-2 focus-visible:ring-ring/40'
+        )}
       >
         {capturing ? (
-          <span className="text-muted-foreground italic">
+          <span className="text-xs italic text-muted-foreground">
             Press a key combo… (Esc to cancel, Backspace to clear)
           </span>
         ) : isEmpty ? (
-          <span className="text-muted-foreground italic">Disabled — click to set a shortcut</span>
+          <span className="text-xs italic text-faint">Disabled — click to set a shortcut</span>
         ) : (
           tokens.map((t, i) => (
-            <kbd
-              key={i}
-              className="px-1.5 py-0.5 rounded border bg-muted text-foreground text-xs font-mono"
-            >
+            <kbd key={i} className="kbd h-6 min-w-6 px-2 text-[11px] text-foreground">
               {t}
             </kbd>
           ))
@@ -119,22 +119,24 @@ export function HotkeyInput({ value, onChange, defaultCombo }: HotkeyInputProps)
       </div>
       <Button
         variant="outline"
-        size="sm"
+        size="icon"
         type="button"
         onClick={() => onChange(defaultCombo)}
         title="Reset to default"
+        aria-label="Reset to default"
       >
-        <RotateCcw className="size-3.5" />
+        <RotateCcw />
       </Button>
       <Button
         variant="outline"
-        size="sm"
+        size="icon"
         type="button"
         onClick={() => onChange('')}
         title="Clear / disable"
+        aria-label="Clear / disable"
         disabled={isEmpty}
       >
-        <X className="size-3.5" />
+        <X />
       </Button>
     </div>
   );

@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import { FolderOpen, Play, WandSparkles } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
 import type { GlobalScript } from '@/types';
@@ -283,34 +285,34 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Play className="size-4" />
-            Run: {script.name}
+            <Play className="size-4 text-primary" />
+            Run {script.name}
           </DialogTitle>
           <DialogDescription asChild>
             <div className="mt-1">
-              <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono break-all">
+              <code className="block rounded-sm border border-border bg-muted/60 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed break-all text-foreground/80">
                 {buildPreviewCommand()}
               </code>
             </div>
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="-mx-6 min-h-0 flex-1 space-y-4 overflow-y-auto px-6">
           {/* Working Directory */}
           <div className="space-y-1.5">
-            <Label>
+            <Label className="text-xs font-medium text-muted-foreground">
               Working directory
-              <span className="text-muted-foreground font-normal ml-1.5">(optional)</span>
+              <span className="font-normal text-faint">(optional)</span>
             </Label>
             <div className="flex gap-2">
               <Input
                 value={workingDir}
                 onChange={(e) => setWorkingDir(e.target.value)}
-                placeholder={fallbackDir || 'Runs where CortX was started...'}
-                className="font-mono text-xs"
+                placeholder={fallbackDir || 'Runs where CortX was started…'}
+                className="font-mono text-[12px]"
               />
               {folder && (
                 <Button
@@ -318,18 +320,19 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
                   size="icon"
                   onClick={() => setWorkingDir(folder)}
                   title="Use the script's folder"
+                  aria-label="Use the script's folder"
                 >
-                  <WandSparkles className="size-4" />
+                  <WandSparkles />
                 </Button>
               )}
-              <Button variant="outline" size="icon" onClick={handleBrowseDir} title="Browse">
-                <FolderOpen className="size-4" />
+              <Button variant="outline" size="icon" onClick={handleBrowseDir} title="Browse" aria-label="Browse for a folder">
+                <FolderOpen />
               </Button>
             </div>
             {!workingDir.trim() && (
               <p className="text-xs text-muted-foreground">
                 {fallbackDir
-                  ? <>Leave empty to run in <code className="font-mono">{fallbackDir}</code></>
+                  ? <>Leave empty to run in <code className="font-mono text-[11px]">{fallbackDir}</code></>
                   : 'Leave empty to run in the directory CortX was started from.'}
               </p>
             )}
@@ -337,13 +340,13 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
 
           {/* Parameters */}
           {script.parameters.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm font-medium">Parameters</Label>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="eyebrow">Parameters</span>
                 {script.parameterPresets.length > 0 && (
                   <Select value={selectedPresetId} onValueChange={handlePresetChange}>
-                    <SelectTrigger className="w-[160px] h-7 text-xs">
-                      <SelectValue placeholder="Select preset..." />
+                    <SelectTrigger size="sm" className="w-[170px] text-xs">
+                      <SelectValue placeholder="Select preset…" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">No preset</SelectItem>
@@ -365,9 +368,10 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
                   return (
                     <div
                       key={param.name}
-                      className={`space-y-1 rounded-md border p-2.5 transition-colors ${
-                        isEnabled ? 'border-border' : 'border-border/50 opacity-50'
-                      }`}
+                      className={cn(
+                        'space-y-1.5 rounded-sm border p-2.5 transition-[opacity,border-color]',
+                        isEnabled ? 'border-border bg-card/60' : 'border-border/60 opacity-60'
+                      )}
                     >
                       <div className="flex items-center gap-2">
                         {isOptional && (
@@ -378,19 +382,17 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
                             }
                           />
                         )}
-                        <Label className="text-xs flex-1">
+                        <Label className="flex-1 flex-wrap gap-x-1.5 gap-y-0.5 text-xs">
                           <span className="font-medium">{param.name}</span>
-                          {param.required && <span className="text-destructive ml-0.5">*</span>}
+                          {param.required && <span className="-ml-1 text-destructive">*</span>}
                           {param.nargs && (
-                            <span className="ml-1.5 inline-flex items-center rounded-sm bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-500">
-                              {param.nargs === '+' ? 'multi' : `${param.nargs} values`}
-                            </span>
+                            <Badge variant="info">{param.nargs === '+' ? 'multi' : `${param.nargs} values`}</Badge>
                           )}
                           {param.longFlag && (
-                            <code className="text-muted-foreground ml-1.5 font-mono">{param.longFlag}</code>
+                            <code className="font-mono text-[11px] text-faint">{param.longFlag}</code>
                           )}
                           {param.description && (
-                            <span className="text-muted-foreground ml-1.5 font-normal">
+                            <span className="font-normal text-muted-foreground">
                               — {param.description}
                             </span>
                           )}
@@ -421,7 +423,7 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
                                 setParamValues((prev) => ({ ...prev, [param.name]: v }))
                               }
                             >
-                              <SelectTrigger className="h-8 text-xs">
+                              <SelectTrigger size="sm" className="w-full text-xs">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -444,10 +446,10 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
                               placeholder={
                                 param.defaultValue ||
                                 (param.nargs
-                                  ? `Enter values separated by spaces...`
-                                  : `Enter ${param.name}...`)
+                                  ? `Enter values separated by spaces…`
+                                  : `Enter ${param.name}…`)
                               }
-                              className="h-8 text-xs font-mono"
+                              className="h-8 font-mono text-xs"
                             />
                           )}
                         </div>
@@ -461,24 +463,24 @@ export function RunScriptDialog({ script, open: isOpen, onOpenChange }: RunScrip
 
           {/* Extra Arguments */}
           <div className="space-y-1.5">
-            <Label>Extra arguments</Label>
+            <Label className="text-xs font-medium text-muted-foreground">Extra arguments</Label>
             <Textarea
               value={extraArgs}
               onChange={(e) => setExtraArgs(e.target.value)}
-              placeholder="Additional arguments appended to the command..."
-              className="font-mono text-xs resize-none"
+              placeholder="Additional arguments appended to the command…"
+              className="resize-none font-mono text-[12px]"
               rows={2}
             />
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button onClick={handleRun} disabled={isRunning}>
-            <Play className="size-4 mr-1.5" />
-            {isRunning ? 'Starting...' : 'Run'}
+            <Play />
+            {isRunning ? 'Starting…' : 'Run'}
           </Button>
         </DialogFooter>
       </DialogContent>

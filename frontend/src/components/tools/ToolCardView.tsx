@@ -1,13 +1,9 @@
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Button } from '@/components/ui/button';
-import { Wrench, MoreVertical, Pencil, Trash2, FileText } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { FileText } from 'lucide-react';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
+import { ToolIcon, ToolMenu, hoverMenuClass } from './ToolCard';
 import type { Tool, TagDefinition } from '@/types';
 
 interface ToolCardProps {
@@ -19,61 +15,53 @@ interface ToolCardProps {
   onToggleFavorite: () => void;
 }
 
+/** Card (the "card" view mode). */
 export function ToolCardView({ tool, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: ToolCardProps) {
+  const configs = tool.configPaths.length;
+
   return (
-    <Card className="group cursor-pointer hover:border-primary/50 transition-colors h-full flex flex-col" onClick={onClick}>
-      <CardHeader className="pb-2 px-4 pt-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Wrench className="size-5 flex-shrink-0" style={{ color: tool.color || '#6b7280' }} />
-            <h3 className="font-medium truncate">{tool.name}</h3>
+    <Card interactive size="sm" className="group h-full gap-3" onClick={onClick}>
+      <div className="flex items-start gap-3 px-4">
+        <ToolIcon color={tool.color} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="truncate font-display text-[15px] font-semibold tracking-tight">{tool.name}</h3>
+            <StatusBadge status={tool.status} className="shrink-0" />
           </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            <StatusBadge status={tool.status} />
-            <FavoriteButton favorite={tool.favorite} onToggle={onToggleFavorite} />
-            <div
-              className={cn('opacity-0 group-hover:opacity-100 transition-opacity')}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="size-7">
-                    <MoreVertical className="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={onEdit}>
-                    <Pencil className="size-4 mr-2" />Edit
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={onDelete} className="text-destructive">
-                    <Trash2 className="size-4 mr-2" />Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
+          {tool.description ? (
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{tool.description}</p>
+          ) : tool.installLocation ? (
+            <p className="mt-0.5 truncate font-mono text-[11px] text-faint" title={tool.installLocation}>{tool.installLocation}</p>
+          ) : null}
         </div>
-      </CardHeader>
-      <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col">
-        {tool.description && (
-          <p className="text-sm text-muted-foreground line-clamp-2">{tool.description}</p>
+        <FavoriteButton favorite={tool.favorite} onToggle={onToggleFavorite} />
+        <ToolMenu onEdit={onEdit} onDelete={onDelete} className={hoverMenuClass} />
+      </div>
+
+      {tool.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 px-4">
+          {tool.tags.map((tag) => (
+            <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
+          ))}
+        </div>
+      )}
+
+      <div className="mt-auto flex items-center gap-2 border-t border-border px-4 pt-3">
+        <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 truncate font-mono text-[11px] text-faint">
+          <FileText className="size-3 shrink-0" />
+          {configs === 0 ? 'No config path' : `${configs} config${configs > 1 ? 's' : ''}`}
+        </span>
+        {tool.version && (
+          <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title="Version">
+            v{tool.version.replace(/^v/i, '')}
+          </span>
         )}
-        <div className="mt-auto pt-3 space-y-2">
-          {tool.tags.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {tool.tags.map((tag) => (
-                <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
-              ))}
-            </div>
-          )}
-          {tool.configPaths.length > 0 && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <FileText className="size-3" />
-              <span>{tool.configPaths.length} config{tool.configPaths.length > 1 ? 's' : ''}</span>
-            </div>
-          )}
-        </div>
-      </CardContent>
+        {tool.installMethod && (
+          <span className="shrink-0 font-mono text-[11px] text-faint" title="Install method">
+            {tool.installMethod}
+          </span>
+        )}
+      </div>
     </Card>
   );
 }

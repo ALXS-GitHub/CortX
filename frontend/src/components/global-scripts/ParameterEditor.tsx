@@ -3,7 +3,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/EmptyState';
 import {
   Select,
   SelectContent,
@@ -20,7 +22,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Plus, Trash2, Wand2, Loader2, Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Trash2, Wand2, Loader2, Check, ChevronDown, ChevronRight, Settings2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
 import type { ScriptParameter, ScriptParamType, GlobalScript, UpdateGlobalScriptInput } from '@/types';
@@ -47,6 +50,31 @@ function emptyParam(): ScriptParameter {
 }
 
 const AUTOSAVE_DELAY = 800;
+
+/** "Saving… / Saved" indicator shared with the preset editor. */
+export function SaveStatus({ status }: { status: 'idle' | 'saving' | 'saved' }) {
+  if (status === 'idle') return <span className="text-xs text-muted-foreground" />;
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      {status === 'saving' ? (
+        <>
+          <Loader2 className="size-3 animate-spin" />
+          Saving…
+        </>
+      ) : (
+        <>
+          <Check className="size-3 text-st-done" />
+          Saved
+        </>
+      )}
+    </span>
+  );
+}
+
+function NargsBadge({ nargs }: { nargs?: string }) {
+  if (!nargs) return null;
+  return <Badge variant="info">{nargs === '+' ? 'multi' : `${nargs} values`}</Badge>;
+}
 
 export function ParameterEditor({ script }: ParameterEditorProps) {
   const { updateGlobalScript, autoDetectScriptParams } = useAppStore();
@@ -154,46 +182,54 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
     toast.success(`Replaced with ${detectedParams.length} parameter(s)`);
   };
 
+  const fieldLabel = 'text-xs font-medium text-muted-foreground';
+  const fieldInput = 'h-8 text-xs';
+
   return (
-    <div className="space-y-6">
-      {/* Header actions */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-4">
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-display text-base font-semibold">Parameters</h2>
+          <p className="text-xs text-muted-foreground">
+            {params.length === 0 ? 'No parameter configured' : `${params.length} parameter${params.length !== 1 ? 's' : ''}`}
+            {' · '}changes are saved automatically
+          </p>
+        </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleAddParam}>
-            <Plus className="size-4 mr-1.5" />
-            Add Parameter
-          </Button>
+          <SaveStatus status={saveStatus} />
           <Button variant="outline" size="sm" onClick={handleDetect} disabled={isDetecting}>
-            {isDetecting ? (
-              <Loader2 className="size-4 mr-1.5 animate-spin" />
-            ) : (
-              <Wand2 className="size-4 mr-1.5" />
-            )}
+            {isDetecting ? <Loader2 className="animate-spin" /> : <Wand2 />}
             Import from --help
           </Button>
-        </div>
-        {/* Auto-save status indicator */}
-        <div className="text-xs text-muted-foreground flex items-center gap-1.5">
-          {saveStatus === 'saving' && (
-            <>
-              <Loader2 className="size-3 animate-spin" />
-              Saving...
-            </>
-          )}
-          {saveStatus === 'saved' && (
-            <>
-              <Check className="size-3 text-green-500" />
-              Saved
-            </>
-          )}
+          <Button size="sm" variant={params.length === 0 ? 'default' : 'outline'} onClick={handleAddParam}>
+            <Plus />
+            Add parameter
+          </Button>
         </div>
       </div>
 
       {/* Parameters list */}
       {params.length === 0 ? (
-        <div className="text-center py-8 text-muted-foreground">
-          <p>No parameters configured.</p>
-          <p className="text-sm mt-1">Add parameters manually or import from --help.</p>
+        <div className="rounded-lg border border-dashed border-border-strong">
+          <EmptyState
+            compact
+            icon={Settings2}
+            title="No parameters configured"
+            description="Add parameters manually or import them from the script's --help output."
+            action={
+              <>
+                <Button variant="outline" onClick={handleDetect} disabled={isDetecting}>
+                  {isDetecting ? <Loader2 className="animate-spin" /> : <Wand2 />}
+                  Import from --help
+                </Button>
+                <Button onClick={handleAddParam}>
+                  <Plus />
+                  Add parameter
+                </Button>
+              </>
+            }
+          />
         </div>
       ) : (
         <div className="space-y-2">
@@ -203,7 +239,7 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
             const typeBadge = PARAM_TYPES.find((t) => t.value === param.paramType)?.label || param.paramType;
 
             return (
-              <Card key={index}>
+              <Card key={index} size="sm" className={cn('group py-0', isExpanded && 'border-accent-border')}>
                 <Collapsible open={isExpanded} onOpenChange={() => {
                   setExpandedParams((prev) => {
                     const next = new Set(prev);
@@ -212,59 +248,56 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
                     return next;
                   });
                 }}>
-                  <div className="flex items-center px-3 py-2">
-                    <CollapsibleTrigger className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                  <div className="flex items-center gap-1 px-3 py-2">
+                    <CollapsibleTrigger className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
                       {isExpanded ? (
-                        <ChevronDown className="size-4 text-muted-foreground shrink-0" />
+                        <ChevronDown className="size-4 shrink-0 text-faint" />
                       ) : (
-                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                        <ChevronRight className="size-4 shrink-0 text-faint" />
                       )}
-                      <span className="font-mono text-sm font-medium truncate">
-                        {param.name || <span className="text-muted-foreground italic">unnamed</span>}
+                      <span className="truncate font-mono text-[13px] font-medium">
+                        {param.name || <span className="italic text-muted-foreground">unnamed</span>}
                       </span>
-                      <span className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0">{typeBadge}</span>
-                      {param.nargs && (
-                        <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded shrink-0">
-                          {param.nargs === '+' ? 'multi' : `${param.nargs} values`}
-                        </span>
-                      )}
+                      <Badge variant="secondary">{typeBadge}</Badge>
+                      <NargsBadge nargs={param.nargs} />
                       {flagSummary && (
-                        <code className="text-xs text-muted-foreground font-mono truncate">{flagSummary}</code>
+                        <code className="truncate font-mono text-[11px] text-faint">{flagSummary}</code>
                       )}
                       {param.required && (
-                        <span className="text-xs text-destructive shrink-0">required</span>
+                        <span className="shrink-0 text-[11px] font-medium text-destructive">required</span>
                       )}
                     </CollapsibleTrigger>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="size-7 text-muted-foreground hover:text-destructive shrink-0"
+                      size="icon-sm"
+                      className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
                       onClick={() => handleRemoveParam(index)}
+                      aria-label="Remove parameter"
                     >
                       <Trash2 className="size-3.5" />
                     </Button>
                   </div>
                   <CollapsibleContent>
-                    <CardContent className="px-4 pb-4 pt-1">
+                    <div className="border-t border-border px-4 pb-4 pt-3">
                       <div className="grid grid-cols-2 gap-3">
                         {/* Name */}
                         <div className="space-y-1">
-                          <Label className="text-xs">Name</Label>
+                          <Label className={fieldLabel}>Name</Label>
                           <Input
                             value={param.name}
                             onChange={(e) => handleUpdateParam(index, 'name', e.target.value)}
                             placeholder="param_name"
-                            className="h-8 text-xs font-mono"
+                            className={cn(fieldInput, 'font-mono')}
                           />
                         </div>
                         {/* Type */}
                         <div className="space-y-1">
-                          <Label className="text-xs">Type</Label>
+                          <Label className={fieldLabel}>Type</Label>
                           <Select
                             value={param.paramType}
                             onValueChange={(v) => handleUpdateParam(index, 'paramType', v)}
                           >
-                            <SelectTrigger className="h-8 text-xs">
+                            <SelectTrigger size="sm" className="w-full text-xs">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -278,48 +311,48 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
                         </div>
                         {/* Short flag */}
                         <div className="space-y-1">
-                          <Label className="text-xs">Short flag</Label>
+                          <Label className={fieldLabel}>Short flag</Label>
                           <Input
                             value={param.shortFlag || ''}
                             onChange={(e) => handleUpdateParam(index, 'shortFlag', e.target.value || undefined)}
                             placeholder="-f"
-                            className="h-8 text-xs font-mono"
+                            className={cn(fieldInput, 'font-mono')}
                           />
                         </div>
                         {/* Long flag */}
                         <div className="space-y-1">
-                          <Label className="text-xs">Long flag</Label>
+                          <Label className={fieldLabel}>Long flag</Label>
                           <Input
                             value={param.longFlag || ''}
                             onChange={(e) => handleUpdateParam(index, 'longFlag', e.target.value || undefined)}
                             placeholder="--flag"
-                            className="h-8 text-xs font-mono"
+                            className={cn(fieldInput, 'font-mono')}
                           />
                         </div>
                         {/* Description */}
-                        <div className="space-y-1 col-span-2">
-                          <Label className="text-xs">Description</Label>
+                        <div className="col-span-2 space-y-1">
+                          <Label className={fieldLabel}>Description</Label>
                           <Input
                             value={param.description || ''}
                             onChange={(e) => handleUpdateParam(index, 'description', e.target.value || undefined)}
                             placeholder="What this parameter does"
-                            className="h-8 text-xs"
+                            className={fieldInput}
                           />
                         </div>
                         {/* Default value */}
                         <div className="space-y-1">
-                          <Label className="text-xs">Default value</Label>
+                          <Label className={fieldLabel}>Default value</Label>
                           <Input
                             value={param.defaultValue || ''}
                             onChange={(e) => handleUpdateParam(index, 'defaultValue', e.target.value || undefined)}
                             placeholder="default"
-                            className="h-8 text-xs font-mono"
+                            className={cn(fieldInput, 'font-mono')}
                           />
                         </div>
                         {/* Required */}
                         <div className="space-y-1">
-                          <Label className="text-xs">Required</Label>
-                          <div className="flex items-center h-8">
+                          <Label className={fieldLabel}>Required</Label>
+                          <div className="flex h-8 items-center">
                             <Switch
                               checked={param.required}
                               onCheckedChange={(v) => handleUpdateParam(index, 'required', v)}
@@ -328,19 +361,19 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
                         </div>
                         {/* Nargs */}
                         <div className="space-y-1">
-                          <Label className="text-xs">Expected values</Label>
+                          <Label className={fieldLabel}>Expected values</Label>
                           <Input
                             value={param.nargs || ''}
                             onChange={(e) => handleUpdateParam(index, 'nargs', e.target.value || undefined)}
                             placeholder="1"
-                            className="h-8 text-xs font-mono"
+                            className={cn(fieldInput, 'font-mono')}
                           />
-                          <p className="text-[10px] text-muted-foreground">Number or + for variadic</p>
+                          <p className="text-[11px] text-faint">Number or + for variadic</p>
                         </div>
                         {/* Enum values */}
                         {param.paramType === 'enum' && (
-                          <div className="space-y-1 col-span-2">
-                            <Label className="text-xs">Enum values (comma-separated)</Label>
+                          <div className="col-span-2 space-y-1">
+                            <Label className={fieldLabel}>Enum values (comma-separated)</Label>
                             <Input
                               value={param.enumValues.join(', ')}
                               onChange={(e) =>
@@ -354,12 +387,12 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
                                 )
                               }
                               placeholder="value1, value2, value3"
-                              className="h-8 text-xs font-mono"
+                              className={cn(fieldInput, 'font-mono')}
                             />
                           </div>
                         )}
                       </div>
-                    </CardContent>
+                    </div>
                   </CollapsibleContent>
                 </Collapsible>
               </Card>
@@ -370,34 +403,32 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
 
       {/* Detect preview dialog */}
       <Dialog open={showDetectPreview} onOpenChange={setShowDetectPreview}>
-        <DialogContent className="sm:max-w-lg max-h-[70vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Detected Parameters</DialogTitle>
+            <DialogTitle>Detected parameters</DialogTitle>
             <DialogDescription>
               Found {detectedParams.length} parameter(s) from --help output.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-2">
-            {detectedParams.map((p, i) => (
-              <div key={i} className="flex items-center gap-2 text-sm border rounded-md px-3 py-2">
-                <code className="font-mono text-xs">
-                  {p.shortFlag && `${p.shortFlag}, `}
-                  {p.longFlag || p.name}
-                </code>
-                <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{p.paramType}</span>
-                {p.nargs && (
-                  <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded">
-                    {p.nargs === '+' ? 'multi' : `${p.nargs} values`}
-                  </span>
-                )}
-                {p.description && (
-                  <span className="text-muted-foreground text-xs truncate">{p.description}</span>
-                )}
-              </div>
-            ))}
+          <div className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6">
+            <div className="overflow-hidden rounded-lg border border-border bg-card/60">
+              {detectedParams.map((p, i) => (
+                <div key={i} className="flex items-center gap-2 border-b border-border px-3 py-2 text-sm last:border-b-0">
+                  <code className="shrink-0 font-mono text-[12px]">
+                    {p.shortFlag && `${p.shortFlag}, `}
+                    {p.longFlag || p.name}
+                  </code>
+                  <Badge variant="secondary">{p.paramType}</Badge>
+                  <NargsBadge nargs={p.nargs} />
+                  {p.description && (
+                    <span className="truncate text-xs text-muted-foreground">{p.description}</span>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDetectPreview(false)}>
+            <Button variant="ghost" onClick={() => setShowDetectPreview(false)}>
               Cancel
             </Button>
             <Button variant="outline" onClick={handleApplyDetected}>

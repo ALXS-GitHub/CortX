@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { TitleBar } from '@/components/layout/TitleBar';
@@ -19,11 +18,12 @@ import { AliasDetail } from '@/components/aliases/AliasDetail';
 import { AppsView } from '@/components/apps/AppsView';
 import { AppDetail } from '@/components/apps/AppDetail';
 import { UtilitiesView } from '@/components/utilities/UtilitiesView';
-import { AgentsView, BetaBadge } from '@/components/agents';
+import { AgentsView } from '@/components/agents';
 import { RunScriptDialog } from '@/components/global-scripts/RunScriptDialog';
 import { CommandPalette } from '@/components/command-palette/CommandPalette';
 import { useCommandPaletteShortcut } from '@/components/command-palette/useCommandPaletteShortcut';
 import { useAppStore } from '@/stores/appStore';
+import { applyThemeMode, bootstrapThemeStyle } from '@/lib/theme';
 import {
   onServiceLog,
   onServiceStatus,
@@ -42,25 +42,8 @@ import {
 } from '@/lib/tauri';
 import type { LogEntry } from '@/types';
 
-// Minimized terminal bar height
-const MINIMIZED_TERMINAL_HEIGHT = 32;
-
-// Component to handle dynamic padding based on terminal state
-function MainContent({ children }: { children: React.ReactNode }) {
-  const { terminalPanelOpen, terminalHeight } = useAppStore();
-
-  // Calculate bottom padding based on terminal state
-  const bottomPadding = terminalPanelOpen ? terminalHeight : MINIMIZED_TERMINAL_HEIGHT;
-
-  return (
-    <div
-      className="flex-1 min-w-0 overflow-auto"
-      style={{ paddingBottom: bottomPadding + 16 }} // +16 for some extra space
-    >
-      {children}
-    </div>
-  );
-}
+// Accent / radius / font are per-machine and applied before the first paint.
+bootstrapThemeStyle();
 
 function RunScriptDialogGlobal() {
   const { runScriptDialogTarget, closeRunScriptDialog } = useAppStore();
@@ -269,25 +252,21 @@ function App() {
     };
   }, []);
 
-  // Get settings from store
-  const settings = useAppStore((state) => state.settings);
-
-  // Apply theme when settings change
+  // Light / dark mode follows the app settings (and the OS when "system").
+  const themeMode = useAppStore((state) => state.settings?.appearance.theme);
   useEffect(() => {
-    const root = document.documentElement;
-    if (settings) {
-      const theme = settings.appearance.theme;
-      if (theme === 'system') {
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        root.classList.toggle('dark', prefersDark);
-      } else {
-        root.classList.toggle('dark', theme === 'dark');
-      }
-    } else {
-      // Default to dark while settings load
-      root.classList.add('dark');
+    // Default to dark while settings load.
+    if (!themeMode) {
+      document.documentElement.classList.add('dark');
+      return;
     }
-  }, [settings]);
+    applyThemeMode(themeMode);
+    if (themeMode !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => applyThemeMode('system');
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [themeMode]);
 
   const renderView = () => {
     switch (currentView) {
@@ -323,36 +302,17 @@ function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col h-screen overflow-hidden">
-        <TitleBar />
-        <div className="flex-1 flex overflow-hidden">
-          <SidebarProvider>
-            <AppSidebar />
-            <SidebarInset className="min-w-0">
-              <header className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
-                <SidebarTrigger className="-ml-1" />
-                <div className="text-sm font-medium text-muted-foreground">
-                  {currentView === 'dashboard' && 'Projects'}
-                  {currentView === 'project' && 'Project'}
-                  {currentView === 'settings' && 'Settings'}
-                  {currentView === 'scripts' && 'Scripts'}
-                  {currentView === 'script-detail' && 'Script Detail'}
-                  {currentView === 'tools' && 'Tools'}
-                  {currentView === 'tool-detail' && 'Tool Detail'}
-                  {currentView === 'aliases' && 'Shell Config'}
-                  {currentView === 'alias-detail' && 'Shell Config Detail'}
-                  {currentView === 'apps' && 'Apps'}
-                  {currentView === 'app-detail' && 'App Detail'}
-                  {currentView === 'utilities' && 'Utilities'}
-                  {currentView === 'agents' && (
-                    <span className="inline-flex items-center gap-2">Agents <BetaBadge /></span>
-                  )}
-                </div>
-              </header>
-              <MainContent>{renderView()}</MainContent>
-            </SidebarInset>
+      <div className="flex h-screen flex-col overflow-hidden text-foreground">
+        <TitleBar onOpenPalette={() => setPaletteOpen(true)} />
+        <div className="flex min-h-0 flex-1">
+          <AppSidebar />
+          <div className="flex min-w-0 flex-1 flex-col">
+            {/* Each screen owns its scrolling (see layout/Screen) */}
+            <main className="min-h-0 flex-1 overflow-auto" key={currentView}>
+              {renderView()}
+            </main>
             <TerminalPanel />
-          </SidebarProvider>
+          </div>
         </div>
       </div>
       <Toaster position="bottom-right" />

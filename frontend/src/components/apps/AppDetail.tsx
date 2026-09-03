@@ -1,9 +1,28 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ComponentType, type ReactNode } from 'react';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/EmptyState';
 import {
-  ChevronLeft,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  ArrowLeft,
   Pencil,
   AppWindow,
   FolderOpen,
@@ -13,17 +32,62 @@ import {
   StickyNote,
   Rocket,
   Play,
-  Tag,
   Star,
+  MoreVertical,
+  Trash2,
+  Link2,
+  Code,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { AppForm } from './AppForm';
+import { AppIcon } from './AppCard';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { toast } from 'sonner';
 import { launchApp as launchAppApi, openAppConfig, openAppUrl, openInExplorer } from '@/lib/tauri';
 import type { UpdateAppInput } from '@/types';
+
+/** Card with a titled header row (icon, title, optional count and actions). */
+function Section({
+  icon: Icon,
+  title,
+  count,
+  actions,
+  children,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  title: string;
+  count?: number;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <Card size="sm" className="gap-3">
+      <div className="flex items-center justify-between gap-3 px-4">
+        <h2 className="inline-flex items-center gap-2 font-display text-base font-semibold">
+          <Icon className="size-4 text-faint" />
+          {title}
+          {count !== undefined && count > 0 && <Badge variant="secondary">{count}</Badge>}
+        </h2>
+        {actions}
+      </div>
+      <div className="px-4">{children}</div>
+    </Card>
+  );
+}
+
+/** Label / value row of the information grid. */
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 items-center gap-2 text-sm">{children}</div>
+    </>
+  );
+}
+
+const codeClass = 'rounded-xs bg-muted px-1.5 py-0.5 font-mono text-[11px]';
 
 export function AppDetail() {
   const {
@@ -33,9 +97,11 @@ export function AppDetail() {
     selectedAppId,
     setCurrentView,
     updateAppItem,
+    deleteApp,
   } = useAppStore();
 
   const [showEditForm, setShowEditForm] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const app = useMemo(
     () => apps.find((a) => a.id === selectedAppId),
@@ -55,6 +121,18 @@ export function AppDetail() {
     if (!app) return;
     await updateAppItem(app.id, data);
     toast.success('App updated');
+  };
+
+  const handleDelete = async () => {
+    if (!app) return;
+    try {
+      await deleteApp(app.id);
+      toast.success('App deleted');
+      setCurrentView('apps');
+    } catch (e) {
+      toast.error('Failed to delete app', { description: String(e) });
+    }
+    setShowDeleteDialog(false);
   };
 
   const handleLaunch = async () => {
@@ -94,208 +172,205 @@ export function AppDetail() {
 
   if (!app) {
     return (
-      <div className="p-6">
-        <Button variant="ghost" onClick={() => setCurrentView('apps')}>
-          <ChevronLeft className="size-4 mr-2" />
-          Back to Apps
-        </Button>
-        <p className="text-muted-foreground mt-4">App not found.</p>
-      </div>
+      <Screen title="App" eyebrow="Apps" onBack={() => setCurrentView('apps')} backLabel="Back to apps">
+        <EmptyState
+          icon={AppWindow}
+          title="App not found"
+          description="It may have been removed from another window or from the CLI."
+          action={
+            <Button onClick={() => setCurrentView('apps')}>
+              <ArrowLeft />
+              Back to apps
+            </Button>
+          }
+        />
+      </Screen>
     );
   }
 
-  return (
-    <div className="p-6 space-y-6">
-      {/* Back + Header */}
-      <div>
-        <Button variant="ghost" size="sm" onClick={() => setCurrentView('apps')} className="mb-4">
-          <ChevronLeft className="size-4 mr-2" />
-          Back to Apps
-        </Button>
+  const toolboxUrl = app.toolboxUrl ? resolveToolboxUrl(app.toolboxUrl) : null;
+  const configs = app.configPaths.length;
 
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <AppWindow className="size-8 flex-shrink-0" style={{ color: app.color || '#6b7280' }} />
-            <div className="min-w-0 flex-1">
-              <TruncatedText as="h1" className="text-2xl font-bold">{app.name}</TruncatedText>
-              {app.description && (
-                <p className="text-sm text-muted-foreground mt-0.5 break-words">{app.description}</p>
+  return (
+    <Screen
+      eyebrow="Apps"
+      title={
+        <span className="inline-flex items-center gap-2">
+          <AppIcon color={app.color} size="sm" />
+          {app.name}
+          <StatusBadge status={app.status} />
+        </span>
+      }
+      subtitle={app.description || (app.executablePath ? <span className="font-mono">{app.executablePath}</span> : undefined)}
+      onBack={() => setCurrentView('apps')}
+      backLabel="Back to apps"
+      actions={
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-pressed={app.favorite}
+            onClick={handleToggleFavorite}
+            title={app.favorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Star className={app.favorite ? 'fill-warning text-warning' : ''} />
+          </Button>
+          {app.homepage && (
+            <Button variant="outline" onClick={() => handleOpenUrl(app.homepage!)} title={app.homepage}>
+              <Globe />
+              Homepage
+            </Button>
+          )}
+          <Button onClick={handleLaunch}>
+            <Rocket />
+            Launch
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="More actions">
+                <MoreVertical />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setShowEditForm(true)}>
+                <Pencil />
+                Edit app
+              </DropdownMenuItem>
+              {toolboxUrl && (
+                <DropdownMenuItem onClick={() => handleOpenUrl(toolboxUrl)}>
+                  <Link2 />
+                  Open toolbox page
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => setShowDeleteDialog(true)}>
+                <Trash2 />
+                Delete app
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {/* Launch */}
+        <Section
+          icon={Play}
+          title="Launch"
+          actions={
+            <Button size="sm" variant="outline" onClick={handleLaunch}>
+              <Rocket className="size-3.5" />
+              Launch {app.name}
+            </Button>
+          }
+        >
+          {app.executablePath || app.launchArgs ? (
+            <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[11px] text-muted-foreground">
+              {app.executablePath && (
+                <>
+                  <span className="text-faint">exe</span>
+                  <TruncatedText className="min-w-0 text-foreground/80">{app.executablePath}</TruncatedText>
+                </>
+              )}
+              {app.launchArgs && (
+                <>
+                  <span className="text-faint">args</span>
+                  <TruncatedText className="min-w-0">{app.launchArgs}</TruncatedText>
+                </>
               )}
             </div>
+          ) : (
+            <p className="text-xs text-faint">No executable path configured.</p>
+          )}
+        </Section>
+
+        {/* Information */}
+        <Section icon={AppWindow} title="Information">
+          <div className="grid grid-cols-[120px_1fr] items-center gap-x-4 gap-y-2.5">
+            <Row label="Status">
+              {app.status ? <StatusBadge status={app.status} /> : <span className="text-xs text-faint">—</span>}
+            </Row>
+
+            {app.version && (
+              <Row label="Version">
+                <code className={codeClass}>{app.version}</code>
+              </Row>
+            )}
+
+            {app.homepage && (
+              <Row label="Homepage">
+                <TruncatedText className="min-w-0 flex-1 text-xs text-muted-foreground">{app.homepage}</TruncatedText>
+                <Button variant="ghost" size="icon-xs" onClick={() => handleOpenUrl(app.homepage!)} title="Open homepage" aria-label="Open homepage">
+                  <ExternalLink />
+                </Button>
+              </Row>
+            )}
+
+            {toolboxUrl && (
+              <Row label="Toolbox">
+                <TruncatedText className="min-w-0 flex-1 text-xs text-muted-foreground">{toolboxUrl}</TruncatedText>
+                <Button variant="ghost" size="icon-xs" onClick={() => handleOpenUrl(toolboxUrl)} title="Open toolbox page" aria-label="Open toolbox page">
+                  <ExternalLink />
+                </Button>
+              </Row>
+            )}
+
+            {app.tags.length > 0 && (
+              <Row label="Tags">
+                <div className="flex flex-wrap gap-1">
+                  {app.tags.map((tag) => (
+                    <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
+                  ))}
+                </div>
+              </Row>
+            )}
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              aria-pressed={app.favorite}
-              onClick={handleToggleFavorite}
-              title={app.favorite ? 'Remove from favorites' : 'Add to favorites'}
-            >
-              <Star className={app.favorite ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
-              {app.favorite ? 'Favorite' : 'Add to favorites'}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
-              <Pencil className="size-4 mr-2" />
-              Edit
-            </Button>
-          </div>
-        </div>
-      </div>
+        </Section>
 
-      {/* Launch Card */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Play className="size-4" />
-            Launch
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Button onClick={handleLaunch} className="w-full" size="lg">
-            <Rocket className="size-5 mr-2" />
-            Launch {app.name}
-          </Button>
-          {app.executablePath && (
-            <div className="text-sm">
-              <span className="text-muted-foreground">Executable:</span>
-              <code className="ml-2 px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{app.executablePath}</code>
-            </div>
-          )}
-          {app.launchArgs && (
-            <div className="text-sm">
-              <span className="text-muted-foreground">Arguments:</span>
-              <code className="ml-2 px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{app.launchArgs}</code>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Info Card */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <AppWindow className="size-4" />
-            Information
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Status:</span>
-            <StatusBadge status={app.status} />
-          </div>
-
-          {app.version && (
-            <div>
-              <span className="text-muted-foreground">Version:</span>
-              <code className="ml-2 px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{app.version}</code>
-            </div>
-          )}
-
-          {app.homepage && (
-            <div className="flex items-center gap-2">
-              <Globe className="size-3.5 text-muted-foreground flex-shrink-0" />
-              <span className="text-muted-foreground flex-shrink-0">Homepage:</span>
-              <TruncatedText className="text-xs flex-1 min-w-0">{app.homepage}</TruncatedText>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs flex-shrink-0" onClick={() => handleOpenUrl(app.homepage!)}>
-                <ExternalLink className="size-3 mr-1" />
-                Open
-              </Button>
-            </div>
-          )}
-
-          {app.toolboxUrl && (
-            <div className="flex items-center gap-2">
-              <Globe className="size-3.5 text-muted-foreground flex-shrink-0" />
-              <span className="text-muted-foreground flex-shrink-0">Toolbox:</span>
-              <TruncatedText className="text-xs flex-1 min-w-0">{resolveToolboxUrl(app.toolboxUrl)}</TruncatedText>
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs flex-shrink-0" onClick={() => handleOpenUrl(resolveToolboxUrl(app.toolboxUrl!))}>
-                <ExternalLink className="size-3 mr-1" />
-                Open
-              </Button>
-            </div>
-          )}
-
-          {app.tags.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <Tag className="size-3.5 text-muted-foreground" />
-              {app.tags.map((tag) => (
-                <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Configs Card */}
-      {app.configPaths.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <FileText className="size-4" />
-              Configuration Paths
-              <Badge variant="secondary" className="ml-1.5 text-xs px-1.5 py-0">
-                {app.configPaths.length}
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+        {/* Configuration paths */}
+        {configs > 0 && (
+          <Section icon={FileText} title="Configuration paths" count={configs}>
             <div className="space-y-2">
               {app.configPaths.map((config, index) => (
-                <div key={index} className="flex items-center justify-between p-2 rounded-md border">
+                <div key={index} className="flex items-center gap-3 rounded-lg border border-border bg-background/40 px-3 py-2">
+                  {config.isDirectory ? <FolderOpen className="size-4 shrink-0 text-faint" /> : <FileText className="size-4 shrink-0 text-faint" />}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      {config.label && (
-                        <span className="text-sm font-medium">{config.label}</span>
-                      )}
-                      {config.isDirectory && (
-                        <Badge variant="outline" className="text-xs py-0">dir</Badge>
-                      )}
+                      {config.label && <span className="truncate text-sm font-medium">{config.label}</span>}
+                      {config.isDirectory && <Badge variant="outline">dir</Badge>}
                     </div>
-                    <p className="text-xs font-mono text-muted-foreground truncate mt-0.5">{config.path}</p>
+                    <p className="truncate font-mono text-[11px] text-muted-foreground" title={config.path}>{config.path}</p>
                   </div>
-                  <div className="flex items-center gap-1 ml-2 shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => handleOpenConfig(index)}
-                    >
-                      Open in VSCode
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => handleOpenConfig(index)}>
+                      <Code />
+                      VSCode
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2 text-xs"
                       onClick={() => {
                         const path = config.isDirectory ? config.path : config.path.replace(/[\\/][^\\/]*$/, '');
                         openInExplorer(path).catch((err) => toast.error('Failed to open explorer', { description: String(err) }));
                       }}
                     >
-                      <FolderOpen className="size-3 mr-1" />
+                      <FolderOpen />
                       Explorer
                     </Button>
                   </div>
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </Section>
+        )}
 
-      {/* Notes Card */}
-      {app.notes && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <StickyNote className="size-4" />
-              Notes
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm whitespace-pre-wrap">{app.notes}</p>
-          </CardContent>
-        </Card>
-      )}
+        {/* Notes */}
+        {app.notes && (
+          <Section icon={StickyNote} title="Notes">
+            <p className="whitespace-pre-wrap text-sm text-muted-foreground">{app.notes}</p>
+          </Section>
+        )}
+      </div>
 
       {/* Edit Form */}
       <AppForm
@@ -307,6 +382,23 @@ export function AppDetail() {
         onSubmit={handleUpdate}
       />
 
-    </div>
+      {/* Delete confirmation */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete app</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete "{app.name}"? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Screen>
   );
 }

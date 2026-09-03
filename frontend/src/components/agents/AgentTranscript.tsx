@@ -114,16 +114,16 @@ export default function AgentTranscript({ sessionId, sessionState, changeToken }
 
   if (error) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
-        <MessageSquareOff className="size-6" />
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
+        <MessageSquareOff className="size-6 text-faint" />
         <p>Could not read the transcript.</p>
-        <p className="text-xs break-all">{error}</p>
+        <p className="break-all font-mono text-[11px] text-faint">{error}</p>
       </div>
     );
   }
   if (!state) {
     return (
-      <div className="flex-1 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+      <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" /> Loading transcript…
       </div>
     );
@@ -136,18 +136,18 @@ export default function AgentTranscript({ sessionId, sessionState, changeToken }
   const visible = state.messages.filter((m) => m.parts.length > 0 && !isToolResultOnly(m));
 
   return (
-    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
       <div className="flex flex-col gap-5 p-4">
         {state.hasMore && (
           <div className="flex justify-center">
             <Button variant="outline" size="sm" onClick={loadOlder} disabled={loadingOlder}>
-              {loadingOlder ? <Loader2 className="size-4 animate-spin" /> : <ChevronUp className="size-4" />}
+              {loadingOlder ? <Loader2 className="animate-spin" /> : <ChevronUp />}
               Load older ({state.offset.toLocaleString()} more)
             </Button>
           </div>
         )}
         {state.total === 0 && (
-          <p className="text-center text-sm text-muted-foreground py-8">No messages in this session yet.</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">No messages in this session yet.</p>
         )}
         {visible.map((m) => (
           <AgentTranscriptMessage key={m.id} message={m} toolResults={toolResults} sessionState={sessionState} />

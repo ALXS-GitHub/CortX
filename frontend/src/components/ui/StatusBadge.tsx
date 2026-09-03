@@ -1,12 +1,12 @@
-import { Badge } from '@/components/ui/badge';
+import { Chip } from '@/components/ui/Chip';
 import { useAppStore } from '@/stores/appStore';
-import { cn } from '@/lib/utils';
 
 interface StatusBadgeProps {
   status?: string;
   className?: string;
 }
 
+/** Project status as a colour-coded chip (colour comes from the status definitions). */
 export function StatusBadge({ status, className }: StatusBadgeProps) {
   const { statusDefinitions } = useAppStore();
 
@@ -16,23 +16,9 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
     (d) => d.name.toLowerCase() === status.toLowerCase()
   );
 
-  const color = def?.color;
-
   return (
-    <Badge
-      variant="outline"
-      className={cn('text-xs font-medium', className)}
-      style={
-        color
-          ? {
-              borderColor: color,
-              color: color,
-              backgroundColor: `${color}15`,
-            }
-          : undefined
-      }
-    >
+    <Chip color={def?.color} neutral={!def?.color} className={className}>
       {status}
-    </Badge>
+    </Chip>
   );
 }

@@ -16,53 +16,54 @@ export function AgentCard({ session, project, selected, onSelect, actions, now, 
 
   return (
     <Card
+      interactive
+      size="sm"
       role="button"
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
       aria-pressed={selected}
       className={cn(
-        'group cursor-pointer transition-colors hover:border-primary/50',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        selected && 'border-primary/60 bg-muted/30',
+        'group outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+        selected && 'border-accent-border bg-accent/40',
         hidden && 'opacity-60',
       )}
     >
-      <CardContent className="p-4 space-y-2">
+      <CardContent className="space-y-2">
         <div className="flex items-start gap-2">
-          <div className="flex items-center gap-2 pt-1 shrink-0">
+          <div className="flex shrink-0 items-center gap-2 pt-1">
             <AgentStateDot state={session.state} />
             <AgentProviderIcon provider={session.provider} />
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              {pinned && <Pin className="size-3 shrink-0 text-muted-foreground" />}
-              {hidden && <EyeOff className="size-3 shrink-0 text-muted-foreground" />}
-              <h3 className="font-medium text-sm truncate" title={session.title}>{session.title}</h3>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-1.5">
+              {pinned && <Pin className="size-3 shrink-0 text-warning" />}
+              {hidden && <EyeOff className="size-3 shrink-0 text-faint" />}
+              <h3 className="truncate font-display text-sm font-semibold tracking-tight" title={session.title}>{session.title}</h3>
             </div>
-            <p className="text-xs text-muted-foreground truncate" title={session.cwd}>
+            <p className="truncate text-xs text-muted-foreground" title={session.cwd}>
               <span className={cn(!project.isProject && 'italic')}>{project.name}</span>
-              {session.gitBranch && ` · ${session.gitBranch}`}
+              {session.gitBranch && <span className="font-mono text-[11px] text-faint"> · {session.gitBranch}</span>}
             </p>
           </div>
           <AgentActionsMenu
             session={session}
             actions={actions}
-            className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+            className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
           />
         </div>
 
         <AgentLastExchange session={session} lines={2} />
 
         <div className="flex items-center justify-between gap-2 pt-1">
-          <div className="flex items-center gap-1 flex-wrap min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
             <AgentTicketChips refs={session.ticketRefs} />
             {tags.slice(0, 3).map((tag) => (
-              <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} className="h-4 px-1.5 text-[10px]" />
+              <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
             ))}
           </div>
           <span
-            className="text-xs text-muted-foreground tabular-nums whitespace-nowrap shrink-0"
+            className="shrink-0 whitespace-nowrap text-xs tabular-nums text-faint"
             title={formatDateTime(session.lastActivityAt)}
           >
             {formatRelativeTime(session.lastActivityAt, now)}

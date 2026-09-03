@@ -1,19 +1,13 @@
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { TagBadge } from '@/components/ui/TagBadge';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import { useAppStore } from '@/stores/appStore';
 import type { Project } from '@/types';
-import { Play, FolderOpen, MoreVertical, Circle, Code } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { openInExplorer, openInVscode } from '@/lib/tauri';
-import { toast } from 'sonner';
+import { Play, Square } from 'lucide-react';
+import { ProjectMenu } from './ProjectCard';
+import { useProjectActions } from './useProjectActions';
 
 interface ProjectCardProps {
   project: Project;
@@ -22,109 +16,50 @@ interface ProjectCardProps {
   onToggleFavorite: () => void;
 }
 
+/** One-line row; rendered inside a bordered list container by the Dashboard. */
 export function ProjectCompactItem({ project, onEdit, onDelete, onToggleFavorite }: ProjectCardProps) {
-  const { selectProject, serviceRuntimes, startService, tagDefinitions } = useAppStore();
-
-  const handleStartAll = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    for (const service of project.services) {
-      const runtime = serviceRuntimes.get(service.id);
-      if (!runtime || runtime.status === 'stopped') {
-        try {
-          await startService(service.id);
-        } catch (error) {
-          console.error(`Failed to start ${service.name}:`, error);
-        }
-      }
-    }
-  };
-
-  const handleOpenFolder = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    openInExplorer(project.rootPath).catch(console.error);
-  };
-
-  const handleOpenInVscode = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    openInVscode(project.rootPath).catch((error) => {
-      toast.error('Failed to open VSCode', {
-        description: String(error),
-      });
-    });
-  };
-
-  const runningCount = project.services.filter((s) => {
-    const runtime = serviceRuntimes.get(s.id);
-    return runtime?.status === 'running';
-  }).length;
+  const { selectProject, tagDefinitions } = useAppStore();
+  const { runningCount, startAll, stopAll } = useProjectActions(project);
+  const total = project.services.length;
+  const allRunning = total > 0 && runningCount === total;
 
   return (
     <div
-      className="flex items-center h-9 border rounded-md px-3 cursor-pointer hover:bg-muted/50 transition-colors group"
+      className="group flex h-10 cursor-pointer items-center gap-2 border-b border-border px-3 transition-colors last:border-b-0 hover:bg-accent/50"
       onClick={() => selectProject(project.id)}
     >
-      {/* Running indicator dot */}
-      {runningCount > 0 && (
-        <Circle className="size-2 fill-current text-green-500 mr-2 flex-shrink-0" />
-      )}
+      <StatusDot tone={runningCount > 0 ? 'running' : 'idle'} size={7} className="shrink-0" />
 
-      {/* Name */}
-      <TruncatedText className="font-medium text-sm min-w-0">{project.name}</TruncatedText>
+      <TruncatedText className="min-w-0 text-sm font-medium">{project.name}</TruncatedText>
 
-      {/* Primary tag */}
       {project.tags.length > 0 && (
-        <TagBadge tag={project.tags[0]} tagDefinitions={tagDefinitions} className="text-xs py-0 ml-1.5 flex-shrink-0" />
+        <TagBadge tag={project.tags[0]} tagDefinitions={tagDefinitions} className="shrink-0" />
       )}
 
-      {/* Service count badge */}
-      {project.services.length > 0 && (
-        <Badge variant="secondary" className="text-xs py-0 ml-2 flex-shrink-0">
-          {project.services.length} service{project.services.length !== 1 ? 's' : ''}
-        </Badge>
-      )}
+      <span className="hidden min-w-0 flex-1 truncate font-mono text-[11px] text-faint md:block" title={project.rootPath}>
+        {project.rootPath}
+      </span>
+      <span className="flex-1 md:hidden" />
 
-      {/* Spacer */}
-      <div className="flex-1" />
+      {total > 0 && (
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {runningCount > 0 ? `${runningCount}/${total} running` : `${total} service${total !== 1 ? 's' : ''}`}
+        </span>
+      )}
 
       <FavoriteButton favorite={project.favorite} onToggle={onToggleFavorite} size="sm" />
 
-      {/* Right side: start button + dropdown (hover visible) */}
-      <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={handleStartAll}
-          disabled={project.services.length === 0}
-        >
-          <Play className="size-3.5" />
-        </Button>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-            <Button variant="ghost" size="icon-sm">
-              <MoreVertical className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={handleOpenInVscode}>
-              <Code className="size-4 mr-2" />
-              Open in VSCode
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleOpenFolder}>
-              <FolderOpen className="size-4 mr-2" />
-              Open Folder
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(); }}>
-              Edit Project
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={(e) => { e.stopPropagation(); onDelete(); }}
-              className="text-destructive"
-            >
-              Delete Project
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        {allRunning ? (
+          <Button variant="ghost" size="icon-sm" onClick={stopAll} title="Stop all" className="text-destructive hover:text-destructive">
+            <Square className="size-3.5" />
+          </Button>
+        ) : (
+          <Button variant="ghost" size="icon-sm" onClick={startAll} disabled={total === 0} title="Start all">
+            <Play className="size-3.5" />
+          </Button>
+        )}
+        <ProjectMenu project={project} onEdit={onEdit} onDelete={onDelete} />
       </div>
     </div>
   );

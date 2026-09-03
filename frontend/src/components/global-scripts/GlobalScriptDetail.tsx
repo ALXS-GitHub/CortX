@@ -1,17 +1,19 @@
 import { useMemo, useState } from 'react';
+import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { StatusDot } from '@/components/ui/StatusDot';
+import { StatusBadge } from '@/components/ui/StatusBadge';
+import { Tabs, TabsContent, TabsCount, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   ArrowLeft,
   Play,
   Square,
   Pencil,
   FileCode,
-  FolderOpen,
   Terminal,
-  Tag,
   Settings2,
   History,
   Layers,
@@ -22,6 +24,7 @@ import { GlobalScriptForm } from './GlobalScriptForm';
 import { ParameterEditor } from './ParameterEditor';
 import { PresetEditor } from './PresetEditor';
 import { ExecutionHistory } from './ExecutionHistory';
+import { ScriptRunBadge } from './GlobalScriptCard';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { toast } from 'sonner';
@@ -82,161 +85,166 @@ export function GlobalScriptDetail() {
     toast.success('Script updated');
   };
 
+  const handleBack = () => setCurrentView('scripts');
+
   if (!script) {
     return (
-      <div className="p-6">
-        <Button variant="ghost" onClick={() => setCurrentView('scripts')}>
-          <ArrowLeft className="size-4 mr-2" />
-          Back to Scripts
-        </Button>
-        <p className="text-muted-foreground mt-4">Script not found.</p>
-      </div>
+      <Screen eyebrow="Scripts" title="Script" onBack={handleBack} backLabel="Back to scripts">
+        <EmptyState
+          icon={FileCode}
+          title="Script not found"
+          description="It may have been deleted from another window or from the CLI."
+          action={
+            <Button onClick={handleBack}>
+              <ArrowLeft />
+              Back to scripts
+            </Button>
+          }
+        />
+      </Screen>
     );
   }
 
+  const commandDisplay = formatCommandDisplay(script.command, script.scriptPath);
+
   return (
-    <div className="p-6 space-y-6">
-      {/* Back + Header */}
-      <div>
-        <Button variant="ghost" size="sm" onClick={() => setCurrentView('scripts')} className="mb-4">
-          <ArrowLeft className="size-4 mr-2" />
-          Back to Scripts
-        </Button>
-
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <FileCode className="size-8 flex-shrink-0" style={{ color: script.color || '#6b7280' }} />
-            <div className="min-w-0 flex-1">
-              <TruncatedText as="h1" className="text-2xl font-bold">{script.name}</TruncatedText>
-              {script.description && (
-                <p className="text-sm text-muted-foreground mt-0.5 break-words">{script.description}</p>
-              )}
+    <Screen
+      eyebrow="Scripts"
+      title={
+        <span className="inline-flex items-center gap-2">
+          {isRunning && <StatusDot tone="running" size={8} />}
+          <span
+            className="grid size-5 shrink-0 place-items-center rounded-[6px]"
+            style={{ backgroundColor: `color-mix(in srgb, ${script.color || 'var(--text-faint)'} 16%, transparent)`, color: script.color || 'var(--text-faint)' }}
+          >
+            <FileCode className="size-3" />
+          </span>
+          {script.name}
+          <ScriptRunBadge status={status} />
+          <StatusBadge status={script.status} />
+        </span>
+      }
+      subtitle={<span className="font-mono">{commandDisplay}</span>}
+      onBack={handleBack}
+      backLabel="Back to scripts"
+      actions={
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-pressed={script.favorite}
+            onClick={handleToggleFavorite}
+            title={script.favorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Star className={script.favorite ? 'fill-warning text-warning' : ''} />
+          </Button>
+          <Button variant="outline" onClick={() => setShowEditForm(true)}>
+            <Pencil />
+            Edit
+          </Button>
+          {isRunning ? (
+            <Button variant="outline" onClick={handleStop} className="text-destructive hover:text-destructive">
+              <Square />
+              Stop
+            </Button>
+          ) : (
+            <Button onClick={handleRun}>
+              <Play />
+              Run
+            </Button>
+          )}
+        </>
+      }
+    >
+      {/* Description + tags */}
+      {(script.description || script.tags.length > 0) && (
+        <div className="mb-5 flex flex-col gap-2">
+          {script.description && <p className="max-w-3xl text-sm text-muted-foreground">{script.description}</p>}
+          {script.tags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {script.tags.map((tag) => (
+                <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} />
+              ))}
             </div>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              aria-pressed={script.favorite}
-              onClick={handleToggleFavorite}
-              title={script.favorite ? 'Remove from favorites' : 'Add to favorites'}
-            >
-              <Star className={script.favorite ? 'size-4 fill-amber-400 text-amber-400' : 'size-4'} />
-              {script.favorite ? 'Favorite' : 'Add to favorites'}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowEditForm(true)}>
-              <Pencil className="size-4 mr-2" />
-              Edit
-            </Button>
-            {isRunning ? (
-              <Button variant="destructive" size="sm" onClick={handleStop}>
-                <Square className="size-4 mr-2" />
-                Stop
-              </Button>
-            ) : (
-              <Button size="sm" onClick={handleRun}>
-                <Play className="size-4 mr-2" />
-                Run
-              </Button>
-            )}
-          </div>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* Tabs */}
-      <Tabs defaultValue="overview">
-        <TabsList>
-          <TabsTrigger value="overview">
-            <Terminal className="size-3.5 mr-1.5" />
+      <Tabs defaultValue="overview" className="gap-5">
+        <TabsList variant="line" className="w-full justify-start">
+          <TabsTrigger value="overview" className="flex-none">
+            <Terminal />
             Overview
           </TabsTrigger>
-          <TabsTrigger value="parameters">
-            <Settings2 className="size-3.5 mr-1.5" />
+          <TabsTrigger value="parameters" className="flex-none">
+            <Settings2 />
             Parameters
-            {script.parameters.length > 0 && (
-              <Badge variant="secondary" className="ml-1.5 text-xs px-1.5 py-0">
-                {script.parameters.length}
-              </Badge>
-            )}
+            {script.parameters.length > 0 && <TabsCount>{script.parameters.length}</TabsCount>}
           </TabsTrigger>
-          <TabsTrigger value="presets">
-            <Layers className="size-3.5 mr-1.5" />
+          <TabsTrigger value="presets" className="flex-none">
+            <Layers />
             Presets
-            {script.parameterPresets.length > 0 && (
-              <Badge variant="secondary" className="ml-1.5 text-xs px-1.5 py-0">
-                {script.parameterPresets.length}
-              </Badge>
-            )}
+            {script.parameterPresets.length > 0 && <TabsCount>{script.parameterPresets.length}</TabsCount>}
           </TabsTrigger>
-          <TabsTrigger value="history">
-            <History className="size-3.5 mr-1.5" />
+          <TabsTrigger value="history" className="flex-none">
+            <History />
             History
           </TabsTrigger>
         </TabsList>
 
         {/* Overview tab */}
-        <TabsContent value="overview" className="mt-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Terminal className="size-4" />
-                Configuration
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div>
-                <span className="text-muted-foreground">Command:</span>
-                <code className="ml-2 px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{formatCommandDisplay(script.command, script.scriptPath)}</code>
-              </div>
-              {script.workingDir && (
-                <div className="flex items-center gap-2">
-                  <FolderOpen className="size-3.5 text-muted-foreground flex-shrink-0" />
-                  <span className="text-muted-foreground flex-shrink-0">Default working dir:</span>
-                  <TruncatedText className="font-mono text-xs flex-1 min-w-0">{script.workingDir}</TruncatedText>
-                </div>
-              )}
+        <TabsContent value="overview" className="space-y-4">
+          <div>
+            <h2 className="font-display text-base font-semibold">Configuration</h2>
+            <p className="text-xs text-muted-foreground">How this script is launched.</p>
+          </div>
+          <Card size="sm" className="py-0">
+            <div className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
+              <span className="eyebrow">cmd</span>
+              <TruncatedText className="min-w-0 font-mono text-[12px] text-foreground/80">{commandDisplay}</TruncatedText>
               {script.scriptPath && (
-                <div className="flex items-center gap-2">
-                  <FileCode className="size-3.5 text-muted-foreground flex-shrink-0" />
-                  <span className="text-muted-foreground flex-shrink-0">Script file:</span>
-                  <TruncatedText className="font-mono text-xs flex-1 min-w-0">{script.scriptPath}</TruncatedText>
-                </div>
+                <>
+                  <span className="eyebrow">file</span>
+                  <TruncatedText className="min-w-0 font-mono text-[11px] text-muted-foreground">{script.scriptPath}</TruncatedText>
+                </>
               )}
-              {script.tags.length > 0 && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Tag className="size-3.5 text-muted-foreground" />
-                  {script.tags.map((tag) => (
-                    <TagBadge key={tag} tag={tag} tagDefinitions={tagDefinitions} className="text-xs py-0" />
-                  ))}
-                </div>
+              {script.workingDir && (
+                <>
+                  <span className="eyebrow">cwd</span>
+                  <TruncatedText className="min-w-0 font-mono text-[11px] text-muted-foreground">{script.workingDir}</TruncatedText>
+                </>
               )}
-              {script.parameters.length > 0 && (
-                <div className="mt-3 pt-3 border-t">
-                  <span className="text-muted-foreground">Parameters:</span>
-                  <span className="ml-2">{script.parameters.length} configured</span>
-                  {script.parameterPresets.length > 0 && (
-                    <span className="text-muted-foreground ml-2">
-                      ({script.parameterPresets.length} preset{script.parameterPresets.length > 1 ? 's' : ''})
-                    </span>
-                  )}
-                </div>
-              )}
-            </CardContent>
+              <span className="eyebrow">params</span>
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {script.parameters.length > 0 ? (
+                  <>
+                    <Badge variant="secondary">{script.parameters.length} configured</Badge>
+                    {script.parameterPresets.length > 0 && (
+                      <Badge variant="secondary">
+                        {script.parameterPresets.length} preset{script.parameterPresets.length > 1 ? 's' : ''}
+                      </Badge>
+                    )}
+                  </>
+                ) : (
+                  'None'
+                )}
+              </span>
+            </div>
           </Card>
         </TabsContent>
 
         {/* Parameters tab */}
-        <TabsContent value="parameters" className="mt-4">
+        <TabsContent value="parameters">
           <ParameterEditor key={script.id} script={script} />
         </TabsContent>
 
         {/* Presets tab */}
-        <TabsContent value="presets" className="mt-4">
+        <TabsContent value="presets">
           <PresetEditor key={script.id} script={script} />
         </TabsContent>
 
         {/* History tab */}
-        <TabsContent value="history" className="mt-4">
+        <TabsContent value="history">
           <ExecutionHistory scriptId={script.id} />
         </TabsContent>
       </Tabs>
@@ -248,6 +256,6 @@ export function GlobalScriptDetail() {
         script={script}
         onSubmit={handleUpdate}
       />
-    </div>
+    </Screen>
   );
 }

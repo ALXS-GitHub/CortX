@@ -33,54 +33,55 @@ export function EnvVariableRow({ variable }: EnvVariableRowProps) {
   };
 
   return (
-    <div className="flex items-center gap-2 py-1.5">
+    <div className="group/row grid grid-cols-[minmax(8rem,12rem)_1fr_auto] items-center gap-2">
       {/* Key - readonly */}
       <Input
         value={variable.key}
         readOnly
-        className="w-48 font-mono text-sm bg-muted/50"
+        aria-label="Variable name"
+        className="h-8 bg-muted/40 font-mono text-[12px] font-medium shadow-none"
       />
 
       {/* Value - masked by default */}
-      <div className="flex-1 relative">
+      <div className="relative min-w-0">
         <Input
           type={isValueVisible ? 'text' : 'password'}
           value={variable.value}
           readOnly
-          className="font-mono text-sm pr-10 bg-muted/50"
+          aria-label="Variable value"
+          className="h-8 bg-muted/40 pr-9 font-mono text-[12px] shadow-none"
         />
         <Button
           variant="ghost"
-          size="icon-sm"
-          className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+          size="icon-xs"
+          className="absolute right-1 top-1/2 -translate-y-1/2 text-faint hover:text-foreground"
           onClick={() => setIsValueVisible(!isValueVisible)}
+          aria-label={isValueVisible ? 'Hide value' : 'Show value'}
         >
-          {isValueVisible ? (
-            <EyeOff className="size-3.5" />
-          ) : (
-            <Eye className="size-3.5" />
-          )}
+          {isValueVisible ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
         </Button>
       </div>
 
       {/* Copy buttons */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="outline" size="icon-sm" onClick={handleCopyKey}>
-            <Copy className="size-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Copy key</TooltipContent>
-      </Tooltip>
+      <div className="flex items-center gap-0.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" onClick={handleCopyKey} aria-label="Copy key" className="text-faint hover:text-foreground">
+              <Copy className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Copy key</TooltipContent>
+        </Tooltip>
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="outline" size="icon-sm" onClick={handleCopyValue}>
-            <ClipboardCopy className="size-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Copy value</TooltipContent>
-      </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" onClick={handleCopyValue} aria-label="Copy value" className="text-faint hover:text-foreground">
+              <ClipboardCopy className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Copy value</TooltipContent>
+        </Tooltip>
+      </div>
     </div>
   );
 }

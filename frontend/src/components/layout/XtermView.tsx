@@ -34,5 +34,5 @@ export function XtermView({ terminalId, autoFocus = false }: XtermViewProps) {
     return () => cancelAnimationFrame(frame);
   }, [autoFocus, terminalId]);
 
-  return <div ref={ref} className="absolute inset-0 overflow-hidden bg-card" />;
+  return <div ref={ref} className="absolute inset-0 overflow-hidden bg-terminal" />;
 }
