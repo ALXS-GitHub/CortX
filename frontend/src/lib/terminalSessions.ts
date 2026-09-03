@@ -223,14 +223,18 @@ export function terminalFontOptions(): {
   const renderer = cfg?.renderer ?? 'webgl';
   const lh = cfg?.lineHeight;
   const ls = cfg?.letterSpacing;
+  const fontFamily = family ? `"${family.replace(/"/g, '')}", ${DEFAULT_FONT_STACK}` : DEFAULT_FONT_STACK;
+  const fontSize = size && size >= 8 && size <= 32 ? size : DEFAULT_FONT_SIZE;
   return {
-    letterSpacing: ls !== undefined && ls >= -2 && ls <= 6 ? ls : undefined,
+    fontFamily,
+    fontSize,
+    lineHeight: lh && lh >= 1 && lh <= 2 ? lh : defaultLineHeight(renderer),
+    // Manual value wins; otherwise cells are snapped to whole pixels (only
+    // matters for the browser renderer, see `pixelSnapLetterSpacing`).
+    letterSpacing:
+      ls !== undefined && ls >= -2 && ls <= 6 ? ls : pixelSnapLetterSpacing(fontFamily, fontSize, renderer),
     fontWeight: clampWeight(cfg?.fontWeight) ?? 400,
     fontWeightBold: clampWeight(cfg?.fontWeightBold) ?? 700,
-    // A user font still falls back to the stack for glyphs it lacks.
-    fontFamily: family ? `"${family.replace(/"/g, '')}", ${DEFAULT_FONT_STACK}` : DEFAULT_FONT_STACK,
-    fontSize: size && size >= 8 && size <= 32 ? size : DEFAULT_FONT_SIZE,
-    lineHeight: lh && lh >= 1 && lh <= 2 ? lh : defaultLineHeight(renderer),
   };
 }
 
@@ -251,7 +255,38 @@ function defaultLineHeight(renderer: string): number {
  * `renderer` setting). The Settings field
  * still lets a font be tuned by hand.
  */
-export const DEFAULT_LETTER_SPACING = 0;
+let advanceCanvas: CanvasRenderingContext2D | null | undefined;
+const advanceCache = new Map<string, number>();
+
+/** Horizontal advance of one glyph, in CSS px. */
+function glyphAdvance(fontFamily: string, fontSize: number): number {
+  const key = `${fontSize}|${fontFamily}`;
+  const cached = advanceCache.get(key);
+  if (cached !== undefined) return cached;
+  if (advanceCanvas === undefined) advanceCanvas = document.createElement('canvas').getContext('2d');
+  if (!advanceCanvas) return fontSize * 0.6;
+  advanceCanvas.font = `${fontSize}px ${fontFamily}`;
+  const width = advanceCanvas.measureText('W'.repeat(20)).width / 20;
+  advanceCache.set(key, width);
+  return width;
+}
+
+/**
+ * Letter spacing that lands every cell on a whole pixel.
+ *
+ * The GPU renderer redraws box / powerline glyphs at the cell size, so it
+ * never seams. The browser renderer draws them as text: with a fractional
+ * advance (Hack is 9.63 px at 16) each cell starts between two pixels and
+ * the antialiased edge of a powerline separator leaves a hairline against
+ * its neighbour. Widening the cell to the next whole pixel removes it.
+ * Returns 0 for the GPU renderer and for advances that are already integral.
+ */
+export function pixelSnapLetterSpacing(fontFamily: string, fontSize: number, renderer: string): number {
+  if (renderer !== 'dom') return 0;
+  const advance = glyphAdvance(fontFamily, fontSize);
+  const snap = Math.ceil(advance) - advance;
+  return snap > 0.02 && snap < 0.98 ? Math.round(snap * 1000) / 1000 : 0;
+}
 
 /** Push family, size (with the window zoom), line height and letter spacing to one terminal. */
 function applyFontMetrics(term: Terminal, font: ReturnType<typeof terminalFontOptions>) {
@@ -259,7 +294,7 @@ function applyFontMetrics(term: Terminal, font: ReturnType<typeof terminalFontOp
   term.options.fontFamily = font.fontFamily;
   term.options.fontSize = size;
   term.options.lineHeight = font.lineHeight;
-  term.options.letterSpacing = font.letterSpacing ?? DEFAULT_LETTER_SPACING;
+  term.options.letterSpacing = font.letterSpacing ?? 0;
   term.options.fontWeight = font.fontWeight;
   term.options.fontWeightBold = font.fontWeightBold;
 }
@@ -388,7 +423,7 @@ function createSession(id: string): TerminalSession {
     fontFamily: font.fontFamily,
     fontSize: Math.max(6, font.fontSize + zoomDelta),
     lineHeight: font.lineHeight,
-    letterSpacing: font.letterSpacing ?? DEFAULT_LETTER_SPACING,
+    letterSpacing: font.letterSpacing ?? 0,
     fontWeight: font.fontWeight,
     fontWeightBold: font.fontWeightBold,
     scrollback: 10000,
