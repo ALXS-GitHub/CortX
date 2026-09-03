@@ -69,10 +69,13 @@ export function TerminalThemeLayer() {
     <>
       <div aria-hidden className="terminal-theme-layer" style={style} />
       {dim > 0 && (
+        // Black, not the theme colour: dimming must darken the picture, not
+        // tint it further (set the wallpaper opacity to 100 and dim to taste
+        // to keep the image's own colours).
         <div
           aria-hidden
           className="terminal-theme-layer"
-          style={{ backgroundImage: 'none', backgroundColor: theme.background, opacity: dim }}
+          style={{ backgroundImage: 'none', backgroundColor: '#000', opacity: dim }}
         />
       )}
     </>

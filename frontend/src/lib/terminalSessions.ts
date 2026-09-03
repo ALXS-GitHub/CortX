@@ -152,9 +152,26 @@ function isDarkTheme(): boolean {
 export function buildTerminalTheme(): ITheme {
   const override = getXtermThemeOverride();
   if (override) {
-    return themeToXterm(override, { transparentBackground: IS_TERMINAL_WINDOW && isWindowThemeActive() });
+    return themeToXterm(override, { transparentBackground: IS_TERMINAL_WINDOW });
   }
   const dark = isDarkTheme();
+  // Panes of the Terminal window are always see-through: the window itself
+  // paints the theme colour and the wallpaper behind them (the window is
+  // opaque unless the user asked for transparency, so this can never leak
+  // the desktop). A theme that has not loaded yet must not blank the
+  // wallpaper with an opaque canvas either.
+  if (IS_TERMINAL_WINDOW) {
+    const fgOnly = resolveCssColor('--terminal-fg') ?? resolveCssColor('--foreground') ?? (dark ? [229, 229, 229] : [36, 36, 36]);
+    return {
+      background: 'rgba(0, 0, 0, 0)',
+      foreground: toHex(fgOnly),
+      cursor: toHex(fgOnly),
+      cursorAccent: 'rgba(0, 0, 0, 0)',
+      selectionBackground: `rgba(${fgOnly[0]}, ${fgOnly[1]}, ${fgOnly[2]}, 0.25)`,
+      selectionInactiveBackground: `rgba(${fgOnly[0]}, ${fgOnly[1]}, ${fgOnly[2]}, 0.15)`,
+      ...(dark ? DARK_ANSI : LIGHT_ANSI),
+    };
+  }
   const bg = resolveCssColor('--bg-terminal') ?? resolveCssColor('--card') ?? (dark ? [30, 30, 30] : [255, 255, 255]);
   const fg = resolveCssColor('--terminal-fg') ?? resolveCssColor('--foreground') ?? (dark ? [229, 229, 229] : [36, 36, 36]);
   const ansi = dark ? DARK_ANSI : LIGHT_ANSI;

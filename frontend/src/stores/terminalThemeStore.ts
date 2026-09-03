@@ -160,6 +160,7 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
     applyThemeToAll();
   };
 
+  let retries = 0;
   const resolveActive = async () => {
     if (!initialised) return;
     const settings = currentSettings();
@@ -175,6 +176,16 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
     // Settings may have moved on while we were fetching.
     const now = resolveActiveThemeName(currentSettings()?.terminal, isAppDark(currentSettings()));
     if (now !== key) return;
+    if (!theme) {
+      // The backend was not ready (app start, dev restart): keep whatever we
+      // had rather than dropping to no theme, and try again shortly.
+      if (retries < 5) {
+        retries += 1;
+        window.setTimeout(() => void resolveActive(), 700 * retries);
+      }
+      return;
+    }
+    retries = 0;
     set({ activeTheme: theme });
     apply();
   };

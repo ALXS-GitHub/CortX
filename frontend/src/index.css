@@ -460,7 +460,10 @@
   position: relative;
   isolation: isolate;
   min-height: 100vh;
-  background: var(--terminal-window-bg, transparent);
+  /* Never see-through by accident: without theme tokens (theme still
+     loading, backend restarting) this falls back to the opaque surface
+     colour instead of showing the desktop or a black hole. */
+  background: var(--terminal-window-bg, var(--card));
 }
 .terminal-theme-layer {
   position: absolute;
