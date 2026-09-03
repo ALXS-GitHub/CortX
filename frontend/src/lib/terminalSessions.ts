@@ -242,9 +242,7 @@ const DEFAULT_LINE_HEIGHT = 1.2;
  * `renderer` setting). The Settings field
  * still lets a font be tuned by hand.
  */
-export function autoLetterSpacing(_fontFamily: string, _fontSize: number): number {
-  return 0;
-}
+export const DEFAULT_LETTER_SPACING = 0;
 
 /** Push family, size (with the window zoom), line height and letter spacing to one terminal. */
 function applyFontMetrics(term: Terminal, font: ReturnType<typeof terminalFontOptions>) {
@@ -252,7 +250,7 @@ function applyFontMetrics(term: Terminal, font: ReturnType<typeof terminalFontOp
   term.options.fontFamily = font.fontFamily;
   term.options.fontSize = size;
   term.options.lineHeight = font.lineHeight;
-  term.options.letterSpacing = font.letterSpacing ?? autoLetterSpacing(font.fontFamily, size);
+  term.options.letterSpacing = font.letterSpacing ?? DEFAULT_LETTER_SPACING;
   term.options.fontWeight = font.fontWeight;
   term.options.fontWeightBold = font.fontWeightBold;
 }
@@ -381,7 +379,7 @@ function createSession(id: string): TerminalSession {
     fontFamily: font.fontFamily,
     fontSize: Math.max(6, font.fontSize + zoomDelta),
     lineHeight: font.lineHeight,
-    letterSpacing: font.letterSpacing ?? autoLetterSpacing(font.fontFamily, Math.max(6, font.fontSize + zoomDelta)),
+    letterSpacing: font.letterSpacing ?? DEFAULT_LETTER_SPACING,
     fontWeight: font.fontWeight,
     fontWeightBold: font.fontWeightBold,
     scrollback: 10000,
