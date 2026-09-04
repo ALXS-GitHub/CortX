@@ -28,6 +28,8 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { XtermView } from './XtermView';
+import { CloseConfirmDialog } from '@/components/terminal/CloseConfirmDialog';
+import { confirmCloseTerminals } from '@/components/terminal/actions';
 import { clearTerminal } from '@/lib/terminalSessions';
 import { useTerminalItems } from '@/hooks/useTerminalItems';
 import { StatusDot } from '@/components/ui/StatusDot';
@@ -536,6 +538,15 @@ export function TerminalPanel() {
 
   const newShellLabel = newShellProjectName ? `New terminal in ${newShellProjectName}` : 'New terminal';
 
+  // "Close all" kills every shell in the dock: ask first when commands are
+  // still running (same prompt as the Terminal window, see CloseConfirmDialog).
+  const handleCloseAll = useCallback(() => {
+    const ids = allTerminals.filter((t) => terminals.get(t.id)?.visibility !== 'closed').map((t) => t.id);
+    void confirmCloseTerminals(ids, 'Close all terminals?').then((ok) => {
+      if (ok) closeAllTerminals();
+    });
+  }, [allTerminals, terminals, closeAllTerminals]);
+
   // ---- Collapsed strip ----
   if (!terminalPanelOpen) {
     return (
@@ -572,6 +583,8 @@ export function TerminalPanel() {
         <DockButton label={newShellLabel} onClick={handleNewShell}>
           <Plus className="size-3.5" />
         </DockButton>
+        {/* Main window: also answers the backend's quit confirmation. */}
+        <CloseConfirmDialog handleAppQuit />
       </div>
     );
   }
@@ -668,7 +681,7 @@ export function TerminalPanel() {
             )}
 
             {visibleTerminals.length > 0 && (
-              <DockButton label="Close all terminals" onClick={closeAllTerminals}>
+              <DockButton label="Close all terminals" onClick={handleCloseAll}>
                 <XCircle className="size-3.5" />
               </DockButton>
             )}
@@ -739,6 +752,9 @@ export function TerminalPanel() {
             </>
           )}
         </div>
+
+        {/* Main window: also answers the backend's quit confirmation. */}
+        <CloseConfirmDialog handleAppQuit />
       </div>
     </TerminalDndContext>
   );

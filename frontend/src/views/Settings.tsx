@@ -305,6 +305,7 @@ export function Settings() {
   const [tabsPlacement, setTabsPlacement] = useState<'sidebar' | 'top'>('sidebar');
   const [terminalFontFamily, setTerminalFontFamily] = useState('');
   const [terminalFontSize, setTerminalFontSize] = useState(12);
+  const [confirmCloseRunning, setConfirmCloseRunning] = useState(true);
   const [restoreSessions, setRestoreSessions] = useState(true);
   const [restoreScrollback, setRestoreScrollback] = useState(true);
   const [restoreScrollbackLines, setRestoreScrollbackLines] = useState(200);
@@ -383,6 +384,7 @@ export function Settings() {
       setTabsPlacement(settings.terminal.tabsPlacement ?? 'sidebar');
       setTerminalFontFamily(settings.terminal.fontFamily ?? '');
       setTerminalFontSize(settings.terminal.fontSize ?? 12);
+      setConfirmCloseRunning(settings.terminal.confirmCloseRunning ?? true);
       setRestoreSessions(settings.terminal.restoreSessions ?? true);
       setRestoreScrollback(settings.terminal.restoreScrollback ?? true);
       setRestoreScrollbackLines(settings.terminal.restoreScrollbackLines ?? 200);
@@ -599,6 +601,10 @@ export function Settings() {
 
     const newSettings: AppSettings = {
       terminal: {
+        // Everything saved so far, so a field this form does not manage —
+        // the ones the terminal itself owns (copy on select, Shift+Enter,
+        // smooth scroll, close confirmation…) — survives a save from here.
+        ...settings.terminal,
         preset: terminalPreset,
         customPath: customPath,
         customArgs: customArgs.split(' ').filter(Boolean),
@@ -616,6 +622,7 @@ export function Settings() {
         tabsPlacement,
         fontFamily: terminalFontFamily.trim() || undefined,
         fontSize: Math.min(32, Math.max(8, Math.round(terminalFontSize) || 12)),
+        confirmCloseRunning,
         restoreSessions,
         restoreScrollback,
         restoreScrollbackLines: Math.min(2000, Math.max(20, Math.round(restoreScrollbackLines) || 200)),
@@ -1142,6 +1149,21 @@ export function Settings() {
             </Field>
 
             <Separator />
+
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label htmlFor="confirm-close-running">Ask before closing a busy terminal</Label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Closing a tab, a pane or CortX itself while a command is running asks first, and names what would be killed.
+                  A terminal sitting at its prompt always closes straight away.
+                </p>
+              </div>
+              <Switch
+                id="confirm-close-running"
+                checked={confirmCloseRunning}
+                onCheckedChange={(v) => { setConfirmCloseRunning(v); setHasChanges(true); }}
+              />
+            </div>
 
             <div className="flex items-center justify-between gap-4">
               <div>

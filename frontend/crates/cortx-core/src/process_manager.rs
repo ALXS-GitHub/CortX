@@ -11,7 +11,9 @@
 use crate::models::{LogStream, ScriptStatus, ServiceStatus};
 use crate::runtime_state::{self, EntityKind, RuntimeEntry, RuntimeStore};
 use crate::terminal::{terminal_id, AnsiLineSplitter, TerminalHub, TerminalKind};
-use crate::terminal::{CommandHistory, CommandRecord, OscScanner, TerminalShellState, TerminalStateTracker};
+use crate::terminal::{
+    CommandHistory, CommandRecord, OscScanner, ShellPhase, TerminalShellState, TerminalStateTracker,
+};
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -154,6 +156,19 @@ struct ShellEntry {
     info: ShellInfo,
 }
 
+/// A terminal that is busy right now, as reported by the shell integration.
+/// Feeds the "these commands are still running" confirmation before a close
+/// or a quit kills them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningTerminal {
+    pub terminal_id: String,
+    /// The command line, when the shell reported one.
+    pub command: Option<String>,
+    /// Epoch millis the command started at.
+    pub started_at: Option<i64>,
+}
+
 /// The two halves of a PTY we keep after spawning: the master (for resize)
 /// and its writer (for keyboard input). The reader lives in its own thread.
 struct PtyIo {
@@ -221,6 +236,31 @@ impl ProcessManager {
     /// Drop the state of a terminal the GUI closed.
     pub fn forget_terminal_state(&self, terminal_id: &str) {
         self.terminal_states.lock().remove(terminal_id);
+    }
+
+    /// Is a command running in this terminal right now? Only shells with the
+    /// shell integration report this; without it the answer is always `false`
+    /// (we never make the user wait on a terminal we know nothing about).
+    pub fn is_terminal_running(&self, terminal_id: &str) -> bool {
+        terminal_is_running(&self.terminal_states, terminal_id)
+    }
+
+    /// Every terminal whose shell says a command is running, with that
+    /// command. Used by "you are about to kill these" prompts on quit.
+    pub fn running_terminals(&self) -> Vec<RunningTerminal> {
+        let mut out: Vec<RunningTerminal> = self
+            .terminal_states
+            .lock()
+            .values()
+            .filter(|s| s.phase == ShellPhase::Running)
+            .map(|s| RunningTerminal {
+                terminal_id: s.terminal_id.clone(),
+                command: s.command.clone(),
+                started_at: s.started_at,
+            })
+            .collect();
+        out.sort_by(|a, b| a.terminal_id.cmp(&b.terminal_id));
+        out
     }
 
     pub fn command_history(&self) -> &CommandHistory {
@@ -985,17 +1025,43 @@ impl ProcessManager {
     }
 
     /// Kill a shell (the tab was closed). No-op if it already exited.
+    ///
+    /// Same courtesy a service gets in `stop_service`: when a command is
+    /// running it is interrupted first and given [`GRACEFUL_STOP_TIMEOUT`] to
+    /// wind down (a dev server releases its port, `claude` saves its session),
+    /// then the whole process tree goes — killing the shell alone would leave
+    /// its grandchildren (`node`, `cargo`, …) orphaned and running on Windows.
     pub fn kill_shell(&self, emitter: &dyn ProcessEventEmitter, shell_id: &str) -> Result<(), String> {
-        let owned = self.shells.lock().remove(shell_id);
-        if let Some(mut entry) = owned {
-            let tid = terminal_id(TerminalKind::Shell, shell_id);
-            let pid = entry.info.pid;
-            let _ = kill_process_tree(pid);
+        let Some(mut entry) = self.shells.lock().remove(shell_id) else {
+            return Ok(());
+        };
+        let tid = terminal_id(TerminalKind::Shell, shell_id);
+        let pid = entry.info.pid;
+        let busy = self.is_terminal_running(&tid);
+        // The terminal is gone as far as everyone else is concerned: it leaves
+        // the maps and the GUI hears about it right away. Only the wind-down
+        // is deferred, so the grace period never freezes the caller (Tauri runs
+        // synchronous commands on the main thread).
+        let mut io = self.ptys.lock().remove(&tid);
+        emitter.emit_shell_exit(shell_id, None);
+        let states = self.terminal_states.clone();
+        let label = shell_id.to_string();
+        thread::spawn(move || {
+            if busy {
+                if let Some(io) = io.as_mut() {
+                    let _ = io.writer.write_all(b"\x03").and_then(|_| io.writer.flush());
+                }
+                wait_until_idle(&states, &tid);
+            }
+            if let Err(e) = kill_process_tree_robust(pid) {
+                log::warn!("Shell {} tree may have survived: {}", label, e);
+            }
             let _ = entry.child.kill();
             let _ = entry.child.wait();
-            self.drop_pty(&tid);
-            emitter.emit_shell_exit(shell_id, None);
-        }
+            // Closing the PTY is what makes the reader thread see EOF, so it
+            // has to come after the child is really gone.
+            drop(io);
+        });
         Ok(())
     }
 
@@ -1016,6 +1082,29 @@ impl ProcessManager {
     // ========================================================================
 
     pub fn stop_all(&self) {
+        // Quit is not an excuse for a brutal kill: whatever is running in a
+        // terminal gets a Ctrl+C and one shared grace period (they wind down
+        // in parallel) before the process trees are torn down. Done before the
+        // shutdown flag so the PTY readers are still folding OSC 133 into the
+        // terminal states and we can tell when a command has actually stopped.
+        let busy: Vec<String> = self
+            .running_terminals()
+            .into_iter()
+            .map(|t| t.terminal_id)
+            .collect();
+        if !busy.is_empty() {
+            log::info!("Interrupting {} running terminal(s) before shutdown", busy.len());
+            for tid in &busy {
+                let _ = self.write_terminal(tid, b"\x03");
+            }
+            let deadline = Instant::now() + GRACEFUL_STOP_TIMEOUT;
+            while Instant::now() < deadline
+                && busy.iter().any(|tid| self.is_terminal_running(tid))
+            {
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+
         // Set shutdown flag to stop monitoring threads
         self.shutdown_flag.store(true, Ordering::SeqCst);
 
@@ -1140,6 +1229,43 @@ impl Drop for ProcessManager {
             self.stop_all();
         }
     }
+}
+
+// ============================================================================
+// Graceful terminal shutdown helpers
+// ============================================================================
+
+/// Does the shell integration say a command is running in this terminal?
+/// Terminals we know nothing about (integration off, service PTYs) count as
+/// idle: we never make the user wait on a guess.
+fn terminal_is_running(
+    states: &Mutex<HashMap<String, TerminalShellState>>,
+    terminal_id: &str,
+) -> bool {
+    matches!(
+        states.lock().get(terminal_id).map(|s| s.phase),
+        Some(ShellPhase::Running)
+    )
+}
+
+/// Wait (bounded by [`GRACEFUL_STOP_TIMEOUT`]) for a terminal to report it is
+/// back at its prompt. Returns whether it got there in time.
+///
+/// This is the shell counterpart of what `stop_service` does through
+/// `ProcessManager::terminate`: a shell never exits on Ctrl+C, so we watch the
+/// *command* instead of the child process.
+fn wait_until_idle(
+    states: &Mutex<HashMap<String, TerminalShellState>>,
+    terminal_id: &str,
+) -> bool {
+    let deadline = Instant::now() + GRACEFUL_STOP_TIMEOUT;
+    while Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(25));
+        if !terminal_is_running(states, terminal_id) {
+            return true;
+        }
+    }
+    false
 }
 
 // ============================================================================

@@ -12,7 +12,7 @@ use process_manager::ProcessManager;
 use storage::Storage;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
@@ -136,6 +136,43 @@ fn handle_cli_args(app: &AppHandle, args: &[String]) {
     } else {
         show_main_window(app);
     }
+}
+
+/// How long the quit path waits for the main window to answer the "these
+/// commands are still running" prompt. On timeout the quit goes through: a
+/// broken or missing webview must never be able to lock the app open.
+const CONFIRM_QUIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Ask the main window to confirm a quit that is about to kill running
+/// terminals (DEV-13, ticket "services actifs terminal"). Returns whether the
+/// quit should go ahead.
+///
+/// The prompt itself lives in the frontend (design system, and it is the side
+/// that knows the `confirmCloseRunning` setting — when it is off the webview
+/// answers `true` straight away). Nothing running = nothing to ask.
+fn confirm_quit_with_running_terminals(app: &AppHandle, state: &AppState) -> bool {
+    let running = state.process_manager.running_terminals();
+    if running.is_empty() {
+        return true;
+    }
+    let Some(main) = app.get_webview_window("main") else {
+        // No main window to ask (e.g. `cortx terminal` cold start): don't
+        // block the quit on a prompt nobody can see.
+        return true;
+    };
+    let _ = main.show();
+    let _ = main.unminimize();
+    let _ = main.set_focus();
+
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    // Registered before the request so an instant answer can't be missed.
+    let handler = app.listen_any("app-quit-decision", move |event| {
+        let _ = tx.send(event.payload().trim() != "false");
+    });
+    let _ = app.emit_to("main", "app-quit-confirm", &running);
+    let decision = rx.recv_timeout(CONFIRM_QUIT_TIMEOUT).unwrap_or(true);
+    app.unlisten(handler);
+    decision
 }
 
 /// Toggle the main window's visibility. Used by left-clicks on the tray icon.
@@ -461,6 +498,13 @@ pub fn run() {
                 let window_clone = window.clone();
                 std::thread::spawn(move || {
                     if let Some(state) = app_handle.try_state::<AppState>() {
+                        // Warp-style guard: never kill a terminal that is in
+                        // the middle of something without asking first.
+                        if !confirm_quit_with_running_terminals(&app_handle, &state) {
+                            log::info!("Quit cancelled - terminals are still running");
+                            state.quitting.store(false, Ordering::SeqCst);
+                            return;
+                        }
                         // Every webview gets `app-closing`: the ClosingModal
                         // shows when processes are running, and each window
                         // stores its restore snapshots — give them a moment.

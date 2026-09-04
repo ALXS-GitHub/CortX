@@ -3,8 +3,15 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type D
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers';
-import { PanelLeftClose, PanelLeftOpen, Pin, Plus, X } from 'lucide-react';
+import { MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Plus, X, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeIcon';
 import { useAppStore } from '@/stores/appStore';
@@ -14,7 +21,8 @@ import { tabsInScope, type TerminalTab } from '@/lib/terminalLayout';
 import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
-import { closeTabAndRelease, openNewTerminal } from './actions';
+import { closeTabAndRelease, closeWorkspaceTabs, openNewTerminal } from './actions';
+import { CloseConfirmDialog } from './CloseConfirmDialog';
 import {
   cwdLabel,
   describeItem,
@@ -250,6 +258,48 @@ function SessionGroupRows({
   );
 }
 
+/**
+ * Header of a workspace group (expanded rail): the project's dot and name,
+ * the tab count, and a menu that acts on the whole section — right-click
+ * anywhere on the row, or the "…" button that appears on hover.
+ */
+function SessionGroupHeader({ group }: { group: WorkspaceGroup }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className="eyebrow group/gh flex items-center gap-1.5 px-2 pb-1 pt-1.5"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setOpen(true);
+      }}
+    >
+      {group.color && <span className="size-1.5 rounded-full" style={{ backgroundColor: group.color }} aria-hidden />}
+      <span className="truncate">{group.name}</span>
+      <span className="ml-auto tabular-nums">{group.tabs.length}</span>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${group.name} actions`}
+            title={`${group.name} actions`}
+            className="grid size-4 shrink-0 place-items-center rounded-[4px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/gh:opacity-100 aria-expanded:opacity-100"
+          >
+            <MoreHorizontal className="size-3" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-48">
+          <DropdownMenuLabel className="truncate">{group.name}</DropdownMenuLabel>
+          <DropdownMenuItem variant="destructive" onClick={() => void closeWorkspaceTabs(group.workspaceId, group.name)}>
+            <XCircle />
+            Close all
+            <span className="ml-auto text-xs tabular-nums opacity-70">{group.tabs.length}</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 /** One session (collapsed rail): the type icon with the status in its corner. */
 function SessionIcon({ tab, items, active, onSelect }: { tab: TerminalTab; items: ItemMap; active: boolean; onSelect: () => void }) {
   const item = tabItem(tab, items);
@@ -395,11 +445,7 @@ export function SessionRail() {
             {collapsed ? (
               <div className="mx-auto mb-1.5 h-px w-5 bg-border first:hidden" />
             ) : (
-              <div className="eyebrow flex items-center gap-1.5 px-2 pb-1 pt-1.5">
-                {g.color && <span className="size-1.5 rounded-full" style={{ backgroundColor: g.color }} aria-hidden />}
-                <span className="truncate">{g.name}</span>
-                <span className="ml-auto tabular-nums">{g.tabs.length}</span>
-              </div>
+              <SessionGroupHeader group={g} />
             )}
             {collapsed ? (
               <div className="flex flex-col items-center gap-1">
@@ -441,6 +487,9 @@ export function SessionRail() {
           <div className={cn('mx-auto h-full w-px transition-colors', resizing ? 'bg-primary' : 'bg-transparent hover:bg-accent-border')} />
         </div>
       )}
+
+      {/* "Something is still running" prompt of the Terminal window. */}
+      <CloseConfirmDialog />
     </aside>
   );
 }

@@ -7,6 +7,7 @@ import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
 import { adjustTerminalZoom, clearTerminal, focusTerminal, resetTerminalZoom } from '@/lib/terminalSessions';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
+import { basename } from '@/lib/terminalNames';
 import type { KeybindingActionId } from '@/lib/keybindings';
 import { activeLeafOf, splitPathTo, visibleTabOrder } from './model';
 import {
@@ -119,16 +120,196 @@ function releaseTerminal(terminalId: string) {
   app.closeTerminal(terminalId);
 }
 
+// ---------------------------------------------------------------------------
+// "Something is still running" confirmation
+// ---------------------------------------------------------------------------
+
+/** One command a close is about to kill, as shown in the dialog. */
+export interface RunningCommand {
+  terminalId: string;
+  /** Tab title, else the directory the shell sits in. */
+  where: string;
+  /** The command line the shell reported, when it did. */
+  command: string | null;
+  /** Epoch ms the command started at. */
+  startedAt: number | null;
+}
+
+interface CloseConfirmRequest {
+  question: string;
+  running: RunningCommand[];
+  /** Quit prompts warn about the whole app, not just a tab. */
+  quitting: boolean;
+  /** When the dialog opened: the durations it shows must not tick while read. */
+  askedAt: number;
+  decide: (confirmed: boolean) => void;
+}
+
+interface CloseConfirmState {
+  request: CloseConfirmRequest | null;
+  ask: (request: Omit<CloseConfirmRequest, 'askedAt'>) => void;
+  answer: (confirmed: boolean) => void;
+}
+
+/**
+ * The single pending confirmation of this window (see `CloseConfirmDialog`).
+ * A second request while one is open answers the first with "no": whatever
+ * the user is now looking at is the one they mean.
+ */
+export const useCloseConfirmStore = create<CloseConfirmState>((set, get) => ({
+  request: null,
+  ask: (request) => {
+    get().request?.decide(false);
+    set({ request: { ...request, askedAt: Date.now() } });
+  },
+  answer: (confirmed) => {
+    const current = get().request;
+    if (!current) return;
+    set({ request: null });
+    current.decide(confirmed);
+  },
+}));
+
+/** Where a terminal lives, for the confirmation list: tab title, else its cwd. */
+export function describeTerminalLocation(terminalId: string): string {
+  const tab = tabContainingTerminal(useTerminalLayoutStore.getState().doc.window, terminalId);
+  if (tab?.title) return tab.title;
+  const cwd = terminalCwd(terminalId);
+  if (cwd) return basename(cwd);
+  return 'Terminal';
+}
+
+/** The terminals of `terminalIds` whose shell says a command is running. */
+export function runningAmong(terminalIds: string[]): RunningCommand[] {
+  const states = useAppStore.getState().terminalStates;
+  const out: RunningCommand[] = [];
+  for (const terminalId of new Set(terminalIds)) {
+    const state = states.get(terminalId);
+    if (state?.phase !== 'running') continue;
+    out.push({
+      terminalId,
+      where: describeTerminalLocation(terminalId),
+      command: state.command ?? null,
+      startedAt: state.startedAt ?? null,
+    });
+  }
+  return out;
+}
+
+/** The `confirmCloseRunning` setting (on unless the user turned it off). */
+export function confirmCloseRunningEnabled(): boolean {
+  return useAppStore.getState().settings?.terminal.confirmCloseRunning ?? true;
+}
+
+/**
+ * Ask before killing terminals that are in the middle of something, the way
+ * Warp does — the dialog names the commands. Resolves `true` straight away
+ * when nothing is running (or the setting is off): an idle tab must never
+ * cost the user a click.
+ */
+export function confirmCloseTerminals(terminalIds: string[], question: string): Promise<boolean> {
+  if (!confirmCloseRunningEnabled()) return Promise.resolve(true);
+  const running = runningAmong(terminalIds);
+  if (running.length === 0) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    useCloseConfirmStore.getState().ask({ question, running, quitting: false, decide: resolve });
+  });
+}
+
+/**
+ * Same prompt for the app quit: the backend hands us what is running (its
+ * `running_terminals`) and waits for the answer on `app-quit-decision`.
+ * Called by `CloseConfirmDialog` in the main window.
+ */
+export function confirmQuit(running: RunningCommand[]): Promise<boolean> {
+  if (!confirmCloseRunningEnabled() || running.length === 0) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    useCloseConfirmStore.getState().ask({
+      question: 'Quit CortX?',
+      running,
+      quitting: true,
+      decide: resolve,
+    });
+  });
+}
+
 /** Remove one leaf from the window and, for shells, kill the process. */
-export function closeLeaf(terminalId: string): void {
+function closeLeafNow(terminalId: string): void {
   useTerminalLayoutStore.getState().removeTerminalFromWindow(terminalId, null);
   releaseTerminal(terminalId);
 }
 
-/** Close a whole tab: every leaf leaves the window, shells are killed. */
+/** Close whole tabs: every leaf leaves the window, shells are killed. */
+function closeTabsNow(tabIds: string[]): void {
+  const layout = useTerminalLayoutStore.getState();
+  for (const tabId of tabIds) {
+    for (const id of layout.closeTab(tabId)) releaseTerminal(id);
+  }
+}
+
+/**
+ * Close one pane. Confirms first when a command is running in it (see
+ * `confirmCloseTerminals`); the caller does not wait for the answer.
+ */
+export function closeLeaf(terminalId: string): void {
+  void confirmCloseTerminals([terminalId], 'Close this pane?').then((ok) => {
+    if (ok) closeLeafNow(terminalId);
+  });
+}
+
+/** Close a tab (and its panes), asking first if something is running in it. */
 export function closeTabAndRelease(tabId: string): void {
-  const ids = useTerminalLayoutStore.getState().closeTab(tabId);
-  for (const id of ids) releaseTerminal(id);
+  void closeTabs([tabId]);
+}
+
+/**
+ * Close several tabs at once behind a single confirmation listing every
+ * command that is about to be killed — closing a project's whole group must
+ * not ask once per tab.
+ */
+export async function closeTabs(tabIds: string[], question?: string): Promise<boolean> {
+  if (tabIds.length === 0) return true;
+  const win = useTerminalLayoutStore.getState().doc.window;
+  const terminalIds = win.tabs
+    .filter((t) => tabIds.includes(t.id))
+    .flatMap((t) => collectLeaves(t.layout).map((l) => l.terminalId));
+  const ok = await confirmCloseTerminals(
+    terminalIds,
+    question ?? (tabIds.length === 1 ? 'Close this terminal?' : `Close these ${tabIds.length} terminals?`)
+  );
+  if (ok) closeTabsNow(tabIds);
+  return ok;
+}
+
+/** The scoped tabs of one workspace, in the order the rail shows them. */
+export function tabsOfWorkspace(workspaceId: string): TerminalTab[] {
+  return orderedTabs().filter((t) => t.workspaceId === workspaceId);
+}
+
+/** Close every tab of one workspace group (rail group header / tab menu). */
+export function closeWorkspaceTabs(workspaceId: string, groupName?: string): Promise<boolean> {
+  const tabs = tabsOfWorkspace(workspaceId);
+  return closeTabs(
+    tabs.map((t) => t.id),
+    groupName ? `Close the ${tabs.length} terminals of ${groupName}?` : undefined
+  );
+}
+
+/**
+ * Close every tab of the current scope except `tabId`. Pinned tabs stay:
+ * pinning is exactly the "keep this one around" gesture.
+ */
+export function closeOtherTabs(tabId: string): Promise<boolean> {
+  const others = otherClosableTabs(tabId);
+  return closeTabs(
+    others.map((t) => t.id),
+    `Close the ${others.length} other terminals?`
+  );
+}
+
+/** What "Close others" would actually close (used for the menu's count too). */
+export function otherClosableTabs(tabId: string): TerminalTab[] {
+  return orderedTabs().filter((t) => t.id !== tabId && !t.pinned);
 }
 
 /** Hand a terminal back to the main window's dock. */

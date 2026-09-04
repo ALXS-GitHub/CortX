@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { Copy, CopyPlus, FolderOpen, Palette, Pencil, Pin, PinOff, X } from 'lucide-react';
+import { Copy, CopyPlus, FolderOpen, Palette, Pencil, Pin, PinOff, X, XCircle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -16,7 +16,17 @@ import type { TerminalTab } from '@/lib/terminalLayout';
 import { comboLabelFor } from '@/lib/keybindings';
 import { ACCENT_PRESETS } from '@/lib/theme';
 import { cn } from '@/lib/utils';
-import { copyTerminalCwd, duplicateTab, openTerminalCwd, terminalCwd } from './actions';
+import { FREE_WORKSPACE_ID } from '@/lib/terminalLayout';
+import {
+  closeOtherTabs,
+  closeWorkspaceTabs,
+  copyTerminalCwd,
+  duplicateTab,
+  openTerminalCwd,
+  otherClosableTabs,
+  tabsOfWorkspace,
+  terminalCwd,
+} from './actions';
 import { activeLeafOf } from './model';
 
 /**
@@ -127,9 +137,17 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
   const togglePinTab = useTerminalLayoutStore((s) => s.togglePinTab);
   const setTabColor = useTerminalLayoutStore((s) => s.setTabColor);
   const keybindings = useAppStore((s) => s.settings?.terminal.keybindings);
+  const projects = useAppStore((s) => s.projects);
   const terminalId = activeLeafOf(tab).terminalId;
   // Read at open time only: the cwd is live state, the menu a snapshot.
   const cwd = open ? terminalCwd(terminalId) ?? activeLeafOf(tab).cwd ?? null : null;
+  // Bulk closes (ticket "close a whole section of tabs"), counted at open time.
+  const otherCount = open ? otherClosableTabs(tab.id).length : 0;
+  const groupCount = open ? tabsOfWorkspace(tab.workspaceId).length : 0;
+  const groupName =
+    tab.workspaceId === FREE_WORKSPACE_ID
+      ? 'Free'
+      : projects.find((p) => `project:${p.id}` === tab.workspaceId)?.name ?? 'this project';
   const shortcut = (label: string | null) => (label ? <DropdownMenuShortcut>{label}</DropdownMenuShortcut> : null);
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -190,6 +208,24 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
         <DropdownMenuItem variant="destructive" onClick={onClose}>
           <X />
           Close
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          variant="destructive"
+          disabled={otherCount < 1}
+          onClick={() => void closeOtherTabs(tab.id)}
+        >
+          <X />
+          Close others
+          {otherCount > 0 && <span className="ml-auto text-xs tabular-nums opacity-70">{otherCount}</span>}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          variant="destructive"
+          disabled={groupCount < 2}
+          onClick={() => void closeWorkspaceTabs(tab.workspaceId, groupName)}
+        >
+          <XCircle />
+          <span className="truncate">Close all in {groupName}</span>
+          {groupCount > 1 && <span className="ml-auto text-xs tabular-nums opacity-70">{groupCount}</span>}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

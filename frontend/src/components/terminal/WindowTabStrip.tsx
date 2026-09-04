@@ -20,6 +20,7 @@ import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { closeTabAndRelease, openNewTerminal } from './actions';
+import { CloseConfirmDialog } from './CloseConfirmDialog';
 import { describeItem, projectColor, sortTabs, tabItem, tabLiveState, tabProject, tabTitle, useItemMap, type ItemMap } from './model';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
 import { useTabContextMenu, useTabRename } from './useTabMenu';
@@ -213,6 +214,9 @@ export function WindowTabStrip() {
           </Button>
         </div>
       </div>
+
+      {/* "Something is still running" prompt (tab-strip layout of the window). */}
+      <CloseConfirmDialog />
     </div>
   );
 }
