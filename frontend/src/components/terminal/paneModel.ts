@@ -6,6 +6,8 @@
 import { useMemo } from 'react';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { collectLeaves, type LeafNode, type TerminalTab } from '@/lib/terminalLayout';
+import { basename } from '@/lib/terminalNames';
+import { cn } from '@/lib/utils';
 import { cwdLabel, type ItemMap, type TabLiveState } from './model';
 import type { TerminalItem } from '@/components/layout/terminal-dnd/types';
 
@@ -45,6 +47,47 @@ export function leafLabel(item: TerminalItem | undefined, number: number, useAge
   if (!item) return `Pane ${number}`;
   if (item.type === 'shell') return cwdLabel(item) ?? item.name;
   return item.name;
+}
+
+/**
+ * Headline of a group's header — a name, never a path cut in half.
+ *
+ * A tab named after a directory (`~\Desktop\Programmes\Important Projects`,
+ * whether the user renamed it or the terminal is named that way) came out of
+ * the header as `~\Desktop\Programmes\Important Proje`: the one part that
+ * identifies it is the part that gets cut. The rest of the app names a
+ * terminal by `basename`, so a group headline does the same — on each `·`
+ * segment, so `pwsh · C:\src\CortX` reads `pwsh · CortX` and a plain name is
+ * left alone. The full text stays in the row's tooltip.
+ */
+export function groupHeadline(title: string): string {
+  const text = title.trim();
+  if (!/[\\/]/.test(text)) return text;
+  return text
+    .split(' · ')
+    .map((part) => (/[\\/]/.test(part) ? basename(part) : part))
+    .join(' · ');
+}
+
+/** `2 panes`, `3 panes` — what a group header says instead of one pane's cwd. */
+export function paneCountLabel(count: number): string {
+  return `${count} panes`;
+}
+
+/**
+ * The card that holds a group (tints in `@/styles/terminal-tabs.css`).
+ *
+ * A class helper rather than a wrapper component, because the tab strip puts
+ * these classes on the tab element itself — the one carrying the sortable ref
+ * and the drag listeners — so the group stays the single draggable unit it
+ * was. The rail, which has a wrapper to spare, puts them on that.
+ */
+export function groupCardClass(active: boolean, orientation: 'vertical' | 'horizontal'): string {
+  return cn(
+    'tt-group border bg-[var(--tt-surface)]',
+    active ? 'border-[var(--tt-edge-active)] bg-[var(--tt-surface-active)]' : 'border-[var(--tt-edge)]',
+    orientation === 'vertical' ? 'flex flex-col rounded-[var(--rad-md)] p-1' : 'rounded-[var(--rad-sm)]'
+  );
 }
 
 /** The panes of a tab, in visual order. */

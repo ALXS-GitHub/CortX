@@ -55,7 +55,10 @@ function IncomingGhost() {
         {panes > 1 && (
           <span className="flex shrink-0 items-center gap-px rounded-[5px] border border-border p-px" aria-hidden>
             {Array.from({ length: Math.min(panes, 4) }, (_, i) => (
-              <span key={i} className="h-3 w-2.5 rounded-[3px] bg-[var(--tab-active-bg)]" />
+              // Not `--tab-active-bg`: it is `rgba(accent, .18)`, and a theme
+              // whose accent is near-black (aespa_wda: #0c161f) turns into a
+              // dark smear over a wallpaper instead of a visible pane chip.
+              <span key={i} className="h-3 w-2.5 rounded-[3px] bg-[var(--tt-surface-active)]" />
             ))}
           </span>
         )}

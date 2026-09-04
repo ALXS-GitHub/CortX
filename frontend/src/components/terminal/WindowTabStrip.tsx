@@ -38,8 +38,8 @@ import {
   type ResolvedTabDisplay,
 } from './model';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
-import { PaneChipRow } from './PaneTabs';
-import { usePaneEntries, useSelectPane } from './paneModel';
+import { PaneGroupChips } from './PaneTabs';
+import { groupCardClass, groupHeadline, usePaneEntries, useSelectPane } from './paneModel';
 import { useTabContextMenu, useTabRename } from './useTabMenu';
 import type { Project } from '@/types';
 
@@ -61,10 +61,13 @@ interface WindowTabProps {
  * One tab of the strip: sortable, renamable on double-click, closable with
  * the X or a middle click, with a right-click menu anchored at the pointer.
  *
- * A tab holding a split renders as a **group**: the tab's own name, then one
- * chip per pane inside a hairline bracket (`PaneChipRow`). Clicking a chip
- * makes that pane current. The group stays a single sortable unit — reorder
- * and detach still act on the tab, which is what the layout document knows.
+ * A tab holding a split renders as a **group**: the tab itself becomes a
+ * small inset card holding its own name, a hairline, then one chip per pane
+ * (`PaneGroupChips`) — the rail's nested card laid on its side, since a 36 px
+ * row has nowhere to indent. Clicking a chip makes that pane current. The
+ * card *is* the tab element, so the group stays a single sortable unit —
+ * reorder and detach still act on the tab, which is what the layout document
+ * knows.
  */
 function WindowTab({ tab, items, projects, isActive, index, showProject, display, onSelect, onClose }: WindowTabProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
@@ -81,6 +84,8 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, display
   const panes = usePaneEntries(tab, items, display.agent);
   const selectPane = useSelectPane();
   const grouped = panes.length > 1;
+  // A group header names the tab; a path would be cut mid-word here.
+  const headline = grouped ? groupHeadline(title) : title;
 
   const accent = tab.color ?? undefined;
   const showIndex = display.index !== 'never' && index <= 9 && !rename.editing;
@@ -90,9 +95,19 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, display
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group/tab relative flex h-9 min-w-0 cursor-grab select-none items-center gap-2 border-r border-border px-3 text-xs transition-colors',
-        grouped ? 'max-w-[460px] gap-1.5' : 'max-w-[240px]',
-        isActive ? 'bg-terminal text-foreground' : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+        'group/tab relative flex min-w-0 cursor-grab select-none items-center text-xs transition-colors',
+        grouped
+          ? cn(
+              // Inset so the card reads as one object floating in the strip,
+              // rather than a stretch of it fenced off by dividers.
+              'my-1 ml-1 h-7 max-w-[540px] gap-1.5 self-center px-1.5',
+              groupCardClass(isActive, 'horizontal'),
+              isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+            )
+          : cn(
+              'h-9 max-w-[240px] gap-2 border-r border-border px-3',
+              isActive ? 'bg-terminal text-foreground' : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'
+            ),
         isDragging && 'z-10 opacity-50'
       )}
       onClick={(e) => {
@@ -119,7 +134,11 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, display
     >
       {isActive && (
         <span
-          className="pointer-events-none absolute inset-x-0 top-0 h-0.5 rounded-b-full bg-primary"
+          className={cn(
+            'pointer-events-none absolute bg-primary',
+            // Inside the rounded card the bar has to stay off the corners.
+            grouped ? 'inset-x-2 top-[2px] h-[2px] rounded-full' : 'inset-x-0 top-0 h-0.5 rounded-b-full'
+          )}
           style={accent ? { backgroundColor: accent } : undefined}
         />
       )}
@@ -139,21 +158,24 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, display
         <TabRenameInput value={rename.draft} onChange={rename.setDraft} onCommit={rename.commit} onCancel={rename.cancel} className="w-32" />
       ) : (
         <span
-          className={cn('pointer-events-none truncate', grouped && 'max-w-[110px] shrink-0')}
+          className={cn('pointer-events-none truncate', grouped && 'max-w-[128px] shrink-0 font-medium')}
           style={accent && !isActive ? { color: accent } : undefined}
-          title={item ? describeItem(item) : undefined}
+          title={item ? describeItem(item) : title}
         >
-          {title}
+          {headline}
         </span>
       )}
       {grouped && !rename.editing && (
-        <PaneChipRow
-          tab={tab}
-          panes={panes}
-          tabActive={isActive}
-          display={display}
-          onSelect={(leafId) => selectPane(tab, leafId)}
-        />
+        <>
+          <span className="tt-divider" aria-hidden />
+          <PaneGroupChips
+            tab={tab}
+            panes={panes}
+            tabActive={isActive}
+            display={display}
+            onSelect={(leafId) => selectPane(tab, leafId)}
+          />
+        </>
       )}
       {showProject && project && (
         <span className="pointer-events-none flex min-w-0 shrink items-center gap-1 rounded-full bg-muted px-1.5 text-[10px] leading-4 text-muted-foreground">
