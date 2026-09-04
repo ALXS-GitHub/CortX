@@ -16,9 +16,17 @@
  * xterm grid anywhere in sight.
  */
 import type { CommandSpec, CommandSuggestion, PathCompletion, SpecItem } from '@/types';
+import type { OutputCandidate } from '@/lib/terminalCompletionOutput';
 
 /** Where a completion comes from; the menu shows it as a small tag. */
-export type CompletionKind = 'history' | 'subcommand' | 'flag' | 'branch' | 'script' | 'path';
+export type CompletionKind =
+  | 'output'
+  | 'history'
+  | 'subcommand'
+  | 'flag'
+  | 'branch'
+  | 'script'
+  | 'path';
 
 export interface CompletionItem {
   /** Text that replaces `line.slice(from)` when accepted. */
@@ -64,6 +72,12 @@ export interface CompletionRequest {
 
 /** Everything the engine may use. Any field may be missing or stale. */
 export interface CompletionData {
+  /**
+   * Commands the previous command's own output told the user to run
+   * (`terminalCompletionOutput.ts`). The most contextual source there is, so
+   * it outranks everything else — but only above its own confidence.
+   */
+  output?: OutputCandidate[];
   history?: CommandSuggestion[];
   spec?: CommandSpec | null;
   gitRefs?: string[];
@@ -178,6 +192,7 @@ function startsWithCI(haystack: string, needle: string): boolean {
 
 /** Base scores, so one source can't drown another by accident. */
 const SCORE = {
+  output: 1100,
   history: 1000,
   script: 800,
   subcommand: 780,
@@ -189,6 +204,16 @@ const SCORE = {
 /** How much a history entry's own ranking can move it inside its band. */
 const HISTORY_SPREAD = 40;
 
+/** Second column of an output candidate in the menu. */
+const OUTPUT_DETAIL: Record<OutputCandidate['reason'], string> = {
+  quoted: 'from the output above',
+  indented: 'from the output above',
+  sentence: 'from the output above',
+  prompt: 'from the output above',
+  correction: 'what the program suggested',
+  resume: 'session printed above',
+};
+
 /**
  * Rank every completion available for `line` given the data at hand.
  *
@@ -199,9 +224,23 @@ export function completeLine(line: string, data: CompletionData, limit = 40): Co
   const req = analyseLine(line);
   const items: CompletionItem[] = [];
 
-  // --- History: extends the whole line, at any position. ---------------
+  // --- Output of the previous command: extends the whole line. ----------
   const typed = line.trimStart();
   const offset = line.length - typed.length;
+  for (const c of data.output ?? []) {
+    if (c.command.length <= typed.length || !startsWithCI(c.command, typed)) continue;
+    items.push({
+      value: c.command,
+      label: c.command,
+      detail: OUTPUT_DETAIL[c.reason],
+      kind: 'output',
+      from: offset,
+      score: SCORE.output + c.confidence,
+      space: false,
+    });
+  }
+
+  // --- History: extends the whole line, at any position. ---------------
   if (typed.length > 0) {
     const matches = (data.history ?? []).filter(
       (h) => h.command.length > typed.length && startsWithCI(h.command, typed)
@@ -296,32 +335,165 @@ export function completeLine(line: string, data: CompletionData, limit = 40): Co
     .slice(0, limit);
 }
 
-/**
- * The ghost text to draw after the cursor, or `null`.
- *
- * History wins — it is the behaviour that already existed and the one that is
- * right most of the time. When nothing in the history extends the line, the
- * best of the other sources is used, but only when it unambiguously extends
- * the word under the cursor.
- */
-export function ghostFor(line: string, data: CompletionData, minPrefix = 2): string | null {
-  const typed = line.trimStart();
-  if (typed.length < minPrefix) return null;
+// ---------------------------------------------------------------------------
+// Ghost text
+// ---------------------------------------------------------------------------
 
+/**
+ * What the ghost decided, or `null` for "say nothing".
+ *
+ * `confidence` is the whole point of this pass: the first implementation
+ * always drew *something*, so a two-letter prefix would pull a sixty-character
+ * command out of the history and a lone matching filename would turn `cargo b`
+ * into `cargo build.rs`. A suggestion that is wrong more often than right is
+ * worse than no suggestion at all, so every source now has to say how sure it
+ * is and the caller drops everything under its threshold.
+ */
+export interface Ghost {
+  /** Text to draw after the cursor. Never empty. */
+  text: string;
+  /** 0..1. Below {@link GHOST_THRESHOLDS}`[level]` nothing is drawn. */
+  confidence: number;
+  source: CompletionKind;
+}
+
+export type GhostLevel = 'strict' | 'balanced' | 'loose';
+
+/** Confidence a suggestion needs to be drawn, per `suggestionConfidence`. */
+export const GHOST_THRESHOLDS: Record<GhostLevel, number> = {
+  strict: 0.72,
+  balanced: 0.55,
+  loose: 0.4,
+};
+
+export interface GhostOptions {
+  /** Shortest line that may produce a ghost at all. Default 2. */
+  minPrefix?: number;
+  /** Confidence below which nothing is drawn. Default `balanced`. */
+  threshold?: number;
+}
+
+/** A history hit starts here and is moved by how much the context agrees. */
+const HISTORY_BASE = 0.5;
+/**
+ * Two history entries whose scores are this close, and which continue
+ * differently, are a coin flip. Score units come from `terminal::history`,
+ * where the whole range is roughly 0..10.
+ */
+const AMBIGUOUS_MARGIN = 0.75;
+/** A curated single-word completion (subcommand, script, branch). */
+const WORD_BASE = 0.7;
+/** A filename is a guess far more often than a subcommand is. */
+const PATH_BASE = 0.6;
+
+function historyGhost(typed: string, data: CompletionData): Ghost | null {
   const matches = (data.history ?? []).filter(
     (h) => h.command.length > typed.length && startsWithCI(h.command, typed)
   );
   const healthy = matches.filter((m) => !m.failed);
-  const fromHistory = (healthy.length > 0 ? healthy : matches)[0];
-  if (fromHistory) return fromHistory.command.slice(typed.length);
+  const pool = healthy.length > 0 ? healthy : matches;
+  const top = pool[0];
+  if (!top) return null;
 
+  let confidence = HISTORY_BASE;
+  if (top.sameCwd) confidence += 0.15;
+  else if (top.sameProject) confidence += 0.05;
+  if (typed.length >= 6) confidence += 0.12;
+  else if (typed.length >= 4) confidence += 0.06;
+  if (top.count >= 3) confidence += 0.05;
+  if (top.failed) confidence -= 0.3;
+
+  // A rival that carries on differently, with a comparable score, means the
+  // prefix simply does not say which one the user is after.
+  const rival = pool.find(
+    (m) => m.command[typed.length] !== top.command[typed.length]
+  );
+  if (rival && top.score - rival.score < AMBIGUOUS_MARGIN) confidence -= 0.25;
+
+  // A short prefix pulling in a long command is a guess, not a completion.
+  const remainder = top.command.slice(typed.length);
+  const ratio = remainder.length / typed.length;
+  if (ratio > 8) confidence -= 0.25;
+  else if (ratio > 4) confidence -= 0.12;
+
+  return { text: remainder, confidence, source: 'history' };
+}
+
+/**
+ * Completions of the word under the cursor — but only when there is exactly
+ * one of them. Picking the alphabetically first of forty filenames is how the
+ * previous version produced nonsense.
+ */
+function wordGhost(line: string, data: CompletionData): Ghost | null {
   const req = analyseLine(line);
-  if (!req.word) return null;
-  const best = completeLine(line, { ...data, history: [] }, 1)[0];
-  if (!best || best.kind === 'history') return null;
-  if (best.value.length <= req.word.length) return null;
-  if (!startsWithCI(best.value, req.word)) return null;
-  return best.value.slice(req.word.length);
+  if (req.word.length < 2) return null;
+  const items = completeLine(line, { ...data, history: [], output: [] }, 8).filter(
+    (i) => i.kind !== 'history' && i.kind !== 'output'
+  );
+  if (items.length === 0) return null;
+  const distinct = new Set(items.map((i) => i.value.toLowerCase()));
+  if (distinct.size > 1) return null;
+
+  const best = items[0];
+  if (best.value.length <= req.word.length || !startsWithCI(best.value, req.word)) return null;
+  // A path as the *first* argument is nearly always a coincidence — the user
+  // typing `cargo b` means `build`, not the `build.rs` that happens to sit
+  // there. Real paths are typed with a separator or a leading dot.
+  if (
+    best.kind === 'path' &&
+    req.wordIndex === 1 &&
+    !/[/\\]/.test(req.word) &&
+    !req.word.startsWith('.')
+  ) {
+    return null;
+  }
+  return {
+    text: best.value.slice(req.word.length),
+    confidence: best.kind === 'path' ? PATH_BASE : WORD_BASE,
+    source: best.kind,
+  };
+}
+
+/**
+ * The ghost text to draw after the cursor, or `null` when nothing is worth
+ * showing.
+ *
+ * Sources, in order of how contextual they are: what the previous command's
+ * output told the user to run, then the history, then an unambiguous
+ * completion of the word under the cursor. The best of the three wins, and it
+ * is only drawn when its confidence clears the threshold.
+ */
+export function ghostFor(line: string, data: CompletionData, options: GhostOptions = {}): Ghost | null {
+  const minPrefix = options.minPrefix ?? 2;
+  const threshold = options.threshold ?? GHOST_THRESHOLDS.balanced;
+  const typed = line.trimStart();
+  if (typed.length < minPrefix) return null;
+
+  const candidates: (Ghost | null)[] = [];
+
+  // The output of the command that just ran: `git push --set-upstream …`
+  // after git said so, `claude --resume <id>` after the session printed it.
+  for (const c of data.output ?? []) {
+    if (c.command.length <= typed.length || !startsWithCI(c.command, typed)) continue;
+    candidates.push({
+      text: c.command.slice(typed.length),
+      // Committing to a longer prefix is itself evidence.
+      confidence: c.confidence + (typed.length >= 6 ? 0.05 : 0),
+      source: 'output',
+    });
+    break; // already ordered by confidence
+  }
+
+  candidates.push(historyGhost(typed, data));
+  candidates.push(wordGhost(line, data));
+
+  let best: Ghost | null = null;
+  for (const c of candidates) {
+    if (!c || !c.text) continue;
+    if (!best || c.confidence > best.confidence) best = c;
+  }
+  if (!best || best.confidence < threshold) return null;
+  return best;
 }
 
 /**

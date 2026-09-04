@@ -1,14 +1,40 @@
-/* Ghost text of the inline history suggestion (see lib/terminalSuggest.ts).
-   Rendered by an xterm decoration at the cursor cell; inherits the
-   terminal's font metrics so it lines up with the typed text. */
+/* Ghost text of the inline suggestion (see lib/terminalSuggest.ts).
+ *
+ * It has one job: look exactly like the text the user is typing, only paler.
+ * Everything here exists to stop it looking like anything else.
+ *
+ * - The font comes from `term.options` and is written inline by `paint()`.
+ *   It cannot be inherited: xterm puts the terminal font on `.xterm-rows` and
+ *   on its hidden measuring element, never on `.xterm-screen`, so the
+ *   decoration used to inherit the *application's* UI font.
+ * - Each character sits in its own cell-wide box (`.cortx-ghost-cell`), so it
+ *   lands on the same column as the canvas renderer's glyph instead of
+ *   drifting away at the font's natural advance.
+ * - Ligatures are off: xterm draws cell by cell and never ligates, so a font
+ *   like Cascadia Code would turn `->` into an arrow the real text never has.
+ * - The colour is the *terminal theme's* foreground, not the app chrome's.
+ *   `--text-faint` belongs to the window around the terminal and clashed with
+ *   any theme that did not match the app's light/dark mode.
+ * - `line-height` is left alone on purpose: xterm writes the cell height on
+ *   the element inline, and that is the value that puts the ghost on the same
+ *   baseline as the row it sits on. */
 .cortx-ghost {
-  color: var(--text-faint);
-  opacity: 0.85;
+  color: var(--terminal-fg, currentcolor);
+  opacity: var(--terminal-ghost-opacity, 0.45);
   white-space: pre;
   pointer-events: none;
-  font: inherit;
-  line-height: inherit;
-  overflow: hidden;
+  user-select: none;
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'clig' 0, 'calt' 0;
+  font-kerning: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.cortx-ghost-cell {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  text-align: left;
 }
 
 /* Floating completion menu (see lib/terminalSuggest.ts + components/terminal/

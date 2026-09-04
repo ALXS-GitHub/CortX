@@ -21,6 +21,7 @@ import type { CompletionKind } from '@/lib/terminalCompletion';
 
 /** Short tag shown on the right of a row. */
 const KIND_LABEL: Record<CompletionKind, string> = {
+  output: 'output',
   history: 'history',
   subcommand: 'cmd',
   flag: 'flag',

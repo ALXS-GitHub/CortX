@@ -10,9 +10,16 @@
  *   cursor straight from the buffer and hand it to the completion engine
  *   (`terminalCompletion.ts` — a pure module, no xterm in sight, so the input
  *   editor of ticket #15 can reuse it as is).
- * - The best continuation is drawn as a dimmed decoration at the cursor. →
+ * - Between `C` and `D` we know exactly which lines are the command's
+ *   **output**, so when it finishes we read them once and ask
+ *   `terminalCompletionOutput.ts` what the program just told the user to run
+ *   (`git push --set-upstream origin …`, `claude --resume <id>`). That is the
+ *   suggestion people actually want next, and no history can produce it.
+ * - The best continuation is drawn as a dimmed decoration at the cursor —
+ *   **only when the engine is confident enough**; below the threshold the
+ *   ghost stays empty, because a wrong suggestion is worse than none. →
  *   accepts (the remainder is typed into the PTY, so the shell sees it as
- *   keystrokes); Esc hides it until the next key.
+ *   keystrokes), Ctrl+→ accepts one word; Esc hides it until the next key.
  * - Ctrl+Space (configurable, see `completionMenu`) opens a floating list of
  *   *every* candidate: history, subcommands and flags learned from `--help`,
  *   git refs, `package.json` scripts, paths. ↑/↓ move, Enter/Tab accept, Esc
@@ -31,12 +38,23 @@ import '@/styles/terminal-suggest.css';
 import * as api from '@/lib/tauri';
 import { getTerminalSession } from '@/lib/terminalSessions';
 import { useAppStore } from '@/stores/appStore';
+import { inputEditorEnabled } from '@/lib/terminalInputEditor';
+import { boundaryLine } from '@/lib/terminalBlockModel';
 import {
   acceptanceFor,
   completeLine,
   ghostFor,
+  GHOST_THRESHOLDS,
+  type CompletionData,
   type CompletionItem,
+  type GhostLevel,
 } from '@/lib/terminalCompletion';
+import {
+  candidatesFromOutput,
+  MAX_SCANNED_LINES,
+  programOf,
+  type OutputCandidate,
+} from '@/lib/terminalCompletionOutput';
 import {
   onCompletionData,
   peek,
@@ -53,6 +71,15 @@ import {
 
 const MIN_PREFIX = 2;
 const MENU_LIMIT = 40;
+
+/**
+ * The advice printed by the command *before* last is still worth something —
+ * running `ls` between a failed `git push` and the fix should not throw the
+ * fix away — but it is one step staler, so it loses this much confidence.
+ * Anything older is dropped: stale advice is exactly how a suggestion engine
+ * starts being wrong.
+ */
+const STALE_PENALTY = 0.1;
 
 /**
  * Commands seen live in this window since it opened. The on-disk history is
@@ -109,6 +136,14 @@ class SuggestionController {
   private remainder = '';
   private muted = false;
   private scheduled = false;
+  /** First output line of the command currently running (set by `133;C`). */
+  private outputStart: number | null = null;
+  /** Command line of the block currently running, for the correction rules. */
+  private runningCommand: string | null = null;
+  /** What the last finished command's output told the user to run. */
+  private fresh: OutputCandidate[] = [];
+  /** The same, from the command before it — one step staler. */
+  private stale: OutputCandidate[] = [];
   private readonly disposables: IDisposable[] = [];
   private readonly term: Terminal;
   private readonly terminalId: string;
@@ -149,6 +184,7 @@ class SuggestionController {
       remainder: this.remainder,
       muted: this.muted,
       input: this.currentInput(),
+      output: this.outputCandidates(),
       menu: getMenuState(this.terminalId),
     };
   }
@@ -156,6 +192,12 @@ class SuggestionController {
   /** Called from the key handler: true when the key was consumed. */
   handleKey(e: KeyboardEvent): boolean {
     if (e.type !== 'keydown') return false;
+    // This listener is on the session container and therefore also sees keys
+    // typed into the universal input editor's textarea. That editor owns the
+    // line — the grid this engine reads is empty while it is up — so anything
+    // we did here would fight it, and with `completionMenu: 'tab'` a Tab would
+    // open our menu before the editor's hand-off ever ran.
+    if (inputEditorEnabled()) return false;
     const menu = getMenuState(this.terminalId);
 
     if (menu.open) {
@@ -193,8 +235,10 @@ class SuggestionController {
       this.hide();
       return false; // the shell may want Esc too
     }
-    if (e.key === 'ArrowRight' && this.decoration && this.remainder && !e.ctrlKey && !e.altKey && !e.metaKey) {
-      const text = this.remainder;
+    if (e.key === 'ArrowRight' && this.decoration && this.remainder && !e.altKey && !e.metaKey) {
+      // Ctrl+→ takes one word, like PSReadLine's `AcceptNextSuggestionWord`;
+      // → takes the lot.
+      const text = e.ctrlKey ? nextWord(this.remainder) : this.remainder;
       this.hide();
       api.writeTerminal(this.terminalId, text).catch(() => {});
       return true;
@@ -258,15 +302,82 @@ class SuggestionController {
         this.hide();
         closeMenu(this.terminalId);
         const cmd = decodeCommandParam(data);
+        this.runningCommand = cmd;
         if (cmd) rememberCommand(cmd);
+        const buf = this.term.buffer.active;
+        // Same one-line convention as the block model: the shells disagree
+        // about whether `C` lands before or after the echoed newline.
+        this.outputStart = boundaryLine(buf.baseY + buf.cursorY, buf.cursorX);
         break;
       }
       case 'D':
         this.phase = 'prompt';
         this.hide();
         closeMenu(this.terminalId);
+        this.harvestOutput();
         break;
     }
+  }
+
+  // -- What the command that just ran told the user to do next -------------
+
+  /**
+   * Read the finished command's output once and turn it into candidates.
+   *
+   * Called from `133;D` only: this is the whole cost of the feature, it is
+   * paid when a command ends rather than while typing, and it is bounded by
+   * `MAX_SCANNED_LINES`.
+   */
+  private harvestOutput() {
+    const start = this.outputStart;
+    const command = this.runningCommand;
+    this.outputStart = null;
+    this.runningCommand = null;
+    if (start === null || !outputEnabled()) return;
+
+    const buf = this.term.buffer.active;
+    if (buf.type === 'alternate') return; // a TUI drew elsewhere
+    const end = boundaryLine(buf.baseY + buf.cursorY, buf.cursorX);
+    if (end <= start) {
+      this.rotate([]);
+      return;
+    }
+    const from = Math.max(start, end - MAX_SCANNED_LINES);
+    const lines: string[] = [];
+    for (let y = from; y < end; y++) {
+      lines.push(buf.getLine(y)?.translateToString(true) ?? '');
+    }
+    this.rotate(
+      candidatesFromOutput(lines, {
+        program: command ? programOf(command) : null,
+        lastCommand: command,
+        knownPrograms: peekHistory(this.scope()).map((h) => h.command),
+      })
+    );
+  }
+
+  private rotate(next: OutputCandidate[]) {
+    this.stale = this.fresh;
+    this.fresh = next;
+  }
+
+  /** Fresh candidates first, then the previous block's, one notch less sure. */
+  private outputCandidates(): OutputCandidate[] {
+    if (this.stale.length === 0) return this.fresh;
+    const seen = new Set(this.fresh.map((c) => c.command.toLowerCase()));
+    const aged = this.stale
+      .filter((c) => !seen.has(c.command.toLowerCase()))
+      .map((c) => ({ ...c, confidence: c.confidence - STALE_PENALTY }));
+    return [...this.fresh, ...aged].sort((a, b) => b.confidence - a.confidence);
+  }
+
+  /** Everything the engine may use for `line`, sources merged. */
+  private dataFor(line: string): CompletionData {
+    const scope = this.scope();
+    const data = peek(line, scope);
+    data.history = this.history(scope);
+    data.output = this.outputCandidates();
+    return data;
   }
 
   private schedule() {
@@ -313,15 +424,14 @@ class SuggestionController {
       this.hide();
       return;
     }
-    const scope = this.scope();
-    const data = peek(line, scope);
-    data.history = this.history(scope);
-    const suggestion = line ? ghostFor(line, data, MIN_PREFIX) : null;
+    const suggestion = line
+      ? ghostFor(line, this.dataFor(line), { minPrefix: MIN_PREFIX, threshold: threshold() })
+      : null;
     if (!suggestion) {
       this.hide();
       return;
     }
-    this.show(suggestion);
+    this.show(suggestion.text);
   }
 
   // -- Completion menu ----------------------------------------------------
@@ -348,10 +458,7 @@ class SuggestionController {
   }
 
   private renderMenu(line: string, opening = false) {
-    const scope = this.scope();
-    const data = peek(line, scope);
-    data.history = this.history(scope);
-    const items = completeLine(line, data, MENU_LIMIT);
+    const items = completeLine(line, this.dataFor(line), MENU_LIMIT);
     if (items.length === 0) {
       // While opening, keep the menu shut rather than flashing an empty box;
       // while open, a line that no longer matches closes it.
@@ -390,11 +497,31 @@ class SuggestionController {
 
   // -- Ghost text ---------------------------------------------------------
 
+  /**
+   * Width and height of one cell, in CSS pixels.
+   *
+   * `.xterm-screen` is sized to exactly `cols × cell.width`, so dividing is
+   * the same number the renderer draws with — including the device-pixel
+   * rounding and the `letterSpacing` option, which is precisely what a plain
+   * run of DOM text cannot reproduce.
+   */
+  private cell(): { width: number; height: number } | null {
+    const screen = this.term.element?.querySelector('.xterm-screen') as HTMLElement | null;
+    if (!screen) return null;
+    const rect = screen.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      width: rect.width / Math.max(1, this.term.cols),
+      height: rect.height / Math.max(1, this.term.rows),
+    };
+  }
+
   private show(remainder: string) {
     const buf = this.term.buffer.active;
     const room = Math.max(0, this.term.cols - buf.cursorX);
-    const visible = remainder.slice(0, room);
-    if (!visible) {
+    // By code point, so an astral character is never cut in half.
+    const chars = Array.from(remainder).slice(0, room);
+    if (chars.length === 0) {
       this.hide();
       return;
     }
@@ -403,16 +530,62 @@ class SuggestionController {
     this.remainder = remainder;
     const marker = this.term.registerMarker(0);
     if (!marker) return;
-    const decoration = this.term.registerDecoration({ marker, x: buf.cursorX, width: visible.length, layer: 'top' });
+    const decoration = this.term.registerDecoration({
+      marker,
+      x: buf.cursorX,
+      width: chars.length,
+      layer: 'top',
+    });
     if (!decoration) return;
+    // `onRender` fires again on every scroll and on every dimension change,
+    // which is exactly when the cell size may have moved: repaint from there
+    // rather than once at creation.
     decoration.onRender((el) => {
-      el.textContent = visible;
       // Add, never replace: xterm's own `xterm-decoration` class carries the
       // `position: absolute` that puts the element at the cursor cell. Wiping
       // it dropped the ghost into the flow at the top-left of the screen.
       el.classList.add('cortx-ghost');
+      this.paint(el, chars);
     });
     this.decoration = decoration;
+  }
+
+  /**
+   * Draw the ghost as plain terminal text, one character per cell.
+   *
+   * The decoration element inherits nothing useful: xterm sets the terminal
+   * font on `.xterm-rows` and on its hidden measuring element, never on
+   * `.xterm-screen`, so `font: inherit` here picked up the *application's* UI
+   * font — a proportional sans-serif at the app's own size, next to the
+   * monospace grid. That is the "bizarre format".
+   *
+   * Copying the font over is necessary but not sufficient: the canvas
+   * renderer places column *n* at exactly `n × cellWidth`, while a DOM text
+   * run advances by the font's natural advance and ligates `->` into one
+   * glyph. The two drift apart within a few characters. So each character
+   * gets its own box at its own column, ligatures off — pixel-aligned with
+   * the real text by construction, whatever the font or the renderer.
+   */
+  private paint(el: HTMLElement, chars: string[]) {
+    const cell = this.cell();
+    if (!cell) return;
+    const options = this.term.options;
+    el.style.fontFamily = options.fontFamily ?? '';
+    el.style.fontSize = `${options.fontSize ?? 12}px`;
+    el.style.fontWeight = String(options.fontWeight ?? 'normal');
+    const signature = `${cell.width.toFixed(3)}|${chars.join('')}`;
+    if (el.dataset.ghost === signature) return;
+    el.dataset.ghost = signature;
+    const frame = document.createDocumentFragment();
+    for (let i = 0; i < chars.length; i++) {
+      const span = document.createElement('span');
+      span.className = 'cortx-ghost-cell';
+      span.style.left = `${i * cell.width}px`;
+      span.style.width = `${cell.width}px`;
+      span.textContent = chars[i];
+      frame.appendChild(span);
+    }
+    el.replaceChildren(frame);
   }
 
   private hide() {
@@ -420,6 +593,12 @@ class SuggestionController {
     this.decoration = null;
     this.remainder = '';
   }
+}
+
+/** The part of a suggestion Ctrl+→ accepts: one word, separator included. */
+function nextWord(remainder: string): string {
+  const m = remainder.match(/^\s*\S+\s?/);
+  return m ? m[0] : remainder;
 }
 
 const controllers = new Map<string, SuggestionController>();
@@ -436,6 +615,22 @@ if (import.meta.env.DEV) {
 
 function enabled(): boolean {
   return useAppStore.getState().settings?.terminal.inlineSuggestions !== false;
+}
+
+/** Mine the previous command's output for what to run next. Default on. */
+function outputEnabled(): boolean {
+  return useAppStore.getState().settings?.terminal.suggestionsFromOutput !== false;
+}
+
+/**
+ * How sure the engine has to be before it draws anything. `strict` shows a
+ * ghost only when the answer is all but certain; `loose` is the old
+ * always-say-something behaviour.
+ */
+function threshold(): number {
+  const level: GhostLevel =
+    useAppStore.getState().settings?.terminal.suggestionConfidence ?? 'balanced';
+  return GHOST_THRESHOLDS[level] ?? GHOST_THRESHOLDS.balanced;
 }
 
 /** Attach ghost-text suggestions and the completion menu to a session (idempotent). */
