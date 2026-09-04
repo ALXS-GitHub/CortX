@@ -39,7 +39,8 @@ import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { showMainWindow } from '@/lib/tauri';
 import { collectLeaves, projectIdOfWorkspace } from '@/lib/terminalLayout';
 import { comboLabelFor, type KeybindingActionId } from '@/lib/keybindings';
-import { openTerminalSettings, openThemePicker, runAction, sendLeafToDock, terminalCwd } from './actions';
+import { openThemePicker, runAction, sendLeafToDock, terminalCwd } from './actions';
+import { openTerminalSettingsPanel } from './settings/meta';
 import { activeLeafOf, tabTitle, useItemMap, visibleTabOrder } from './model';
 import { SaveLaunchConfigDialog } from './launch/SaveLaunchConfigDialog';
 import { launchProjectName, runLaunchConfigWithToast, sortLaunchConfigs, useLaunchConfigs } from './launch/useLaunchConfigs';
@@ -281,9 +282,13 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
               <SwatchBook />
               Open theme picker
             </CommandItem>
-            <CommandItem value="terminal settings shortcuts keybindings preferences" onSelect={() => run(openTerminalSettings)}>
+            <CommandItem
+              value="terminal settings shortcuts keybindings notifications preferences"
+              onSelect={() => run(openTerminalSettingsPanel)}
+            >
               <Settings2 />
               Terminal settings…
+              <Hint>Ctrl ,</Hint>
             </CommandItem>
             <CommandItem value="open cortx main window" onSelect={() => run(() => showMainWindow())}>
               <AppWindow />

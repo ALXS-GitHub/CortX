@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppWindow, Loader2, Plus, Search, SquareTerminal } from 'lucide-react';
+import { AppWindow, Loader2, Plus, Search, SlidersHorizontal, SquareTerminal } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,8 @@ import { FindBar } from '@/components/terminal/FindBar';
 import { TerminalThemeRoot } from '@/components/terminal/theme/TerminalThemeLayer';
 import { BetaBadge } from '@/components/ui/BetaBadge';
 import { ThemePicker } from '@/components/terminal/theme/ThemePicker';
+import { TerminalSettingsDialog } from '@/components/terminal/settings/TerminalSettingsDialog';
+import { openTerminalSettingsPanel } from '@/components/terminal/settings/meta';
 import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { TERMINAL_EVENTS, openNewTerminal } from '@/components/terminal/actions';
 import { useItemMap } from '@/components/terminal/model';
@@ -65,6 +67,20 @@ export function TerminalWindow() {
 
   useEffect(() => {
     document.title = 'CortX Terminal';
+  }, []);
+
+  // Ctrl+, opens the settings panel. Not part of the rebindable registry yet
+  // (`lib/keybindings.ts` has no `window.settings` action); the palette entry
+  // is the discoverable way in.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
+      if (e.key !== ',') return;
+      e.preventDefault();
+      openTerminalSettingsPanel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   // Scope requested at creation (`cortx terminal --project`, or a project's
@@ -161,6 +177,15 @@ export function TerminalWindow() {
                 <Search />
                 <span className="kbd">Ctrl K</span>
               </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={openTerminalSettingsPanel}
+                title="Terminal settings (Ctrl+,)"
+                aria-label="Terminal settings"
+              >
+                <SlidersHorizontal />
+              </Button>
               <Button variant="ghost" size="xs" onClick={() => void showMainWindow()} title="Bring the main window up">
                 <AppWindow />
                 Open CortX
@@ -211,6 +236,7 @@ export function TerminalWindow() {
       </TerminalThemeRoot>
       <TerminalPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <ThemePicker />
+      <TerminalSettingsDialog />
       <FindBar />
       <Toaster position="bottom-right" />
     </TooltipProvider>

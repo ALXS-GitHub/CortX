@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
-import { useAppStore } from '@/stores/appStore';
+import { registerTerminalWindowView, useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
+import { collectLeaves, tabsInScope } from '@/lib/terminalLayout';
+import { decideCommandNotification } from '@/components/terminal/settings/notificationPolicy';
 import { applyThemeMode } from '@/lib/theme';
 import {
   onServiceLog,
@@ -30,6 +32,39 @@ import { listen } from '@tauri-apps/api/event';
 import type { LogEntry } from '@/types';
 
 /**
+ * Terminals drawn in the Terminal window right now: every leaf of the tab on
+ * screen (a split shows all of its panes at once), or the single maximised
+ * one. Mirrors how `TerminalWindow` picks its active tab.
+ */
+function terminalWindowVisibleIds(): string[] {
+  const win = useTerminalLayoutStore.getState().doc.window;
+  const scoped = tabsInScope(win, win.scope);
+  const tab = scoped.find((t) => t.id === win.activeTabId) ?? scoped[0] ?? null;
+  if (!tab) return [];
+  const leaves = collectLeaves(tab.layout);
+  if (tab.maximizedLeafId) {
+    const only = leaves.find((l) => l.id === tab.maximizedLeafId);
+    return only ? [only.terminalId] : [];
+  }
+  return leaves.map((l) => l.terminalId);
+}
+
+/**
+ * Which window owns a terminal's notifications. Both windows run this hook and
+ * both receive `terminal-state`, so without this every command would notify
+ * twice. The shared layout says where a terminal is shown; the other window
+ * stays quiet about it.
+ */
+function ownsTerminal(terminalId: string): boolean {
+  const doc = useTerminalLayoutStore.getState().doc;
+  const surface = doc.surfaces[terminalId] ?? 'dock';
+  if (IS_TERMINAL_WINDOW) return surface === 'window';
+  // The main window also speaks for the Terminal window's terminals while
+  // that window is closed — otherwise nobody would.
+  return surface === 'dock' || doc.windowOpen !== true;
+}
+
+/**
  * Everything a CortX window needs at boot, shared by the main window and the
  * Terminal window: initial data loads, backend event listeners (services,
  * scripts, shells, shell integration, shared terminal layout, file watcher),
@@ -40,6 +75,17 @@ export function useAppBootstrap() {
 
   // Keep track of whether listeners are set up
   const listenersSetUp = useRef(false);
+
+  // Terminal window: teach the store how to tell whether a terminal is on
+  // screen here, so "finished while you weren't looking" means the same thing
+  // in both windows (badges and notifications alike).
+  useEffect(() => {
+    if (!IS_TERMINAL_WINDOW) return;
+    return registerTerminalWindowView({
+      isVisible: (id) => terminalWindowVisibleIds().includes(id),
+      visibleIds: terminalWindowVisibleIds,
+    });
+  }, []);
 
   // Load initial data
   useEffect(() => {
@@ -191,26 +237,35 @@ export function useAppBootstrap() {
         markShellExited(payload.shellId, payload.exitCode);
       });
 
-      // Shell integration: cwd / running command / exit codes. A long command
-      // that ends in a tab you are not looking at gets a toast, plus an OS
-      // notification when the window is in the background.
+      // Shell integration: cwd / running command / exit codes. What earns a
+      // toast or an OS notification is decided by `notificationPolicy` — by
+      // default only a failed command, in a terminal out of sight, that is not
+      // one of the long-lived interactive programs.
       unlistenTerminalState = await onTerminalState((payload) => {
         if (isCancelled) return;
         const store = useAppStore.getState();
         const finished = store.applyTerminalState(payload);
         // Session restore reopens a terminal in its last directory.
         if (payload.cwd) useTerminalLayoutStore.getState().updateLeafCwd(payload.terminalId, payload.cwd);
-        if (!finished || finished.inView) return;
-        const cfg = store.settings?.terminal;
-        if (cfg?.notifyOnLongCommand === false) return;
-        const threshold = (cfg?.longCommandSeconds ?? 10) * 1000;
-        if (finished.durationMs < threshold) return;
+        if (!finished) return;
+        // One window per terminal, or the same command notifies twice.
+        if (!ownsTerminal(payload.terminalId)) return;
+        const windowFocused = typeof document === 'undefined' || document.hasFocus();
+        const decision = decideCommandNotification(store.settings?.terminal, {
+          command: finished.command,
+          exitCode: finished.exitCode,
+          durationMs: finished.durationMs,
+          inView: finished.inView,
+          windowFocused,
+        });
+        if (!decision) return;
         const { name, projectName } = terminalDisplayName(payload.terminalId, store);
-        const ok = finished.exitCode == null || finished.exitCode === 0;
         const title = projectName ? `${name} · ${projectName}` : name;
-        const body = `${finished.command ?? 'Command'} ${ok ? 'finished' : `failed (exit ${finished.exitCode})`} in ${formatDuration(finished.durationMs)}`;
-        (ok ? toast.success : toast.error)(title, { description: body });
-        if (!document.hasFocus()) sendOsNotification(title, body).catch(() => {});
+        const body = `${finished.command ?? 'Command'} ${
+          decision.failed ? `failed (exit ${finished.exitCode})` : 'finished'
+        } in ${formatDuration(finished.durationMs)}`;
+        if (decision.toast) (decision.failed ? toast.error : toast.success)(title, { description: body });
+        if (decision.system) sendOsNotification(title, body).catch(() => {});
       });
 
       // Shared terminal layout written by the other window.

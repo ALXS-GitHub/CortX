@@ -1,0 +1,407 @@
+/**
+ * The integrated terminal's behaviour and text rendering. Extracted verbatim
+ * from `views/Settings.tsx` (DEV-13 #8) and rebound to the app store, so the
+ * Settings page and the Terminal window's own panel edit the very same
+ * `settings.terminal` — one source of truth, no mirror state.
+ *
+ * Notifications used to live here; they now have their own card
+ * (`TerminalNotificationsSection`).
+ */
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Separator } from '@/components/ui/separator';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Code, Field, Section, ToggleField } from '@/components/settings/SettingsPrimitives';
+import { NumberField, TextField } from './controls';
+import { useTerminalSettings } from './useTerminalSettings';
+import { resolveTabDisplay } from '@/components/terminal/model';
+import type { TabIndexDisplay, TerminalTargetSurface } from '@/types';
+
+/** The parts of a tab that can be switched off, in the order they are drawn. */
+const TAB_DISPLAY_TOGGLES = [
+  { key: 'cwd', label: 'Directory', hint: 'Second line: the directory the shell is in.' },
+  { key: 'command', label: 'Running command', hint: 'Replaces the directory while a command runs.' },
+  { key: 'status', label: 'Status', hint: 'The spinner, the finished pill and the runtime dot.' },
+  { key: 'agent', label: 'Agent', hint: 'A detected Claude Code / Codex session: its icon, its title, its own state.' },
+] as const;
+
+export function IntegratedTerminalSection() {
+  const { terminal, patch } = useTerminalSettings();
+
+  const shellIntegration = terminal?.shellIntegration ?? true;
+  const renderer = terminal?.renderer ?? 'canvas';
+  const restoreSessions = terminal?.restoreSessions ?? true;
+  const restoreScrollback = terminal?.restoreScrollback ?? true;
+  const selectionColor = terminal?.selectionColor ?? '';
+  const tabDisplay = resolveTabDisplay(terminal?.tabDisplay);
+
+  return (
+    <Section
+      title="Integrated terminal"
+      description='The terminal panel runs every service, script and shell tab in a real PTY. Configure the shell used by the "New terminal" button.'
+    >
+      <TextField
+        id="integrated-shell"
+        label="Shell"
+        hint={
+          <>
+            Command line of the shell to launch, e.g. <Code>pwsh -NoLogo</Code>, <Code>nu</Code> or{' '}
+            <Code>/bin/zsh -l</Code>. Leave empty to auto-detect. Applies to newly opened tabs.
+          </>
+        }
+        value={terminal?.integratedShell ?? ''}
+        onCommit={(v) => patch({ integratedShell: v.trim() || undefined })}
+        placeholder={
+          navigator.userAgent.includes('Windows') ? 'Auto (pwsh -NoLogo, falls back to powershell)' : 'Auto ($SHELL)'
+        }
+        disabled={!terminal}
+      />
+
+      <ToggleField
+        id="shell-integration"
+        label="Shell integration"
+        hint={
+          <>
+            <Code>cortx init</Code> makes the shell report its directory, running command and exit codes (OSC 7 / OSC
+            133) — only inside CortX terminals. Powers the live tab titles, the running spinner and the command history.
+          </>
+        }
+      >
+        <Switch
+          id="shell-integration"
+          checked={shellIntegration}
+          onCheckedChange={(v) => patch({ shellIntegration: v })}
+          disabled={!terminal}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="file-path-links"
+        label="Clickable file paths"
+        hint="Underlines the file paths in the output that really exist on disk, and opens them in your editor at the line the compiler pointed at. Alt- or Shift-click reveals the folder instead."
+      >
+        <Switch
+          id="file-path-links"
+          checked={terminal?.filePathLinks ?? true}
+          onCheckedChange={(v) => patch({ filePathLinks: v })}
+          disabled={!terminal}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="kitty-graphics"
+        label="Kitty graphics"
+        hint="A third inline-image protocol, on top of Sixel and iTerm2. Turn it off only if a program draws garbage instead of a picture."
+      >
+        <Switch
+          id="kitty-graphics"
+          checked={terminal?.kittyGraphics ?? true}
+          onCheckedChange={(v) => patch({ kittyGraphics: v })}
+          disabled={!terminal}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="inline-suggestions"
+        label="Inline suggestions"
+        hint="Ghost text from your command history while you type; → accepts it. Needs shell integration. PowerShell's own prediction is switched off inside CortX to avoid a double suggestion."
+      >
+        <Switch
+          id="inline-suggestions"
+          checked={terminal?.inlineSuggestions ?? true}
+          onCheckedChange={(v) => patch({ inlineSuggestions: v })}
+          disabled={!terminal || !shellIntegration}
+        />
+      </ToggleField>
+
+      <div className="grid gap-4 sm:grid-cols-[1fr_auto_auto]">
+        <TextField
+          id="terminal-font"
+          label="Font"
+          hint="Any installed font (e.g. Hack NF, JetBrains Mono, Cascadia Code). Nerd Font variants render prompt glyphs. Applies to every terminal, dock and window."
+          value={terminal?.fontFamily ?? ''}
+          onCommit={(v) => patch({ fontFamily: v.trim() || undefined })}
+          placeholder="Default monospace stack"
+          list="terminal-font-suggestions"
+          disabled={!terminal}
+        >
+          <datalist id="terminal-font-suggestions">
+            <option value="Hack NF" />
+            <option value="Hack NFM" />
+            <option value="JetBrains Mono" />
+            <option value="Cascadia Code" />
+            <option value="Cascadia Mono" />
+            <option value="Consolas" />
+          </datalist>
+        </TextField>
+        <NumberField
+          id="terminal-font-size"
+          label="Size"
+          value={terminal?.fontSize ?? 12}
+          min={8}
+          max={32}
+          onCommit={(v) => patch({ fontSize: v ?? 12 })}
+          className="w-24"
+          disabled={!terminal}
+        />
+        <NumberField
+          id="terminal-line-height"
+          label="Line height"
+          hint={renderer === 'dom' ? '1.0 keeps powerline separators joined with this renderer.' : undefined}
+          value={terminal?.lineHeight ?? 1.2}
+          min={1}
+          max={2}
+          step={0.05}
+          onCommit={(v) => patch({ lineHeight: v ?? 1.2 })}
+          className="w-24"
+          disabled={!terminal}
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-4">
+        <NumberField
+          id="terminal-font-weight"
+          label="Text weight"
+          hint="400 is regular, 300 lighter."
+          value={terminal?.fontWeight ?? 400}
+          min={100}
+          max={900}
+          step={100}
+          onCommit={(v) => patch({ fontWeight: v ?? 400 })}
+          className="w-24"
+          disabled={!terminal}
+        />
+        <NumberField
+          id="terminal-font-weight-bold"
+          label="Bold weight"
+          hint="700 by default; 600 is calmer."
+          value={terminal?.fontWeightBold ?? 700}
+          min={100}
+          max={900}
+          step={100}
+          onCommit={(v) => patch({ fontWeightBold: v ?? 700 })}
+          className="w-24"
+          disabled={!terminal}
+        />
+        <NumberField
+          id="terminal-letter-spacing"
+          label="Letter spacing"
+          hint="px; empty = automatic (compensates fonts whose advance is not a whole pixel)."
+          value={terminal?.letterSpacing}
+          min={-2}
+          max={6}
+          step={0.5}
+          allowEmpty
+          placeholder="auto"
+          onCommit={(v) => patch({ letterSpacing: v })}
+          className="w-24"
+          disabled={!terminal}
+        />
+        <Field label="Selection colour" htmlFor="terminal-selection-color" hint="Any CSS colour; empty = the theme's.">
+          <div className="flex items-center gap-2">
+            <Input
+              id="terminal-selection-color"
+              value={selectionColor}
+              placeholder="theme"
+              onChange={(e) => patch({ selectionColor: e.target.value.trim() || undefined })}
+              className="w-32 font-mono text-[12px]"
+              disabled={!terminal}
+            />
+            <span
+              aria-hidden
+              className="size-6 shrink-0 rounded-[var(--rad-xs)] border border-border"
+              style={{ background: selectionColor.trim() || 'var(--terminal-selection, transparent)' }}
+            />
+          </div>
+        </Field>
+      </div>
+
+      <Field
+        label="Renderer"
+        htmlFor="terminal-renderer"
+        hint="GPU and Canvas both draw box, block and powerline characters themselves, so they always line up; Canvas rasterises the text through the platform engine, which keeps the letters finer. The browser renderer draws everything as text and can leave hairlines between cells."
+      >
+        <Select
+          value={renderer}
+          onValueChange={(v: 'dom' | 'webgl' | 'canvas') => patch({ renderer: v })}
+          disabled={!terminal}
+        >
+          <SelectTrigger id="terminal-renderer" className="w-[260px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="webgl">GPU (fastest on heavy output)</SelectItem>
+            <SelectItem value="canvas">Canvas (default: fine text, exact block glyphs)</SelectItem>
+            <SelectItem value="dom">Browser (no acceleration)</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <ToggleField
+        id="dock-terminal-theme"
+        label="Colour the dock terminals with the terminal theme"
+        hint="Off: the dock keeps the app skin's palette; the Terminal window always follows the terminal theme."
+      >
+        <Switch
+          id="dock-terminal-theme"
+          checked={terminal?.dockUsesTerminalTheme ?? false}
+          onCheckedChange={(v) => patch({ dockUsesTerminalTheme: v })}
+          disabled={!terminal}
+        />
+      </ToggleField>
+
+      <Field
+        label="Terminal window · tabs"
+        htmlFor="tabs-placement"
+        hint="Where the list of terminals lives in the Terminal window: a sessions rail on the left, or a tab strip above the panes. One or the other, never both."
+      >
+        <Select
+          value={terminal?.tabsPlacement ?? 'sidebar'}
+          onValueChange={(v: 'sidebar' | 'top') => patch({ tabsPlacement: v })}
+          disabled={!terminal}
+        >
+          <SelectTrigger id="tabs-placement" className="w-[220px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="sidebar">Sessions rail (left)</SelectItem>
+            <SelectItem value="top">Tab strip (top)</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Field
+        label="What a tab shows"
+        hint="The title is always there. Everything around it is up to you."
+        htmlFor="tab-display-cwd"
+      >
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          {TAB_DISPLAY_TOGGLES.map(({ key, label, hint }) => (
+            <label key={key} htmlFor={`tab-display-${key}`} className="flex items-center gap-2 text-xs" title={hint}>
+              <Switch
+                id={`tab-display-${key}`}
+                checked={tabDisplay[key]}
+                onCheckedChange={(v) => patch({ tabDisplay: { ...tabDisplay, [key]: v } })}
+                disabled={!terminal}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      </Field>
+
+      <Field
+        label={<span className="text-xs text-muted-foreground">Tab number</span>}
+        hint="The number types Ctrl+N jumps to. It only means something while Ctrl is down, which is when it shows by default."
+        htmlFor="tab-display-index"
+      >
+        <Select
+          value={tabDisplay.index}
+          onValueChange={(v: TabIndexDisplay) => patch({ tabDisplay: { ...tabDisplay, index: v } })}
+          disabled={!terminal}
+        >
+          <SelectTrigger id="tab-display-index" className="w-[220px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="never">Never</SelectItem>
+            <SelectItem value="ctrl">While Ctrl is held</SelectItem>
+            <SelectItem value="always">Always</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Separator />
+
+      <ToggleField
+        id="confirm-close-running"
+        label="Ask before closing a busy terminal"
+        hint="Closing a tab, a pane or CortX itself while a command is running asks first, and names what would be killed. A terminal sitting at its prompt always closes straight away."
+      >
+        <Switch
+          id="confirm-close-running"
+          checked={terminal?.confirmCloseRunning ?? true}
+          onCheckedChange={(v) => patch({ confirmCloseRunning: v })}
+          disabled={!terminal}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="restore-sessions"
+        label="Restore sessions on start"
+        hint="Reopens the Terminal window's tabs where you left them — shells in their last directory, nothing re-run."
+      >
+        <Switch
+          id="restore-sessions"
+          checked={restoreSessions}
+          onCheckedChange={(v) => patch({ restoreSessions: v })}
+          disabled={!terminal}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="restore-scrollback"
+        label="Restore scrollback"
+        hint="Seeds each restored shell with the tail of its previous output, so you keep the context of what ran."
+      >
+        <Switch
+          id="restore-scrollback"
+          checked={restoreScrollback}
+          onCheckedChange={(v) => patch({ restoreScrollback: v })}
+          disabled={!terminal || !restoreSessions}
+        />
+      </ToggleField>
+
+      <NumberField
+        id="restore-scrollback-lines"
+        label={<span className="text-xs text-muted-foreground">Lines</span>}
+        value={terminal?.restoreScrollbackLines ?? 200}
+        min={20}
+        max={2000}
+        onCommit={(v) => patch({ restoreScrollbackLines: v ?? 200 })}
+        disabled={!terminal || !restoreSessions || !restoreScrollback}
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Started services and scripts open in"
+          htmlFor="open-processes-in"
+          hint="Where a service or script started from the app shows up."
+        >
+          <Select
+            value={terminal?.openProcessesIn ?? 'dock'}
+            onValueChange={(v: TerminalTargetSurface) => patch({ openProcessesIn: v })}
+            disabled={!terminal}
+          >
+            <SelectTrigger id="open-processes-in" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="dock">Dock (main window)</SelectItem>
+              <SelectItem value="window">Terminal window</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field
+          label="Dev sessions (launch configurations) open in"
+          htmlFor="open-dev-sessions-in"
+          hint="A configuration can still pick its own target."
+        >
+          <Select
+            value={terminal?.openDevSessionsIn ?? 'window'}
+            onValueChange={(v: TerminalTargetSurface) => patch({ openDevSessionsIn: v })}
+            disabled={!terminal}
+          >
+            <SelectTrigger id="open-dev-sessions-in" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="window">Terminal window</SelectItem>
+              <SelectItem value="dock">Dock (main window)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+    </Section>
+  );
+}

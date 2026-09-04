@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,6 @@ import { Badge } from '@/components/ui/badge';
 import { Chip } from '@/components/ui/Chip';
 import { Segmented, type SegOption } from '@/components/ui/Segmented';
 import { BetaBadge } from '@/components/ui/BetaBadge';
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -75,11 +74,10 @@ import {
   type Skin,
   type ThemeMode,
 } from '@/lib/theme';
-import { LaunchConfigsSection } from '@/components/terminal/launch/LaunchConfigsSection';
-import { TerminalAppearanceSection } from '@/components/terminal/settings/TerminalAppearanceSection';
-import { ShortcutsSection } from '@/components/terminal/settings/ShortcutsSection';
-import type { TerminalConfig } from '@/types';
-import type { AppSettings, AgentsSettings, TerminalPreset, TerminalTargetSurface, ExportSummary, ImportOptions, ShimStatus } from '@/types';
+import { TERMINAL_SECTION_KEYWORDS } from '@/components/terminal/settings/meta';
+import { TerminalSettingsSections } from '@/components/terminal/settings/TerminalSettingsPanel';
+import { Section, Field, Code } from '@/components/settings/SettingsPrimitives';
+import type { AppSettings, AgentsSettings, ExportSummary, ImportOptions, ShimStatus } from '@/types';
 
 const DEFAULT_GLOBAL_HOTKEY = 'CmdOrCtrl+Shift+Space';
 
@@ -108,9 +106,9 @@ const SETTINGS_TAB_KEY = 'cortx-settings-tab';
 
 const SECTION_KEYWORDS: [SettingsTab, string][] = [
   ['appearance', 'appearance style halcyon classic theme light dark system accent colour color corners radius font'],
-  ['terminal', 'terminal application external windows terminal powershell cmd warp custom path arguments cortx terminal preset'],
-  ['terminal', 'integrated terminal shell integration notifications long command inline suggestions ghost font size line height tabs placement rail restore sessions scrollback snapshot open in dock window processes dev sessions dock theme'],
-  ['terminal', 'terminal appearance theme picker wallpaper opacity blur dim cursor padding window opacity effect acrylic mica shortcuts keybindings keyboard launch configurations dev session yaml'],
+  // The terminal cards carry their own keywords (they are shared with the
+  // Terminal window's settings panel), so the search banner reuses them.
+  ...Object.values(TERMINAL_SECTION_KEYWORDS).map((kw) => ['terminal', kw] as [SettingsTab, string]),
   ['general', 'default behavior launch method integrated external clipboard services'],
   ['general', 'command palette global hotkey shortcut'],
   ['general', 'tags labels colours manage projects'],
@@ -131,62 +129,6 @@ function readSavedTab(): SettingsTab {
   }
 }
 
-const TERMINAL_PRESETS: {
-  value: TerminalPreset;
-  label: string;
-  description: string;
-  platforms: ('windows' | 'macos' | 'linux')[];
-}[] = [
-  {
-    value: 'cortxterminal',
-    label: 'CortX Terminal',
-    description: "Services launched externally open in CortX's own Terminal window",
-    platforms: ['windows', 'macos', 'linux'],
-  },
-  {
-    value: 'windowsterminal',
-    label: 'Windows Terminal',
-    description: 'Modern Windows terminal with tabs and profiles',
-    platforms: ['windows'],
-  },
-  {
-    value: 'powershell',
-    label: 'PowerShell',
-    description: 'Windows PowerShell terminal',
-    platforms: ['windows'],
-  },
-  {
-    value: 'cmd',
-    label: 'Command Prompt',
-    description: 'Classic Windows command prompt (cmd.exe)',
-    platforms: ['windows'],
-  },
-  {
-    value: 'warp',
-    label: 'Warp',
-    description: 'Modern terminal with AI features (opens in working directory)',
-    platforms: ['windows', 'macos'],
-  },
-  {
-    value: 'macterminal',
-    label: 'Terminal.app',
-    description: 'Default macOS terminal',
-    platforms: ['macos'],
-  },
-  {
-    value: 'iterm2',
-    label: 'iTerm2',
-    description: 'Popular macOS terminal replacement',
-    platforms: ['macos'],
-  },
-  {
-    value: 'custom',
-    label: 'Custom',
-    description: 'Specify your own terminal executable and arguments',
-    platforms: ['windows', 'macos', 'linux'],
-  },
-];
-
 const THEME_MODE_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
   { value: 'light', label: 'Light', icon: Sun },
   { value: 'dark', label: 'Dark', icon: Moon },
@@ -202,83 +144,8 @@ const clampInt = (raw: string, fallback: number, min: number, max: number): numb
   return Math.min(Math.max(n, min), max);
 };
 
-// Detect current platform
-const getPlatform = (): 'windows' | 'macos' | 'linux' => {
-  const platform = navigator.platform.toLowerCase();
-  if (platform.includes('win')) return 'windows';
-  if (platform.includes('mac')) return 'macos';
-  return 'linux';
-};
-
-// ============================================================================
-// Small layout helpers (local to the settings page)
-// ============================================================================
-
-/** One settings section: a card with a title, a description and optional header action. */
-function Section({
-  title,
-  description,
-  icon: Icon,
-  action,
-  children,
-  className,
-}: {
-  title: ReactNode;
-  description?: ReactNode;
-  icon?: typeof Sun;
-  action?: ReactNode;
-  children?: ReactNode;
-  className?: string;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {Icon && <Icon className="size-4 text-faint" />}
-          {title}
-        </CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
-        {action && <CardAction>{action}</CardAction>}
-      </CardHeader>
-      {children && <CardContent className={cn('space-y-4', className)}>{children}</CardContent>}
-    </Card>
-  );
-}
-
-/** Label + control + hint. */
-function Field({
-  label,
-  htmlFor,
-  hint,
-  children,
-  className,
-}: {
-  label: ReactNode;
-  htmlFor?: string;
-  hint?: ReactNode;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    // `content-start`: in a multi-column row the tallest field (the one with
-    // a hint) sets the height, and without it the shorter fields stretch
-    // their rows and drop their label to the middle.
-    <div className={cn('grid content-start gap-2', className)}>
-      <Label htmlFor={htmlFor}>{label}</Label>
-      {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
-  );
-}
-
-/** Inline code snippet inside a hint. */
-function Code({ children }: { children: ReactNode }) {
-  return <code className="rounded-xs bg-muted px-1 py-px font-mono text-[11px] text-foreground">{children}</code>;
-}
-
 export function Settings() {
   const { settings, loadSettings, updateSettings, exportScriptsConfig, previewImport, importScriptsConfig, backupToGit } = useAppStore();
-  const platform = getPlatform();
 
   const [showTagManager, setShowTagManager] = useState(false);
   const [showStatusManager, setShowStatusManager] = useState(false);
@@ -295,27 +162,6 @@ export function Settings() {
     settings: true,
   });
   const [isImporting, setIsImporting] = useState(false);
-  const [terminalPreset, setTerminalPreset] = useState<TerminalPreset>('windowsterminal');
-  const [customPath, setCustomPath] = useState('');
-  const [customArgs, setCustomArgs] = useState('');
-  const [integratedShell, setIntegratedShell] = useState('');
-  const [shellIntegration, setShellIntegration] = useState(true);
-  const [notifyOnLongCommand, setNotifyOnLongCommand] = useState(true);
-  const [longCommandSeconds, setLongCommandSeconds] = useState(10);
-  const [tabsPlacement, setTabsPlacement] = useState<'sidebar' | 'top'>('sidebar');
-  const [terminalFontFamily, setTerminalFontFamily] = useState('');
-  const [terminalFontSize, setTerminalFontSize] = useState(12);
-  const [confirmCloseRunning, setConfirmCloseRunning] = useState(true);
-  const [restoreSessions, setRestoreSessions] = useState(true);
-  const [restoreScrollback, setRestoreScrollback] = useState(true);
-  const [restoreScrollbackLines, setRestoreScrollbackLines] = useState(200);
-  const [openProcessesIn, setOpenProcessesIn] = useState<TerminalTargetSurface>('dock');
-  const [openDevSessionsIn, setOpenDevSessionsIn] = useState<TerminalTargetSurface>('window');
-  const [inlineSuggestions, setInlineSuggestions] = useState(true);
-  // Appearance of the terminals (theme, cursor, padding, window opacity /
-  // effect): held as one draft, edited by TerminalAppearanceSection.
-  const [terminalAppearance, setTerminalAppearance] = useState<Partial<TerminalConfig>>({});
-  const [keybindings, setKeybindings] = useState<Record<string, string>>({});
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [launchMethod, setLaunchMethod] = useState<'clipboard' | 'external' | 'integrated'>('integrated');
   const [toolboxBaseUrl, setToolboxBaseUrl] = useState('');
@@ -344,19 +190,10 @@ export function Settings() {
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [activeTab, setActiveTab] = useState<SettingsTab>(readSavedTab);
   const [query, setQuery] = useState('');
-  const [terminalLineHeight, setTerminalLineHeight] = useState(1.2);
-  const [terminalLetterSpacing, setTerminalLetterSpacing] = useState<string>('');
-  const [terminalFontWeight, setTerminalFontWeight] = useState(400);
-  const [terminalFontWeightBold, setTerminalFontWeightBold] = useState(700);
-  const [terminalRenderer, setTerminalRenderer] = useState<'dom' | 'webgl' | 'canvas'>('canvas');
-  const [terminalSelectionColor, setTerminalSelectionColor] = useState('');
-  const [dockUsesTerminalTheme, setDockUsesTerminalTheme] = useState(false);
   // Hydrate from the store only when its content actually changed (the
   // store object is replaced on every reload, our own saves included).
   const lastHydratedRef = useRef<string | null>(null);
 
-  // Filter presets for current platform
-  const availablePresets = TERMINAL_PRESETS.filter((p) => p.platforms.includes(platform));
 
   useEffect(() => {
     if (!settings) loadSettings();
@@ -367,47 +204,6 @@ export function Settings() {
       const json = JSON.stringify(settings);
       if (lastHydratedRef.current === json) return;
       lastHydratedRef.current = json;
-      setTerminalPreset(settings.terminal.preset);
-      setCustomPath(settings.terminal.customPath);
-      setCustomArgs(settings.terminal.customArgs.join(' '));
-      setIntegratedShell(settings.terminal.integratedShell ?? '');
-      setShellIntegration(settings.terminal.shellIntegration ?? true);
-      setNotifyOnLongCommand(settings.terminal.notifyOnLongCommand ?? true);
-      setLongCommandSeconds(settings.terminal.longCommandSeconds ?? 10);
-      setTerminalLineHeight(settings.terminal.lineHeight ?? 1.2);
-      setTerminalLetterSpacing(settings.terminal.letterSpacing === undefined ? '' : String(settings.terminal.letterSpacing));
-      setTerminalFontWeight(settings.terminal.fontWeight ?? 400);
-      setTerminalFontWeightBold(settings.terminal.fontWeightBold ?? 700);
-      setTerminalRenderer(settings.terminal.renderer ?? 'canvas');
-      setTerminalSelectionColor(settings.terminal.selectionColor ?? '');
-      setDockUsesTerminalTheme(settings.terminal.dockUsesTerminalTheme ?? false);
-      setTabsPlacement(settings.terminal.tabsPlacement ?? 'sidebar');
-      setTerminalFontFamily(settings.terminal.fontFamily ?? '');
-      setTerminalFontSize(settings.terminal.fontSize ?? 12);
-      setConfirmCloseRunning(settings.terminal.confirmCloseRunning ?? true);
-      setRestoreSessions(settings.terminal.restoreSessions ?? true);
-      setRestoreScrollback(settings.terminal.restoreScrollback ?? true);
-      setRestoreScrollbackLines(settings.terminal.restoreScrollbackLines ?? 200);
-      setOpenProcessesIn(settings.terminal.openProcessesIn ?? 'dock');
-      setOpenDevSessionsIn(settings.terminal.openDevSessionsIn ?? 'window');
-      setInlineSuggestions(settings.terminal.inlineSuggestions ?? true);
-      setTerminalAppearance({
-        themeDark: settings.terminal.themeDark,
-        themeLight: settings.terminal.themeLight,
-        themeFollowsApp: settings.terminal.themeFollowsApp ?? true,
-        cursorStyle: settings.terminal.cursorStyle ?? 'bar',
-        cursorBlink: settings.terminal.cursorBlink ?? true,
-        padding: settings.terminal.padding ?? 8,
-        windowOpacity: settings.terminal.windowOpacity ?? 100,
-        windowEffect: settings.terminal.windowEffect ?? 'none',
-        wallpaperOpacity: settings.terminal.wallpaperOpacity,
-        wallpaperBlur: settings.terminal.wallpaperBlur,
-        wallpaperFit: settings.terminal.wallpaperFit,
-        wallpaperDim: settings.terminal.wallpaperDim ?? 0,
-        chromeOpacity: settings.terminal.chromeOpacity ?? 72,
-        chromeBlur: settings.terminal.chromeBlur ?? 20,
-      });
-      setKeybindings({ ...(settings.terminal.keybindings ?? {}) });
       setTheme(settings.appearance.theme);
       setLaunchMethod(settings.defaults.launchMethod);
       setToolboxBaseUrl(settings.toolboxBaseUrl ?? '');
@@ -455,27 +251,6 @@ export function Settings() {
       toast.error(`Failed to add to PATH: ${e}`);
     } finally {
       setIsInstallingPath(false);
-    }
-  };
-
-  const handleBrowseTerminal = async () => {
-    try {
-      const selected = await open({
-        multiple: false,
-        title: 'Select Terminal Executable',
-        filters: [
-          {
-            name: 'Executables',
-            extensions: platform === 'windows' ? ['exe'] : ['app', ''],
-          },
-        ],
-      });
-      if (selected && typeof selected === 'string') {
-        setCustomPath(selected);
-        setHasChanges(true);
-      }
-    } catch (e) {
-      console.error('Failed to open file picker:', e);
     }
   };
 
@@ -600,38 +375,11 @@ export function Settings() {
     if (!settings) return;
 
     const newSettings: AppSettings = {
-      terminal: {
-        // Everything saved so far, so a field this form does not manage —
-        // the ones the terminal itself owns (copy on select, Shift+Enter,
-        // smooth scroll, close confirmation…) — survives a save from here.
-        ...settings.terminal,
-        preset: terminalPreset,
-        customPath: customPath,
-        customArgs: customArgs.split(' ').filter(Boolean),
-        integratedShell: integratedShell.trim() || undefined,
-        shellIntegration,
-        notifyOnLongCommand,
-        longCommandSeconds: Math.max(1, Math.round(longCommandSeconds) || 10),
-        lineHeight: Math.min(2, Math.max(1, Number(terminalLineHeight) || 1.2)),
-        letterSpacing: terminalLetterSpacing.trim() === '' ? undefined : Math.min(6, Math.max(-2, Number(terminalLetterSpacing) || 0)),
-        fontWeight: terminalFontWeight,
-        fontWeightBold: terminalFontWeightBold,
-        renderer: terminalRenderer,
-        selectionColor: terminalSelectionColor.trim() || undefined,
-        dockUsesTerminalTheme,
-        tabsPlacement,
-        fontFamily: terminalFontFamily.trim() || undefined,
-        fontSize: Math.min(32, Math.max(8, Math.round(terminalFontSize) || 12)),
-        confirmCloseRunning,
-        restoreSessions,
-        restoreScrollback,
-        restoreScrollbackLines: Math.min(2000, Math.max(20, Math.round(restoreScrollbackLines) || 200)),
-        openProcessesIn,
-        openDevSessionsIn,
-        inlineSuggestions,
-        ...terminalAppearance,
-        keybindings,
-      },
+      // Every terminal setting is owned by the cards in
+      // components/terminal/settings/, which write to the store themselves
+      // (the same cards run in the Terminal window). This page must therefore
+      // hand the terminal block back untouched.
+      terminal: { ...settings.terminal },
       appearance: {
         theme,
       },
@@ -709,7 +457,6 @@ export function Settings() {
     );
   }
 
-  const selectedPresetInfo = TERMINAL_PRESETS.find((p) => p.value === terminalPreset);
 
   const saveActions = (
     <span className="inline-flex h-8 items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
@@ -776,501 +523,10 @@ export function Settings() {
           </>
         )}
 
-        {/* Terminal */}
-        {visible('terminal', 'terminal application external windows terminal powershell cmd warp custom path arguments cortx terminal preset') && (
-          <>
-          <Section
-            title="Terminal"
-            icon={TerminalSquare}
-            description="External terminal application used when launching services outside the app."
-          >
-            <Field
-              label="Terminal application"
-              htmlFor="terminal-preset"
-              hint={
-                selectedPresetInfo && (
-                  <span className="inline-flex items-center gap-1">
-                    <Info className="size-3" />
-                    {selectedPresetInfo.description}
-                  </span>
-                )
-              }
-            >
-              <Select
-                value={terminalPreset}
-                onValueChange={(value: TerminalPreset) => {
-                  setTerminalPreset(value);
-                  setHasChanges(true);
-                }}
-              >
-                <SelectTrigger id="terminal-preset">
-                  <SelectValue placeholder="Select terminal" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availablePresets.map((preset) => (
-                    <SelectItem key={preset.value} value={preset.value}>
-                      {preset.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            {terminalPreset === 'custom' && (
-              <>
-                <Separator />
-
-                <Field label="Custom terminal path" htmlFor="custom-path" hint="Path to your terminal executable">
-                  <div className="flex gap-2">
-                    <Input
-                      id="custom-path"
-                      value={customPath}
-                      onChange={(e) => {
-                        setCustomPath(e.target.value);
-                        setHasChanges(true);
-                      }}
-                      placeholder={
-                        platform === 'windows'
-                          ? 'e.g., C:\\Program Files\\Terminal\\terminal.exe'
-                          : '/usr/bin/terminal'
-                      }
-                      className="flex-1 font-mono text-[12px]"
-                    />
-                    <Button variant="outline" size="icon" onClick={handleBrowseTerminal} aria-label="Browse">
-                      <FolderOpen />
-                    </Button>
-                  </div>
-                </Field>
-
-                <Field
-                  label="Custom arguments"
-                  htmlFor="custom-args"
-                  hint={
-                    <>
-                      Arguments passed to the terminal. Placeholders: <Code>{'{dir}'}</Code> (working directory),{' '}
-                      <Code>{'{command}'}</Code> (service command), <Code>{'{full_command}'}</Code> (cd + command)
-                    </>
-                  }
-                >
-                  <Input
-                    id="custom-args"
-                    value={customArgs}
-                    onChange={(e) => {
-                      setCustomArgs(e.target.value);
-                      setHasChanges(true);
-                    }}
-                    placeholder="e.g., -e bash -c {full_command}"
-                    className="font-mono text-[12px]"
-                  />
-                </Field>
-              </>
-            )}
-
-            {terminalPreset === 'warp' && (
-              <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                <p className="mb-1 font-medium text-foreground">Note about Warp</p>
-                <p>
-                  Warp will open in the service's working directory, but cannot automatically execute
-                  commands. You'll need to run the command manually or use the integrated terminal for
-                  automatic execution.
-                </p>
-              </div>
-            )}
-          </Section>
-          </>
-        )}
-
-        {/* Integrated terminal */}
-        {visible('terminal', 'integrated terminal shell integration notifications long command inline suggestions ghost font size line height tabs placement rail restore sessions scrollback snapshot open in dock window processes dev sessions dock theme') && (
-          <>
-          <Section
-            title="Integrated terminal"
-            description='The terminal panel runs every service, script and shell tab in a real PTY. Configure the shell used by the "New terminal" button.'
-          >
-            <Field
-              label="Shell"
-              htmlFor="integrated-shell"
-              hint={
-                <>
-                  Command line of the shell to launch, e.g. <Code>pwsh -NoLogo</Code>, <Code>nu</Code> or{' '}
-                  <Code>/bin/zsh -l</Code>. Leave empty to auto-detect. Applies to newly opened tabs.
-                </>
-              }
-            >
-              <Input
-                id="integrated-shell"
-                value={integratedShell}
-                onChange={(e) => {
-                  setIntegratedShell(e.target.value);
-                  setHasChanges(true);
-                }}
-                placeholder={
-                  navigator.userAgent.includes('Windows')
-                    ? 'Auto (pwsh -NoLogo, falls back to powershell)'
-                    : 'Auto ($SHELL)'
-                }
-                className="font-mono text-[12px]"
-              />
-            </Field>
-
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label htmlFor="shell-integration">Shell integration</Label>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  <Code>cortx init</Code> makes the shell report its directory, running command and exit codes
-                  (OSC 7 / OSC 133) — only inside CortX terminals. Powers the live tab titles, the
-                  running spinner and the command history.
-                </p>
-              </div>
-              <Switch
-                id="shell-integration"
-                checked={shellIntegration}
-                onCheckedChange={(v) => { setShellIntegration(v); setHasChanges(true); }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label htmlFor="notify-long-command">Notify when a long command finishes</Label>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Toast in the app, and an OS notification when CortX is in the background, for commands
-                  that end in a tab you are not looking at.
-                </p>
-              </div>
-              <Switch
-                id="notify-long-command"
-                checked={notifyOnLongCommand}
-                onCheckedChange={(v) => { setNotifyOnLongCommand(v); setHasChanges(true); }}
-                disabled={!shellIntegration}
-              />
-            </div>
-
-            <Field
-              label={<span className="text-xs text-muted-foreground">Minimum duration (seconds)</span>}
-              htmlFor="long-command-seconds"
-            >
-              <Input
-                id="long-command-seconds"
-                type="number"
-                min={1}
-                max={3600}
-                value={longCommandSeconds}
-                onChange={(e) => { setLongCommandSeconds(Number(e.target.value)); setHasChanges(true); }}
-                className="w-28 font-mono text-[12px]"
-                disabled={!shellIntegration || !notifyOnLongCommand}
-              />
-            </Field>
-
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label htmlFor="inline-suggestions">Inline suggestions</Label>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Ghost text from your command history while you type; → accepts it. Needs shell
-                  integration. PowerShell's own prediction is switched off inside CortX to avoid a double
-                  suggestion.
-                </p>
-              </div>
-              <Switch
-                id="inline-suggestions"
-                checked={inlineSuggestions}
-                onCheckedChange={(v) => { setInlineSuggestions(v); setHasChanges(true); }}
-                disabled={!shellIntegration}
-              />
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-[1fr_auto_auto]">
-              <Field
-                label="Font"
-                htmlFor="terminal-font"
-                hint="Any installed font (e.g. Hack NF, JetBrains Mono, Cascadia Code). Nerd Font variants render prompt glyphs. Applies to every terminal, dock and window."
-              >
-                <Input
-                  id="terminal-font"
-                  value={terminalFontFamily}
-                  onChange={(e) => { setTerminalFontFamily(e.target.value); setHasChanges(true); }}
-                  placeholder="Default monospace stack"
-                  className="font-mono text-[12px]"
-                  list="terminal-font-suggestions"
-                />
-                <datalist id="terminal-font-suggestions">
-                  <option value="Hack NF" />
-                  <option value="Hack NFM" />
-                  <option value="JetBrains Mono" />
-                  <option value="Cascadia Code" />
-                  <option value="Cascadia Mono" />
-                  <option value="Consolas" />
-                </datalist>
-              </Field>
-              <Field label="Size" htmlFor="terminal-font-size">
-                <Input
-                  id="terminal-font-size"
-                  type="number"
-                  min={8}
-                  max={32}
-                  value={terminalFontSize}
-                  onChange={(e) => { setTerminalFontSize(Number(e.target.value)); setHasChanges(true); }}
-                  className="w-24 font-mono text-[12px]"
-                />
-              </Field>
-              <Field
-                label="Line height"
-                htmlFor="terminal-line-height"
-                hint={terminalRenderer === 'dom' ? '1.0 keeps powerline separators joined with this renderer.' : undefined}
-              >
-                <Input
-                  id="terminal-line-height"
-                  type="number"
-                  min={1}
-                  max={2}
-                  step={0.05}
-                  value={terminalLineHeight}
-                  onChange={(e) => { setTerminalLineHeight(Number(e.target.value)); setHasChanges(true); }}
-                  className="w-24 font-mono text-[12px]"
-                />
-              </Field>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-4">
-              <Field
-                label="Text weight"
-                htmlFor="terminal-font-weight"
-                hint="400 is regular, 300 lighter."
-              >
-                <Input
-                  id="terminal-font-weight"
-                  type="number"
-                  min={100}
-                  max={900}
-                  step={100}
-                  value={terminalFontWeight}
-                  onChange={(e) => { setTerminalFontWeight(Number(e.target.value)); setHasChanges(true); }}
-                  className="w-24 font-mono text-[12px]"
-                />
-              </Field>
-              <Field label="Bold weight" htmlFor="terminal-font-weight-bold" hint="700 by default; 600 is calmer.">
-                <Input
-                  id="terminal-font-weight-bold"
-                  type="number"
-                  min={100}
-                  max={900}
-                  step={100}
-                  value={terminalFontWeightBold}
-                  onChange={(e) => { setTerminalFontWeightBold(Number(e.target.value)); setHasChanges(true); }}
-                  className="w-24 font-mono text-[12px]"
-                />
-              </Field>
-              <Field
-                label="Letter spacing"
-                htmlFor="terminal-letter-spacing"
-                hint="px; empty = automatic (compensates fonts whose advance is not a whole pixel)."
-              >
-                <Input
-                  id="terminal-letter-spacing"
-                  type="number"
-                  min={-2}
-                  max={6}
-                  step={0.5}
-                  value={terminalLetterSpacing}
-                  placeholder="auto"
-                  onChange={(e) => { setTerminalLetterSpacing(e.target.value); setHasChanges(true); }}
-                  className="w-24 font-mono text-[12px]"
-                />
-              </Field>
-              <Field
-                label="Selection colour"
-                htmlFor="terminal-selection-color"
-                hint="Any CSS colour; empty = the theme's."
-              >
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="terminal-selection-color"
-                    value={terminalSelectionColor}
-                    placeholder="theme"
-                    onChange={(e) => { setTerminalSelectionColor(e.target.value); setHasChanges(true); }}
-                    className="w-32 font-mono text-[12px]"
-                  />
-                  <span
-                    aria-hidden
-                    className="size-6 shrink-0 rounded-[var(--rad-xs)] border border-border"
-                    style={{ background: terminalSelectionColor.trim() || 'var(--terminal-selection, transparent)' }}
-                  />
-                </div>
-              </Field>
-            </div>
-
-            <Field
-              label="Renderer"
-              htmlFor="terminal-renderer"
-              hint="GPU and Canvas both draw box, block and powerline characters themselves, so they always line up; Canvas rasterises the text through the platform engine, which keeps the letters finer. The browser renderer draws everything as text and can leave hairlines between cells."
-            >
-              <Select value={terminalRenderer} onValueChange={(v: 'dom' | 'webgl' | 'canvas') => { setTerminalRenderer(v); setHasChanges(true); }}>
-                <SelectTrigger id="terminal-renderer" className="w-[260px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="webgl">GPU (fastest on heavy output)</SelectItem>
-                  <SelectItem value="canvas">Canvas (default: fine text, exact block glyphs)</SelectItem>
-                  <SelectItem value="dom">Browser (no acceleration)</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label htmlFor="dock-terminal-theme">Colour the dock terminals with the terminal theme</Label>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Off: the dock keeps the app skin's palette; the Terminal window always follows the terminal theme.
-                </p>
-              </div>
-              <Switch
-                id="dock-terminal-theme"
-                checked={dockUsesTerminalTheme}
-                onCheckedChange={(v) => { setDockUsesTerminalTheme(v); setHasChanges(true); }}
-              />
-            </div>
-
-            <Field
-              label="Terminal window · tabs"
-              htmlFor="tabs-placement"
-              hint="Where the list of terminals lives in the Terminal window: a sessions rail on the left, or a tab strip above the panes. One or the other, never both."
-            >
-              <Select
-                value={tabsPlacement}
-                onValueChange={(v: 'sidebar' | 'top') => { setTabsPlacement(v); setHasChanges(true); }}
-              >
-                <SelectTrigger id="tabs-placement" className="w-[220px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="sidebar">Sessions rail (left)</SelectItem>
-                  <SelectItem value="top">Tab strip (top)</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-
-            <Separator />
-
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label htmlFor="confirm-close-running">Ask before closing a busy terminal</Label>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Closing a tab, a pane or CortX itself while a command is running asks first, and names what would be killed.
-                  A terminal sitting at its prompt always closes straight away.
-                </p>
-              </div>
-              <Switch
-                id="confirm-close-running"
-                checked={confirmCloseRunning}
-                onCheckedChange={(v) => { setConfirmCloseRunning(v); setHasChanges(true); }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label htmlFor="restore-sessions">Restore sessions on start</Label>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Reopens the Terminal window's tabs where you left them — shells in their last directory, nothing re-run.
-                </p>
-              </div>
-              <Switch
-                id="restore-sessions"
-                checked={restoreSessions}
-                onCheckedChange={(v) => { setRestoreSessions(v); setHasChanges(true); }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label htmlFor="restore-scrollback">Restore scrollback</Label>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Seeds each restored shell with the tail of its previous output, so you keep the context of what ran.
-                </p>
-              </div>
-              <Switch
-                id="restore-scrollback"
-                checked={restoreScrollback}
-                onCheckedChange={(v) => { setRestoreScrollback(v); setHasChanges(true); }}
-                disabled={!restoreSessions}
-              />
-            </div>
-
-            <Field label={<span className="text-xs text-muted-foreground">Lines</span>} htmlFor="restore-scrollback-lines">
-              <Input
-                id="restore-scrollback-lines"
-                type="number"
-                min={20}
-                max={2000}
-                value={restoreScrollbackLines}
-                onChange={(e) => { setRestoreScrollbackLines(Number(e.target.value)); setHasChanges(true); }}
-                className="w-28 font-mono text-[12px]"
-                disabled={!restoreSessions || !restoreScrollback}
-              />
-            </Field>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field
-                label="Started services and scripts open in"
-                htmlFor="open-processes-in"
-                hint="Where a service or script started from the app shows up."
-              >
-                <Select
-                  value={openProcessesIn}
-                  onValueChange={(v: TerminalTargetSurface) => { setOpenProcessesIn(v); setHasChanges(true); }}
-                >
-                  <SelectTrigger id="open-processes-in" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="dock">Dock (main window)</SelectItem>
-                    <SelectItem value="window">Terminal window</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field
-                label="Dev sessions (launch configurations) open in"
-                htmlFor="open-dev-sessions-in"
-                hint="A configuration can still pick its own target."
-              >
-                <Select
-                  value={openDevSessionsIn}
-                  onValueChange={(v: TerminalTargetSurface) => { setOpenDevSessionsIn(v); setHasChanges(true); }}
-                >
-                  <SelectTrigger id="open-dev-sessions-in" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="window">Terminal window</SelectItem>
-                    <SelectItem value="dock">Dock (main window)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
-          </Section>
-          </>
-        )}
-
-        {/* Launch configurations */}
-        {visible('terminal', 'terminal appearance theme picker wallpaper opacity blur dim cursor padding window opacity effect acrylic mica shortcuts keybindings keyboard launch configurations dev session yaml') && (
-          <>
-          <TerminalAppearanceSection
-            value={{ ...(settings?.terminal ?? { preset: terminalPreset, customPath, customArgs: [] }), ...terminalAppearance }}
-            onChange={(patch) => {
-              setTerminalAppearance((prev) => ({ ...prev, ...patch }));
-              setHasChanges(true);
-            }}
-          />
-
-          <ShortcutsSection
-            value={keybindings}
-            onChange={(next) => {
-              setKeybindings(next);
-              setHasChanges(true);
-            }}
-          />
-
-          <LaunchConfigsSection />
-          </>
-        )}
+        {/* Terminal — every card lives in components/terminal/settings/ and is
+            bound straight to settings.terminal, so the Terminal window's own
+            panel (Ctrl+, there) shows the very same controls (DEV-13 #8). */}
+        {(q || activeTab === 'terminal') && <TerminalSettingsSections query={q} empty={null} />}
 
         {/* Defaults */}
         {visible('general', 'default behavior launch method integrated external clipboard services') && (

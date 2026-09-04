@@ -101,6 +101,29 @@ export interface TerminalCommandFinished {
   command: string | null;
 }
 
+/**
+ * How the Terminal window decides "this terminal is on screen". Its layout
+ * lives in `terminalLayoutStore`, which imports *this* store, so the Terminal
+ * window registers the predicate instead (see `useAppBootstrap`). Left null in
+ * the main window, where the dock's own panes answer the question.
+ */
+export interface TerminalWindowView {
+  /** Is this terminal drawn right now (ignoring the window's focus)? */
+  isVisible: (id: string) => boolean;
+  /** Every terminal drawn right now. */
+  visibleIds: () => string[];
+}
+
+let terminalWindowView: TerminalWindowView | null = null;
+
+/** Returns the disposer, so a window can unregister on unmount. */
+export function registerTerminalWindowView(view: TerminalWindowView): () => void {
+  terminalWindowView = view;
+  return () => {
+    if (terminalWindowView === view) terminalWindowView = null;
+  };
+}
+
 // Dev-only escape hatch for CDP-driven checks (see terminalSessions.ts).
 // Assigned after the store is created, at the bottom of this file.
 
@@ -1753,13 +1776,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   isTerminalInView: (id) => {
+    if (typeof document !== 'undefined' && !document.hasFocus()) return false;
+    // Terminal window: "on screen" is decided by the shared layout, not by
+    // the dock (see registerTerminalWindowView).
+    if (terminalWindowView) return terminalWindowView.isVisible(id);
     const state = get();
     const t = state.terminals.get(id);
     if (!t || t.visibility !== 'visible' || !t.paneId) return false;
     if (!state.terminalPanelOpen) return false;
     const pane = state.terminalPanes.find((p) => p.id === t.paneId);
-    if (pane?.activeTerminalId !== id) return false;
-    return typeof document === 'undefined' || document.hasFocus();
+    return pane?.activeTerminalId === id;
   },
 
   markTerminalSeen: (id) => {
@@ -1839,10 +1865,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   markVisibleTerminalsSeen: () => {
     const state = get();
-    if (state.terminalAttention.size === 0 || !state.terminalPanelOpen) return;
-    const seen = state.terminalPanes
-      .map((p) => p.activeTerminalId)
-      .filter((id): id is string => !!id && state.terminalAttention.has(id));
+    if (state.terminalAttention.size === 0) return;
+    const onScreen = terminalWindowView
+      ? terminalWindowView.visibleIds()
+      : state.terminalPanelOpen
+        ? state.terminalPanes.map((p) => p.activeTerminalId)
+        : [];
+    const seen = onScreen.filter((id): id is string => !!id && state.terminalAttention.has(id));
     if (seen.length === 0) return;
     const terminalAttention = new Map(state.terminalAttention);
     for (const id of seen) terminalAttention.delete(id);
