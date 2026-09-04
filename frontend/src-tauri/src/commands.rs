@@ -3070,6 +3070,20 @@ fn theme_store(state: &State<AppState>) -> cortx_core::terminal::ThemeStore {
     cortx_core::terminal::ThemeStore::new(&state.storage.terminal_dir())
 }
 
+/// Payload of the `terminal-themes-changed` broadcast: the theme keys whose
+/// file (or wallpaper) was touched on disk. Emitted to **every** window (like
+/// `terminal-layout`) by the watcher started in `lib.rs`'s `setup`, so a
+/// `.yaml` dropped in the folder — or imported from the other window — needs
+/// no restart.
+#[derive(Clone, serde::Serialize)]
+pub struct TerminalThemesChangedEvent {
+    keys: Vec<String>,
+}
+
+pub fn terminal_themes_changed(keys: Vec<String>) -> TerminalThemesChangedEvent {
+    TerminalThemesChangedEvent { keys }
+}
+
 #[tauri::command]
 pub fn list_terminal_themes(state: State<AppState>) -> Vec<cortx_core::terminal::ThemeSummary> {
     theme_store(&state).list()

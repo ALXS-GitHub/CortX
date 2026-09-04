@@ -315,6 +315,22 @@ pub fn run() {
             // Keep watcher alive for the lifetime of the app
             app.manage(watcher_handle);
 
+            // Terminal themes: a `.yaml` (or a wallpaper) dropped into
+            // `data/terminal/themes/` shows up in the picker of every window
+            // without a restart. `ThemeStore::list()` first, so the folder the
+            // watcher needs exists and the bundled themes are materialised.
+            let theme_store = cortx_core::terminal::ThemeStore::new(&state.storage.terminal_dir());
+            theme_store.list();
+            let themes_app = app.handle().clone();
+            match cortx_core::terminal::themes::watch(theme_store.dir().to_path_buf(), move |keys| {
+                let _ = themes_app.emit("terminal-themes-changed", commands::terminal_themes_changed(keys));
+            }) {
+                Ok(handle) => {
+                    app.manage(handle);
+                }
+                Err(e) => log::warn!("Terminal theme watcher could not start: {}", e),
+            }
+
             // Agents section: watch the provider roots (transcripts, live
             // registry, Codex sqlite) and refresh incrementally.
             let agents = state.agents.clone();

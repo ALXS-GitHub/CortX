@@ -902,6 +902,18 @@ export async function readTerminalThemeImage(name: string): Promise<string | nul
 }
 
 /**
+ * A theme file (or wallpaper) appeared, changed or was removed in
+ * `data/terminal/themes/`. Broadcast to every window — the main one and the
+ * Terminal one — so a dropped-in or imported theme shows up without a
+ * restart. The watcher starts with the first `listTerminalThemes()`.
+ */
+export async function onTerminalThemesChanged(
+  callback: (keys: string[]) => void
+): Promise<UnlistenFn> {
+  return listen<{ keys: string[] }>('terminal-themes-changed', (event) => callback(event.payload.keys));
+}
+
+/**
  * Backdrop effect of the Terminal window (acrylic / mica on Windows,
  * vibrancy on macOS). `tint` = theme background (acrylic tint), `dark` picks
  * the material. Opacity itself is CSS (`--terminal-window-alpha`).

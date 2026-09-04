@@ -4,7 +4,10 @@
  *
  * A theme (Warp's YAML, see `cortx_core::terminal::themes`) carries one
  * background, one accent, one foreground, 16 ANSI colours and a
- * `darker` / `lighter` hint. In the Terminal window the theme drives
+ * `darker` / `lighter` hint. Background and accent may be *gradients* in
+ * Warp's format (`{top, bottom}` / `{left, right}`): the flat colour is then
+ * the blend of the stops (everything that takes a single colour uses it) and
+ * the stops themselves paint the window through `themeBackgroundCss`. In the Terminal window the theme drives
  * *everything* the way Warp does: `applyWindowTheme` rewrites the design
  * tokens on `<html>` (canvas, cards, glass, borders, text, accent) so the
  * title bar, the sessions rail, the panes and every popover follow it. The
@@ -17,7 +20,7 @@
  * wallpaper and acrylic / mica all compose like in Warp.
  */
 import type { ITheme } from '@xterm/xterm';
-import type { AppSettings, TerminalConfig, TerminalTheme } from '@/types';
+import type { AppSettings, TerminalConfig, TerminalTheme, TerminalThemeGradient, TerminalThemeSummary } from '@/types';
 import { accentForeground, bootstrapThemeStyle } from '@/lib/theme';
 
 export const DEFAULT_THEME_DARK = 'dark-modern';
@@ -101,6 +104,61 @@ export function mix(a: string, b: string, t: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Gradients (Warp's `background: {top, bottom}` / `accent: {left, right}`)
+// ---------------------------------------------------------------------------
+
+/** Anything carrying a flat colour plus its optional gradient stops. */
+export interface GradientColor {
+  color: string;
+  gradient?: TerminalThemeGradient | null;
+}
+
+/** `[from, to, vertical]` of a gradient, `null` when it has no usable pair. */
+export function gradientStops(g: TerminalThemeGradient | null | undefined): [string, string, boolean] | null {
+  if (!g) return null;
+  if (g.top && g.bottom) return [g.top, g.bottom, true];
+  if (g.left && g.right) return [g.left, g.right, false];
+  return null;
+}
+
+/**
+ * CSS `background` of a themed surface: a `linear-gradient` when the theme
+ * has stops, the flat colour otherwise. `alpha` (0–1) applies to every stop,
+ * so the window opacity keeps working over a gradient.
+ *
+ * Always a `background` *shorthand* value — never assign it to
+ * `background-color`, which cannot hold a gradient.
+ */
+export function gradientCss({ color, gradient }: GradientColor, alpha = 1): string {
+  const stops = gradientStops(gradient);
+  if (!stops) return alpha >= 1 ? color : rgba(color, alpha);
+  const [from, to, vertical] = stops;
+  const dir = vertical ? 'to bottom' : 'to right';
+  return `linear-gradient(${dir}, ${rgba(from, alpha)}, ${rgba(to, alpha)})`;
+}
+
+/** The theme's window background (gradient included) at `alpha`. */
+export function themeBackgroundCss(
+  theme: { background: string; background_gradient?: TerminalThemeGradient | null },
+  alpha = 1
+): string {
+  return gradientCss({ color: theme.background, gradient: theme.background_gradient }, alpha);
+}
+
+/**
+ * Same for a picker row / card, which works off the summary DTO (camelCase
+ * field names, no `terminal_colors`).
+ */
+export function themeCanvasCss(theme: TerminalThemeSummary, alpha = 1): string {
+  return gradientCss({ color: theme.background, gradient: theme.backgroundGradient }, alpha);
+}
+
+/** The summary's accent — a gradient too in a few Warp themes. */
+export function themeAccentCss(theme: TerminalThemeSummary): string {
+  return gradientCss({ color: theme.accent, gradient: theme.accentGradient });
+}
+
+// ---------------------------------------------------------------------------
 // xterm palette
 // ---------------------------------------------------------------------------
 
@@ -122,6 +180,12 @@ export function themeSelection(theme: TerminalTheme, override?: string | null): 
 /**
  * xterm `ITheme` for a theme. With `transparentBackground` the canvas is
  * see-through (the window root paints the colour, wallpaper on top).
+ *
+ * A gradient theme cannot reach xterm — its canvas takes one colour — so the
+ * palette uses `theme.background`, the blend of the stops computed by the
+ * backend. In the Terminal window that colour is invisible anyway (the canvas
+ * is transparent and the root paints the real gradient); in the dock it is
+ * the plausible flat stand-in.
  */
 export function themeToXterm(
   theme: TerminalTheme,
@@ -283,7 +347,9 @@ export function chromeTokens(theme: TerminalTheme, opacity = 100, look: ChromeLo
     '--tab-active-bg': rgba(ac, 0.18),
     '--btn-outline-bg': rgba(card, 0.7),
     '--canvas-wash': 'none',
-    '--terminal-window-bg': rgba(bg, alpha),
+    // A `background` shorthand: a gradient theme paints its stops here, so
+    // the whole window carries the gradient the file asks for.
+    '--terminal-window-bg': themeBackgroundCss(theme, alpha),
     '--terminal-window-solid': bg,
     '--terminal-window-alpha': alpha.toFixed(3),
     '--terminal-selection': themeSelection(theme, look.selectionColor),

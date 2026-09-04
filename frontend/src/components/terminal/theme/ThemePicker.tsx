@@ -1,16 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, FolderOpen, FileDown, Image as ImageIcon, Loader2, Moon, Sun, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FolderOpen, FileDown, Loader2, Moon, Palette, Search, Sun } from 'lucide-react';
 import { ask, open } from '@tauri-apps/plugin-dialog';
 import { exists } from '@tauri-apps/plugin-fs';
 import { dataDir, homeDir, join } from '@tauri-apps/api/path';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Segmented } from '@/components/ui/Segmented';
+import { ThemeCard } from '@/components/terminal/theme/ThemeCard';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalThemeStore, type ThemeSlot } from '@/stores/terminalThemeStore';
-import { isAppDark, resolveActiveThemeName, themeSlotForMode } from '@/lib/terminalTheme';
+import {
+  DEFAULT_THEME_DARK,
+  DEFAULT_THEME_LIGHT,
+  isAppDark,
+  themeAccentCss,
+  themeCanvasCss,
+  themeSlotForMode,
+} from '@/lib/terminalTheme';
 import { cn } from '@/lib/utils';
-import type { TerminalThemeSummary } from '@/types';
+import type { TerminalConfig, TerminalThemeSummary } from '@/types';
 
 /** Colour strip of one theme: canvas + accent dot, then the 8 ANSI colours. */
 export function ThemeSwatches({ theme, className }: { theme: TerminalThemeSummary; className?: string }) {
@@ -18,9 +28,9 @@ export function ThemeSwatches({ theme, className }: { theme: TerminalThemeSummar
     <span className={cn('flex shrink-0 items-center gap-1', className)} aria-hidden>
       <span
         className="grid size-6 place-items-center rounded-[6px] border border-border-strong"
-        style={{ background: theme.background }}
+        style={{ background: themeCanvasCss(theme) }}
       >
-        <span className="size-2.5 rounded-full" style={{ background: theme.accent }} />
+        <span className="size-2.5 rounded-full" style={{ background: themeAccentCss(theme) }} />
       </span>
       <span className="flex gap-px overflow-hidden rounded-[4px]">
         {theme.swatches.map((c, i) => (
@@ -55,14 +65,24 @@ interface ThemePickerProps {
    * Settings page). `slot` is the settings field the choice belongs to.
    */
   onChoose?: (key: string, slot: ThemeSlot) => void;
+  /** Same idea for the "follow the app mode" switch. */
+  onFollowsChange?: (value: boolean) => void;
+  /** The host's unsaved draft, when it owns the settings; else the saved ones. */
+  config?: TerminalConfig;
 }
 
 /**
  * Theme picker (Ctrl+K "Change theme", or the `cortx:open-theme-picker`
- * event): searchable list with swatches, live preview while navigating,
- * Enter applies, Esc reverts. Reads/writes `useTerminalThemeStore`.
+ * event): a gallery of real previews — the theme's background (gradients
+ * included), its wallpaper, a mock prompt in its ANSI colours — with the
+ * **dark and light slots side by side** so both can be set in one go.
+ *
+ * Picking applies straight away and leaves the picker open (switch tab, set
+ * the other mode, Esc / Done to leave). Hovering a card previews it live,
+ * but only while the tab being edited is the one the current mode reads —
+ * previewing a light theme over a dark window would say nothing useful.
  */
-export function ThemePicker({ onChoose }: ThemePickerProps) {
+export function ThemePicker({ onChoose, onFollowsChange, config }: ThemePickerProps) {
   const open_ = useTerminalThemeStore((s) => s.pickerOpen);
   const themes = useTerminalThemeStore((s) => s.themes);
   const loading = useTerminalThemeStore((s) => s.loading);
@@ -73,33 +93,71 @@ export function ThemePicker({ onChoose }: ThemePickerProps) {
   const importFolder = useTerminalThemeStore((s) => s.importFolder);
   const remove = useTerminalThemeStore((s) => s.remove);
   const settings = useAppStore((s) => s.settings);
+  const updateSettings = useAppStore((s) => s.updateSettings);
 
+  const cfg = config ?? settings?.terminal;
   const dark = isAppDark(settings);
-  const slot = themeSlotForMode(settings?.terminal, dark);
-  const activeKey = resolveActiveThemeName(settings?.terminal, dark);
+  const follows = cfg?.themeFollowsApp ?? true;
+  const activeSlot = themeSlotForMode(cfg, dark);
+  const darkKey = cfg?.themeDark?.trim() || DEFAULT_THEME_DARK;
+  const lightKey = cfg?.themeLight?.trim() || DEFAULT_THEME_LIGHT;
 
-  const [value, setValue] = useState(activeKey);
+  const [target, setTarget] = useState<ThemeSlot>(activeSlot);
+  const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
+  const gridRef = useRef<HTMLDivElement>(null);
 
-  // Start on the active theme each time the picker opens.
+  // Each time the picker opens, edit the slot the current mode reads (read
+  // through a ref: a mode flip while the picker is open must not move the tab
+  // out from under the user).
+  const activeSlotRef = useRef(activeSlot);
+  activeSlotRef.current = activeSlot;
   useEffect(() => {
-    if (open_) setValue(activeKey);
-  }, [open_, activeKey]);
+    if (open_) {
+      setTarget(activeSlotRef.current);
+      setQuery('');
+    }
+  }, [open_]);
 
-  const highlighted = useMemo(() => themes.find((t) => t.key === value) ?? null, [themes, value]);
-  const bundled = useMemo(() => themes.filter((t) => t.source === 'bundled'), [themes]);
-  const imported = useMemo(() => themes.filter((t) => t.source !== 'bundled'), [themes]);
+  const chosenKey = target === 'themeDark' ? darkKey : lightKey;
+  const otherKey = target === 'themeDark' ? lightKey : darkKey;
+  /** Live preview only makes sense for the slot the window is showing. */
+  const previews = target === activeSlot;
 
-  const onHighlight = useCallback(
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return themes;
+    return themes.filter((t) => `${t.name} ${t.key} ${t.source}`.toLowerCase().includes(q));
+  }, [themes, query]);
+  const bundled = useMemo(() => filtered.filter((t) => t.source === 'bundled'), [filtered]);
+  const imported = useMemo(() => filtered.filter((t) => t.source !== 'bundled'), [filtered]);
+
+  const onHover = useCallback(
     (key: string) => {
-      setValue(key);
-      if (open_) void setPreview(key);
+      if (previews) void setPreview(key);
     },
-    [open_, setPreview]
+    [previews, setPreview]
   );
+  const onLeave = useCallback(() => {
+    if (previews) void setPreview(null);
+  }, [previews, setPreview]);
+
+  const switchTarget = (slot: ThemeSlot) => {
+    void setPreview(null);
+    setTarget(slot);
+  };
 
   const onOpenChange = (next: boolean) => {
     if (!next) closePicker();
+  };
+
+  const setFollows = (value: boolean) => {
+    if (onFollowsChange) {
+      onFollowsChange(value);
+      return;
+    }
+    if (!settings) return;
+    void updateSettings({ ...settings, terminal: { ...settings.terminal, themeFollowsApp: value } });
   };
 
   const doImportFile = async () => {
@@ -114,7 +172,7 @@ export function ThemePicker({ onChoose }: ThemePickerProps) {
       });
       if (typeof picked !== 'string') return;
       const theme = await importFile(picked);
-      if (theme) onHighlight(theme.key);
+      if (theme) setQuery(theme.name);
     } finally {
       setBusy(false);
     }
@@ -136,9 +194,8 @@ export function ThemePicker({ onChoose }: ThemePickerProps) {
     }
   };
 
-  const doDelete = async () => {
-    if (!highlighted || highlighted.source === 'bundled') return;
-    const ok = await ask(`Delete the theme "${highlighted.name}"? Its file and wallpaper are removed.`, {
+  const doDelete = async (theme: TerminalThemeSummary) => {
+    const ok = await ask(`Delete the theme "${theme.name}"? Its file and wallpaper are removed.`, {
       title: 'Delete theme',
       kind: 'warning',
       okLabel: 'Delete',
@@ -147,53 +204,127 @@ export function ThemePicker({ onChoose }: ThemePickerProps) {
     if (!ok) return;
     setBusy(true);
     try {
-      if (await remove(highlighted.key)) onHighlight(activeKey);
+      await remove(theme.key);
     } finally {
       setBusy(false);
     }
   };
 
-  const renderItem = (t: TerminalThemeSummary) => (
-    <CommandItem key={t.key} value={t.key} keywords={[t.name, t.source]} onSelect={() => void choose(t.key, onChoose)}>
-      <ThemeSwatches theme={t} />
-      <span className="min-w-0 flex-1 truncate">{t.name}</span>
-      {t.hasImage && <ImageIcon className="size-3.5" aria-label="Has a wallpaper" />}
-      {t.details === 'lighter' ? (
-        <Sun className="size-3.5" aria-label="Light theme" />
-      ) : (
-        <Moon className="size-3.5" aria-label="Dark theme" />
-      )}
-      {t.key === activeKey && <Check className="size-3.5 !text-primary" aria-label="Current theme" />}
-    </CommandItem>
-  );
+  /** Arrow keys walk the gallery; the column count comes from the grid itself. */
+  const onGridKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const keys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'];
+    if (!keys.includes(e.key)) return;
+    const grid = gridRef.current;
+    if (!grid) return;
+    const cards = Array.from(grid.querySelectorAll<HTMLButtonElement>('[data-theme-card]'));
+    const index = cards.findIndex((c) => c === document.activeElement);
+    if (index < 0) return;
+    e.preventDefault();
+    const columns = Math.max(
+      1,
+      getComputedStyle(cards[index].parentElement?.parentElement ?? grid).gridTemplateColumns.split(' ').length
+    );
+    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowDown' ? columns : -columns;
+    const next = cards[Math.min(cards.length - 1, Math.max(0, index + step))];
+    next?.focus();
+  };
+
+  const section = (title: string, list: TerminalThemeSummary[]) =>
+    list.length > 0 && (
+      <div key={title} className="grid gap-2">
+        <div className="eyebrow">{title}</div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {list.map((t) => (
+            <ThemeCard
+              key={t.key}
+              theme={t}
+              selected={t.key === chosenKey}
+              usedElsewhere={t.key === otherKey}
+              onPick={() => void choose(t.key, target, onChoose)}
+              onHover={() => onHover(t.key)}
+              onLeave={onLeave}
+              onDelete={t.source === 'bundled' ? undefined : () => void doDelete(t)}
+            />
+          ))}
+        </div>
+      </div>
+    );
 
   return (
     <Dialog open={open_} onOpenChange={onOpenChange}>
-      <DialogContent className="top-[14%] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-xl" showCloseButton={false}>
-        <DialogTitle className="sr-only">Terminal theme</DialogTitle>
-        <DialogDescription className="sr-only">
-          Pick a theme for the terminal. Arrow keys preview, Enter applies, Escape reverts.
-        </DialogDescription>
-        <Command
-          value={value}
-          onValueChange={onHighlight}
-          className="[&_[cmdk-group-heading]]:eyebrow [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:size-4 [&_[cmdk-input]]:h-12"
+      <DialogContent className="top-[8%] max-h-[84vh] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <div className="flex flex-col gap-3 border-b border-border px-5 pt-5 pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3 pr-8">
+            <div>
+              <DialogTitle className="flex items-center gap-2">
+                <Palette className="size-4 text-faint" />
+                Terminal theme
+              </DialogTitle>
+              <DialogDescription className="mt-1">
+                Warp&apos;s YAML format. Pick the theme for each mode — the pictures below are the real thing.
+              </DialogDescription>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor="picker-follows">
+              <Switch id="picker-follows" checked={follows} onCheckedChange={setFollows} />
+              Follow the app&apos;s mode
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Segmented
+              size="sm"
+              value={target}
+              onChange={switchTarget}
+              options={[
+                { value: 'themeDark', label: 'Dark mode', icon: Moon },
+                { value: 'themeLight', label: 'Light mode', icon: Sun },
+              ]}
+            />
+            <div className="relative min-w-[180px] flex-1">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-faint" />
+              <Input
+                autoFocus
+                placeholder="Search themes…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="h-8 pl-9"
+                aria-label="Search themes"
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-faint">
+            {target === 'themeDark'
+              ? follows
+                ? 'Used while the app is in dark mode.'
+                : 'Used all the time (the app mode is not followed).'
+              : follows
+                ? 'Used while the app is in light mode.'
+                : 'Not used right now — turn "Follow the app’s mode" back on to use it.'}
+          </p>
+        </div>
+
+        <div
+          ref={gridRef}
+          onKeyDown={onGridKeyDown}
+          className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto px-5 py-4"
         >
-          <CommandInput placeholder="Search themes…" />
-          <CommandList className="max-h-[min(52vh,420px)]">
-            {loading && themes.length === 0 ? (
-              <div className="flex items-center justify-center gap-2 py-8 text-xs text-faint">
-                <Loader2 className="size-3.5 animate-spin" />
-                Loading themes…
-              </div>
-            ) : (
-              <CommandEmpty>No theme matches.</CommandEmpty>
-            )}
-            {bundled.length > 0 && <CommandGroup heading="Bundled">{bundled.map(renderItem)}</CommandGroup>}
-            {imported.length > 0 && <CommandGroup heading="Imported">{imported.map(renderItem)}</CommandGroup>}
-          </CommandList>
-        </Command>
-        <div className="flex items-center gap-1.5 border-t border-border px-2 py-2">
+          {loading && themes.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-xs text-faint">
+              <Loader2 className="size-3.5 animate-spin" />
+              Loading themes…
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="grid place-items-center rounded-lg border border-dashed border-border-strong py-10 text-xs text-faint">
+              No theme matches “{query}”.
+            </div>
+          ) : (
+            <>
+              {section('Bundled', bundled)}
+              {section('Imported', imported)}
+            </>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--footer-border)] bg-[var(--footer-bg)] px-5 py-3">
           <Button variant="ghost" size="xs" onClick={() => void doImportFile()} disabled={busy}>
             <FileDown />
             Import file…
@@ -202,23 +333,15 @@ export function ThemePicker({ onChoose }: ThemePickerProps) {
             <FolderOpen />
             Import folder…
           </Button>
-          {highlighted && highlighted.source !== 'bundled' && (
-            <Button variant="ghost" size="xs" className="text-destructive" onClick={() => void doDelete()} disabled={busy}>
-              <Trash2 />
-              Delete
-            </Button>
-          )}
           <span className="ml-auto flex items-center gap-2 text-[10.5px] text-faint">
+            <span>Drop a .yaml in the themes folder and it shows up here.</span>
             <span>
-              <span className="kbd">↑↓</span> preview
-            </span>
-            <span>
-              <span className="kbd">Enter</span> use as {slot === 'themeDark' ? 'dark' : 'light'} theme
-            </span>
-            <span>
-              <span className="kbd">Esc</span> revert
+              <span className="kbd">Esc</span> close
             </span>
           </span>
+          <Button variant="outline" size="xs" onClick={closePicker}>
+            Done
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

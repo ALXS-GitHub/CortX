@@ -18,7 +18,16 @@ import {
 import { ThemePicker, ThemeSwatches } from '@/components/terminal/theme/ThemePicker';
 import { useTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { useAppStore } from '@/stores/appStore';
-import { DEFAULT_THEME_DARK, DEFAULT_THEME_LIGHT, clampOpacity, isAppDark, mix, rgba } from '@/lib/terminalTheme';
+import {
+  DEFAULT_THEME_DARK,
+  DEFAULT_THEME_LIGHT,
+  clampOpacity,
+  isAppDark,
+  mix,
+  rgba,
+  themeAccentCss,
+  themeCanvasCss,
+} from '@/lib/terminalTheme';
 import type { TerminalConfig, TerminalThemeSummary } from '@/types';
 
 const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
@@ -181,12 +190,13 @@ function PreviewStrip({
         backgroundPosition: '0 0, 6px 6px',
       }}
     >
-      <div style={{ background: rgba(theme.background, alpha), color: theme.foreground }}>
+      {/* `themeCanvasCss` carries a `{top, bottom}` gradient when the theme has one. */}
+      <div style={{ background: themeCanvasCss(theme, alpha), color: theme.foreground }}>
         <div
           className="flex h-6 items-center gap-2 border-b px-2 text-[10px]"
           style={{ background: rgba(card, 0.72 * alpha), borderColor: rgba(theme.foreground, 0.12), color: muted }}
         >
-          <span className="size-2 rounded-full" style={{ background: theme.accent }} />
+          <span className="size-2 rounded-full" style={{ background: themeAccentCss(theme) }} />
           Terminal — {theme.name}
         </div>
         <div className="flex">
@@ -556,7 +566,12 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
           </Row>
         </div>
       </CardContent>
-      <ThemePicker onChoose={(key, slot) => onChange({ [slot]: key })} />
+      {/* The picker edits the draft too (both slots), never the saved settings. */}
+      <ThemePicker
+        config={value}
+        onChoose={(key, slot) => onChange({ [slot]: key })}
+        onFollowsChange={(v) => onChange({ themeFollowsApp: v })}
+      />
     </Card>
   );
 }

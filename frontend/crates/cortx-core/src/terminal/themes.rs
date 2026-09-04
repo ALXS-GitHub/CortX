@@ -7,8 +7,8 @@
 //!
 //! ```yaml
 //! name: aespa_wda            # optional; the file stem when missing
-//! background: "#713d39"
-//! accent: "#0c161f"
+//! background: "#713d39"      # or a gradient: { top: …, bottom: … }
+//! accent: "#0c161f"          # or a gradient: { left: …, right: … }
 //! foreground: "#ffffff"
 //! details: darker            # darker | lighter — drives the chrome's light/dark mode
 //! background_image:          # optional wallpaper
@@ -27,6 +27,15 @@
 //! A theme's **key** is its file stem (`gruvbox-dark`); the settings refer to
 //! keys. Bundled themes are compiled in and materialised into the folder the
 //! first time it is listed, so they sync (and can be edited) like the others.
+//!
+//! **Gradients.** Warp lets `background` and `accent` be a map of stops
+//! (`{top, bottom}` for the background, `{left, right}` for the accent;
+//! `blue_monday` even sets both pairs on the background). Those files parse
+//! here too: the map is kept verbatim in `background_gradient` /
+//! `accent_gradient` (so the YAML round-trips unchanged) and `background` /
+//! `accent` carry a *solid representative* — the 50/50 blend of the two
+//! stops — for everything that can only take one colour (xterm's canvas, the
+//! acrylic tint, the derived chrome tokens).
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -53,6 +62,103 @@ pub enum ImageFit {
     Contain,
     Tile,
     Center,
+}
+
+/// A Warp gradient: the stops of `background` (`top` / `bottom`) or of
+/// `accent` (`left` / `right`). Every field is optional because Warp files
+/// use whichever pair they please — and `blue_monday` sets all four.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Gradient {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right: Option<String>,
+}
+
+impl Gradient {
+    /// `(from, to, vertical)` — the vertical pair wins when both are set.
+    pub fn stops(&self) -> Option<(&str, &str, bool)> {
+        match (self.top.as_deref(), self.bottom.as_deref()) {
+            (Some(a), Some(b)) => Some((a, b, true)),
+            _ => match (self.left.as_deref(), self.right.as_deref()) {
+                (Some(a), Some(b)) => Some((a, b, false)),
+                _ => None,
+            },
+        }
+    }
+
+    fn any(&self) -> Option<&str> {
+        self.top
+            .as_deref()
+            .or(self.bottom.as_deref())
+            .or(self.left.as_deref())
+            .or(self.right.as_deref())
+    }
+
+    fn colors(&self) -> impl Iterator<Item = &String> {
+        [&self.top, &self.bottom, &self.left, &self.right].into_iter().flatten()
+    }
+}
+
+/// A theme colour in the YAML: one hex string, or a map of gradient stops.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ColorSpec {
+    Solid(String),
+    Gradient(Gradient),
+}
+
+impl ColorSpec {
+    /// Split into `(solid representative, gradient)`. A gradient with a
+    /// single stop degrades to that colour (no gradient to paint).
+    fn split(self, what: &str) -> Result<(String, Option<Gradient>), String> {
+        match self {
+            ColorSpec::Solid(s) => Ok((s, None)),
+            ColorSpec::Gradient(g) => match g.stops() {
+                Some((a, b, _)) => Ok((mix_hex(a, b), Some(g))),
+                None => match g.any() {
+                    Some(one) => Ok((one.to_string(), None)),
+                    None => Err(format!("`{}` is a map with no colour in it", what)),
+                },
+            },
+        }
+    }
+
+    fn join(solid: &str, gradient: &Option<Gradient>) -> ColorSpec {
+        match gradient {
+            Some(g) => ColorSpec::Gradient(g.clone()),
+            None => ColorSpec::Solid(solid.to_string()),
+        }
+    }
+}
+
+/// Midpoint of two hex colours, `#rrggbb`. Falls back to `a` when either
+/// side is not a colour (`validate` reports the real error).
+fn mix_hex(a: &str, b: &str) -> String {
+    let (Some(ca), Some(cb)) = (parse_rgb(a), parse_rgb(b)) else {
+        return a.to_string();
+    };
+    let mid = |i: usize| ((u16::from(ca[i]) + u16::from(cb[i])) / 2) as u8;
+    format!("#{:02x}{:02x}{:02x}", mid(0), mid(1), mid(2))
+}
+
+/// `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa` → RGB (alpha dropped).
+fn parse_rgb(s: &str) -> Option<[u8; 3]> {
+    let hex = s.trim().strip_prefix('#')?;
+    let expand = |c: char| -> Option<u8> { c.to_digit(16).map(|d| (d * 17) as u8) };
+    let mut cs = hex.chars();
+    match hex.len() {
+        3 | 4 => Some([expand(cs.next()?)?, expand(cs.next()?)?, expand(cs.next()?)?]),
+        6 | 8 => {
+            let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
+            Some([byte(0)?, byte(2)?, byte(4)?])
+        }
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -125,8 +231,15 @@ pub struct TerminalTheme {
     /// Display name. Missing in many Warp files: prettified stem then.
     #[serde(default)]
     pub name: String,
+    /// Always a single colour: the blend of the stops when the file has a
+    /// gradient (see `background_gradient`).
     pub background: String,
+    /// The gradient stops, when the file gave a map instead of a colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_gradient: Option<Gradient>,
     pub accent: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent_gradient: Option<Gradient>,
     pub foreground: String,
     #[serde(default)]
     pub details: ThemeDetails,
@@ -144,10 +257,17 @@ pub struct ThemeSummary {
     pub key: String,
     pub name: String,
     pub background: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background_gradient: Option<Gradient>,
     pub accent: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accent_gradient: Option<Gradient>,
     pub foreground: String,
     pub details: ThemeDetails,
     pub has_image: bool,
+    /// Wallpaper opacity in percent, so a card can preview it faithfully.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_opacity: Option<f64>,
     pub source: ThemeSource,
     /// The 8 normal ANSI colours (swatch strip).
     pub swatches: Vec<String>,
@@ -244,6 +364,17 @@ impl TerminalTheme {
                 return Err(format!("`{}` must be a hex colour, got '{}'", what, value));
             }
         }
+        for (what, gradient) in [
+            ("background", &self.background_gradient),
+            ("accent", &self.accent_gradient),
+        ] {
+            let Some(g) = gradient else { continue };
+            for c in g.colors() {
+                if !is_hex_color(c) {
+                    return Err(format!("`{}`: '{}' is not a hex colour", what, c));
+                }
+            }
+        }
         for (set, colors) in [
             ("normal", &self.terminal_colors.normal),
             ("bright", &self.terminal_colors.bright),
@@ -273,7 +404,8 @@ impl TerminalTheme {
 
     /// Parse Warp YAML. `stem` fills the key / name when the file has none.
     pub fn from_yaml(text: &str, stem: &str) -> Result<Self, String> {
-        let mut theme: TerminalTheme = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
+        let wire: WireTheme = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
+        let mut theme = wire.into_theme()?;
         theme.validate()?;
         if theme.name.trim().is_empty() {
             theme.name = prettify(stem);
@@ -297,9 +429,7 @@ impl TerminalTheme {
 
     /// Warp-compatible YAML (the key is carried by the file name).
     pub fn to_yaml(&self) -> Result<String, String> {
-        let mut copy = self.clone();
-        copy.key.clear();
-        serde_yaml::to_string(&copy).map_err(|e| e.to_string())
+        serde_yaml::to_string(&WireTheme::from_theme(self)).map_err(|e| e.to_string())
     }
 
     fn summary(&self, source: ThemeSource, has_image: bool) -> ThemeSummary {
@@ -307,12 +437,78 @@ impl TerminalTheme {
             key: self.key.clone(),
             name: self.name.clone(),
             background: self.background.clone(),
+            background_gradient: self.background_gradient.clone(),
             accent: self.accent.clone(),
+            accent_gradient: self.accent_gradient.clone(),
             foreground: self.foreground.clone(),
             details: self.details,
             has_image,
+            image_opacity: has_image.then(|| self.background_image.as_ref().and_then(|i| i.opacity)).flatten(),
             source,
             swatches: self.terminal_colors.normal.all().iter().map(|s| s.to_string()).collect(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// YAML shape
+// ---------------------------------------------------------------------------
+
+/// The theme as it is written on disk: `background` and `accent` may be a
+/// colour *or* a map of gradient stops. `TerminalTheme` splits them into a
+/// solid representative plus the stops; this type puts them back together so
+/// a Warp file round-trips byte-for-byte in meaning.
+///
+/// Field order = the order Warp writes them (serde_yaml keeps it).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WireTheme {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    key: String,
+    #[serde(default)]
+    name: String,
+    background: ColorSpec,
+    accent: ColorSpec,
+    foreground: String,
+    #[serde(default)]
+    details: ThemeDetails,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    background_image: Option<BackgroundImage>,
+    terminal_colors: TerminalColors,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cortx: Option<CortxThemeExt>,
+}
+
+impl WireTheme {
+    fn into_theme(self) -> Result<TerminalTheme, String> {
+        let (background, background_gradient) = self.background.split("background")?;
+        let (accent, accent_gradient) = self.accent.split("accent")?;
+        Ok(TerminalTheme {
+            key: self.key,
+            name: self.name,
+            background,
+            background_gradient,
+            accent,
+            accent_gradient,
+            foreground: self.foreground,
+            details: self.details,
+            background_image: self.background_image,
+            terminal_colors: self.terminal_colors,
+            cortx: self.cortx,
+        })
+    }
+
+    fn from_theme(theme: &TerminalTheme) -> Self {
+        Self {
+            // The key is carried by the file name.
+            key: String::new(),
+            name: theme.name.clone(),
+            background: ColorSpec::join(&theme.background, &theme.background_gradient),
+            accent: ColorSpec::join(&theme.accent, &theme.accent_gradient),
+            foreground: theme.foreground.clone(),
+            details: theme.details,
+            background_image: theme.background_image.clone(),
+            terminal_colors: theme.terminal_colors.clone(),
+            cortx: theme.cortx.clone(),
         }
     }
 }
@@ -663,6 +859,81 @@ impl ThemeStore {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Watcher (DEV-13 — themes appear without restarting)
+// ---------------------------------------------------------------------------
+
+/// Handle returned by [`watch`]. Drop it to stop watching.
+pub struct ThemeWatcherHandle {
+    _debouncer: notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>,
+    _thread: std::thread::JoinHandle<()>,
+}
+
+/// Watch `data/terminal/themes/` and report the **keys** touched (yaml files
+/// and wallpapers alike, so replacing a picture refreshes too). Same shape as
+/// `file_watcher::start_watching`: 300 ms debounce, one thread, drop to stop.
+///
+/// The folder is created first: `notify` cannot watch a missing path, and a
+/// fresh profile has no themes folder until the bundled ones are written.
+pub fn watch<F>(dir: PathBuf, on_change: F) -> Result<ThemeWatcherHandle, notify::Error>
+where
+    F: Fn(Vec<String>) + Send + 'static,
+{
+    use notify_debouncer_mini::{new_debouncer, DebounceEventResult};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    if let Err(e) = fs::create_dir_all(&dir) {
+        return Err(notify::Error::generic(&format!("{}: {}", dir.display(), e)));
+    }
+    let (tx, rx) = mpsc::channel::<DebounceEventResult>();
+    let mut debouncer = new_debouncer(Duration::from_millis(300), tx)?;
+    debouncer.watcher().watch(&dir, notify::RecursiveMode::NonRecursive)?;
+
+    let thread = std::thread::Builder::new()
+        .name("cortx-theme-watcher".into())
+        .spawn(move || {
+            while let Ok(result) = rx.recv() {
+                let events = match result {
+                    Ok(events) => events,
+                    Err(err) => {
+                        log::warn!("Terminal theme watcher error: {:?}", err);
+                        continue;
+                    }
+                };
+                let mut keys: Vec<String> = Vec::new();
+                for event in events {
+                    let ext = event
+                        .path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.to_ascii_lowercase())
+                        .unwrap_or_default();
+                    let interesting = matches!(ext.as_str(), "yaml" | "yml") || IMAGE_EXTENSIONS.contains(&ext.as_str());
+                    if !interesting {
+                        continue; // .yaml.tmp of our own atomic writes, and the rest
+                    }
+                    let Some(stem) = event.path.file_stem().and_then(|s| s.to_str()) else {
+                        continue;
+                    };
+                    let key = slugify(stem);
+                    if !key.is_empty() && !keys.contains(&key) {
+                        keys.push(key);
+                    }
+                }
+                if !keys.is_empty() {
+                    on_change(keys);
+                }
+            }
+        })
+        .map_err(|e| notify::Error::generic(&e.to_string()))?;
+
+    Ok(ThemeWatcherHandle {
+        _debouncer: debouncer,
+        _thread: thread,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,6 +1045,103 @@ terminal_colors:
         let alt = yaml.replace("imageFit: tile", "image_fit: center");
         let back = TerminalTheme::from_yaml(&alt, "aespa_wda").unwrap();
         assert_eq!(back.cortx.unwrap().image_fit, Some(ImageFit::Center));
+    }
+
+    /// Warp's `snowy`: a `{top, bottom}` background. `synthwave_84` adds a
+    /// `{left, right}` accent, `blue_monday` a background with all four.
+    const SNOWY: &str = r##"background:
+  top: "#ffffff"
+  bottom: "#dee6eb"
+accent: "#647e90"
+foreground: "#000000"
+details: lighter
+terminal_colors:
+  normal: { black: "#212121", red: "#c30771", green: "#10a778", yellow: "#a89c14", blue: "#008ec4", magenta: "#523c79", cyan: "#20a5ba", white: "#e0e0e0" }
+  bright: { black: "#212121", red: "#fb007a", green: "#5fd7af", yellow: "#f3e430", blue: "#20bbfc", magenta: "#6855de", cyan: "#4fb8cc", white: "#f1f1f1" }
+"##;
+
+    #[test]
+    fn parses_warps_gradient_background_and_accent() {
+        let t = TerminalTheme::from_yaml(SNOWY, "snowy").unwrap();
+        let g = t.background_gradient.as_ref().unwrap();
+        assert_eq!(g.stops(), Some(("#ffffff", "#dee6eb", true)));
+        // Solid representative = the blend of the two stops.
+        assert_eq!(t.background, "#eef2f5");
+        assert_eq!(t.accent, "#647e90");
+        assert!(t.accent_gradient.is_none());
+        assert_eq!(t.details, ThemeDetails::Lighter);
+
+        // A `{left, right}` accent (synthwave_84).
+        let t = TerminalTheme::from_yaml(
+            &SNOWY.replace("accent: \"#647e90\"", "accent:\n  left: \"#f92aad\"\n  right: \"#848bbd\""),
+            "synthwave",
+        )
+        .unwrap();
+        assert_eq!(t.accent_gradient.as_ref().unwrap().stops(), Some(("#f92aad", "#848bbd", false)));
+        assert_eq!(t.accent, "#be5ab5");
+
+        // blue_monday: both pairs on the background — vertical wins, all four kept.
+        let t = TerminalTheme::from_yaml(
+            &SNOWY.replace(
+                "  bottom: \"#dee6eb\"",
+                "  bottom: \"#dee6eb\"\n  left: \"#000000\"\n  right: \"#00081e\"",
+            ),
+            "blue-monday",
+        )
+        .unwrap();
+        let g = t.background_gradient.as_ref().unwrap();
+        assert_eq!(g.stops(), Some(("#ffffff", "#dee6eb", true)));
+        assert_eq!(g.left.as_deref(), Some("#000000"));
+        assert_eq!(g.right.as_deref(), Some("#00081e"));
+    }
+
+    #[test]
+    fn gradients_round_trip_and_solid_backgrounds_are_untouched() {
+        let t = TerminalTheme::from_yaml(SNOWY, "snowy").unwrap();
+        let yaml = t.to_yaml().unwrap();
+        assert!(yaml.contains("top: '#ffffff'") || yaml.contains("top: \"#ffffff\""), "{yaml}");
+        assert_eq!(TerminalTheme::from_yaml(&yaml, "snowy").unwrap(), t);
+
+        // A plain string background still writes back as a plain string.
+        let solid = TerminalTheme::from_yaml(DRACULA_WARP, "dracula").unwrap();
+        let yaml = solid.to_yaml().unwrap();
+        assert!(yaml.contains("background: '#282a36'"), "{yaml}");
+        assert!(!yaml.contains("background_gradient"), "{yaml}");
+        assert_eq!(TerminalTheme::from_yaml(&yaml, "dracula").unwrap(), solid);
+
+        // A one-stop map degrades to that colour rather than failing.
+        let one = TerminalTheme::from_yaml(&SNOWY.replace("  bottom: \"#dee6eb\"\n", ""), "one").unwrap();
+        assert_eq!(one.background, "#ffffff");
+        assert!(one.background_gradient.is_none());
+    }
+
+    #[test]
+    fn gradient_stops_are_validated_like_plain_colours() {
+        assert!(TerminalTheme::from_yaml(&SNOWY.replace("#dee6eb", "steel"), "snowy").is_err());
+        assert!(TerminalTheme::from_yaml(&SNOWY.replace("  top: \"#ffffff\"\n  bottom: \"#dee6eb\"", "  hue: 4"), "x").is_err());
+        assert_eq!(mix_hex("#000000", "#ffffff"), "#7f7f7f");
+        assert_eq!(mix_hex("#fff", "#000"), "#7f7f7f");
+        assert_eq!(mix_hex("#ffffffcc", "#000000"), "#7f7f7f");
+    }
+
+    #[test]
+    fn watcher_reports_the_keys_that_changed() {
+        use std::sync::mpsc;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("themes");
+        let (tx, rx) = mpsc::channel();
+        let _handle = watch(dir.clone(), move |keys| {
+            let _ = tx.send(keys);
+        })
+        .unwrap();
+        fs::write(dir.join("my_theme.yaml"), SNOWY).unwrap();
+        // Our own atomic writes go through a .yaml.tmp: it must stay quiet.
+        fs::write(dir.join("scratch.yaml.tmp"), "x").unwrap();
+        let keys = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the watcher should report the new theme");
+        assert!(keys.contains(&"my-theme".to_string()), "{keys:?}");
+        assert!(!keys.iter().any(|k| k.starts_with("scratch")), "{keys:?}");
     }
 
     #[test]

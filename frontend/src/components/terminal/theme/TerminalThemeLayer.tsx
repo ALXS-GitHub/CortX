@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
-import { loadThemeImage, useCurrentTerminalTheme } from '@/stores/terminalThemeStore';
+import { loadThemeImage, useCurrentTerminalTheme, useTerminalThemeStore } from '@/stores/terminalThemeStore';
 
 type Fit = 'cover' | 'contain' | 'tile' | 'center';
 
@@ -17,6 +17,9 @@ type Fit = 'cover' | 'contain' | 'tile' | 'center';
 export function TerminalThemeLayer() {
   const theme = useCurrentTerminalTheme();
   const look = useAppStore((s) => s.settings?.terminal);
+  // Bumped when the theme files change on disk: a wallpaper replaced under
+  // the same theme key must be read again (the store cleared its cache).
+  const assetVersion = useTerminalThemeStore((s) => s.assetVersion);
   const key = theme?.key;
   const imagePath = theme?.background_image?.path;
   const [src, setSrc] = useState<{ key: string; url: string } | null>(null);
@@ -61,7 +64,7 @@ export function TerminalThemeLayer() {
       document.removeEventListener('visibilitychange', onWake);
       if (retry !== null) window.clearTimeout(retry);
     };
-  }, [key, imagePath]);
+  }, [key, imagePath, assetVersion]);
 
   // A stale `src` (previous theme) is ignored rather than cleared: the key
   // check below hides it until the new wallpaper is in.

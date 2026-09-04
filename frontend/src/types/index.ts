@@ -113,6 +113,9 @@ export interface TerminalConfig {
   longCommandSeconds?: number;
   /** Terminal window: sessions rail on the left (default) or a tab strip on top — never both. */
   tabsPlacement?: 'sidebar' | 'top';
+  /** Ask before closing a terminal — or quitting CortX — while a command is
+   *  running in it (nothing running = closes straight away). Default true. */
+  confirmCloseRunning?: boolean;
   /** Font of every terminal. Empty = bundled monospace stack. */
   fontFamily?: string;
   /** Font size in px. Default 12. */
@@ -166,7 +169,18 @@ export interface TerminalConfig {
   chromeBlur?: number;
   /** Colour the main window's dock terminals with the terminal theme too. Default false. */
   dockUsesTerminalTheme?: boolean;
+  /** A mouse selection is copied to the clipboard as soon as it ends (Warp / X11 style).
+   *  While on, Ctrl+C keeps interrupting the program instead of copying. Default true. */
+  copyOnSelect?: boolean;
+  /** What Shift+Enter sends: `escape-enter` = ESC + CR (a new line for Claude Code,
+   *  zsh and fish), `enter` = the same CR as Enter. Default `escape-enter`. */
+  shiftEnter?: ShiftEnterKey;
+  /** Wheel scrolling animation in ms; 0 scrolls instantly, line by line. Default 100. */
+  smoothScrollDuration?: number;
 }
+
+/** What the terminal sends when Shift+Enter is pressed (see `lib/terminalKeys`). */
+export type ShiftEnterKey = 'escape-enter' | 'enter';
 
 export type TerminalTargetSurface = 'dock' | 'window';
 
@@ -943,6 +957,19 @@ export interface TerminalThemeImage {
   opacity?: number | null;
 }
 
+/**
+ * Warp gradient stops: `top` / `bottom` for a `background`, `left` / `right`
+ * for an `accent` (a few themes set both pairs on the background). The
+ * matching flat colour (`background` / `accent`) is always filled in with the
+ * blend of the stops, for anything that takes a single colour.
+ */
+export interface TerminalThemeGradient {
+  top?: string | null;
+  bottom?: string | null;
+  left?: string | null;
+  right?: string | null;
+}
+
 /** CortX-only knobs under the `cortx:` key (ignored by Warp). */
 export interface TerminalThemeCortxExt {
   cursor?: string | null;
@@ -956,8 +983,11 @@ export interface TerminalTheme {
   /** File stem — what the settings (`themeDark` / `themeLight`) refer to. */
   key: string;
   name: string;
+  /** Always a single colour (the blend of the stops when there is a gradient). */
   background: string;
+  background_gradient?: TerminalThemeGradient | null;
   accent: string;
+  accent_gradient?: TerminalThemeGradient | null;
   foreground: string;
   details: TerminalThemeDetails;
   background_image?: TerminalThemeImage | null;
@@ -965,15 +995,19 @@ export interface TerminalTheme {
   cortx?: TerminalThemeCortxExt | null;
 }
 
-/** One row of the theme picker. */
+/** One card of the theme picker. */
 export interface TerminalThemeSummary {
   key: string;
   name: string;
   background: string;
+  backgroundGradient?: TerminalThemeGradient | null;
   accent: string;
+  accentGradient?: TerminalThemeGradient | null;
   foreground: string;
   details: TerminalThemeDetails;
   hasImage: boolean;
+  /** Wallpaper opacity in percent, as the theme file asks for it. */
+  imageOpacity?: number | null;
   source: TerminalThemeSource;
   /** The 8 normal ANSI colours. */
   swatches: string[];

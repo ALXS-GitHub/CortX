@@ -7,6 +7,10 @@
  * xterm (`applyThemeToAll`) and — in the Terminal window — to the window
  * chrome (`applyWindowTheme`) and the native backdrop effect.
  *
+ * The themes folder is watched by the backend: a `.yaml` dropped in, edited
+ * or imported (from either window) is broadcast as `terminal-themes-changed`
+ * and picked up here — no restart, and both windows follow.
+ *
  * Wire-up: call `initTerminalThemeStore({ windowChrome: true })` once from
  * the Terminal window (in an effect; it returns a disposer). Without init
  * the store still lists themes and previews palettes (Settings page), but
@@ -42,19 +46,30 @@ interface TerminalThemeState {
   /** Transient theme shown while navigating the picker. */
   previewTheme: TerminalTheme | null;
   pickerOpen: boolean;
+  /**
+   * Bumped whenever the theme files change on disk. Anything holding a
+   * cached asset (the wallpaper data URL) reloads when it moves.
+   */
+  assetVersion: number;
 
   /** (Re)load the theme list. */
   load: () => Promise<void>;
   /** Preview a theme live (`null` reverts to the active one). */
   setPreview: (key: string | null) => Promise<void>;
   /**
-   * Make `key` the theme of the current mode. Saves the settings, unless
-   * `onChoose` is given (the Settings page then owns the save).
+   * Make `key` the theme of `slot` (default: the slot the current mode
+   * reads). Saves the settings, unless `onChoose` is given (the Settings
+   * page then owns the save).
    */
-  choose: (key: string, onChoose?: (key: string, slot: ThemeSlot) => void) => Promise<void>;
+  choose: (key: string, slot?: ThemeSlot, onChoose?: (key: string, slot: ThemeSlot) => void) => Promise<void>;
   openPicker: () => void;
   /** Close the picker and drop the preview. */
   closePicker: () => void;
+  /**
+   * A theme file changed on disk (watcher broadcast, any window): drop the
+   * caches, relist, and re-resolve what is on screen.
+   */
+  refreshFromDisk: (keys?: string[]) => Promise<void>;
   importFile: (path: string) => Promise<TerminalTheme | null>;
   importFolder: (path: string) => Promise<TerminalThemeImportReport | null>;
   remove: (key: string) => Promise<boolean>;
@@ -136,7 +151,7 @@ function syncWindowEffect(theme: TerminalTheme | null, cfg: TerminalConfig | und
 
 // Store-internal actions reachable from `initTerminalThemeStore` (declared
 // before the store: the creator runs synchronously).
-const internals: { apply: () => void; resolveActive: () => Promise<void> } = {
+const internals: { apply: () => void; resolveActive: (force?: boolean) => Promise<void> } = {
   apply: () => {},
   resolveActive: async () => {},
 };
@@ -166,11 +181,12 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
 
   let retries = 0;
   let retryTimer: number | null = null;
-  const resolveActive = async () => {
+  /** `force`: refetch even when the key did not move (the file changed). */
+  const resolveActive = async (force = false) => {
     if (!initialised) return;
     const settings = currentSettings();
     const key = resolveActiveThemeName(settings?.terminal, isAppDark(settings));
-    if (get().activeTheme?.key === key) {
+    if (!force && get().activeTheme?.key === key) {
       apply(); // opacity / effect may have changed
       return;
     }
@@ -214,6 +230,7 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
     activeTheme: null,
     previewTheme: null,
     pickerOpen: false,
+    assetVersion: 0,
 
     load: async () => {
       if (get().loading) return;
@@ -246,29 +263,31 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
       apply();
     },
 
-    choose: async (key, onChoose) => {
+    choose: async (key, slot, onChoose) => {
       const settings = currentSettings();
-      const slot = themeSlotForMode(settings?.terminal, isAppDark(settings));
+      const activeSlot = themeSlotForMode(settings?.terminal, isAppDark(settings));
+      const target = slot ?? activeSlot;
       const preview = get().previewTheme;
       previewSeq++;
       // Keep what is on screen as the active theme right away (no flash) —
-      // only where the store drives the window; elsewhere (Settings page)
-      // the saved settings decide.
+      // only where the store drives the window, and only when the slot being
+      // set is the one the current mode reads (setting the *other* slot must
+      // not repaint the window).
+      const takesEffect = target === activeSlot;
       set({
-        pickerOpen: false,
         previewTheme: null,
-        activeTheme: initialised && preview?.key === key ? preview : get().activeTheme,
+        activeTheme: initialised && takesEffect && preview?.key === key ? preview : get().activeTheme,
       });
       apply();
       if (onChoose) {
-        onChoose(key, slot);
+        onChoose(key, target);
         return;
       }
       if (!settings) return;
       try {
         await useAppStore.getState().updateSettings({
           ...settings,
-          terminal: { ...settings.terminal, [slot]: key },
+          terminal: { ...settings.terminal, [target]: key },
         });
       } catch (err) {
         toast.error('Could not save the theme', { description: String(err) });
@@ -286,6 +305,24 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
       const hadPreview = get().previewTheme !== null;
       set({ pickerOpen: false, previewTheme: null });
       if (hadPreview) apply();
+    },
+
+    refreshFromDisk: async (keys) => {
+      if (keys && keys.length > 0) {
+        for (const key of keys) invalidate(key);
+      } else {
+        invalidate();
+      }
+      set({ assetVersion: get().assetVersion + 1 });
+      await get().load(); // relists, then re-resolves the active theme
+      // The list is back; the theme objects themselves may have changed
+      // under the same key (someone edited the file), so refetch them.
+      const preview = get().previewTheme;
+      if (preview) {
+        const fresh = await fetchTheme(preview.key);
+        if (fresh && get().previewTheme?.key === fresh.key) set({ previewTheme: fresh });
+      }
+      await resolveActive(true);
     },
 
     importFile: async (path) => {
@@ -363,6 +400,24 @@ export function initTerminalThemeStore(opts: { windowChrome?: boolean } = {}): (
       if (state.settings !== prev.settings) void internals.resolveActive();
     })
   );
+  // A theme file dropped in the folder, imported (possibly from the other
+  // window) or edited by hand: pick it up without a restart. The backend
+  // broadcasts to every window, so both stay in sync.
+  let stopThemeWatch: (() => void) | null = null;
+  let watchDisposed = false;
+  void api
+    .onTerminalThemesChanged((keys) => {
+      void useTerminalThemeStore.getState().refreshFromDisk(keys);
+    })
+    .then((un) => {
+      if (watchDisposed) un();
+      else stopThemeWatch = un;
+    })
+    .catch((err) => console.warn('Terminal theme watcher not listening:', err));
+  disposers.push(() => {
+    watchDisposed = true;
+    stopThemeWatch?.();
+  });
   // OS mode flips (when the app follows the system).
   const mq = window.matchMedia('(prefers-color-scheme: dark)');
   const onMq = () => void internals.resolveActive();
