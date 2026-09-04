@@ -15,10 +15,14 @@
  * like the rest of the chrome.
  */
 
+import { blockIconSvg, type BlockIconId } from '@/lib/terminalBlockIcons';
+
 export interface BlockMenuItem {
   label: string;
   /** Right-hand hint (a shortcut, a count). */
   hint?: string;
+  /** The same glyph the hover toolbar uses, so the two read as one feature. */
+  icon?: BlockIconId;
   disabled?: boolean;
   /** A separator is drawn above this item. */
   separated?: boolean;
@@ -62,9 +66,13 @@ export function openBlockMenu(x: number, y: number, header: string, items: Block
     button.className = 'cortx-block-menu-item';
     button.setAttribute('role', 'menuitem');
     button.disabled = item.disabled === true;
+    const left = document.createElement('span');
+    left.className = 'cortx-block-menu-label';
+    if (item.icon) left.appendChild(blockIconSvg(item.icon));
     const label = document.createElement('span');
     label.textContent = item.label;
-    button.appendChild(label);
+    left.appendChild(label);
+    button.appendChild(left);
     if (item.hint) {
       const hint = document.createElement('span');
       hint.className = 'cortx-block-menu-hint';

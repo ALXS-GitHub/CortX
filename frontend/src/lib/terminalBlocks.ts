@@ -10,16 +10,42 @@
  * layer that is drawn *over* the grid and never displaces a glyph.
  *
  * What it gives you:
- * - **Prompt-to-prompt navigation** (Ctrl+↑ / Ctrl+↓): scrolls the previous /
- *   next prompt to the top of the pane and highlights its block.
+ * - **Dividers**: a 1 px rule the full width of the pane on every block's top
+ *   edge. This is what makes a block a thing you *see* rather than a thing the
+ *   app knows about — Warp's `appearance.blocks.show_block_dividers`, which is
+ *   on by default there and here.
+ * - **A hover / selection band**: the block under the pointer (and the selected
+ *   one) is washed with a few percent of the foreground colour, so its extent
+ *   is obvious before you act on it.
+ * - **A hover toolbar** at the block's top-right corner, straddling its
+ *   divider: copy the command, copy the output, copy both, run it again, fold
+ *   it away, and a `⋯` opening the full menu. Warp puts its block actions in
+ *   the same place, and this is the whole difference between "there is a menu
+ *   somewhere" and "the actions are there when you want them".
  * - **A clickable gutter** in the pane's left padding: one bar per block,
  *   coloured by the exit code the shell reported. Click selects, double-click
  *   folds, right-click opens the block menu.
- * - **Copy** the command, the output, or both (menu; and Ctrl+Shift+C when a
- *   block is selected and there is no text selection, which copies nothing
- *   today).
+ * - **Prompt-to-prompt navigation** (Ctrl+↑ / Ctrl+↓): scrolls the previous /
+ *   next prompt to the top of the pane and highlights its block.
+ * - **Copy** the command, the output, both, or the whole thing as a Markdown
+ *   `console` fence — plus Ctrl+Shift+C when a block is selected and there is
+ *   no text selection, which copies nothing today.
  * - **Fold** a block's output behind a "412 lines hidden" strip.
- * - **Run the command again**, when the terminal is back at its prompt.
+ * - **Run the command again**, or **put it back on the prompt line** to edit
+ *   it first (Warp's `terminal:reinput_commands`).
+ * - **Scroll to the top / bottom** of a block, and hand its rows to the
+ *   terminal's own text selection.
+ *
+ * ## Why the overlay never takes the mouse
+ *
+ * A full-width element covering a block would be the obvious way to know what
+ * the pointer is over — and it would also swallow every mouse event the grid
+ * needs: text selection, the file-path and URL links, the inline images, the
+ * scrollbar. So the layer is `pointer-events: none` and the hovered block is
+ * worked out from the pointer's *y coordinate* and the cell height. The only
+ * three things that accept a click are the gutter bar, the fold cover and the
+ * toolbar's own buttons, and each of them stops the event so the pane's
+ * copy-on-select and right-click-pastes handlers never see it.
  *
  * ## Why markers, and what breaks them
  *
@@ -80,8 +106,12 @@ import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import { comboFromEvent, effectiveCombos } from '@/lib/keybindings';
 import { closeBlockMenu, openBlockMenu } from '@/lib/terminalBlockMenu';
+import { blockIconSvg } from '@/lib/terminalBlockIcons';
 import {
+  blockActions,
+  blockAtLine,
   blockFailed,
+  blockMarkdown,
   blockRange,
   blockStatusLabel,
   boundaryLine,
@@ -92,6 +122,8 @@ import {
   navigateBlocks,
   parseBlockMarker,
   shortCommand,
+  type BlockActionId,
+  type BlockActionSpec,
   type BufferRowText,
   type BlockStatus,
   type TerminalBlock,
@@ -108,6 +140,25 @@ export function blockGutterEnabled(): boolean {
 }
 
 /**
+ * The hairline between two blocks — the thing that makes blocks *visible*
+ * rather than merely tracked. Warp's own `appearance.blocks.show_block_dividers`
+ * defaults to on; so does this.
+ */
+export function blockDividersEnabled(): boolean {
+  return useAppStore.getState().settings?.terminal.blockDividers !== false;
+}
+
+/** The toolbar that appears at a block's top-right corner on hover. */
+export function blockActionBarEnabled(): boolean {
+  return useAppStore.getState().settings?.terminal.blockActions !== false;
+}
+
+/** The universal input editor owns the prompt line (ticket #15, U1). */
+function inputEditorOwnsPrompt(): boolean {
+  return useAppStore.getState().settings?.terminal.inputEditor === true;
+}
+
+/**
  * How many blocks one terminal remembers. Each is three markers, and a marker
  * is three listeners on the buffer's line list, so this is the one place where
  * a long-lived terminal could accumulate cost.
@@ -116,6 +167,9 @@ const MAX_BLOCKS = 400;
 
 /** Visible width of a gutter bar, in px (the click target is wider; see CSS). */
 const BAR_WIDTH = 3;
+
+/** Height of the hover toolbar, in px. Must match `.cortx-blocks-actions`. */
+const TOOLBAR_HEIGHT = 24;
 
 interface BlockRecord {
   id: number;
@@ -144,6 +198,10 @@ class BlockController {
   /** The block the shell is currently at a prompt in / running. */
   private current: BlockRecord | null = null;
   private selectedId: number | null = null;
+  /** The block under the pointer: highlighted, and the one the toolbar acts on. */
+  private hoveredId: number | null = null;
+  /** Viewport row the pointer was last resolved on (mousemove fires per pixel). */
+  private hoverRow = -1;
 
   private layer: HTMLElement | null = null;
   /** Elements of the last render, keyed `<blockId>:<kind>`, for reconciling. */
@@ -175,6 +233,13 @@ class BlockController {
 
     this.container.addEventListener('keydown', this.onKeyDown, true);
     this.container.addEventListener('mousedown', this.onMouseDown, true);
+    // Hover is read from the *pointer position*, never from an element under
+    // it: a full-width element covering a block would take the mouse away
+    // from the grid and there would be no text selection, no link click and
+    // no image click left. Nothing of this overlay accepts the pointer except
+    // the gutter bar, the fold cover and the toolbar's own buttons.
+    this.container.addEventListener('mousemove', this.onMouseMove, true);
+    this.container.addEventListener('mouseleave', this.onMouseLeave);
   }
 
   dispose() {
@@ -183,12 +248,15 @@ class BlockController {
     this.frame = 0;
     this.container.removeEventListener('keydown', this.onKeyDown, true);
     this.container.removeEventListener('mousedown', this.onMouseDown, true);
+    this.container.removeEventListener('mousemove', this.onMouseMove, true);
+    this.container.removeEventListener('mouseleave', this.onMouseLeave);
     for (const d of this.disposables) d.dispose();
     this.disposables.length = 0;
     for (const record of this.records) this.disposeMarkers(record);
     this.records = [];
     this.current = null;
     this.selectedId = null;
+    this.hoveredId = null;
     this.removeLayer();
     closeBlockMenu();
     this.tearingDown = false;
@@ -202,6 +270,7 @@ class BlockController {
       this.records = [];
       this.current = null;
       this.selectedId = null;
+      this.hoveredId = null;
       this.tearingDown = false;
       this.removeLayer();
       return;
@@ -330,6 +399,7 @@ class BlockController {
     if (i >= 0) this.records.splice(i, 1);
     if (this.current === record) this.current = null;
     if (this.selectedId === record.id) this.selectedId = null;
+    if (this.hoveredId === record.id) this.hoveredId = null;
     this.disposeMarkers(record);
     this.schedule();
   }
@@ -444,10 +514,61 @@ class BlockController {
   private readonly onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
     if (this.layer?.contains(e.target as Node)) return;
+    // A drag that ends on the row it started on would otherwise leave the
+    // hover cache thinking it is already resolved.
+    this.hoverRow = -1;
     if (this.selectedId === null) return;
     this.selectedId = null;
     this.schedule();
   };
+
+  /**
+   * Which block the pointer is over. Resolved from the y coordinate and the
+   * cell height — the overlay itself is transparent to the mouse, so this is
+   * the only way to know, and it costs nothing until the row changes.
+   */
+  private readonly onMouseMove = (e: MouseEvent) => {
+    if (this.records.length === 0) return;
+    if (!blocksEnabled() || !blockActionBarEnabled()) {
+      this.setHovered(null);
+      return;
+    }
+    // A button is down: the pointer is dragging a text selection (or the
+    // scrollbar). Leave everything alone until it is released.
+    if (e.buttons !== 0) return;
+    // Over the toolbar itself. It straddles the block's top divider, so the
+    // row under the pointer can belong to the block *above* — recomputing
+    // there would make the bar flee from under the cursor.
+    if (this.layer?.contains(e.target as Node)) return;
+    const metrics = this.metrics();
+    if (!metrics) return;
+    const y = e.clientY - this.container.getBoundingClientRect().top - metrics.top;
+    const row = Math.floor(y / metrics.cell);
+    if (row === this.hoverRow) return;
+    this.hoverRow = row;
+    if (row < 0 || row >= this.term.rows) {
+      this.setHovered(null);
+      return;
+    }
+    const buf = this.term.buffer.active;
+    if (buf.type !== 'normal') {
+      this.setHovered(null);
+      return;
+    }
+    const block = blockAtLine(this.blocks(), buf.viewportY + row, this.liveEnd());
+    this.setHovered(block?.id ?? null);
+  };
+
+  private readonly onMouseLeave = () => {
+    this.hoverRow = -1;
+    this.setHovered(null);
+  };
+
+  private setHovered(id: number | null) {
+    if (this.hoveredId === id) return;
+    this.hoveredId = id;
+    this.schedule();
+  }
 
   private select(id: number) {
     this.selectedId = this.selectedId === id ? null : id;
@@ -530,13 +651,35 @@ class BlockController {
     return record ? this.snapshot(record) : null;
   }
 
+  /** The command of a block on one line, ready to be typed back into the PTY. */
+  private commandLine(block: TerminalBlock): string {
+    return this.commandText(block).split('\n')[0]?.trim() ?? '';
+  }
+
   /** Re-run a block's command, once the terminal is back at a prompt. */
   private rerun(block: TerminalBlock) {
-    const command = this.commandText(block).split('\n')[0]?.trim();
+    const command = this.commandLine(block);
     if (!command) return;
     api.writeTerminal(this.terminalId, `${command}\r`).catch((error) => {
       toast.error('Could not run the command again', { description: String(error) });
     });
+  }
+
+  /**
+   * Warp's `terminal:reinput_commands`: the command goes back on the prompt
+   * line *without* a carriage return, so it can be edited before it runs.
+   * Refused while the universal input editor is on — the shell's line and the
+   * line CortX shows would then be two different strings (see `blockActions`).
+   */
+  private reinput(block: TerminalBlock) {
+    const command = this.commandLine(block);
+    if (!command) return;
+    api
+      .writeTerminal(this.terminalId, command)
+      .then(() => this.term.focus())
+      .catch((error) => {
+        toast.error('Could not put the command back at the prompt', { description: String(error) });
+      });
   }
 
   /** True while the shell is at a prompt (nothing of ours is running). */
@@ -545,51 +688,95 @@ class BlockController {
   }
 
   /**
-   * The block menu. Every entry re-reads its block by id when it is chosen:
-   * the popup can stand open while output keeps arriving, and acting on the
-   * geometry captured at open time would copy the wrong lines.
+   * The actions of one block, right now. Recomputed rather than remembered:
+   * output keeps arriving while the toolbar is on screen and the menu is
+   * open, and "Copy output" must not stay greyed out because it was empty
+   * when the pointer arrived.
+   */
+  private actionsFor(block: TerminalBlock): BlockActionSpec[] {
+    const fold = foldedRange(block, this.liveEnd());
+    return blockActions({
+      block,
+      hasCommand: this.commandText(block).trim().length > 0,
+      hiddenLines: fold ? fold.endExclusive - fold.start : 0,
+      atPrompt: this.atPrompt(),
+      inputEditor: inputEditorOwnsPrompt(),
+    });
+  }
+
+  /**
+   * Run one action on the block `id` names. The block is re-read here and not
+   * at the time the button was drawn: the toolbar can be standing over a
+   * command that is still printing, and acting on stale geometry would copy
+   * the wrong lines.
+   */
+  private run(id: number, action: BlockActionId) {
+    const block = this.blockById(id);
+    if (!block) return;
+    switch (action) {
+      case 'copyCommand':
+        void this.copy(this.commandText(block), 'command');
+        break;
+      case 'copyOutput':
+        void this.copy(this.outputText(block), 'output');
+        break;
+      case 'copyBlock':
+        void this.copy(this.blockText(block), 'block');
+        break;
+      case 'copyMarkdown':
+        void this.copy(
+          blockMarkdown(this.commandText(block), this.outputText(block), block.exitCode),
+          'block as Markdown'
+        );
+        break;
+      case 'rerun':
+        this.rerun(block);
+        break;
+      case 'reinput':
+        this.reinput(block);
+        break;
+      case 'fold':
+        this.toggleFold(id);
+        break;
+      case 'selectText': {
+        const full = blockRange(block, this.liveEnd());
+        this.term.selectLines(full.start, full.endExclusive - 1);
+        break;
+      }
+      case 'scrollTop':
+        this.term.scrollToLine(block.start);
+        break;
+      case 'scrollBottom': {
+        const full = blockRange(block, this.liveEnd());
+        this.term.scrollToLine(Math.max(0, full.endExclusive - this.term.rows));
+        break;
+      }
+    }
+  }
+
+  /**
+   * The block menu — the same list as the hover toolbar, with the actions the
+   * toolbar has no room for. Opened from the `⋯` button, from a right-click on
+   * a gutter bar or a fold, and from a right-click in a pane whose block is
+   * selected.
    */
   private openMenu(id: number, x: number, y: number) {
     const block = this.blockById(id);
     if (!block) return;
-    const busy = !this.atPrompt();
-    const range = foldedRange(block, this.liveEnd());
-    const hidden = range ? range.endExclusive - range.start : 0;
     const header = shortCommand(this.commandText(block)) || blockStatusLabel(block);
-    const on = (run: (fresh: TerminalBlock) => void) => () => {
-      const fresh = this.blockById(id);
-      if (fresh) run(fresh);
-    };
-    openBlockMenu(x, y, header, [
-      { label: 'Copy command', onSelect: on((b) => void this.copy(this.commandText(b), 'command')) },
-      { label: 'Copy output', onSelect: on((b) => void this.copy(this.outputText(b), 'output')) },
-      {
-        label: 'Copy command and output',
-        hint: 'Ctrl Shift C',
-        onSelect: on((b) => void this.copy(this.blockText(b), 'block')),
-      },
-      {
-        label: 'Select block',
-        separated: true,
-        onSelect: on((b) => {
-          const full = blockRange(b, this.liveEnd());
-          this.term.selectLines(full.start, full.endExclusive - 1);
-        }),
-      },
-      {
-        label: block.folded ? 'Unfold output' : 'Fold output',
-        hint: hidden > 0 ? foldLabel(hidden) : undefined,
-        disabled: hidden === 0,
-        onSelect: () => this.toggleFold(id),
-      },
-      {
-        label: 'Run again',
-        separated: true,
-        hint: busy ? 'busy' : undefined,
-        disabled: busy || !this.commandText(block).trim(),
-        onSelect: on((b) => this.rerun(b)),
-      },
-    ]);
+    openBlockMenu(
+      x,
+      y,
+      header,
+      this.actionsFor(block).map((spec) => ({
+        label: spec.label,
+        hint: spec.hint,
+        disabled: spec.disabled,
+        separated: spec.separated,
+        icon: spec.id,
+        onSelect: () => this.run(id, spec.id),
+      }))
+    );
   }
 
   // -- Drawing ------------------------------------------------------------
@@ -654,27 +841,58 @@ class BlockController {
     const viewportY = buf.viewportY;
     const rows = this.term.rows;
     const gutter = blockGutterEnabled();
+    const dividers = blockDividersEnabled();
+    const toolbars = blockActionBarEnabled();
     const keep = new Set<string>();
 
     for (const block of blocks) {
       const range = blockRange(block, liveEnd);
       const visible = clipToViewport(range, viewportY, rows);
       const selected = block.id === this.selectedId;
+      const hovered = block.id === this.hoveredId;
+
+      // The divider that opens the block: a 1 px rule the full width of the
+      // pane, drawn on the boundary between the previous block's last output
+      // row and this block's prompt row. This is the whole point of the
+      // feature — without it a block is a thing the app knows about and the
+      // eye does not. `<= rows` and not `< rows`: a block starting on the row
+      // just past the bottom still has its top edge on the last pixel line.
+      const dividerRow = block.start - viewportY;
+      if (dividers && dividerRow >= 0 && dividerRow <= rows) {
+        const rule = this.element(keep, `${block.id}:rule`, 'cortx-blocks-rule', layer);
+        rule.style.top = `${Math.round(metrics.top + dividerRow * metrics.cell)}px`;
+        rule.dataset.status = barStatus(block);
+        rule.dataset.active = hovered || selected ? 'true' : 'false';
+      }
 
       if (visible && gutter) {
         const bar = this.element(keep, `${block.id}:bar`, 'cortx-blocks-bar', layer);
         bar.style.top = `${Math.round(metrics.top + visible.row * metrics.cell)}px`;
         bar.style.height = `${Math.max(2, Math.round(visible.count * metrics.cell))}px`;
         bar.dataset.status = barStatus(block);
-        bar.dataset.selected = selected ? 'true' : 'false';
+        bar.dataset.selected = selected || hovered ? 'true' : 'false';
         setText(bar, 'title', `${blockStatusLabel(block)}${block.command ? ` · ${shortCommand(block.command)}` : ''}`);
         this.bindBar(bar, block.id);
       }
 
-      if (visible && selected) {
-        const tint = this.element(keep, `${block.id}:tint`, 'cortx-blocks-tint', layer);
-        tint.style.top = `${Math.round(metrics.top + visible.row * metrics.cell)}px`;
-        tint.style.height = `${Math.round(visible.count * metrics.cell)}px`;
+      // Hovered or selected: a wash over the block's rows, so it reads as one
+      // object. Never strong enough to make the text under it harder to read.
+      if (visible && (selected || hovered)) {
+        const band = this.element(keep, `${block.id}:band`, 'cortx-blocks-band', layer);
+        band.style.top = `${Math.round(metrics.top + visible.row * metrics.cell)}px`;
+        band.style.height = `${Math.round(visible.count * metrics.cell)}px`;
+        band.dataset.state = selected ? 'selected' : 'hover';
+      }
+
+      // The toolbar, at the block's top-right corner, straddling its divider —
+      // where Warp puts it. Only for a block that has run something: the
+      // prompt being typed has no command to act on, and that row belongs to
+      // the input editor (ticket #15). The selected block gets one too when
+      // the pointer is elsewhere, so Ctrl+↑ / Ctrl+↓ reach the actions without
+      // a mouse — but never two toolbars at once.
+      const armed = hovered || (selected && this.hoveredId === null);
+      if (visible && toolbars && armed && block.status !== 'prompt') {
+        this.toolbar(keep, layer, block, metrics, visible.row, rows);
       }
 
       if (block.folded) {
@@ -710,6 +928,78 @@ class BlockController {
       this.elements.set(key, element);
     }
     return element;
+  }
+
+  /**
+   * The hover toolbar of one block: an icon per `primary` action plus a `⋯`
+   * that opens the rest. Rebuilt only when the set of actions changes (its
+   * signature is stashed on the element) — this runs on every rendered frame,
+   * including while a command is printing.
+   */
+  private toolbar(
+    keep: Set<string>,
+    layer: HTMLElement,
+    block: TerminalBlock,
+    metrics: { cell: number; top: number },
+    row: number,
+    rows: number
+  ) {
+    const bar = this.element(keep, `${block.id}:actions`, 'cortx-blocks-actions', layer);
+    // Centred on the block's top edge, then kept inside the pane: a block
+    // whose first line is scrolled off still gets its toolbar, at the top.
+    const anchor = metrics.top + row * metrics.cell;
+    const bottom = metrics.top + rows * metrics.cell;
+    const top = Math.min(Math.max(anchor - TOOLBAR_HEIGHT / 2, metrics.top + 1), bottom - TOOLBAR_HEIGHT - 1);
+    bar.style.top = `${Math.round(top)}px`;
+
+    const specs = this.actionsFor(block).filter((spec) => spec.primary);
+    const signature = specs.map((spec) => `${spec.id} ${spec.label} ${spec.disabled}`).join('');
+    if (bar.dataset.signature === signature) return;
+    bar.dataset.signature = signature;
+    bar.textContent = '';
+    for (const spec of specs) {
+      bar.appendChild(this.actionButton(block.id, spec.id, spec.label, spec.hint, spec.disabled));
+    }
+    bar.appendChild(this.actionButton(block.id, 'more', 'More actions', undefined, false));
+  }
+
+  /** One icon button of the toolbar. `more` opens the menu instead of acting. */
+  private actionButton(
+    id: number,
+    action: BlockActionId | 'more',
+    label: string,
+    hint: string | undefined,
+    disabled: boolean
+  ): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'cortx-blocks-action';
+    button.disabled = disabled;
+    button.title = hint ? `${label} · ${hint}` : label;
+    button.setAttribute('aria-label', label);
+    button.appendChild(blockIconSvg(action));
+    // Never let a toolbar click start a selection, move the focus, or reach
+    // the pane's own "copy on select" / "right-click pastes" handlers.
+    button.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (action === 'more') {
+        const rect = button.getBoundingClientRect();
+        this.openMenu(id, rect.left, rect.bottom + 4);
+        return;
+      }
+      this.run(id, action);
+    });
+    button.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.openMenu(id, e.clientX, e.clientY);
+    });
+    return button;
   }
 
   private bindBar(bar: HTMLElement, id: number) {
@@ -769,6 +1059,10 @@ class BlockController {
     set('--cortx-block-run', theme.yellow, 'var(--warning, #f5f543)');
     set('--cortx-block-idle', theme.brightBlack, 'var(--text-faint, #666666)');
     set('--cortx-block-fg', theme.foreground, 'var(--terminal-fg, var(--foreground))');
+    // The pane's own background, for the toolbar's plate: a themed Terminal
+    // window is see-through down to the wallpaper, and icons floating on a
+    // photograph are unreadable.
+    set('--cortx-block-bg', theme.background, 'var(--terminal-window-solid, var(--card))');
     // The gutter lives in the pane's left padding so the text never moves. A
     // padding of 0 leaves nowhere to put it: it then overlays the first three
     // pixels of column one rather than shifting the grid.
@@ -790,7 +1084,12 @@ class BlockController {
 
   /** Dev diagnostics (CDP). */
   debug() {
-    return { blocks: this.blocks(), selectedId: this.selectedId, liveEnd: this.liveEnd() };
+    return {
+      blocks: this.blocks(),
+      selectedId: this.selectedId,
+      hoveredId: this.hoveredId,
+      liveEnd: this.liveEnd(),
+    };
   }
 }
 

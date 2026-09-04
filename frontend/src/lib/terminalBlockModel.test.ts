@@ -14,9 +14,13 @@
  * wrapped rows into the command you actually typed.
  */
 import {
+  type BlockActionContext,
+  type BlockActionId,
   type TerminalBlock,
+  blockActions,
   blockAtLine,
   blockFailed,
+  blockMarkdown,
   blockRange,
   blockStatusLabel,
   boundaryLine,
@@ -319,6 +323,122 @@ test('a long command is elided for the menu, a short one is left alone', () => {
 test('the fold label counts in plain English', () => {
   assert.equal(foldLabel(1), '1 line hidden');
   assert.equal(foldLabel(412), '412 lines hidden');
+});
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+/** A block with a command, nine lines of output and a shell at its prompt. */
+function context(over: Partial<BlockActionContext> = {}): BlockActionContext {
+  return {
+    block: block(),
+    hasCommand: true,
+    hiddenLines: 9,
+    atPrompt: true,
+    inputEditor: false,
+    ...over,
+  };
+}
+
+/** Every action, keyed by id — the list is never filtered, only disabled. */
+function actionMap(ctx: BlockActionContext): Map<BlockActionId, { label: string; disabled: boolean; hint?: string }> {
+  return new Map(blockActions(ctx).map((a) => [a.id, { label: a.label, disabled: a.disabled, hint: a.hint }]));
+}
+
+test('the toolbar and the menu are the same list, never two lists', () => {
+  const all = blockActions(context());
+  const ids = all.map((a) => a.id);
+  assert.equal(new Set(ids).size, ids.length, 'no action is offered twice');
+  // Everything the toolbar shows is in the menu, because it is one list and
+  // `primary` only says which entries get their own button.
+  assert.deepEqual(
+    all.filter((a) => a.primary).map((a) => a.id),
+    ['copyCommand', 'copyOutput', 'copyBlock', 'rerun', 'fold']
+  );
+});
+
+test('a healthy finished block offers everything', () => {
+  const actions = actionMap(context());
+  for (const [id, spec] of actions) assert.equal(spec.disabled, false, `${id} should be available`);
+});
+
+test('a command that printed nothing cannot have its output copied or folded', () => {
+  const actions = actionMap(context({ hiddenLines: 0 }));
+  assert.equal(actions.get('copyOutput')?.disabled, true);
+  assert.equal(actions.get('fold')?.disabled, true);
+  assert.equal(actions.get('scrollBottom')?.disabled, true);
+  assert.equal(actions.get('copyCommand')?.disabled, false, 'the command is still there');
+  assert.equal(actions.get('copyBlock')?.disabled, false);
+});
+
+test('an empty block offers nothing to copy but can still be scrolled to', () => {
+  const actions = actionMap(context({ hasCommand: false, hiddenLines: 0 }));
+  assert.equal(actions.get('copyBlock')?.disabled, true);
+  assert.equal(actions.get('copyMarkdown')?.disabled, true);
+  assert.equal(actions.get('scrollTop')?.disabled, false);
+  assert.equal(actions.get('selectText')?.disabled, false);
+});
+
+test('nothing is typed into a shell that is busy, and the entry says why', () => {
+  const actions = actionMap(context({ atPrompt: false }));
+  assert.equal(actions.get('rerun')?.disabled, true);
+  assert.equal(actions.get('rerun')?.hint, 'busy');
+  assert.equal(actions.get('reinput')?.disabled, true);
+  assert.equal(actions.get('reinput')?.hint, 'busy');
+  assert.equal(actions.get('copyOutput')?.disabled, false, 'copying a running block is fine');
+});
+
+test('the universal input editor refuses reinput and only reinput', () => {
+  const actions = actionMap(context({ inputEditor: true }));
+  assert.equal(actions.get('reinput')?.disabled, true);
+  assert.equal(actions.get('reinput')?.hint, 'input editor');
+  assert.equal(actions.get('rerun')?.disabled, false, 'running submits at once, nothing to desync');
+});
+
+test('the fold entry flips its label and counts what it hides', () => {
+  assert.equal(actionMap(context())?.get('fold')?.label, 'Fold output');
+  assert.equal(actionMap(context())?.get('fold')?.hint, '9 lines hidden');
+  const folded = actionMap(context({ block: block({ folded: true }) }));
+  assert.equal(folded.get('fold')?.label, 'Unfold output');
+});
+
+// ---------------------------------------------------------------------------
+// Markdown
+// ---------------------------------------------------------------------------
+
+/** Multi-line fixtures, written as lines: escapes in a fenced string are unreadable. */
+const lines = (...parts: string[]) => parts.join('\n');
+
+test('a block becomes a console transcript', () => {
+  assert.equal(
+    blockMarkdown('git status', lines('On branch main', 'nothing to commit'), 0),
+    lines('```console', '$ git status', 'On branch main', 'nothing to commit', '```')
+  );
+});
+
+test('a failing command carries its exit code, a successful one does not', () => {
+  assert.equal(blockMarkdown('false', '', 1), lines('```console', '$ false', '# exit 1', '```'));
+  assert.equal(blockMarkdown('true', '', 0), lines('```console', '$ true', '```'));
+  assert.equal(blockMarkdown('true', '', null), lines('```console', '$ true', '```'));
+});
+
+test('a multi-line command keeps its continuation lines', () => {
+  assert.equal(
+    blockMarkdown(lines('for x in a b; do', '  echo $x', 'done'), lines('a', 'b'), 0),
+    lines('```console', '$ for x in a b; do', '>   echo $x', '> done', 'a', 'b', '```')
+  );
+});
+
+test('the fence grows past backticks in the output', () => {
+  const out = blockMarkdown('cat readme.md', 'use ```js fences```', 0);
+  assert.equal(out.startsWith('````console\n'), true, out);
+  assert.equal(out.endsWith('\n````'), true, out);
+});
+
+test('a block with neither a command nor output produces nothing at all', () => {
+  assert.equal(blockMarkdown('', '', 0), '');
+  assert.equal(blockMarkdown('   ', lines('', ''), null), '');
 });
 
 report();

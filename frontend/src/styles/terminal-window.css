@@ -88,72 +88,6 @@
 }
 
 /* ============================================================
-   Universal input editor (ticket #15, U1 — see lib/terminalInputEditor.ts).
-
-   One line, laid exactly over the cell where the shell's prompt ends, so what
-   the user types looks like it is being typed *at the prompt* — it simply is
-   not in the grid. Everything about it follows the terminal theme (font,
-   colours, caret), never the app chrome: it has to be indistinguishable from
-   the text around it.
-
-   The ghost sits behind the textarea and repeats the typed text in
-   `transparent` so the suggested remainder lands on exactly the right column
-   without measuring anything.
-   ============================================================ */
-.cortx-input {
-  position: absolute;
-  z-index: 5;
-  overflow: hidden;
-  white-space: pre;
-  /* Only the field takes the mouse; the rest of the row stays the grid's, so
-     a selection that starts on the prompt line still works. */
-  pointer-events: none;
-}
-.cortx-input[hidden] {
-  display: none !important;
-}
-.cortx-input-field {
-  position: absolute;
-  inset: 0;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  outline: none;
-  resize: none;
-  overflow: hidden;
-  background: transparent;
-  color: var(--terminal-fg, var(--foreground));
-  caret-color: var(--terminal-cursor, var(--terminal-fg, var(--foreground)));
-  font: inherit;
-  line-height: inherit;
-  letter-spacing: inherit;
-  white-space: pre;
-  overflow-wrap: normal;
-  pointer-events: auto;
-}
-.cortx-input-field::selection {
-  background: var(--terminal-selection, color-mix(in srgb, var(--terminal-fg, var(--foreground)) 25%, transparent));
-}
-.cortx-input-ghost {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  white-space: pre;
-  pointer-events: none;
-  font: inherit;
-  line-height: inherit;
-  letter-spacing: inherit;
-}
-.cortx-input-ghost-typed {
-  color: transparent;
-}
-.cortx-input-ghost-rest {
-  color: var(--text-faint);
-  opacity: 0.85;
-}
-
-/* ============================================================
    Command blocks (DEV-13 P4, ticket #7 — see lib/terminalBlocks.ts).
 
    One overlay layer per pane, a child of `.cortx-xterm`, so it inherits the
@@ -161,12 +95,22 @@
    from the text. Everything in it is drawn *over* the grid: not a single glyph
    moves, which is the whole contract of this feature.
 
-   The gutter bars live in the pane's left padding (`--terminal-padding`,
-   applied by `.cortx-xterm-host`), reached with a negative `left` computed in
-   JS — the host clips at its border box, and the padding is inside it, so the
-   bars show without stealing a column. Colours come from the *terminal*
-   palette (the ANSI colours xterm is drawing with), never from the app chrome,
-   so an imported Warp theme colours the blocks too.
+   Four things are drawn: a 1 px divider on each block's top edge, a wash over
+   the hovered / selected block, the gutter bar, and — only while the pointer
+   is inside a block — its action toolbar. The gutter bars and the dividers
+   reach into the pane's left padding (`--terminal-padding`, applied by
+   `.cortx-xterm-host`) with a negative `left`: the host clips at its border
+   box and the padding is inside it, so they show without stealing a column.
+
+   Colours come from the *terminal* palette (the ANSI colours xterm is drawing
+   with, pushed onto the layer as `--cortx-block-*` by `applyPalette`), never
+   from the app chrome — an imported Warp theme colours the blocks too, and a
+   divider stays exactly as legible on a black theme, a white one and a
+   wallpaper.
+
+   Nothing here takes the mouse except the gutter bar, the fold cover and the
+   toolbar's buttons: hover is worked out from the pointer's y coordinate in
+   JS, so text selection, links and images keep every event they need.
    ============================================================ */
 .cortx-blocks {
   position: absolute;
@@ -214,16 +158,116 @@
   opacity: 1;
 }
 
-/* The selected block: a wash the strength of a selection highlight, never
-   enough to make the text underneath harder to read. */
-.cortx-blocks-tint {
+/* The divider that opens a block: one hairline, edge to edge, on the boundary
+   between the previous block's last output row and this block's prompt. Fine
+   (exactly 1 px, never scaled) but unmistakable — the contrast is taken from
+   the *terminal* foreground, so it lands at the same strength on a black
+   theme, a white one and a photograph. `--cortx-block-fg` is set in JS from
+   the palette xterm is drawing with. */
+.cortx-blocks-rule {
   position: absolute;
-  left: 0;
-  /* Clear of xterm's own scrollbar, which sits in the last few pixels. */
-  right: 2px;
-  border-radius: 2px;
+  /* Out into the host's left padding, so the rule really does cross the whole
+     pane like Warp's — the grid starts after that padding, and the host clips
+     at its border box, not at its padding box (same trick as the gutter). */
+  left: calc(0px - var(--terminal-padding, 8px));
+  right: 0;
+  height: 1px;
   pointer-events: none;
-  background: color-mix(in srgb, var(--cortx-block-fg) 9%, transparent);
+  background: color-mix(in srgb, var(--cortx-block-fg) 34%, transparent);
+  transition: background-color 120ms ease;
+}
+.cortx-blocks-rule[data-status='running'] {
+  background: color-mix(in srgb, var(--cortx-block-run) 55%, transparent);
+}
+.cortx-blocks-rule[data-status='failed'] {
+  background: color-mix(in srgb, var(--cortx-block-fail) 62%, transparent);
+}
+/* Hovered or selected: the block announces where it begins. */
+.cortx-blocks-rule[data-active='true'] {
+  background: color-mix(in srgb, var(--cortx-block-fg) 78%, transparent);
+}
+.cortx-blocks-rule[data-active='true'][data-status='running'] {
+  background: var(--cortx-block-run);
+}
+.cortx-blocks-rule[data-active='true'][data-status='failed'] {
+  background: var(--cortx-block-fail);
+}
+
+/* The hovered / selected block: a wash the strength of a selection highlight,
+   never enough to make the text underneath harder to read. */
+.cortx-blocks-band {
+  position: absolute;
+  left: calc(0px - var(--terminal-padding, 8px));
+  right: 0;
+  pointer-events: none;
+  transition: background-color 120ms ease;
+}
+.cortx-blocks-band[data-state='hover'] {
+  background: color-mix(in srgb, var(--cortx-block-fg) 5%, transparent);
+}
+.cortx-blocks-band[data-state='selected'] {
+  background: color-mix(in srgb, var(--cortx-block-fg) 10%, transparent);
+}
+
+/* The block's actions, at its top-right corner and straddling its divider —
+   where Warp puts them. It is the only part of the overlay that covers text,
+   it only exists while the pointer is inside the block, and it is opaque
+   enough (the terminal's own background, blurred) to stay readable over a
+   wallpaper. */
+.cortx-blocks-actions {
+  position: absolute;
+  right: 12px;
+  /* Elements are reused across frames, so their DOM order is creation order
+     and not paint order; the one thing that must always win is this. */
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  height: 24px; /* TOOLBAR_HEIGHT in lib/terminalBlocks.ts */
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--cortx-block-fg) 20%, transparent);
+  background: color-mix(in srgb, var(--cortx-block-bg) 86%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
+  pointer-events: auto;
+  animation: cortx-blocks-actions-in 110ms ease-out;
+}
+@keyframes cortx-blocks-actions-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.cortx-blocks-action {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: color-mix(in srgb, var(--cortx-block-fg) 68%, transparent);
+  cursor: pointer;
+  transition: background-color 90ms ease, color 90ms ease;
+}
+.cortx-blocks-action > svg {
+  width: 13px;
+  height: 13px;
+}
+.cortx-blocks-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--cortx-block-fg) 15%, transparent);
+  color: var(--cortx-block-fg);
+}
+.cortx-blocks-action:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 /* A folded block's output. Purely a cover: the rows are still in the buffer,
@@ -231,6 +275,7 @@
    drawing decision, not an edit. */
 .cortx-blocks-fold {
   position: absolute;
+  z-index: 1;
   left: 0;
   /* Wide of the scrollbar: this one takes clicks and must not swallow it. */
   right: 10px;
@@ -266,7 +311,7 @@
 .cortx-block-menu {
   position: fixed;
   z-index: 90;
-  min-width: 210px;
+  min-width: 236px;
   padding: 4px;
   border-radius: var(--rad-sm, 8px);
   border: 1px solid var(--border-strong, var(--border));
@@ -311,6 +356,19 @@
 .cortx-block-menu-item:disabled {
   opacity: 0.45;
   cursor: default;
+}
+/* Same glyph as the hover toolbar, so the two surfaces read as one feature. */
+.cortx-block-menu-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.cortx-block-menu-label > svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  opacity: 0.65;
 }
 .cortx-block-menu-hint {
   color: var(--text-faint, var(--muted-foreground));

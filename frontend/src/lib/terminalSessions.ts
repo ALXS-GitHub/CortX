@@ -36,6 +36,8 @@ import { attachInputEditor, inputEditorEnabled, refreshInputEditors } from '@/li
 import { registerFileLinkProvider } from '@/lib/terminalLinks';
 import {
   attachBlocks,
+  blockActionBarEnabled,
+  blockDividersEnabled,
   blockGutterEnabled,
   blocksEnabled,
   copySelectedBlock,
@@ -375,6 +377,11 @@ export function applyTerminalPadding() {
   refreshBlocks();
 }
 
+/** Everything about blocks that a redraw has to notice (ticket #7). */
+function blockSettingsKey(): string {
+  return [blocksEnabled(), blockGutterEnabled(), blockDividersEnabled(), blockActionBarEnabled()].join('|');
+}
+
 let settingsSubscribed = false;
 
 /** Re-apply font, cursor and padding to every session when the settings change. */
@@ -388,7 +395,7 @@ function ensureSettingsSubscription() {
   let lastSmoothScroll = smoothScrollDuration();
   let lastInputPosition = inputPositionSetting();
   let lastInputEditor = inputEditorEnabled();
-  let lastBlocks = `${blocksEnabled()}|${blockGutterEnabled()}`;
+  let lastBlocks = blockSettingsKey();
   useAppStore.subscribe(() => {
     const font = terminalFontOptions();
     const fontKey = JSON.stringify(font);
@@ -435,7 +442,7 @@ function ensureSettingsSubscription() {
     }
     // Ticket #7: switching blocks off tears the overlay down; switching the
     // gutter off only stops drawing the bars.
-    const blocks = `${blocksEnabled()}|${blockGutterEnabled()}`;
+    const blocks = blockSettingsKey();
     if (blocks !== lastBlocks) {
       lastBlocks = blocks;
       refreshBlocks();

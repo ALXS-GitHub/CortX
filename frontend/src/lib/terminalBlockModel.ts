@@ -269,3 +269,140 @@ export function shortCommand(command: string | null, max = 48): string {
 export function foldLabel(count: number): string {
   return count === 1 ? '1 line hidden' : `${count} lines hidden`;
 }
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything a block can be asked to do. The list is deliberately the *same*
+ * in the hover toolbar and in the menu — `primary` only decides which of them
+ * get an icon of their own on the bar and which live behind its `⋯`, so an
+ * action can never exist in one surface and be missing from the other.
+ */
+export type BlockActionId =
+  | 'copyCommand'
+  | 'copyOutput'
+  | 'copyBlock'
+  | 'copyMarkdown'
+  | 'rerun'
+  | 'reinput'
+  | 'fold'
+  | 'selectText'
+  | 'scrollTop'
+  | 'scrollBottom';
+
+/** What the controller knows about a block when it builds the action list. */
+export interface BlockActionContext {
+  block: TerminalBlock;
+  /** A command can be read back (the shell sent one, or it is on the grid). */
+  hasCommand: boolean;
+  /** Output lines the fold hides, or would hide. 0 = the command printed nothing. */
+  hiddenLines: number;
+  /** The shell is at a prompt — nothing of ours is running in it. */
+  atPrompt: boolean;
+  /** The universal input editor owns the prompt line (ticket #15, U1). */
+  inputEditor: boolean;
+}
+
+export interface BlockActionSpec {
+  id: BlockActionId;
+  label: string;
+  /** Right-hand hint in the menu, second line of the toolbar's tooltip. */
+  hint?: string;
+  disabled: boolean;
+  /** Gets its own button on the hover toolbar; the rest are behind the `⋯`. */
+  primary: boolean;
+  /** A separator is drawn above this entry in the menu. */
+  separated?: boolean;
+}
+
+/**
+ * The actions of one block, in the order they are shown. Nothing is ever
+ * dropped from the list — an action that cannot run right now comes back
+ * `disabled` with a hint saying why, so the menu never changes shape under
+ * the pointer while output is still arriving.
+ */
+export function blockActions(ctx: BlockActionContext): BlockActionSpec[] {
+  const { block, hasCommand, hiddenLines, atPrompt, inputEditor } = ctx;
+  const hasOutput = hiddenLines > 0;
+  const empty = !hasCommand && !hasOutput;
+  const busy = !atPrompt;
+  // "Put back at the prompt" types into the shell's own line editor. With the
+  // universal input editor on, the line the shell holds and the line CortX
+  // shows are two different things — so that one is refused rather than
+  // desynchronising them. Re-running is unaffected: it submits immediately.
+  const typeHint = busy ? 'busy' : inputEditor ? 'input editor' : undefined;
+  return [
+    { id: 'copyCommand', label: 'Copy command', disabled: !hasCommand, primary: true },
+    { id: 'copyOutput', label: 'Copy output', disabled: !hasOutput, primary: true },
+    {
+      id: 'copyBlock',
+      label: 'Copy command and output',
+      hint: 'Ctrl Shift C',
+      disabled: empty,
+      primary: true,
+    },
+    { id: 'copyMarkdown', label: 'Copy as Markdown', disabled: empty, primary: false },
+    {
+      id: 'rerun',
+      label: 'Run again',
+      separated: true,
+      hint: busy ? 'busy' : undefined,
+      disabled: busy || !hasCommand,
+      primary: true,
+    },
+    {
+      id: 'reinput',
+      label: 'Put back at the prompt',
+      hint: typeHint,
+      disabled: busy || inputEditor || !hasCommand,
+      primary: false,
+    },
+    {
+      id: 'fold',
+      label: block.folded ? 'Unfold output' : 'Fold output',
+      separated: true,
+      hint: hasOutput ? foldLabel(hiddenLines) : undefined,
+      disabled: !hasOutput,
+      primary: true,
+    },
+    { id: 'selectText', label: 'Select block', disabled: false, primary: false },
+    // Warp's `terminal:scroll_to_top_of_selected_block` /
+    // `…_bottom_of_selected_block`, which is how you get back to the command
+    // that produced a screenful of output — and back down to its end.
+    { id: 'scrollTop', label: 'Scroll to top of block', separated: true, disabled: false, primary: false },
+    { id: 'scrollBottom', label: 'Scroll to bottom of block', disabled: !hasOutput, primary: false },
+  ];
+}
+
+/** The longest run of backticks in `text` (so a fence can always contain it). */
+function longestBacktickRun(text: string): number {
+  let longest = 0;
+  let run = 0;
+  for (const ch of text) {
+    run = ch === '`' ? run + 1 : 0;
+    if (run > longest) longest = run;
+  }
+  return longest;
+}
+
+/**
+ * A block as a Markdown fenced `console` transcript — the shape you want when
+ * a command and what it printed go into a ticket, a commit message or a chat.
+ * The command is prefixed `$ ` (continuation lines `> `), the exit code is
+ * only mentioned when it is not zero, and the fence grows past any backticks
+ * the output itself contains.
+ */
+export function blockMarkdown(command: string, output: string, exitCode: number | null): string {
+  const cmd = command.replace(/\s+$/, '');
+  const out = output.replace(/\s+$/, '');
+  const lines: string[] = [];
+  if (cmd) lines.push(cmd.split('\n').map((line, i) => `${i === 0 ? '$' : '>'} ${line}`).join('\n'));
+  if (out) lines.push(out);
+  if (exitCode !== null && exitCode !== 0) lines.push(`# exit ${exitCode}`);
+  if (lines.length === 0) return '';
+  const body = lines.join('\n');
+  const fence = '`'.repeat(Math.max(3, longestBacktickRun(body) + 1));
+  return `${fence}console\n${body}\n${fence}`;
+}
