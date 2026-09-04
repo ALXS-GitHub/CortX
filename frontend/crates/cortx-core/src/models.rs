@@ -597,6 +597,34 @@ pub struct TerminalConfig {
     /// for the rest. Off leaves the gutter bar's right-click menu.
     #[serde(default = "default_true")]
     pub block_actions: bool,
+    /// Vertical air between two blocks — Warp's `appearance.spacing`, and
+    /// like it `normal` by default. Read by
+    /// [`crate::shell_init::resolve_block_spacing`] when the shell
+    /// integration is generated: `Normal` makes the shell print one blank
+    /// line before a prompt that follows a command, which is the only way to
+    /// get real space in an xterm grid where every row is the same height.
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub block_spacing: TerminalBlockSpacing,
+}
+
+/// How much room a command block gets above it (DEV-13 #7).
+///
+/// Warp reserves pixels because it draws its own blocks; CortX draws over
+/// xterm's grid, where a row is a row and no CSS can push two of them apart.
+/// So the space is a *real* blank line, emitted by the shell integration just
+/// before the prompt — which also gives the divider and the action bar a row
+/// of their own instead of hovering over one the shell wrote in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalBlockSpacing {
+    /// One blank line between a command's output and the next prompt (Warp's
+    /// default, and ours).
+    #[default]
+    Normal,
+    /// Nothing is added: the prompt follows the output immediately, which is
+    /// what CortX did before this setting existed.
+    Compact,
 }
 
 /// Where the input line sits in a terminal pane (ticket #15, U0).
@@ -898,6 +926,7 @@ impl Default for TerminalConfig {
             block_gutter: true,
             block_dividers: true,
             block_actions: true,
+            block_spacing: TerminalBlockSpacing::default(),
         }
     }
 }

@@ -23,14 +23,18 @@ import {
   blockMarkdown,
   blockRange,
   blockStatusLabel,
+  blockToolbarWidth,
   boundaryLine,
   clipToViewport,
+  colorLuminance,
+  dividerOffsetRows,
   foldLabel,
   foldedRange,
   joinBufferRows,
   navigateBlocks,
   parseBlockMarker,
   shortCommand,
+  terminalIsDark,
 } from './terminalBlockModel.ts';
 
 // --- a test runner in twenty lines ----------------------------------------
@@ -196,6 +200,24 @@ test('a range entirely off screen draws nothing', () => {
   assert.equal(clipToViewport({ start: 0, endExclusive: 5 }, 10, 24), null);
   assert.equal(clipToViewport({ start: 100, endExclusive: 120 }, 10, 24), null);
   assert.equal(clipToViewport({ start: 10, endExclusive: 10 }, 10, 24), null);
+});
+
+// ---------------------------------------------------------------------------
+// Spacing (ticket #7 — Warp's `appearance.spacing`)
+// ---------------------------------------------------------------------------
+
+test('with no spacing line the divider stays on the block’s top edge', () => {
+  assert.equal(dividerOffsetRows(null), 0);
+});
+
+test('a spacing line puts the divider through its middle', () => {
+  // Half a row up from the prompt: the blank line the shell printed then has
+  // half of itself above the rule and half below, which is the padding Warp
+  // gets by reserving pixels. Anything else (0, or a whole row) would glue the
+  // rule to one of the two blocks instead of separating them.
+  assert.equal(dividerOffsetRows('above'), -0.5);
+  // And half a row *down* when the blank line is the block's own first row.
+  assert.equal(dividerOffsetRows('first'), 0.5);
 });
 
 // ---------------------------------------------------------------------------
@@ -439,6 +461,45 @@ test('the fence grows past backticks in the output', () => {
 test('a block with neither a command nor output produces nothing at all', () => {
   assert.equal(blockMarkdown('', '', 0), '');
   assert.equal(blockMarkdown('   ', lines('', ''), null), '');
+});
+
+// --- the divider's neutral colour -----------------------------------------
+
+test('a colour is read from every notation a terminal palette uses', () => {
+  assert.equal(colorLuminance('#000'), 0);
+  assert.equal(colorLuminance('#000000'), 0);
+  assert.equal(colorLuminance('#ffffff'), 1);
+  assert.equal(colorLuminance('#ffffffcc'), 1);
+  assert.equal(colorLuminance('rgb(255, 255, 255)'), 1);
+  assert.equal(colorLuminance('rgba(0 0 0 / 0.5)'), 0);
+  assert.equal(colorLuminance(undefined), null);
+  assert.equal(colorLuminance('rebeccapurple'), null);
+  assert.equal(colorLuminance('#12345'), null);
+});
+
+test('the wallpaper theme that made the divider pink is read as dark', () => {
+  // `aespa_wda`: white text on a warm brown-red, with a photo behind it. A
+  // divider mixed from the foreground came out pink; a *white* wash at 11 %
+  // does not, and this is the test that says which of the two we pick.
+  assert.equal(terminalIsDark('#713d39', '#ffffff'), true);
+});
+
+test('light, dark and half-configured palettes each pick a side', () => {
+  assert.equal(terminalIsDark('#1e1e1e', '#d4d4d4'), true);
+  assert.equal(terminalIsDark('#ffffff', '#000000'), false);
+  assert.equal(terminalIsDark('#fafafa', undefined), false);
+  // No background: decided from the foreground instead (light text = dark pane).
+  assert.equal(terminalIsDark(undefined, '#eeeeee'), true);
+  assert.equal(terminalIsDark(undefined, '#111111'), false);
+  // Nothing at all: a terminal is dark until told otherwise.
+  assert.equal(terminalIsDark(undefined, undefined), true);
+});
+
+test('the toolbar width is predicted before the toolbar exists', () => {
+  // 22 px buttons, a 1 px gap, 3 px of padding either side, a 1 px border.
+  assert.equal(blockToolbarWidth(0), 0);
+  assert.equal(blockToolbarWidth(1), 30);
+  assert.equal(blockToolbarWidth(6), 145);
 });
 
 report();

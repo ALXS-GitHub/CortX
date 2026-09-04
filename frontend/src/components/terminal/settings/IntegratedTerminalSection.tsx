@@ -20,6 +20,7 @@ import type {
   SuggestionConfidence,
   TabIndexDisplay,
   CompletionMenuKey,
+  TerminalBlockSpacing,
   TerminalInputPosition,
   TerminalTargetSurface,
 } from '@/types';
@@ -156,10 +157,40 @@ export function IntegratedTerminalSection() {
         />
       </ToggleField>
 
+      <Field
+        label={<span className="text-xs text-muted-foreground">Block spacing</span>}
+        htmlFor="terminal-block-spacing"
+        hint={
+          <>
+            Warp's <Code>appearance.spacing</Code>, and like it <Code>Normal</Code> here.{' '}
+            <Code>Normal</Code> asks the shell integration for one blank line between a command's output and the next
+            prompt, and the divider is then drawn through the middle of it — the space has to be a real line, because
+            CortX draws its blocks over the terminal grid, where every row is exactly one row tall and no amount of CSS
+            can push two of them apart. The line is only ever added after a command actually ran, never before the first
+            prompt of a session, and never when your own prompt already starts on a new line.{' '}
+            <Code>Compact</Code> adds nothing. Applies to terminals opened from now on.
+          </>
+        }
+      >
+        <Select
+          value={terminal?.blockSpacing ?? 'normal'}
+          onValueChange={(v: TerminalBlockSpacing) => patch({ blockSpacing: v })}
+          disabled={!terminal || !shellIntegration || !blocks}
+        >
+          <SelectTrigger id="terminal-block-spacing" className="w-[260px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="normal">Normal (default)</SelectItem>
+            <SelectItem value="compact">Compact</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
       <ToggleField
         id="terminal-block-dividers"
         label={<span className="text-xs text-muted-foreground">Block dividers</span>}
-        hint="The 1 px rule across the pane at the top of every block — what makes the blocks visible. It turns red on a command that failed and brightens on the block under the pointer."
+        hint="The 1 px rule across the pane at the top of every block — what makes the blocks visible. It is deliberately faint and colourless, white on a dark palette and black on a light one, so it stays a boundary you sense rather than a line you read, even on a theme with a background image. The rules above and below the block under the pointer come up a little; the exit code is the colour of the gutter bar, not of the rule."
       >
         <Switch
           id="terminal-block-dividers"
@@ -172,7 +203,7 @@ export function IntegratedTerminalSection() {
       <ToggleField
         id="terminal-block-actions"
         label={<span className="text-xs text-muted-foreground">Block actions on hover</span>}
-        hint="A small toolbar at the top-right of the block under the pointer: copy the command, copy the output, copy both, run it again, fold the output, and ⋯ for the rest (copy as Markdown, put the command back at the prompt, select the block, scroll to its top or bottom). Off, the same menu is still a right-click on the gutter bar away."
+        hint="A small toolbar near the top-right of the block under the pointer: copy the command, copy the output, copy both, run it again, fold the output, and ⋯ for the rest (copy as Markdown, put the command back at the prompt, select the block, scroll to its top or bottom). It only ever sits on a row whose right-hand end is empty, so a right-hand prompt — a clock, a git status — is never covered; when the block has no such row it is not shown, and the same menu is still a right-click on the gutter bar away."
       >
         <Switch
           id="terminal-block-actions"

@@ -95,18 +95,23 @@
    from the text. Everything in it is drawn *over* the grid: not a single glyph
    moves, which is the whole contract of this feature.
 
-   Four things are drawn: a 1 px divider on each block's top edge, a wash over
-   the hovered / selected block, the gutter bar, and — only while the pointer
-   is inside a block — its action toolbar. The gutter bars and the dividers
-   reach into the pane's left padding (`--terminal-padding`, applied by
-   `.cortx-xterm-host`) with a negative `left`: the host clips at its border
-   box and the padding is inside it, so they show without stealing a column.
+   Three things are drawn: a 1 px divider on each block's top edge, the gutter
+   bar, and — only while the pointer is inside a block — its action toolbar.
+   The gutter bars and the dividers reach into the pane's left padding
+   (`--terminal-padding`, applied by `.cortx-xterm-host`) with a negative
+   `left`: the host clips at its border box and the padding is inside it, so
+   they show without stealing a column.
 
-   Colours come from the *terminal* palette (the ANSI colours xterm is drawing
-   with, pushed onto the layer as `--cortx-block-*` by `applyPalette`), never
-   from the app chrome — an imported Warp theme colours the blocks too, and a
-   divider stays exactly as legible on a black theme, a white one and a
-   wallpaper.
+   Nothing is drawn *over* a block's rows. There is no hover or selection wash:
+   the block under the pointer is the one whose hairline — and the next one's —
+   comes up, with its gutter bar at full strength. A tint over the grid, however
+   faint, changes the colour of the text the shell wrote, and on a theme with a
+   background image it is the first thing the eye lands on.
+
+   Status colours come from the *terminal* palette (the ANSI colours xterm is
+   drawing with, pushed onto the layer as `--cortx-block-*` by `applyPalette`),
+   never from the app chrome — an imported Warp theme colours the gutter too.
+   The divider is the exception: it is achromatic on purpose (see the rule).
 
    Nothing here takes the mouse except the gutter bar, the fold cover and the
    toolbar's buttons: hover is worked out from the pointer's y coordinate in
@@ -153,17 +158,35 @@
   background: var(--cortx-block-fail);
   opacity: 0.8;
 }
+/* The block under the pointer, and the selected one: the gutter bar comes up
+   to full strength and gains a pixel. That, plus the two hairlines bracketing
+   the block, is the entire hover feedback — nothing is painted over the rows,
+   ever. A wash over a block, however faint, recolours the text the shell drew,
+   and on a theme with a background image it is the first thing the eye finds. */
 .cortx-blocks-bar:hover::before,
 .cortx-blocks-bar[data-selected='true']::before {
+  width: calc(var(--cortx-block-bar-width, 3px) + 1px);
   opacity: 1;
 }
 
 /* The divider that opens a block: one hairline, edge to edge, on the boundary
-   between the previous block's last output row and this block's prompt. Fine
-   (exactly 1 px, never scaled) but unmistakable — the contrast is taken from
-   the *terminal* foreground, so it lands at the same strength on a black
-   theme, a white one and a photograph. `--cortx-block-fg` is set in JS from
-   the palette xterm is drawing with. */
+   between the previous block's last output row and this block's prompt.
+
+   It is deliberately *achromatic*: `--cortx-block-line` is set in JS to plain
+   white on a dark palette and plain black on a light one (see `applyPalette`),
+   never mixed from the theme's foreground. A foreground mix is what made this
+   rule pink on a wallpaper theme — `aespa_wda` is white text on `#713d39` — and
+   a hue is exactly what a separator must not have. The alpha is the other half
+   of the fix: at ~11 % you notice a boundary, you do not read a line.
+
+   No status colour either. A red rule across the whole pane on every failed
+   command is the loudest thing on screen; the exit code lives in the gutter
+   bar, three pixels wide, out in the margin. */
+/* Vertical placement is inline, from lib/terminalBlocks.ts: the block's top
+   edge normally, and the middle of the blank line above it when the shell left
+   one (`terminal.blockSpacing = normal`). Nothing here can create that space —
+   the grid's rows are all one row tall — so the CSS only ever draws the rule
+   where the geometry says. */
 .cortx-blocks-rule {
   position: absolute;
   /* Out into the host's left padding, so the rule really does cross the whole
@@ -173,64 +196,44 @@
   right: 0;
   height: 1px;
   pointer-events: none;
-  background: color-mix(in srgb, var(--cortx-block-fg) 34%, transparent);
+  background: var(--cortx-block-line, rgb(255 255 255 / 0.11));
   transition: background-color 120ms ease;
 }
-.cortx-blocks-rule[data-status='running'] {
-  background: color-mix(in srgb, var(--cortx-block-run) 55%, transparent);
-}
-.cortx-blocks-rule[data-status='failed'] {
-  background: color-mix(in srgb, var(--cortx-block-fail) 62%, transparent);
-}
-/* Hovered or selected: the block announces where it begins. */
+/* The two rules that bracket the hovered / selected block: still neutral, just
+   no longer whispering. This is what says "this block", instead of a mask. */
 .cortx-blocks-rule[data-active='true'] {
-  background: color-mix(in srgb, var(--cortx-block-fg) 78%, transparent);
-}
-.cortx-blocks-rule[data-active='true'][data-status='running'] {
-  background: var(--cortx-block-run);
-}
-.cortx-blocks-rule[data-active='true'][data-status='failed'] {
-  background: var(--cortx-block-fail);
+  background: var(--cortx-block-line-active, rgb(255 255 255 / 0.3));
 }
 
-/* The hovered / selected block: a wash the strength of a selection highlight,
-   never enough to make the text underneath harder to read. */
-.cortx-blocks-band {
-  position: absolute;
-  left: calc(0px - var(--terminal-padding, 8px));
-  right: 0;
-  pointer-events: none;
-  transition: background-color 120ms ease;
-}
-.cortx-blocks-band[data-state='hover'] {
-  background: color-mix(in srgb, var(--cortx-block-fg) 5%, transparent);
-}
-.cortx-blocks-band[data-state='selected'] {
-  background: color-mix(in srgb, var(--cortx-block-fg) 10%, transparent);
-}
-
-/* The block's actions, at its top-right corner and straddling its divider —
-   where Warp puts them. It is the only part of the overlay that covers text,
-   it only exists while the pointer is inside the block, and it is opaque
-   enough (the terminal's own background, blurred) to stay readable over a
-   wallpaper. */
+/* The block's actions. It is the only part of the overlay that sits over the
+   grid, so `placeToolbar` only ever puts it on a row whose right-hand end
+   paints nothing — no glyph, no coloured plate — and sizes it to exactly one
+   row so it cannot spill into the neighbours. Its own plate is the terminal's
+   background, blurred, because a themed window is see-through down to the
+   wallpaper and icons floating on a photograph are unreadable. */
 .cortx-blocks-actions {
   position: absolute;
-  right: 12px;
+  /* Clear of the scrollbar. `TOOLBAR_RIGHT_MARGIN` in lib/terminalBlocks.ts is
+     this plus the air the bar keeps from the last glyph of its row. */
+  right: 10px;
   /* Elements are reused across frames, so their DOM order is creation order
      and not paint order; the one thing that must always win is this. */
   z-index: 2;
   display: flex;
   align-items: center;
   gap: 1px;
-  height: 24px; /* TOOLBAR_HEIGHT in lib/terminalBlocks.ts */
+  /* Overridden inline with the row height the bar was fitted to; this is the
+     ceiling (TOOLBAR_HEIGHT in lib/terminalBlocks.ts). Buttons are 22 px wide,
+     which with the 1 px gap, the 3 px padding and the border is what
+     `blockToolbarWidth` predicts. */
+  height: 24px;
   padding: 0 3px;
   box-sizing: border-box;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--cortx-block-fg) 20%, transparent);
   background: color-mix(in srgb, var(--cortx-block-bg) 86%, transparent);
   backdrop-filter: blur(8px);
-  box-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.22);
   pointer-events: auto;
   animation: cortx-blocks-actions-in 110ms ease-out;
 }
@@ -248,7 +251,9 @@
   display: grid;
   place-items: center;
   width: 22px;
-  height: 18px;
+  /* Follows the bar, which is squeezed to one grid row on a small font. */
+  height: calc(100% - 5px);
+  min-height: 11px;
   padding: 0;
   border: 0;
   border-radius: 999px;

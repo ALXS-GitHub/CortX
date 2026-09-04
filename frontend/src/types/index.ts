@@ -240,7 +240,16 @@ export interface TerminalConfig {
    *  command, the output or both, run it again, fold it, and `⋯` for the rest.
    *  Off leaves the gutter's right-click menu. Default true. */
   blockActions?: boolean;
+  /** Air between two blocks — Warp's `appearance.spacing`, and like it
+   *  `normal` by default. `normal` makes the shell integration print one real
+   *  blank line before a prompt that follows a command: an overlay cannot
+   *  space out two rows of an xterm grid, so the room has to exist in the
+   *  buffer. `compact` adds nothing. Applies to newly opened terminals. */
+  blockSpacing?: TerminalBlockSpacing;
 }
+
+/** How much room a block gets above it (ticket #7). Default `normal`. */
+export type TerminalBlockSpacing = 'normal' | 'compact';
 
 /** Where the input line sits in a terminal pane (ticket #15, U0). */
 export type TerminalInputPosition = 'flow' | 'bottom';

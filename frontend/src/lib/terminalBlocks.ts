@@ -13,15 +13,20 @@
  * - **Dividers**: a 1 px rule the full width of the pane on every block's top
  *   edge. This is what makes a block a thing you *see* rather than a thing the
  *   app knows about — Warp's `appearance.blocks.show_block_dividers`, which is
- *   on by default there and here.
- * - **A hover / selection band**: the block under the pointer (and the selected
- *   one) is washed with a few percent of the foreground colour, so its extent
- *   is obvious before you act on it.
- * - **A hover toolbar** at the block's top-right corner, straddling its
- *   divider: copy the command, copy the output, copy both, run it again, fold
- *   it away, and a `⋯` opening the full menu. Warp puts its block actions in
- *   the same place, and this is the whole difference between "there is a menu
- *   somewhere" and "the actions are there when you want them".
+ *   on by default there and here. It is a *neutral* wash (white on a dark
+ *   palette, black on a light one) and weak enough to be guessed rather than
+ *   read; it carries no status colour, because a full-width red rule is the
+ *   loudest thing on a pane.
+ * - **A bracket, not a band**: the block under the pointer (and the selected
+ *   one) is shown by its own hairline and the next block's coming up slightly,
+ *   so its extent is obvious. Nothing is ever painted *over* a block's rows:
+ *   a wash, however faint, recolours the text the shell drew and is the first
+ *   thing the eye finds on a themed pane.
+ * - **A hover toolbar** near the block's top-right corner: copy the command,
+ *   copy the output, copy both, run it again, fold it away, and a `⋯` opening
+ *   the full menu. It only ever lands on a row whose right-hand end is empty —
+ *   preferably the gap on the divider — so a right-hand prompt (a clock, a git
+ *   status) is never covered; when no such row exists it is not drawn at all.
  * - **A clickable gutter** in the pane's left padding: one bar per block,
  *   coloured by the exit code the shell reported. Click selects, double-click
  *   folds, right-click opens the block menu.
@@ -35,6 +40,27 @@
  *   it first (Warp's `terminal:reinput_commands`).
  * - **Scroll to the top / bottom** of a block, and hand its rows to the
  *   terminal's own text selection.
+ *
+ * ## The one thing the overlay cannot do: make room
+ *
+ * Warp has a setting for the air between two blocks (`appearance.spacing`)
+ * because it draws its blocks itself and can reserve pixels. We draw over
+ * xterm's grid, where every row is exactly one row tall: `lineHeight` moves
+ * *all* of them, the canvas renderer paints the whole viewport as one bitmap,
+ * and the DOM renderer's rows are addressed by `y / rowHeight` everywhere from
+ * selection to link hit-testing — pushing one row down with a margin would
+ * shift the pane's own idea of where every glyph is. So no overlay, in any
+ * renderer, can space two blocks apart.
+ *
+ * The room therefore has to *exist*, as a real blank line in the buffer, and
+ * the only thing that can put one there without lying to the PTY is the shell:
+ * `terminal.blockSpacing = normal` (the default, as in Warp) makes the shell
+ * integration print one before a prompt that follows a command — see
+ * `shell_init.rs`. Everything here only *reads* the result: when the row above
+ * a block paints nothing, the divider moves into the middle of it and the
+ * action bar is centred on the same offset, which is how the boundary ends up
+ * with padding above and below it and the toolbar ends up over nothing at all.
+ * `compact` needs no code of its own — there is simply no such row.
  *
  * ## Why the overlay never takes the mouse
  *
@@ -114,15 +140,19 @@ import {
   blockMarkdown,
   blockRange,
   blockStatusLabel,
+  blockToolbarWidth,
   boundaryLine,
   clipToViewport,
+  dividerOffsetRows,
   foldLabel,
   foldedRange,
   joinBufferRows,
   navigateBlocks,
   parseBlockMarker,
   shortCommand,
+  terminalIsDark,
   type BlockActionId,
+  type BlockSpacingRow,
   type BlockActionSpec,
   type BufferRowText,
   type BlockStatus,
@@ -168,8 +198,35 @@ const MAX_BLOCKS = 400;
 /** Visible width of a gutter bar, in px (the click target is wider; see CSS). */
 const BAR_WIDTH = 3;
 
-/** Height of the hover toolbar, in px. Must match `.cortx-blocks-actions`. */
+/**
+ * Tallest the hover toolbar is ever drawn, in px. It is shrunk to one grid row
+ * when the rows are shorter than this, because a toolbar that spills into the
+ * row above or below would cover text there (see `placeToolbar`).
+ */
 const TOOLBAR_HEIGHT = 24;
+
+/** Shortest a toolbar may be squeezed to before it is simply not drawn. */
+const TOOLBAR_MIN_HEIGHT = 15;
+
+/**
+ * Blank px the toolbar wants past its own width at the right edge of the pane:
+ * the CSS inset (10 px, clear of the scrollbar) plus a little air so it never
+ * touches the last glyph of the row it lands on.
+ */
+const TOOLBAR_RIGHT_MARGIN = 16;
+
+/** How far down a block we look for a row the toolbar can sit on. */
+const TOOLBAR_SEARCH_ROWS = 24;
+
+/** The grid's geometry inside the session container, in px. */
+interface Metrics {
+  /** Height of one row. */
+  cell: number;
+  /** Width of one column (0 when it could not be measured). */
+  column: number;
+  /** Where the grid starts, relative to the container's top. */
+  top: number;
+}
 
 interface BlockRecord {
   id: number;
@@ -202,10 +259,26 @@ class BlockController {
   private hoveredId: number | null = null;
   /** Viewport row the pointer was last resolved on (mousemove fires per pixel). */
   private hoverRow = -1;
+  /**
+   * Viewport rows the hover toolbar is standing on. Those rows do not change
+   * the hovered block: the toolbar is often placed on the row *above* a block's
+   * divider (the one place near the top edge that is usually blank), and
+   * without this the pointer would hand the hover to the block above on its way
+   * to the buttons — the bar would flee from under the cursor.
+   */
+  private toolbarRows: number[] = [];
 
   private layer: HTMLElement | null = null;
   /** Elements of the last render, keyed `<blockId>:<kind>`, for reconciling. */
   private elements = new Map<string, HTMLElement>();
+  /**
+   * `usedColumns` memo for the frame being drawn, keyed by absolute buffer
+   * line. Every block asks about the row above its prompt (is there a spacing
+   * line?) and the toolbar asks about the same rows again — and the answer for
+   * a blank row costs a full scan of the line, since there is no glyph to stop
+   * at. Cleared at the top of every `render`.
+   */
+  private usedCache = new Map<number, number>();
   private frame = 0;
   /** True while we dispose markers ourselves (their onDispose must not recurse). */
   private tearingDown = false;
@@ -257,6 +330,7 @@ class BlockController {
     this.current = null;
     this.selectedId = null;
     this.hoveredId = null;
+    this.usedCache.clear();
     this.removeLayer();
     closeBlockMenu();
     this.tearingDown = false;
@@ -546,6 +620,8 @@ class BlockController {
     const row = Math.floor(y / metrics.cell);
     if (row === this.hoverRow) return;
     this.hoverRow = row;
+    // On (or beside) the toolbar: the pointer is on its way to a button.
+    if (this.hoveredId !== null && this.toolbarRows.includes(row)) return;
     if (row < 0 || row >= this.term.rows) {
       this.setHovered(null);
       return;
@@ -804,18 +880,23 @@ class BlockController {
     this.elements.clear();
   }
 
-  /** Height and top offset of one grid row, measured on the screen element. */
-  private metrics(): { cell: number; top: number } | null {
+  /** Size and top offset of one grid cell, measured on the screen element. */
+  private metrics(): Metrics | null {
     const screen = this.term.element?.querySelector('.xterm-screen') as HTMLElement | null;
-    if (!screen || this.term.rows < 1) return null;
+    if (!screen || this.term.rows < 1 || this.term.cols < 1) return null;
     const cell = screen.clientHeight / this.term.rows;
+    const column = screen.clientWidth / this.term.cols;
     if (!Number.isFinite(cell) || cell <= 0) return null;
     // The screen sits at the top of the container in practice, but a renderer
     // or a future addon could inset it; measure rather than assume. Both
     // elements carry the same `translateY` (bottom-pinned mode), so the
     // difference is exactly the inset.
     const top = screen.getBoundingClientRect().top - this.container.getBoundingClientRect().top;
-    return { cell, top: Number.isFinite(top) ? top : 0 };
+    return {
+      cell,
+      column: Number.isFinite(column) && column > 0 ? column : 0,
+      top: Number.isFinite(top) ? top : 0,
+    };
   }
 
   private render() {
@@ -835,6 +916,9 @@ class BlockController {
     const layer = this.ensureLayer();
     layer.hidden = false;
     this.applyPalette(layer);
+    // Recomputed below, for the one block that has a toolbar (if any).
+    this.toolbarRows = [];
+    this.usedCache.clear();
 
     const blocks = this.blocks();
     const liveEnd = this.liveEnd();
@@ -844,6 +928,20 @@ class BlockController {
     const dividers = blockDividersEnabled();
     const toolbars = blockActionBarEnabled();
     const keep = new Set<string>();
+    // A hovered / selected block is shown by the two hairlines that *bracket*
+    // it — its own, and the one belonging to the block below — never by a
+    // wash over its rows: a tint over the grid changes the colour of the text
+    // the shell drew, and on a wallpaper theme it is the first thing the eye
+    // lands on. The bracket plus the gutter bar say the same thing and cover
+    // nothing.
+    const bracketed = new Set<number>();
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      if (block.id !== this.selectedId && block.id !== this.hoveredId) continue;
+      bracketed.add(block.id);
+      const below = blocks[i + 1];
+      if (below) bracketed.add(below.id);
+    }
 
     for (const block of blocks) {
       const range = blockRange(block, liveEnd);
@@ -857,12 +955,30 @@ class BlockController {
       // feature — without it a block is a thing the app knows about and the
       // eye does not. `<= rows` and not `< rows`: a block starting on the row
       // just past the bottom still has its top edge on the last pixel line.
+      //
+      // It carries no status colour: a full-width red or yellow rule is the
+      // loudest thing on the pane, and the exit code is already the colour of
+      // the gutter bar, which is three pixels wide and in the margin.
+      //
+      // When the shell left a blank line above the prompt — the spacing
+      // `terminal.blockSpacing = normal` asks it for, or a prompt of the
+      // user's own that starts on a new line — the rule moves into the middle
+      // of it, so there is real padding on both sides of the boundary instead
+      // of a hairline pressed against the prompt. Half a row up is only drawn
+      // when that row is actually in the viewport; at the very top of the pane
+      // the blank line has scrolled off and the top edge is right again.
       const dividerRow = block.start - viewportY;
+      // The blank row is only used when it is on screen: at the very top of
+      // the pane the spacing line has scrolled off and at the very bottom
+      // there is nothing under the last row to move into.
+      const spacing = this.spacingRow(block.start);
+      const usable =
+        (spacing === 'above' && dividerRow >= 1) || (spacing === 'first' && dividerRow < rows);
+      const offset = usable ? dividerOffsetRows(spacing) : 0;
       if (dividers && dividerRow >= 0 && dividerRow <= rows) {
         const rule = this.element(keep, `${block.id}:rule`, 'cortx-blocks-rule', layer);
-        rule.style.top = `${Math.round(metrics.top + dividerRow * metrics.cell)}px`;
-        rule.dataset.status = barStatus(block);
-        rule.dataset.active = hovered || selected ? 'true' : 'false';
+        rule.style.top = `${Math.round(metrics.top + (dividerRow + offset) * metrics.cell)}px`;
+        rule.dataset.active = bracketed.has(block.id) ? 'true' : 'false';
       }
 
       if (visible && gutter) {
@@ -875,24 +991,14 @@ class BlockController {
         this.bindBar(bar, block.id);
       }
 
-      // Hovered or selected: a wash over the block's rows, so it reads as one
-      // object. Never strong enough to make the text under it harder to read.
-      if (visible && (selected || hovered)) {
-        const band = this.element(keep, `${block.id}:band`, 'cortx-blocks-band', layer);
-        band.style.top = `${Math.round(metrics.top + visible.row * metrics.cell)}px`;
-        band.style.height = `${Math.round(visible.count * metrics.cell)}px`;
-        band.dataset.state = selected ? 'selected' : 'hover';
-      }
-
-      // The toolbar, at the block's top-right corner, straddling its divider —
-      // where Warp puts it. Only for a block that has run something: the
-      // prompt being typed has no command to act on, and that row belongs to
-      // the input editor (ticket #15). The selected block gets one too when
-      // the pointer is elsewhere, so Ctrl+↑ / Ctrl+↓ reach the actions without
-      // a mouse — but never two toolbars at once.
+      // The toolbar, near the block's top-right corner. Only for a block that
+      // has run something: the prompt being typed has no command to act on,
+      // and that row belongs to the input editor (ticket #15). The selected
+      // block gets one too when the pointer is elsewhere, so Ctrl+↑ / Ctrl+↓
+      // reach the actions without a mouse — but never two toolbars at once.
       const armed = hovered || (selected && this.hoveredId === null);
       if (visible && toolbars && armed && block.status !== 'prompt') {
-        this.toolbar(keep, layer, block, metrics, visible.row, rows);
+        this.toolbar(keep, layer, block, metrics, visible, viewportY, rows, usable ? spacing : null);
       }
 
       if (block.folded) {
@@ -935,24 +1041,31 @@ class BlockController {
    * that opens the rest. Rebuilt only when the set of actions changes (its
    * signature is stashed on the element) — this runs on every rendered frame,
    * including while a command is printing.
+   *
+   * Where it goes is decided by `placeToolbar`, and when that answers "nowhere"
+   * the bar is simply not drawn: it may never cover a glyph the shell wrote.
    */
   private toolbar(
     keep: Set<string>,
     layer: HTMLElement,
     block: TerminalBlock,
-    metrics: { cell: number; top: number },
-    row: number,
-    rows: number
+    metrics: Metrics,
+    visible: { row: number; count: number },
+    viewportY: number,
+    rows: number,
+    spacing: BlockSpacingRow
   ) {
-    const bar = this.element(keep, `${block.id}:actions`, 'cortx-blocks-actions', layer);
-    // Centred on the block's top edge, then kept inside the pane: a block
-    // whose first line is scrolled off still gets its toolbar, at the top.
-    const anchor = metrics.top + row * metrics.cell;
-    const bottom = metrics.top + rows * metrics.cell;
-    const top = Math.min(Math.max(anchor - TOOLBAR_HEIGHT / 2, metrics.top + 1), bottom - TOOLBAR_HEIGHT - 1);
-    bar.style.top = `${Math.round(top)}px`;
-
     const specs = this.actionsFor(block).filter((spec) => spec.primary);
+    // `+ 1` for the "More actions" button, which is always there.
+    const width = blockToolbarWidth(specs.length + 1);
+    const slot = this.placeToolbar(block, metrics, visible, viewportY, rows, width, spacing);
+    if (!slot) return;
+    this.toolbarRows = slot.rows;
+
+    const bar = this.element(keep, `${block.id}:actions`, 'cortx-blocks-actions', layer);
+    bar.style.top = `${Math.round(slot.top)}px`;
+    bar.style.height = `${Math.round(slot.height)}px`;
+
     const signature = specs.map((spec) => `${spec.id} ${spec.label} ${spec.disabled}`).join('');
     if (bar.dataset.signature === signature) return;
     bar.dataset.signature = signature;
@@ -961,6 +1074,150 @@ class BlockController {
       bar.appendChild(this.actionButton(block.id, spec.id, spec.label, spec.hint, spec.disabled));
     }
     bar.appendChild(this.actionButton(block.id, 'more', 'More actions', undefined, false));
+  }
+
+  /**
+   * Find a place for a block's toolbar that hides nothing.
+   *
+   * The prompt line is not free real estate: a right-hand prompt — oh-my-posh's
+   * clock, a git status, an exit code — sits exactly where a top-right toolbar
+   * would go, and covering it is the one thing this overlay must never do. So
+   * the bar only ever lands on a row whose right-hand end paints *nothing*, and
+   * it is squeezed to a single row's height so it cannot spill into the rows
+   * above and below either.
+   *
+   * Candidates, in the order that reads best:
+   *
+   * 0. the spacing line the shell left above the prompt, when there is one —
+   *    a row that belongs to no block and holds nothing, and the row the
+   *    divider is centred in, so the bar sits *on* the boundary the way Warp's
+   *    does. This is what `terminal.blockSpacing = normal` buys;
+   * 1. straddling the divider, when the row above it and the block's first row
+   *    are both free — the empty gap between two blocks, which is where the eye
+   *    expects a boundary control;
+   * 2. the row just above the divider on its own;
+   * 3. the block's first row on its own;
+   * 4. failing those, the first free row going down through the block.
+   *
+   * When every candidate is occupied the toolbar is not drawn at all. The
+   * gutter bar still opens the same menu on a right-click, so nothing is lost
+   * but the shortcut.
+   */
+  private placeToolbar(
+    block: TerminalBlock,
+    metrics: Metrics,
+    visible: { row: number; count: number },
+    viewportY: number,
+    rows: number,
+    width: number,
+    spacing: BlockSpacingRow
+  ): { top: number; height: number; rows: number[] } | null {
+    const height = Math.min(TOOLBAR_HEIGHT, Math.floor(metrics.cell));
+    if (height < TOOLBAR_MIN_HEIGHT || metrics.column <= 0) return null;
+
+    const need = width + TOOLBAR_RIGHT_MARGIN;
+    const free = (row: number) => {
+      if (row < 0 || row >= rows) return false;
+      return (this.term.cols - this.usedColumns(viewportY + row)) * metrics.column >= need;
+    };
+    /** A `height`-tall bar centred on one viewport row. */
+    const onRow = (row: number) => ({
+      top: metrics.top + (row + 0.5) * metrics.cell - height / 2,
+      height,
+      rows: [row],
+    });
+
+    const startRow = block.start - viewportY;
+    // The spacing row, when it is on screen: nothing is written there and the
+    // divider is drawn through its middle, so this is both the safest and the
+    // best-looking place. (`free` re-checks the width for a pane too narrow
+    // to hold the bar at all.)
+    if (spacing === 'above' && startRow >= 1 && free(startRow - 1)) return onRow(startRow - 1);
+    // Same idea when the blank line belongs to the block itself: the prompt is
+    // one row lower, so the bar goes on the block's own first row.
+    if (spacing === 'first' && free(startRow)) return onRow(startRow);
+    const aboveFree = free(startRow - 1);
+    const firstFree = free(startRow);
+    // Centred on the divider itself: half of it in each of two free rows.
+    if (aboveFree && firstFree) {
+      return {
+        top: metrics.top + startRow * metrics.cell - height / 2,
+        height,
+        rows: [startRow - 1, startRow],
+      };
+    }
+    if (aboveFree) return onRow(startRow - 1);
+    if (firstFree) return onRow(startRow);
+
+    // Nothing at the top edge: walk down the block's visible rows, skipping
+    // the first one when that is the row just refused.
+    const from = startRow === visible.row ? visible.row + 1 : visible.row;
+    const to = Math.min(visible.row + visible.count - 1, rows - 1, from + TOOLBAR_SEARCH_ROWS);
+    for (let row = from; row <= to; row++) {
+      if (free(row)) return onRow(row);
+    }
+    return null;
+  }
+
+  /**
+   * The column after the last cell of an absolute buffer line that paints
+   * anything — a glyph *or* a background colour, because a right-hand prompt is
+   * usually a run of spaces on a coloured plate and covering that would be just
+   * as wrong as covering a letter. `0` for a row that paints nothing at all.
+   *
+   * Memoised for the frame being drawn: the same rows are asked about twice —
+   * once to find the spacing line above a block, once to place its toolbar —
+   * and the answer for a blank row costs a scan of the whole line.
+   */
+  private usedColumns(line: number): number {
+    const cached = this.usedCache.get(line);
+    if (cached !== undefined) return cached;
+    const value = this.measureColumns(line);
+    this.usedCache.set(line, value);
+    return value;
+  }
+
+  /**
+   * Is the line just above `start` a *spacing* line — one that belongs to no
+   * block and paints nothing?
+   *
+   * That is what `terminal.blockSpacing = normal` makes the shell print before
+   * a prompt that follows a command (`shell_init.rs`), and it is read off the
+   * buffer rather than off the setting on purpose: a prompt of the user's own
+   * that already opens on a new line gets the same treatment, a session
+   * started before the setting changed keeps the layout it actually has, and
+   * `compact` needs no special case at all.
+   *
+   * `start - 1` is an *absolute* buffer line, so a spacing row scrolled just
+   * off the top of the viewport is still recognised.
+   */
+  private spacingRow(start: number): BlockSpacingRow {
+    if (start >= 1 && this.usedColumns(start - 1) === 0) return 'above';
+    // A prompt that opens on a newline of its own (oh-my-posh, starship's
+    // `add_newline`) puts the blank row *inside* the block: `OSC 133;A` lands
+    // before the newline. The shell integration adds nothing in that case, so
+    // this is the only way to see it.
+    if (this.usedColumns(start) === 0) return 'first';
+    return null;
+  }
+
+  /** The uncached half of `usedColumns`. */
+  private measureColumns(line: number): number {
+    const buf = this.term.buffer.active;
+    const row = buf.getLine(line);
+    if (!row) return 0;
+    // One cell object, reused down the row: this runs for a handful of rows on
+    // every frame the pointer is inside a block.
+    const cell = row.getCell(0);
+    for (let x = this.term.cols - 1; x >= 0; x--) {
+      const c = cell ? row.getCell(x, cell) : row.getCell(x);
+      if (!c) continue;
+      const chars = c.getChars();
+      if (chars !== '' && chars !== ' ') return x + Math.max(1, c.getWidth());
+      // Mode 0 is "the theme's own background", i.e. nothing was painted here.
+      if (c.getBgColorMode() !== 0) return x + 1;
+    }
+    return 0;
   }
 
   /** One icon button of the toolbar. `more` opens the menu instead of acting. */
@@ -1059,6 +1316,24 @@ class BlockController {
     set('--cortx-block-run', theme.yellow, 'var(--warning, #f5f543)');
     set('--cortx-block-idle', theme.brightBlack, 'var(--text-faint, #666666)');
     set('--cortx-block-fg', theme.foreground, 'var(--terminal-fg, var(--foreground))');
+
+    // The hairline between two blocks is the one thing on this layer that must
+    // never take a *hue*. Mixing the theme's foreground into it — what this
+    // used to do — is fine on a plain black or white theme and wrong the moment
+    // the theme has a background image: `aespa_wda`'s foreground is pure white
+    // and its background `#713d39`, so a 34 % white rule reads as a bright pink
+    // stripe pointing straight at the wallpaper's colour. A *neutral* wash has
+    // no such opinion: white over a dark ground, black over a light one, both
+    // achromatic, both weak enough that you notice the boundary rather than the
+    // line. Which of the two is decided from the palette the terminal is
+    // actually drawing with, not from the app's light/dark chrome, so an
+    // imported Warp theme gets the right one in a window of either mode.
+    const dark = terminalIsDark(theme.background, theme.foreground);
+    layer.style.setProperty('--cortx-block-line', dark ? 'rgb(255 255 255 / 0.11)' : 'rgb(0 0 0 / 0.13)');
+    layer.style.setProperty(
+      '--cortx-block-line-active',
+      dark ? 'rgb(255 255 255 / 0.30)' : 'rgb(0 0 0 / 0.32)'
+    );
     // The pane's own background, for the toolbar's plate: a themed Terminal
     // window is see-through down to the wallpaper, and icons floating on a
     // photograph are unreadable.
