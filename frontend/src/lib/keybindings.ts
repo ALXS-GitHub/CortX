@@ -39,10 +39,13 @@ export const KEYBINDING_ACTIONS = [
   // --- Panes
   { id: 'pane.splitRight', label: 'Split right', category: 'Panes', defaults: ['ctrl+shift+d'] },
   { id: 'pane.splitDown', label: 'Split down', category: 'Panes', defaults: ['ctrl+shift+e'] },
-  { id: 'pane.focusLeft', label: 'Focus pane left', category: 'Panes', defaults: ['ctrl+alt+left', 'alt+left'] },
-  { id: 'pane.focusRight', label: 'Focus pane right', category: 'Panes', defaults: ['ctrl+alt+right', 'alt+right'] },
-  { id: 'pane.focusUp', label: 'Focus pane above', category: 'Panes', defaults: ['ctrl+alt+up', 'alt+up'] },
-  { id: 'pane.focusDown', label: 'Focus pane below', category: 'Panes', defaults: ['ctrl+alt+down', 'alt+down'] },
+  // Ctrl+Alt+arrow only: a bare Alt+arrow is Option/Alt + arrow for the
+  // program under the PTY (word by word in Claude Code, zsh and PSReadLine),
+  // and a split pane in that direction used to swallow it.
+  { id: 'pane.focusLeft', label: 'Focus pane left', category: 'Panes', defaults: ['ctrl+alt+left'] },
+  { id: 'pane.focusRight', label: 'Focus pane right', category: 'Panes', defaults: ['ctrl+alt+right'] },
+  { id: 'pane.focusUp', label: 'Focus pane above', category: 'Panes', defaults: ['ctrl+alt+up'] },
+  { id: 'pane.focusDown', label: 'Focus pane below', category: 'Panes', defaults: ['ctrl+alt+down'] },
   { id: 'pane.resizeLeft', label: 'Resize pane left', category: 'Panes', defaults: ['ctrl+alt+shift+left'] },
   { id: 'pane.resizeRight', label: 'Resize pane right', category: 'Panes', defaults: ['ctrl+alt+shift+right'] },
   { id: 'pane.resizeUp', label: 'Resize pane up', category: 'Panes', defaults: ['ctrl+alt+shift+up'] },

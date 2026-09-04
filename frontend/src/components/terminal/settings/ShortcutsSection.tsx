@@ -1,7 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Keyboard, RotateCcw, TriangleAlert } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Keyboard, MousePointerClick, RotateCcw, TriangleAlert } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { DEFAULT_SHIFT_ENTER, DEFAULT_SMOOTH_SCROLL_DURATION } from '@/lib/terminalKeys';
+import { useAppStore } from '@/stores/appStore';
+import type { ShiftEnterKey, TerminalConfig } from '@/types';
 import {
   IS_MAC,
   KEYBINDING_ACTIONS,
@@ -22,6 +30,112 @@ interface ShortcutsSectionProps {
   value: KeybindingOverrides | undefined;
   /** Reports the next overrides record; the page holds the state and saves it. */
   onChange: (next: KeybindingOverrides) => void;
+}
+
+/** One labelled row of the "Keys and selection" card. */
+function BehaviourRow({ id, label, hint, children }: { id: string; label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <Label htmlFor={id}>{label}</Label>
+        {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Settings card for what the keys and the mouse do inside a terminal, as
+ * opposed to the window shortcuts below it. These three are saved as soon as
+ * they change (the Settings page's Save button only owns the fields it
+ * renders itself).
+ */
+function KeysAndSelectionCard() {
+  const settings = useAppStore((s) => s.settings);
+  const updateSettings = useAppStore((s) => s.updateSettings);
+  const terminal = settings?.terminal;
+
+  const patch = (next: Partial<TerminalConfig>) => {
+    if (!settings) return;
+    updateSettings({ ...settings, terminal: { ...settings.terminal, ...next } }).catch((err) =>
+      toast.error('Could not save the terminal settings', { description: String(err) })
+    );
+  };
+
+  const copyOnSelect = terminal?.copyOnSelect ?? true;
+  const shiftEnter = terminal?.shiftEnter ?? DEFAULT_SHIFT_ENTER;
+  const smooth = terminal?.smoothScrollDuration ?? DEFAULT_SMOOTH_SCROLL_DURATION;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <MousePointerClick className="size-4 text-faint" />
+          Keys and selection
+        </CardTitle>
+        <CardDescription>How the keyboard and the mouse behave inside a terminal. Saved as soon as you change them.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <BehaviourRow
+          id="terminal-copy-on-select"
+          label="Copy on select"
+          hint={
+            <>
+              Selecting with the mouse copies straight away, like Warp. Ctrl+C then keeps interrupting the running program instead of
+              copying — Ctrl+Shift+C copies whenever you need it.
+            </>
+          }
+        >
+          <Switch id="terminal-copy-on-select" checked={copyOnSelect} onCheckedChange={(v) => patch({ copyOnSelect: v })} disabled={!settings} />
+        </BehaviourRow>
+
+        <BehaviourRow
+          id="terminal-shift-enter"
+          label="Shift+Enter sends"
+          hint="A plain terminal sends the same key for Enter and Shift+Enter. ESC+Enter is what Claude Code's /terminal-setup binds, and what zsh and fish insert a new line for."
+        >
+          <Select value={shiftEnter} onValueChange={(v: ShiftEnterKey) => patch({ shiftEnter: v })} disabled={!settings}>
+            <SelectTrigger id="terminal-shift-enter" className="w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="escape-enter">A new line (ESC + Enter)</SelectItem>
+              <SelectItem value="enter">The same thing as Enter</SelectItem>
+            </SelectContent>
+          </Select>
+        </BehaviourRow>
+
+        <BehaviourRow
+          id="terminal-smooth-scroll"
+          label="Smooth scrolling"
+          hint="The wheel glides instead of jumping a line at a time. Typing still snaps to the bottom instantly."
+        >
+          <Switch
+            id="terminal-smooth-scroll"
+            checked={smooth > 0}
+            onCheckedChange={(v) => patch({ smoothScrollDuration: v ? DEFAULT_SMOOTH_SCROLL_DURATION : 0 })}
+            disabled={!settings}
+          />
+          <Input
+            type="number"
+            min={10}
+            max={500}
+            step={10}
+            value={smooth > 0 ? smooth : DEFAULT_SMOOTH_SCROLL_DURATION}
+            disabled={!settings || smooth === 0}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) patch({ smoothScrollDuration: Math.min(500, Math.max(10, Math.round(n))) });
+            }}
+            className="w-20"
+            aria-label="Smooth scrolling duration in milliseconds"
+          />
+          <span className="text-xs text-muted-foreground">ms</span>
+        </BehaviourRow>
+      </CardContent>
+    </Card>
+  );
 }
 
 /**
@@ -157,6 +271,8 @@ export function ShortcutsSection({ value, onChange }: ShortcutsSectionProps) {
   };
 
   return (
+    <>
+    <KeysAndSelectionCard />
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
@@ -195,5 +311,6 @@ export function ShortcutsSection({ value, onChange }: ShortcutsSectionProps) {
         ))}
       </CardContent>
     </Card>
+    </>
   );
 }

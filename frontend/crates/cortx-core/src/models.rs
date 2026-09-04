@@ -479,6 +479,39 @@ pub struct TerminalConfig {
     /// (off: the dock follows the app skin, as before).
     #[serde(default)]
     pub dock_uses_terminal_theme: bool,
+    /// A mouse selection lands in the clipboard as soon as it ends (Warp /
+    /// X11 style). While on, Ctrl+C keeps interrupting the running program
+    /// instead of copying — the text is already copied.
+    #[serde(default = "default_true")]
+    pub copy_on_select: bool,
+    /// What Shift+Enter sends to the program under the PTY.
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub shift_enter: ShiftEnterKey,
+    /// Wheel scrolling animation, in ms. 0 scrolls instantly (line by line).
+    #[serde(default = "default_smooth_scroll_duration")]
+    pub smooth_scroll_duration: u16,
+    /// Ask before closing a terminal — or quitting CortX — while a command is
+    /// running in it. Nothing running: it closes straight away either way.
+    #[serde(default = "default_true")]
+    pub confirm_close_running: bool,
+}
+
+/// What the terminal sends when Shift+Enter is pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ShiftEnterKey {
+    /// ESC + CR, i.e. what Alt/Option+Enter already sends: the sequence
+    /// Claude Code's `/terminal-setup` binds to Shift+Enter, and the one
+    /// zsh and fish insert a new line for.
+    #[default]
+    EscapeEnter,
+    /// The plain CR of Enter — the program cannot tell the two apart.
+    Enter,
+}
+
+fn default_smooth_scroll_duration() -> u16 {
+    100
 }
 
 fn default_chrome_opacity() -> u8 {
@@ -605,6 +638,10 @@ impl Default for TerminalConfig {
             chrome_opacity: default_chrome_opacity(),
             chrome_blur: default_chrome_blur(),
             dock_uses_terminal_theme: false,
+            copy_on_select: true,
+            shift_enter: ShiftEnterKey::default(),
+            smooth_scroll_duration: default_smooth_scroll_duration(),
+            confirm_close_running: true,
         }
     }
 }

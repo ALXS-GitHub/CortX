@@ -29,6 +29,7 @@ import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { getXtermThemeOverride, isWindowThemeActive, themeToXterm } from '@/lib/terminalTheme';
+import { copyOnSelectEnabled, overrideKeySequence, smoothScrollDuration } from '@/lib/terminalKeys';
 
 export interface TerminalSession {
   id: string;
@@ -351,6 +352,7 @@ function ensureSettingsSubscription() {
   let lastFont = JSON.stringify(terminalFontOptions());
   let lastCursor = JSON.stringify(terminalCursorOptions());
   let lastPadding = terminalPadding();
+  let lastSmoothScroll = smoothScrollDuration();
   useAppStore.subscribe(() => {
     const font = terminalFontOptions();
     const fontKey = JSON.stringify(font);
@@ -376,6 +378,11 @@ function ensureSettingsSubscription() {
       lastPadding = padding;
       applyTerminalPadding();
     }
+    const smooth = smoothScrollDuration();
+    if (smooth !== lastSmoothScroll) {
+      lastSmoothScroll = smooth;
+      for (const s of sessions.values()) s.term.options.smoothScrollDuration = smooth;
+    }
   });
 }
 
@@ -393,7 +400,8 @@ export function applyThemeToAll() {
 // Clipboard helpers
 // ---------------------------------------------------------------------------
 
-async function copySelection(term: Terminal): Promise<boolean> {
+/** Copy the selection. `clear` false keeps the highlight (copy on select). */
+async function copySelection(term: Terminal, clear = true): Promise<boolean> {
   if (!term.hasSelection()) return false;
   const text = term.getSelection();
   try {
@@ -402,7 +410,7 @@ async function copySelection(term: Terminal): Promise<boolean> {
     console.error('Clipboard write failed:', err);
     return false;
   }
-  term.clearSelection();
+  if (clear) term.clearSelection();
   return true;
 }
 
@@ -413,6 +421,43 @@ async function pasteFromClipboard(term: Terminal) {
   } catch (err) {
     console.error('Clipboard read failed:', err);
   }
+}
+
+/**
+ * Does the webview paste by itself on Ctrl/Cmd+V?
+ *
+ * It does on Chromium (Windows, Linux) and on macOS through the Edit menu,
+ * and xterm.js listens for the resulting DOM `paste` event to send a
+ * correctly bracketed paste. So CortX must *not* read the clipboard on
+ * Ctrl+V as well — that pasted everything twice, since returning `false`
+ * from a custom key handler stops xterm's own key processing but never
+ * cancels the browser's default action.
+ *
+ * `null` until the first Ctrl+V of this window says which it is; a webview
+ * that turns out not to paste (no `paste` event within `PASTE_PROBE_MS`)
+ * gets the manual paste, then and from then on.
+ */
+let webviewPastesOnCtrlV: boolean | null = null;
+let pasteProbe: number | null = null;
+const PASTE_PROBE_MS = 250;
+
+/** A DOM paste reached a terminal: the webview does handle Ctrl+V. */
+function noteWebviewPaste() {
+  webviewPastesOnCtrlV = true;
+  if (pasteProbe !== null) {
+    window.clearTimeout(pasteProbe);
+    pasteProbe = null;
+  }
+}
+
+function probeWebviewPaste(term: Terminal) {
+  if (pasteProbe !== null) return;
+  pasteProbe = window.setTimeout(() => {
+    pasteProbe = null;
+    if (webviewPastesOnCtrlV !== null) return;
+    webviewPastesOnCtrlV = false;
+    void pasteFromClipboard(term);
+  }, PASTE_PROBE_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -446,6 +491,10 @@ function createSession(id: string): TerminalSession {
     theme: buildTerminalTheme(),
     macOptionIsMeta: true,
     scrollOnUserInput: true,
+    // Wheel scrolling glides instead of jumping a line at a time. Typing
+    // still snaps to the bottom instantly (xterm disables the animation for
+    // `scrollOnUserInput`), so this costs nothing at the prompt.
+    smoothScrollDuration: smoothScrollDuration(),
     drawBoldTextInBrightColors: true,
     // Tells xterm which reflow quirks to expect from ConPTY.
     windowsPty: IS_WINDOWS ? { backend: 'conpty' } : undefined,
@@ -507,35 +556,93 @@ function createSession(id: string): TerminalSession {
   );
 
   // Copy / paste conventions (Windows Terminal style): Ctrl+C with a selection
-  // copies instead of interrupting; Ctrl+V and Ctrl+Shift+V paste;
-  // Ctrl+Shift+C always copies.
+  // copies instead of interrupting (unless copy on select already did it);
+  // Ctrl+V and Ctrl+Shift+V paste; Ctrl+Shift+C always copies.
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
+
+    // Keys a plain VT terminal cannot express — today only Shift+Enter,
+    // which would otherwise send the same CR as Enter (see lib/terminalKeys).
+    const sequence = overrideKeySequence(e);
+    if (sequence !== null) {
+      e.preventDefault();
+      term.input(sequence, true);
+      return false;
+    }
+
     const mod = e.ctrlKey || e.metaKey;
     if (!mod) return true;
     if (e.code === 'KeyC') {
-      if (e.shiftKey || term.hasSelection()) {
-        copySelection(term);
+      // Ctrl/Cmd+Shift+C always copies.
+      if (e.shiftKey) {
+        e.preventDefault();
+        void copySelection(term);
+        return false;
+      }
+      // Ctrl+C over a selection copies — but only while copy on select is
+      // off. With it on the text is already in the clipboard, so Ctrl+C
+      // stays the interrupt that Claude Code and Codex need.
+      if (term.hasSelection() && !copyOnSelectEnabled()) {
+        e.preventDefault();
+        void copySelection(term);
         return false;
       }
       return true;
     }
     if (e.code === 'KeyV') {
-      pasteFromClipboard(term);
+      // Ctrl/Cmd+Shift+V: no webview implements this one everywhere (macOS
+      // has no menu entry for it), so read the clipboard by hand — and
+      // cancel the event so Chromium's "paste and match style" does not
+      // paste a second time.
+      if (e.shiftKey || webviewPastesOnCtrlV === false) {
+        e.preventDefault();
+        void pasteFromClipboard(term);
+        return false;
+      }
+      // Plain Ctrl/Cmd+V: leave the paste to the webview. Returning false
+      // only keeps xterm from *also* sending ^V to the pty; the DOM `paste`
+      // event still fires and xterm's own handler brackets and writes the
+      // text — exactly once.
+      if (webviewPastesOnCtrlV === null) probeWebviewPaste(term);
       return false;
     }
     return true;
   });
 
+  container.addEventListener('paste', noteWebviewPaste, true);
+
   // Right-click: copy the selection if there is one, otherwise paste.
   container.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (term.hasSelection()) {
-      copySelection(term);
+      void copySelection(term);
     } else {
-      pasteFromClipboard(term);
+      void pasteFromClipboard(term);
     }
   });
+
+  // Copy on select (Warp, and the X11 tradition): the text of a *mouse*
+  // selection reaches the clipboard as soon as the drag ends — never during
+  // it, never for an empty or whitespace-only selection, and the highlight
+  // stays where it is. Keyboard selections (select all) are left alone.
+  let mouseSelecting = false;
+  container.addEventListener('mousedown', (e) => {
+    if (e.button === 0) mouseSelecting = true;
+  });
+  // On `document`: a drag very often ends with the pointer outside the pane.
+  const onMouseUp = (e: MouseEvent) => {
+    if (e.button !== 0 || !mouseSelecting) return;
+    mouseSelecting = false;
+    if (!copyOnSelectEnabled()) return;
+    // One turn later: xterm settles the selection in its own listener for
+    // this very mouseup, and a plain click has cleared it by then.
+    window.setTimeout(() => {
+      if (!term.hasSelection() || !term.getSelection().trim()) return;
+      void copySelection(term, false);
+    }, 0);
+  };
+  document.addEventListener('mouseup', onMouseUp, true);
+  session.disposables.push({ dispose: () => document.removeEventListener('mouseup', onMouseUp, true) });
 
   sessions.set(id, session);
   return session;
