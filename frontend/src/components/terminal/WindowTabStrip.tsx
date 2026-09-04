@@ -17,7 +17,7 @@ import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeI
 import { AgentProviderIcon } from '@/components/agents/AgentProviderIcon';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
-import { isAgentsScope, type TerminalTab } from '@/lib/terminalLayout';
+import { collectLeaves, isAgentsScope, type TerminalTab } from '@/lib/terminalLayout';
 import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
@@ -38,6 +38,8 @@ import {
   type ResolvedTabDisplay,
 } from './model';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
+import { PaneChipRow } from './PaneTabs';
+import { usePaneEntries, useSelectPane } from './paneModel';
 import { useTabContextMenu, useTabRename } from './useTabMenu';
 import type { Project } from '@/types';
 
@@ -58,6 +60,11 @@ interface WindowTabProps {
 /**
  * One tab of the strip: sortable, renamable on double-click, closable with
  * the X or a middle click, with a right-click menu anchored at the pointer.
+ *
+ * A tab holding a split renders as a **group**: the tab's own name, then one
+ * chip per pane inside a hairline bracket (`PaneChipRow`). Clicking a chip
+ * makes that pane current. The group stays a single sortable unit — reorder
+ * and detach still act on the tab, which is what the layout document knows.
  */
 function WindowTab({ tab, items, projects, isActive, index, showProject, display, onSelect, onClose }: WindowTabProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
@@ -71,6 +78,9 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, display
 
   const rename = useTabRename(tab, title);
   const menu = useTabContextMenu();
+  const panes = usePaneEntries(tab, items, display.agent);
+  const selectPane = useSelectPane();
+  const grouped = panes.length > 1;
 
   const accent = tab.color ?? undefined;
   const showIndex = display.index !== 'never' && index <= 9 && !rename.editing;
@@ -80,7 +90,8 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, display
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group/tab relative flex h-9 min-w-0 max-w-[240px] cursor-grab select-none items-center gap-2 border-r border-border px-3 text-xs transition-colors',
+        'group/tab relative flex h-9 min-w-0 cursor-grab select-none items-center gap-2 border-r border-border px-3 text-xs transition-colors',
+        grouped ? 'max-w-[460px] gap-1.5' : 'max-w-[240px]',
         isActive ? 'bg-terminal text-foreground' : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
         isDragging && 'z-10 opacity-50'
       )}
@@ -121,17 +132,28 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, display
         />
       )}
       {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
-      {display.status && <TerminalStatusGlyph live={live} className="pointer-events-none" />}
+      {/* Grouped: each chip carries its own status, the tab-wide one would
+          only repeat whichever pane happened to be loudest. */}
+      {display.status && !grouped && <TerminalStatusGlyph live={live} className="pointer-events-none" />}
       {rename.editing ? (
         <TabRenameInput value={rename.draft} onChange={rename.setDraft} onCommit={rename.commit} onCancel={rename.cancel} className="w-32" />
       ) : (
         <span
-          className="pointer-events-none truncate"
+          className={cn('pointer-events-none truncate', grouped && 'max-w-[110px] shrink-0')}
           style={accent && !isActive ? { color: accent } : undefined}
           title={item ? describeItem(item) : undefined}
         >
           {title}
         </span>
+      )}
+      {grouped && !rename.editing && (
+        <PaneChipRow
+          tab={tab}
+          panes={panes}
+          tabActive={isActive}
+          display={display}
+          onSelect={(leafId) => selectPane(tab, leafId)}
+        />
       )}
       {showProject && project && (
         <span className="pointer-events-none flex min-w-0 shrink items-center gap-1 rounded-full bg-muted px-1.5 text-[10px] leading-4 text-muted-foreground">
@@ -197,7 +219,19 @@ export function WindowTabStrip() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   // Dragging a tab past the edge of the window detaches it (ticket #20).
-  const detach = useDetachDrag();
+  // `describe` is what the destination window draws under the cursor once
+  // the pointer is out of this one.
+  const detach = useDetachDrag({
+    describe: (tabId) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab) return { title: 'Terminal', panes: 1, color: null };
+      return {
+        title: tabTitle(tab, items, display.agent),
+        panes: collectLeaves(tab.layout).length,
+        color: tab.color,
+      };
+    },
+  });
 
   const onDragEnd = useCallback(
     (e: DragEndEvent) => {

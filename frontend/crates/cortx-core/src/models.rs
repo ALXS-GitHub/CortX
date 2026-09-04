@@ -543,6 +543,19 @@ pub struct TerminalConfig {
     /// file paths.
     #[serde(default = "default_true")]
     pub completion_context: bool,
+    /// Read the output of the command that just finished for what to run
+    /// next: the `git push --set-upstream …` git printed itself, the session
+    /// id a coding agent left behind, the subcommand a program says you
+    /// meant. Extraction is deliberately conservative — see
+    /// `lib/terminalCompletionOutput.ts`.
+    #[serde(default = "default_true")]
+    pub suggestions_from_output: bool,
+    /// How sure the engine has to be before it draws a ghost at all. Below
+    /// the threshold nothing is shown: a wrong suggestion costs more than a
+    /// missing one.
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub suggestion_confidence: SuggestionConfidence,
     /// Where the input line sits in a pane (ticket #15, U0). `Flow` is what
     /// CortX has always done — the prompt follows the output down the pane;
     /// `Bottom` pins it to the bottom and stacks the output above it, like
@@ -574,6 +587,16 @@ pub struct TerminalConfig {
     /// exit code). Off keeps navigation, copying and folding.
     #[serde(default = "default_true")]
     pub block_gutter: bool,
+    /// The 1 px rule the full width of the pane on each block's top edge —
+    /// the thing that makes a block visible rather than merely tracked. Warp
+    /// calls it `appearance.blocks.show_block_dividers` and defaults it on.
+    #[serde(default = "default_true")]
+    pub block_dividers: bool,
+    /// The toolbar that appears at a block's top-right corner on hover: copy
+    /// the command, the output or both, run it again, fold it away, and `…`
+    /// for the rest. Off leaves the gutter bar's right-click menu.
+    #[serde(default = "default_true")]
+    pub block_actions: bool,
 }
 
 /// Where the input line sits in a terminal pane (ticket #15, U0).
@@ -598,6 +621,20 @@ pub enum CompletionMenuKey {
     CtrlSpace,
     /// Tab. Takes it away from PSReadLine / zsh completion while at a prompt.
     Tab,
+}
+
+/// How sure an inline suggestion has to be before it is drawn (#17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SuggestionConfidence {
+    /// Only when the answer is all but certain (the program printed it, or a
+    /// long prefix matches one command and nothing else).
+    Strict,
+    /// The default: ambiguous prefixes and lone filename matches say nothing.
+    #[default]
+    Balanced,
+    /// Show whatever matches, as CortX did before this pass.
+    Loose,
 }
 
 /// What a terminal tab shows (sessions rail and tab strip alike).
@@ -852,11 +889,15 @@ impl Default for TerminalConfig {
             completion_menu: CompletionMenuKey::default(),
             completion_specs: true,
             completion_context: true,
+            suggestions_from_output: true,
+            suggestion_confidence: SuggestionConfidence::default(),
             input_position: TerminalInputPosition::default(),
             input_editor: false,
             input_editor_handoff: true,
             blocks: true,
             block_gutter: true,
+            block_dividers: true,
+            block_actions: true,
         }
     }
 }

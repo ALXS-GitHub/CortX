@@ -3285,6 +3285,13 @@ pub fn terminal_themes_changed(keys: Vec<String>) -> TerminalThemesChangedEvent 
     TerminalThemesChangedEvent { keys }
 }
 
+/// Where the theme files live, so the picker can open the folder rather than
+/// rebuild the path per platform on the frontend.
+#[tauri::command]
+pub fn terminal_themes_dir(state: State<AppState>) -> String {
+    theme_store(&state).dir().display().to_string()
+}
+
 #[tauri::command]
 pub fn list_terminal_themes(state: State<AppState>) -> Vec<cortx_core::terminal::ThemeSummary> {
     theme_store(&state).list()

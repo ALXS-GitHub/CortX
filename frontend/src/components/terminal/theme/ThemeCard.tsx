@@ -9,9 +9,8 @@
  * opening the picker with 40 imported themes does not inline 40 images.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Check, Image as ImageIcon, Moon, Sun, Trash2 } from 'lucide-react';
+import { Check, Image as ImageIcon, Moon, Sun } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { themeAccentCss, themeCanvasCss } from '@/lib/terminalTheme';
 import { loadThemeImage, useTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { cn } from '@/lib/utils';
@@ -63,10 +62,16 @@ export interface ThemeCardProps {
   /** Hover / focus: live-preview this theme (no-op where preview is off). */
   onHover?: () => void;
   onLeave?: () => void;
-  onDelete?: () => void;
 }
 
-export function ThemeCard({ theme, selected, usedElsewhere, onPick, onHover, onLeave, onDelete }: ThemeCardProps) {
+/**
+ * Deleting a theme from here was removed on purpose: the cards are what you
+ * *browse*, one hover away from a live preview, and a destructive button in
+ * that path is a trap. The themes are plain files — the picker's "Themes
+ * folder" button opens them, and a file removed there disappears from the
+ * gallery straight away (the folder is watched).
+ */
+export function ThemeCard({ theme, selected, usedElsewhere, onPick, onHover, onLeave }: ThemeCardProps) {
   const ref = useRef<HTMLDivElement>(null);
   const near = useNearViewport(ref);
   const image = useThemeImage(theme.key, near && theme.hasImage);
@@ -156,18 +161,6 @@ export function ThemeCard({ theme, selected, usedElsewhere, onPick, onHover, onL
           </Badge>
         </div>
       </button>
-      {onDelete && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Delete ${theme.name}`}
-          title="Delete this theme"
-          onClick={onDelete}
-          className="absolute top-1.5 right-1.5 rounded-full bg-[var(--btn-outline-bg)] text-destructive opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-        >
-          <Trash2 />
-        </Button>
-      )}
     </div>
   );
 }

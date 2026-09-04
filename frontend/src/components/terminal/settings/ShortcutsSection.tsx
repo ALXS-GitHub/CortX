@@ -3,11 +3,10 @@ import { Keyboard, MousePointerClick, RotateCcw, TriangleAlert } from 'lucide-re
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { DEFAULT_SHIFT_ENTER, DEFAULT_SMOOTH_SCROLL_DURATION } from '@/lib/terminalKeys';
+import { DEFAULT_SHIFT_ENTER } from '@/lib/terminalKeys';
 import { useAppStore } from '@/stores/appStore';
 import type { ShiftEnterKey, TerminalConfig } from '@/types';
 import {
@@ -65,7 +64,6 @@ function KeysAndSelectionCard() {
 
   const copyOnSelect = terminal?.copyOnSelect ?? true;
   const shiftEnter = terminal?.shiftEnter ?? DEFAULT_SHIFT_ENTER;
-  const smooth = terminal?.smoothScrollDuration ?? DEFAULT_SMOOTH_SCROLL_DURATION;
 
   return (
     <Card>
@@ -106,33 +104,6 @@ function KeysAndSelectionCard() {
           </Select>
         </BehaviourRow>
 
-        <BehaviourRow
-          id="terminal-smooth-scroll"
-          label="Smooth scrolling"
-          hint="The wheel glides instead of jumping a line at a time. Typing still snaps to the bottom instantly."
-        >
-          <Switch
-            id="terminal-smooth-scroll"
-            checked={smooth > 0}
-            onCheckedChange={(v) => patch({ smoothScrollDuration: v ? DEFAULT_SMOOTH_SCROLL_DURATION : 0 })}
-            disabled={!settings}
-          />
-          <Input
-            type="number"
-            min={10}
-            max={500}
-            step={10}
-            value={smooth > 0 ? smooth : DEFAULT_SMOOTH_SCROLL_DURATION}
-            disabled={!settings || smooth === 0}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (Number.isFinite(n)) patch({ smoothScrollDuration: Math.min(500, Math.max(10, Math.round(n))) });
-            }}
-            className="w-20"
-            aria-label="Smooth scrolling duration in milliseconds"
-          />
-          <span className="text-xs text-muted-foreground">ms</span>
-        </BehaviourRow>
       </CardContent>
     </Card>
   );

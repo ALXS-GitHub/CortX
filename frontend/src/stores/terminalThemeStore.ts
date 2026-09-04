@@ -84,6 +84,13 @@ let chrome = false;
 let initialised = false;
 let previewSeq = 0;
 let lastEffectKey = '';
+/**
+ * A `load()` was asked for while one was already in flight — a watcher event
+ * landing during the initial listing, which is exactly when a theme is being
+ * dropped in. Without this the second request was simply dropped and the new
+ * theme only appeared at the next restart.
+ */
+let listStale = false;
 
 const themeCache = new Map<string, Promise<TerminalTheme | null>>();
 const imageCache = new Map<string, Promise<string | null>>();
@@ -233,11 +240,17 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
     assetVersion: 0,
 
     load: async () => {
-      if (get().loading) return;
+      if (get().loading) {
+        listStale = true;
+        return;
+      }
       set({ loading: true });
       try {
-        const themes = await api.listTerminalThemes();
-        set({ themes, loaded: true });
+        do {
+          listStale = false;
+          const themes = await api.listTerminalThemes();
+          set({ themes, loaded: true });
+        } while (listStale);
       } catch (err) {
         console.error('Failed to list terminal themes:', err);
         toast.error('Could not load the terminal themes', { description: String(err) });

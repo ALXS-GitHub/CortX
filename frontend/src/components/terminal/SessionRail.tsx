@@ -19,7 +19,7 @@ import { STATE_LABEL } from '@/components/agents/agentUtils';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { RAIL_WIDTH_COLLAPSED, useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
-import { type TerminalTab } from '@/lib/terminalLayout';
+import { collectLeaves, type TerminalTab } from '@/lib/terminalLayout';
 import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
@@ -40,6 +40,8 @@ import {
   type WorkspaceGroup,
 } from './model';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
+import { PaneRailRows } from './PaneTabs';
+import { usePaneEntries, useSelectPane } from './paneModel';
 import { useTabContextMenu, useTabRename } from './useTabMenu';
 import { useDetachDrag } from './useDetachDrag';
 
@@ -82,6 +84,10 @@ function RailIconButton({
  * double-click, with the tab's colour as a left accent bar (and a faint tint
  * when active) and a right-click menu. What it shows — second line, status,
  * agent, Ctrl+N number — follows `terminal.tabDisplay`.
+ *
+ * A tab holding a split lists its panes underneath (`PaneRailRows`), the
+ * same grouping the tab strip shows as a bracket of chips. The sortable node
+ * is the wrapper, so the panes travel with their tab while it is dragged.
  */
 function SessionRow({
   tab,
@@ -115,113 +121,123 @@ function SessionRow({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
   const rename = useTabRename(tab, title);
   const menu = useTabContextMenu();
+  const panes = usePaneEntries(tab, items, display.agent);
+  const selectPane = useSelectPane();
+  const grouped = panes.length > 1;
 
   const color = tab.color;
-  const style: CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    // Active + coloured: a tint of the tab colour instead of the neutral accent.
-    ...(active && color ? { backgroundColor: `color-mix(in srgb, ${color} 8%, transparent)` } : {}),
-  };
+  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
+  // Active + coloured: a tint of the tab colour instead of the neutral accent.
+  const rowStyle: CSSProperties | undefined =
+    active && color ? { backgroundColor: `color-mix(in srgb, ${color} 8%, transparent)` } : undefined;
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      onClick={onSelect}
-      onDoubleClick={(e) => {
-        e.stopPropagation();
-        rename.start();
-      }}
-      onKeyDown={(e) => {
-        if (rename.editing) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onSelect();
-        } else if (e.key === 'F2') {
-          e.preventDefault();
-          rename.start();
-        }
-      }}
-      onContextMenu={menu.onContextMenu}
-      title={!rename.editing && item ? describeItem(item) : undefined}
-      className={cn(
-        'group relative flex h-10 w-full cursor-default select-none items-center gap-2 rounded-[var(--rad-nav)] px-2 text-left transition-colors',
-        active ? 'text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
-        active && !color && 'bg-accent',
-        isDragging && 'z-10 opacity-60'
-      )}
-      {...attributes}
-      {...listeners}
-    >
-      {color && (
-        <span
-          className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-full"
-          style={{ backgroundColor: color }}
-          aria-hidden
-        />
-      )}
-      {agent ? (
-        <AgentProviderIcon provider={agent.provider} plain className="pointer-events-none size-3.5 shrink-0" />
-      ) : (
-        <TerminalTypeIcon
-          type={item?.type ?? 'shell'}
-          className="pointer-events-none size-3.5 shrink-0 text-faint"
-        />
-      )}
-      {rename.editing ? (
-        <TabRenameInput
-          value={rename.draft}
-          onChange={rename.setDraft}
-          onCommit={rename.commit}
-          onCancel={rename.cancel}
-          className="min-w-0 flex-1"
-        />
-      ) : (
-        <span className="pointer-events-none flex min-w-0 flex-1 flex-col leading-tight">
-          <span className="truncate text-[12.5px]">{title}</span>
-          {secondary && (
-            <span
-              className={cn(
-                'truncate text-[10.5px]',
-                waiting ? 'text-st-progress' : 'font-mono',
-                running ? 'text-primary' : !waiting && 'text-faint'
-              )}
-            >
-              {secondary}
-            </span>
-          )}
-        </span>
-      )}
-      {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
-      {display.index !== 'never' && index <= 9 && !rename.editing && (
-        <span
-          className={cn(
-            'pointer-events-none shrink-0 font-mono text-[10px] tabular-nums text-faint transition-opacity',
-            display.index === 'always' ? 'opacity-100' : 'opacity-0 [html[data-ctrl-held]_&]:opacity-100'
-          )}
-          aria-hidden
-        >
-          {index}
-        </span>
-      )}
-      {display.status && <TerminalStatusGlyph live={live} className="pointer-events-none" />}
-      <button
-        type="button"
-        className="grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
-        onClick={(e) => {
+    <div ref={setNodeRef} style={style} className={cn(isDragging && 'z-10 opacity-60')}>
+      <div
+        style={rowStyle}
+        onClick={onSelect}
+        onDoubleClick={(e) => {
           e.stopPropagation();
-          onClose();
+          rename.start();
         }}
-        onPointerDown={(e) => e.stopPropagation()}
-        onDoubleClick={(e) => e.stopPropagation()}
-        title="Close tab"
-        aria-label="Close tab"
+        onKeyDown={(e) => {
+          if (rename.editing) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onSelect();
+          } else if (e.key === 'F2') {
+            e.preventDefault();
+            rename.start();
+          }
+        }}
+        onContextMenu={menu.onContextMenu}
+        title={!rename.editing && item ? describeItem(item) : undefined}
+        className={cn(
+          'group relative flex h-10 w-full cursor-default select-none items-center gap-2 rounded-[var(--rad-nav)] px-2 text-left transition-colors',
+          active ? 'text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+          active && !color && 'bg-accent'
+        )}
+        {...attributes}
+        {...listeners}
       >
-        <X className="pointer-events-none size-3" />
-      </button>
+        {color && (
+          <span
+            className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-full"
+            style={{ backgroundColor: color }}
+            aria-hidden
+          />
+        )}
+        {agent ? (
+          <AgentProviderIcon provider={agent.provider} plain className="pointer-events-none size-3.5 shrink-0" />
+        ) : (
+          <TerminalTypeIcon
+            type={item?.type ?? 'shell'}
+            className="pointer-events-none size-3.5 shrink-0 text-faint"
+          />
+        )}
+        {rename.editing ? (
+          <TabRenameInput
+            value={rename.draft}
+            onChange={rename.setDraft}
+            onCommit={rename.commit}
+            onCancel={rename.cancel}
+            className="min-w-0 flex-1"
+          />
+        ) : (
+          <span className="pointer-events-none flex min-w-0 flex-1 flex-col leading-tight">
+            <span className="truncate text-[12.5px]">{title}</span>
+            {secondary && (
+              <span
+                className={cn(
+                  'truncate text-[10.5px]',
+                  waiting ? 'text-st-progress' : 'font-mono',
+                  running ? 'text-primary' : !waiting && 'text-faint'
+                )}
+              >
+                {secondary}
+              </span>
+            )}
+          </span>
+        )}
+        {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
+        {display.index !== 'never' && index <= 9 && !rename.editing && (
+          <span
+            className={cn(
+              'pointer-events-none shrink-0 font-mono text-[10px] tabular-nums text-faint transition-opacity',
+              display.index === 'always' ? 'opacity-100' : 'opacity-0 [html[data-ctrl-held]_&]:opacity-100'
+            )}
+            aria-hidden
+          >
+            {index}
+          </span>
+        )}
+        {display.status && <TerminalStatusGlyph live={live} className="pointer-events-none" />}
+        <button
+          type="button"
+          className="grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          title="Close tab"
+          aria-label="Close tab"
+        >
+          <X className="pointer-events-none size-3" />
+        </button>
 
-      <TabContextMenu tab={tab} open={menu.open} onOpenChange={menu.setOpen} pos={menu.pos} onRename={rename.start} onClose={onClose} />
+        <TabContextMenu tab={tab} open={menu.open} onOpenChange={menu.setOpen} pos={menu.pos} onRename={rename.start} onClose={onClose} />
+      </div>
+      {grouped && (
+        <PaneRailRows
+          tab={tab}
+          panes={panes}
+          tabActive={active}
+          display={display}
+          onSelect={(leafId) => selectPane(tab, leafId)}
+        />
+      )}
     </div>
   );
 }
@@ -256,8 +272,19 @@ function SessionGroupRows({
 
   // Dragging a row past the edge of the window detaches the tab (ticket #20).
   // The row itself stays inside (the modifiers below); `DetachDropHint` is
-  // what tells the user what releasing will do.
-  const detach = useDetachDrag();
+  // what tells the user what releasing will do — and, when the pointer is
+  // over another Terminal window, that window draws the tab it describes.
+  const detach = useDetachDrag({
+    describe: (tabId) => {
+      const tab = group.tabs.find((t) => t.id === tabId);
+      if (!tab) return { title: 'Terminal', panes: 1, color: null };
+      return {
+        title: tabTitle(tab, items, display.agent),
+        panes: collectLeaves(tab.layout).length,
+        color: tab.color,
+      };
+    },
+  });
 
   const onDragEnd = useCallback(
     (e: DragEndEvent) => {
@@ -361,6 +388,9 @@ function SessionIcon({
   const live = tabLiveState(tab, items);
   const agent = display.agent ? live.agent : undefined;
   const title = tabTitle(tab, items, display.agent);
+  // No room for a group of chips here; the number of panes is what a
+  // collapsed rail can honestly say about a split.
+  const paneCount = collectLeaves(tab.layout).length;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -383,11 +413,20 @@ function SessionIcon({
               <TerminalStatusGlyph live={live} className="scale-90" />
             </span>
           )}
+          {paneCount > 1 && (
+            <span
+              className="absolute -bottom-0.5 -right-0.5 grid h-3 min-w-3 place-items-center rounded-full bg-[var(--tab-active-bg)] px-0.5 font-mono text-[8.5px] leading-none tabular-nums text-foreground"
+              aria-hidden
+            >
+              {paneCount}
+            </span>
+          )}
         </button>
       </TooltipTrigger>
       <TooltipContent side="right">
         {title}
         {item?.projectName ? ` · ${item.projectName}` : ''}
+        {paneCount > 1 ? ` · ${paneCount} panes` : ''}
       </TooltipContent>
     </Tooltip>
   );

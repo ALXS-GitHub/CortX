@@ -203,6 +203,14 @@ export interface TerminalConfig {
   /** Git refs, package.json scripts and file paths in the terminal's own
    *  directory. Default true. */
   completionContext?: boolean;
+  /** Read the previous command's output for what to run next — the
+   *  `git push --set-upstream …` git just printed, the session id a coding
+   *  agent left behind, the subcommand it says you meant. Default true. */
+  suggestionsFromOutput?: boolean;
+  /** How sure the engine must be before it draws a ghost at all. `strict`
+   *  only when it is all but certain, `loose` whenever anything matches.
+   *  Default `balanced`. */
+  suggestionConfidence?: SuggestionConfidence;
   /** Where the input line sits in a pane: `flow` = after the output, as today;
    *  `bottom` = pinned to the bottom of the pane, output stacking above it
    *  (Warp's `pinned_to_bottom`). Purely visual — the PTY size never changes.
@@ -225,6 +233,13 @@ export interface TerminalConfig {
   /** The clickable status bars in the pane's left padding (green / red per
    *  exit code). Off keeps navigation, copy and folding. Default true. */
   blockGutter?: boolean;
+  /** The 1 px rule the full width of the pane on each block's top edge — what
+   *  makes the blocks visible (Warp's `show_block_dividers`). Default true. */
+  blockDividers?: boolean;
+  /** The toolbar that appears at a block's top-right corner on hover: copy the
+   *  command, the output or both, run it again, fold it, and `⋯` for the rest.
+   *  Off leaves the gutter's right-click menu. Default true. */
+  blockActions?: boolean;
 }
 
 /** Where the input line sits in a terminal pane (ticket #15, U0). */
@@ -391,6 +406,9 @@ export interface PathCompletion {
 
 /** Which key opens the terminal completion menu. */
 export type CompletionMenuKey = 'off' | 'ctrlSpace' | 'tab';
+
+/** How sure an inline suggestion must be before it is drawn at all. */
+export type SuggestionConfidence = 'strict' | 'balanced' | 'loose';
 
 export interface AppearanceConfig {
   theme: 'light' | 'dark' | 'system';

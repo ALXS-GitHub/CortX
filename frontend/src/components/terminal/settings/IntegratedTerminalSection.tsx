@@ -14,8 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Code, Field, Section, ToggleField } from '@/components/settings/SettingsPrimitives';
 import { NumberField, TextField } from './controls';
 import { useTerminalSettings } from './useTerminalSettings';
+import { DEFAULT_SMOOTH_SCROLL_DURATION } from '@/lib/terminalKeys';
 import { resolveTabDisplay } from '@/components/terminal/model';
 import type {
+  SuggestionConfidence,
   TabIndexDisplay,
   CompletionMenuKey,
   TerminalInputPosition,
@@ -38,6 +40,7 @@ export function IntegratedTerminalSection() {
   const restoreSessions = terminal?.restoreSessions ?? true;
   const restoreScrollback = terminal?.restoreScrollback ?? true;
   const selectionColor = terminal?.selectionColor ?? '';
+  const blocks = terminal?.blocks ?? true;
   const tabDisplay = resolveTabDisplay(terminal?.tabDisplay);
 
   return (
@@ -76,6 +79,19 @@ export function IntegratedTerminalSection() {
           id="shell-integration"
           checked={shellIntegration}
           onCheckedChange={(v) => patch({ shellIntegration: v })}
+          disabled={!terminal}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="smooth-scroll"
+        label="Smooth scrolling"
+        hint="The wheel glides instead of jumping a line at a time. Typing still snaps to the bottom instantly, so this costs nothing at the prompt."
+      >
+        <Switch
+          id="smooth-scroll"
+          checked={(terminal?.smoothScrollDuration ?? DEFAULT_SMOOTH_SCROLL_DURATION) > 0}
+          onCheckedChange={(v) => patch({ smoothScrollDuration: v ? DEFAULT_SMOOTH_SCROLL_DURATION : 0 })}
           disabled={!terminal}
         />
       </ToggleField>
@@ -124,10 +140,11 @@ export function IntegratedTerminalSection() {
         label="Command blocks"
         hint={
           <>
-            Each command and its output become a block, from the same OSC 133 markers as the tab titles.{' '}
-            <Code>Ctrl+↑</Code> / <Code>Ctrl+↓</Code> jump from one prompt to the previous or next one; a block can be
-            copied, folded away or run again from its gutter bar. It is drawn over the terminal, never in it — no line
-            moves, and a shell without <Code>cortx init</Code> shows nothing at all.
+            Each command and its output become a block, from the same OSC 133 markers as the tab titles. A hairline
+            separates one block from the next, hovering one shows its actions — copy the command, the output or both,
+            run it again, fold it away — and <Code>Ctrl+↑</Code> / <Code>Ctrl+↓</Code> jump from one prompt to the
+            previous or next one. It is drawn over the terminal, never in it — no line moves, and a shell without{' '}
+            <Code>cortx init</Code> shows nothing at all.
           </>
         }
       >
@@ -140,6 +157,32 @@ export function IntegratedTerminalSection() {
       </ToggleField>
 
       <ToggleField
+        id="terminal-block-dividers"
+        label={<span className="text-xs text-muted-foreground">Block dividers</span>}
+        hint="The 1 px rule across the pane at the top of every block — what makes the blocks visible. It turns red on a command that failed and brightens on the block under the pointer."
+      >
+        <Switch
+          id="terminal-block-dividers"
+          checked={terminal?.blockDividers ?? true}
+          onCheckedChange={(v) => patch({ blockDividers: v })}
+          disabled={!terminal || !shellIntegration || !blocks}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="terminal-block-actions"
+        label={<span className="text-xs text-muted-foreground">Block actions on hover</span>}
+        hint="A small toolbar at the top-right of the block under the pointer: copy the command, copy the output, copy both, run it again, fold the output, and ⋯ for the rest (copy as Markdown, put the command back at the prompt, select the block, scroll to its top or bottom). Off, the same menu is still a right-click on the gutter bar away."
+      >
+        <Switch
+          id="terminal-block-actions"
+          checked={terminal?.blockActions ?? true}
+          onCheckedChange={(v) => patch({ blockActions: v })}
+          disabled={!terminal || !shellIntegration || !blocks}
+        />
+      </ToggleField>
+
+      <ToggleField
         id="terminal-block-gutter"
         label={<span className="text-xs text-muted-foreground">Block gutter</span>}
         hint="A thin bar in the pane's left padding for each block, green or red according to the exit code the shell reported. Click it to select the block, double-click to fold its output, right-click for the block menu. Off, the shortcuts and the menu still work."
@@ -148,9 +191,43 @@ export function IntegratedTerminalSection() {
           id="terminal-block-gutter"
           checked={terminal?.blockGutter ?? true}
           onCheckedChange={(v) => patch({ blockGutter: v })}
-          disabled={!terminal || !shellIntegration || !(terminal?.blocks ?? true)}
+          disabled={!terminal || !shellIntegration || !blocks}
         />
       </ToggleField>
+
+      <ToggleField
+        id="suggestions-from-output"
+        label={<span className="text-xs text-muted-foreground">Suggest from the last output</span>}
+        hint="When a program tells you what to run next — a resume command, the git push that sets an upstream, a corrected typo — offer it. Only a command the program spelled out is ever suggested; anything merely sitting in the output stays in the Ctrl+Space menu."
+      >
+        <Switch
+          id="suggestions-from-output"
+          checked={terminal?.suggestionsFromOutput ?? true}
+          onCheckedChange={(v) => patch({ suggestionsFromOutput: v })}
+          disabled={!terminal || !(terminal?.inlineSuggestions ?? true)}
+        />
+      </ToggleField>
+
+      <Field
+        label={<span className="text-xs text-muted-foreground">Suggest only when sure</span>}
+        htmlFor="suggestion-confidence"
+        hint="How certain the guess must be before any ghost text is drawn. A wrong suggestion costs more than none, so the default already stays quiet when two of your habits start the same way."
+      >
+        <Select
+          value={terminal?.suggestionConfidence ?? 'balanced'}
+          onValueChange={(v: SuggestionConfidence) => patch({ suggestionConfidence: v })}
+          disabled={!terminal || !(terminal?.inlineSuggestions ?? true)}
+        >
+          <SelectTrigger id="suggestion-confidence" className="w-[260px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="strict">Only when certain</SelectItem>
+            <SelectItem value="balanced">Balanced (default)</SelectItem>
+            <SelectItem value="loose">Guess more often</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
 
       <Field
         label={<span className="text-xs text-muted-foreground">Completion menu</span>}

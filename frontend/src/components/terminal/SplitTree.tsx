@@ -15,9 +15,15 @@ interface TreeProps {
 }
 
 /**
- * A split node: children laid out with flex according to `sizes`, 4 px
- * dividers in between. Dragging a divider updates a local copy of the sizes
- * and commits once on mouse-up (one layout write, not one per pixel).
+ * A split node: children laid out with flex according to `sizes`, a divider
+ * in between. Dragging a divider updates a local copy of the sizes and
+ * commits once on mouse-up (one layout write, not one per pixel).
+ *
+ * The divider is a 5 px band — comfortable to grab — that *draws* a 1 px
+ * hairline in its middle: a thick rule between two terminals reads as a
+ * frame, and the panes are meant to look like one surface split in two.
+ * Making the visible line thin by shrinking the element would make resizing
+ * a pixel hunt, hence the two sizes.
  */
 function SplitView({ node, tab, items, isActiveTab, multi }: TreeProps & { node: SplitNode }) {
   const setSplitSizes = useTerminalLayoutStore((s) => s.setSplitSizes);
@@ -99,11 +105,21 @@ function SplitView({ node, tab, items, isActiveTab, multi }: TreeProps & { node:
               aria-orientation={horizontal ? 'vertical' : 'horizontal'}
               onMouseDown={(e) => onDividerDown(e, i)}
               className={cn(
-                'shrink-0 bg-border transition-colors hover:bg-primary/60',
-                horizontal ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
-                dragSizes && 'bg-primary'
+                'group/divider relative shrink-0',
+                horizontal ? 'w-[5px] cursor-col-resize' : 'h-[5px] cursor-row-resize'
               )}
-            />
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  'pointer-events-none absolute bg-border-strong transition-colors',
+                  horizontal
+                    ? 'inset-y-0 left-1/2 w-px -translate-x-1/2'
+                    : 'inset-x-0 top-1/2 h-px -translate-y-1/2',
+                  dragSizes && drag.current?.index === i ? 'bg-primary' : 'group-hover/divider:bg-primary/70'
+                )}
+              />
+            </div>
           )}
         </Fragment>
       ))}

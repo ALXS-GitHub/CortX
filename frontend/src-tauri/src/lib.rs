@@ -680,6 +680,7 @@ pub fn run() {
             commands::delete_launch_config,
             commands::launch_config_to_yaml,
             commands::list_terminal_themes,
+            commands::terminal_themes_dir,
             commands::get_terminal_theme,
             commands::import_terminal_theme_file,
             commands::import_terminal_theme_folder,

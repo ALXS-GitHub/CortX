@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FolderOpen, FileDown, Loader2, Moon, Palette, Search, Sun } from 'lucide-react';
-import { ask, open } from '@tauri-apps/plugin-dialog';
+import { FolderOpen, FileDown, FolderSymlink, Loader2, Moon, Palette, Search, Sun } from 'lucide-react';
+import { toast } from 'sonner';
+import { open } from '@tauri-apps/plugin-dialog';
 import { exists } from '@tauri-apps/plugin-fs';
 import { dataDir, homeDir, join } from '@tauri-apps/api/path';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
@@ -9,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Segmented } from '@/components/ui/Segmented';
 import { ThemeCard } from '@/components/terminal/theme/ThemeCard';
+import { openTerminalThemesDir } from '@/components/terminal/theme/themesDir';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalThemeStore, type ThemeSlot } from '@/stores/terminalThemeStore';
 import {
@@ -91,7 +93,6 @@ export function ThemePicker({ onChoose, onFollowsChange, config }: ThemePickerPr
   const closePicker = useTerminalThemeStore((s) => s.closePicker);
   const importFile = useTerminalThemeStore((s) => s.importFile);
   const importFolder = useTerminalThemeStore((s) => s.importFolder);
-  const remove = useTerminalThemeStore((s) => s.remove);
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
 
@@ -194,19 +195,15 @@ export function ThemePicker({ onChoose, onFollowsChange, config }: ThemePickerPr
     }
   };
 
-  const doDelete = async (theme: TerminalThemeSummary) => {
-    const ok = await ask(`Delete the theme "${theme.name}"? Its file and wallpaper are removed.`, {
-      title: 'Delete theme',
-      kind: 'warning',
-      okLabel: 'Delete',
-      cancelLabel: 'Keep',
-    });
-    if (!ok) return;
-    setBusy(true);
+  // Themes are plain files. Rather than a delete button on a card you are
+  // one hover away from previewing, the picker opens the folder: renaming,
+  // editing and deleting all happen there, and the watcher reflects it here
+  // without a restart.
+  const doOpenFolder = async () => {
     try {
-      await remove(theme.key);
-    } finally {
-      setBusy(false);
+      await openTerminalThemesDir();
+    } catch (err) {
+      toast.error('Could not open the themes folder', { description: String(err) });
     }
   };
 
@@ -243,7 +240,6 @@ export function ThemePicker({ onChoose, onFollowsChange, config }: ThemePickerPr
               onPick={() => void choose(t.key, target, onChoose)}
               onHover={() => onHover(t.key)}
               onLeave={onLeave}
-              onDelete={t.source === 'bundled' ? undefined : () => void doDelete(t)}
             />
           ))}
         </div>
@@ -332,6 +328,15 @@ export function ThemePicker({ onChoose, onFollowsChange, config }: ThemePickerPr
           <Button variant="ghost" size="xs" onClick={() => void doImportFolder()} disabled={busy}>
             <FolderOpen />
             Import folder…
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => void doOpenFolder()}
+            title="Open data/terminal/themes — edit, rename or delete a theme there"
+          >
+            <FolderSymlink />
+            Themes folder
           </Button>
           <span className="ml-auto flex items-center gap-2 text-[10.5px] text-faint">
             <span>Drop a .yaml in the themes folder and it shows up here.</span>
