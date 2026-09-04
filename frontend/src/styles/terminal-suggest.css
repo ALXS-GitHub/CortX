@@ -10,3 +10,62 @@
   line-height: inherit;
   overflow: hidden;
 }
+
+/* Floating completion menu (see lib/terminalSuggest.ts + components/terminal/
+   complete/CompletionMenu.tsx). Positioned `fixed` at the cursor cell, so it
+   never changes the size of the pane and never resizes the PTY. It holds no
+   focusable node: the keyboard stays with the terminal at all times. */
+.cortx-completion-menu {
+  position: fixed;
+  z-index: 60;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised, var(--surface));
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
+  font-size: 12px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.cortx-completion-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cortx-completion-row[data-active='true'] {
+  background: var(--accent-soft, rgb(255 255 255 / 10%));
+}
+
+.cortx-completion-value {
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cortx-completion-detail {
+  color: var(--text-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cortx-completion-kind {
+  color: var(--text-faint);
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex: none;
+}

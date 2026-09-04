@@ -16,17 +16,23 @@
 //! Neither piece knows anything about Tauri; the GUI adapts a `Channel` into a
 //! [`SinkFn`].
 
+pub mod complete;
 pub mod history;
 pub mod launch;
 pub mod layout;
 pub mod osc;
 pub mod snapshot;
+pub mod spec;
 pub mod themes;
 
-pub use history::{CommandHistory, CommandRecord};
+pub use complete::{complete_path, git_refs, npm_scripts, PathCompletion};
+pub use history::{
+    rank_commands, CommandHistory, CommandRecord, CommandSuggestion, SuggestContext,
+};
 pub use launch::{LaunchConfig, LaunchNode, LaunchStore, LaunchTab, LaunchTarget};
 pub use layout::{LayoutDoc, LayoutStore};
 pub use osc::{OscScanner, ShellEvent, ShellPhase, TerminalShellState, TerminalStateTracker};
+pub use spec::{CommandSpec, SpecItem, SpecStore};
 pub use themes::{TerminalTheme, ThemeStore, ThemeSummary};
 
 use parking_lot::Mutex;

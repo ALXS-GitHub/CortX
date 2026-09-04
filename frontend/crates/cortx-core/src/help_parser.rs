@@ -365,6 +365,99 @@ fn extract_default(description: Option<&str>) -> Option<String> {
     })
 }
 
+/// Extract the subcommands listed in a `--help` page (#17).
+///
+/// Complements [`parse_help_output`], which only reads options. Recognises
+/// the shapes CortX actually meets on this machine:
+///
+/// - clap / cargo / docker: a `Commands:` (or `Management Commands:`,
+///   `SUBCOMMANDS:`) section followed by indented `name  description` lines,
+///   with `name, alias` pairs supported (`build, b`).
+/// - git: `These are common Git commands used in various situations:`
+///   followed by un-indented group titles and indented entries.
+///
+/// Returns `(name, description)` in the order they appear, deduplicated.
+pub fn parse_help_subcommands(help_text: &str) -> Vec<(String, Option<String>)> {
+    /// Never let a malformed page produce an unbounded list.
+    const MAX: usize = 300;
+
+    let entry_re =
+        Regex::new(r"^[ \t]{2,8}([a-zA-Z][a-zA-Z0-9_.:+-]*)((?:[ \t]*,[ \t]*[a-zA-Z][a-zA-Z0-9_.:+-]*)*)(?:[ \t]{2,}(\S.*))?$")
+            .unwrap();
+    // npm lists its commands as a wrapped, comma-separated run of bare names
+    // ("access, adduser, audit, ..."). Two names or more, so a wrapped
+    // description line can't be mistaken for one.
+    let bare_list_re =
+        Regex::new(r"^[a-zA-Z][a-zA-Z0-9_.:+-]*(?:[ \t]*,[ \t]*[a-zA-Z][a-zA-Z0-9_.:+-]*)+[ \t]*,?$")
+            .unwrap();
+
+    let mut out: Vec<(String, Option<String>)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut in_section = false;
+
+    for line in help_text.lines() {
+        let trimmed = line.trim_end();
+        if trimmed.trim().is_empty() {
+            continue;
+        }
+        let indented = trimmed.starts_with(' ') || trimmed.starts_with('\t');
+        let lower = trimmed.trim().to_lowercase();
+
+        if !indented {
+            // An un-indented line is a heading. It opens the section when it
+            // mentions commands, and closes it when it introduces something
+            // else (`Options:`, `Examples:`, ...). Anything else (git's group
+            // titles) leaves the current state alone.
+            if lower.contains("command") && (lower.ends_with(':') || lower.ends_with("situations:")) {
+                in_section = true;
+            } else if lower.ends_with(':') {
+                in_section = false;
+            }
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        // Indented lines that are clearly options belong to another section
+        // that forgot its heading; stop trusting the section.
+        if trimmed.trim_start().starts_with('-') {
+            in_section = false;
+            continue;
+        }
+        // The bare list is checked first: `version, view, whoami` would
+        // otherwise be read as one entry named `version`.
+        if bare_list_re.is_match(trimmed.trim()) {
+            for name in trimmed
+                .trim()
+                .trim_end_matches(',')
+                .split(',')
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+            {
+                if seen.insert(name.to_string()) {
+                    out.push((name.to_string(), None));
+                }
+            }
+        } else if let Some(caps) = entry_re.captures(trimmed) {
+            // `name  description`, aliases (`build, b`) dropped on purpose:
+            // a menu full of one-letter duplicates helps nobody.
+            let name = caps.get(1).unwrap().as_str().to_string();
+            let description = caps
+                .get(3)
+                .map(|m| m.as_str().trim().to_string())
+                .filter(|d| !d.is_empty());
+            if seen.insert(name.clone()) {
+                out.push((name, description));
+            }
+        }
+        if out.len() >= MAX {
+            break;
+        }
+    }
+    out
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -546,6 +639,119 @@ options:
         assert_eq!(
             extract_default(Some("Default number of impostors (default: 1).")),
             Some("1".to_string())
+        );
+    }
+
+    #[test]
+    fn subcommands_clap_style_with_aliases() {
+        let help = r#"Rust's package manager
+
+Usage: cargo [OPTIONS] [COMMAND]
+
+Commands:
+  build, b     Compile the current package
+  check, c     Analyze the current package
+  test, t      Run the tests
+  help         Print this message or the help of the given subcommand(s)
+
+Options:
+  -v, --verbose      Use verbose output
+      --offline      Run without accessing the network
+"#;
+        let subs = parse_help_subcommands(help);
+        let names: Vec<_> = subs.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["build", "check", "test", "help"]);
+        assert_eq!(subs[0].1.as_deref(), Some("Compile the current package"));
+        assert!(
+            !names.contains(&"verbose"),
+            "options must not leak into subcommands"
+        );
+    }
+
+    #[test]
+    fn subcommands_git_style_groups() {
+        let help = r#"usage: git [-v | --version] [-h | --help] [-C <path>] <command> [<args>]
+
+These are common Git commands used in various situations:
+
+start a working area (see also: git help tutorial)
+   clone     Clone a repository into a new directory
+   init      Create an empty Git repository
+
+work on the current change (see also: git help everyday)
+   add       Add file contents to the index
+   restore   Restore working tree files
+
+'git help -a' and 'git help -g' list available subcommands.
+"#;
+        let names: Vec<_> = parse_help_subcommands(help)
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, vec!["clone", "init", "add", "restore"]);
+    }
+
+    #[test]
+    fn subcommands_docker_style_two_sections() {
+        let help = r#"Usage:  docker [OPTIONS] COMMAND
+
+Management Commands:
+  container   Manage containers
+  image       Manage images
+
+Commands:
+  build       Build an image from a Dockerfile
+  run         Create and run a new container
+
+Global Options:
+  -D, --debug    Enable debug mode
+"#;
+        let names: Vec<_> = parse_help_subcommands(help)
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, vec!["container", "image", "build", "run"]);
+    }
+
+    #[test]
+    fn subcommands_absent_when_there_is_no_command_section() {
+        let help = r#"Usage: myapp [OPTIONS]
+
+Options:
+  -v, --verbose    Enable verbose output
+  -o, --output FILE  Output file
+"#;
+        assert!(parse_help_subcommands(help).is_empty());
+    }
+
+    #[test]
+    fn subcommands_npm_style_comma_wrapped_list() {
+        let help = r#"npm <command>
+
+Usage:
+
+npm install        install all the dependencies in your project
+npm test           run this project's tests
+
+All commands:
+
+    access, adduser, audit, bugs, cache, ci,
+    completion, config, dedupe, deprecate, diff,
+    version, view, whoami
+
+Specify configs in the ini-formatted file:
+    C:\Users\x\.npmrc
+"#;
+        let names: Vec<_> = parse_help_subcommands(help)
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert!(names.contains(&"install".to_string()) || names.contains(&"access".to_string()));
+        assert!(names.contains(&"whoami".to_string()));
+        assert!(names.contains(&"config".to_string()));
+        assert!(
+            !names.iter().any(|n| n.contains(".npmrc")),
+            "the config paragraph is not a command list: {names:?}"
         );
     }
 }
