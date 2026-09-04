@@ -468,7 +468,7 @@ export function IntegratedTerminalSection() {
       <ToggleField
         id="restore-sessions"
         label="Restore sessions on start"
-        hint="Reopens the Terminal window's tabs where you left them — shells in their last directory, nothing re-run."
+        hint="When you open terminal mode, your tabs come back where you left them — shells in their last directory, nothing re-run. Starting CortX never opens the terminal by itself."
       >
         <Switch
           id="restore-sessions"

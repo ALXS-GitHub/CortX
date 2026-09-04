@@ -4,19 +4,19 @@
  * their previous scrollback tail), and nothing is re-run. Services / scripts
  * keep their leaves and show as ended until restarted.
  *
- * **Lazy on purpose.** Starting CortX must not start a terminal: respawning
- * every saved shell at boot costs a PTY (and a shell profile, and whatever
- * `cortx init` pulls in) per tab, for a window nobody has asked for yet. So
- * `bootTerminalRestore` only tidies snapshots, and reopens the Terminal window
- * when it was up at the last quit; the shells themselves are respawned by
- * `restoreTerminalSessions`, which `openTerminalWindow` awaits — the first
- * time terminal mode is entered, and once per run.
+ * **Lazy on purpose.** Starting CortX must not start a terminal — neither the
+ * window nor a single PTY. Respawning every saved shell at boot costs a shell
+ * profile (and whatever `cortx init` pulls in) per tab, and reopening the
+ * window puts a terminal in front of someone who opened the cockpit. So boot
+ * does nothing but tidy snapshots; the window and its shells both come back on
+ * the first `openTerminalWindow`, which awaits `restoreTerminalSessions` once
+ * per run. `restoreSessions` therefore means "your tabs are where you left
+ * them *when you open terminal mode*", not "open terminal mode for me".
  */
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore, IS_TERMINAL_WINDOW } from '@/stores/terminalLayoutStore';
 import { allWindowLeaves, projectIdOfWorkspace, replaceTerminalIds } from '@/lib/terminalLayout';
-import { openTerminalWindow } from '@/components/terminal/terminalWindows';
 
 let restoreStarted: Promise<void> | null = null;
 
@@ -91,10 +91,10 @@ async function runRestore(): Promise<void> {
 }
 
 /**
- * What session restore does at app start: nothing that costs a process. The
- * snapshots of terminals that left the layout are dead weight, and a Terminal
- * window that was up at the last quit is reopened — which is what triggers the
- * shell restore, through `openTerminalWindow`.
+ * What session restore does at app start: nothing you can see, and nothing
+ * that costs a process. It drops the snapshots of terminals that have left the
+ * layout, and stops there — the Terminal window is **not** reopened, however
+ * it was left at the last quit.
  */
 export async function bootTerminalRestore(): Promise<void> {
   if (IS_TERMINAL_WINDOW) return;
@@ -103,7 +103,4 @@ export async function bootTerminalRestore(): Promise<void> {
   const doc = useTerminalLayoutStore.getState().doc;
   const keep = allWindowLeaves(doc.window).map((l) => l.leaf.terminalId);
   api.pruneTerminalSnapshots(keep).catch(() => {});
-  if (doc.windowOpen) {
-    openTerminalWindow().catch(() => {});
-  }
 }
