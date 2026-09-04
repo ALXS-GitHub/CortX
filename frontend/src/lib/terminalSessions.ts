@@ -30,6 +30,13 @@ import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { getXtermThemeOverride, isWindowThemeActive, themeToXterm } from '@/lib/terminalTheme';
 import { copyOnSelectEnabled, overrideKeySequence, smoothScrollDuration } from '@/lib/terminalKeys';
+import { TerminalImageFilter, type ImagePart } from '@/lib/terminalImages';
+import { registerFileLinkProvider } from '@/lib/terminalLinks';
+
+/** One queued piece of output, plus the callback owed to whoever wrote it. */
+interface QueuedPart extends ImagePart {
+  done?: () => void;
+}
 
 export interface TerminalSession {
   id: string;
@@ -47,6 +54,14 @@ export interface TerminalSession {
   disposables: IDisposable[];
   /** True while the backend scrollback snapshot is being parsed (see attach). */
   replaying: boolean;
+  /** Repairs iTerm2 images and translates kitty graphics (see terminalImages). */
+  images: TerminalImageFilter;
+  /** Output waiting to be written, in order (a kitty frame can need decoding). */
+  pending: QueuedPart[];
+  /** A part of `pending` is being awaited; nothing else may be written. */
+  draining: boolean;
+  /** Size last accepted by the backend PTY, so a lost resize can be retried. */
+  sentSize: { cols: number; rows: number } | null;
 }
 
 const sessions = new Map<string, TerminalSession>();
@@ -511,7 +526,9 @@ function createSession(id: string): TerminalSession {
       openExternal(uri).catch((err) => console.error('Failed to open URL:', err));
     })
   );
-  // Sixel + iTerm2 inline images. (Kitty graphics land in a later addon release.)
+  // Sixel + iTerm2 inline images. Kitty graphics reach the same renderer
+  // through `lib/terminalImages`, which rewrites them as iTerm2 sequences —
+  // the addon has no kitty support and xterm.js has no APC handler at all.
   const image = new ImageAddon({
     sixelSupport: true,
     iipSupport: true,
@@ -540,7 +557,22 @@ function createSession(id: string): TerminalSession {
     canvas: null,
     disposables: [],
     replaying: false,
+    images: new TerminalImageFilter({
+      // Answering the kitty support query is what makes programs use it.
+      respond: (data) => {
+        if (session.replaying) return;
+        api.writeTerminal(id, data).catch(() => {});
+      },
+      kitty: () => useAppStore.getState().settings?.terminal.kittyGraphics !== false,
+    }),
+    pending: [],
+    draining: false,
+    sentSize: null,
   };
+
+  // Clickable file paths (and `file:line:col`) next to the URL detection the
+  // WebLinksAddon already does. Registered second, so URLs still win.
+  session.disposables.push(registerFileLinkProvider(term, id));
 
   // Keyboard input → PTY. Errors (process already gone) are expected; ignore.
   session.disposables.push(
@@ -550,8 +582,8 @@ function createSession(id: string): TerminalSession {
     })
   );
   session.disposables.push(
-    term.onResize(({ cols, rows }) => {
-      api.resizeTerminal(id, cols, rows).catch(() => {});
+    term.onResize(() => {
+      pushTerminalSize(session);
     })
   );
 
@@ -752,6 +784,49 @@ function neutraliseThemeBackground(bytes: Uint8Array): Uint8Array {
   return out;
 }
 
+/**
+ * PTY output → xterm, through the image filter.
+ *
+ * The filter hands back the chunk as a list of parts: bytes ready to write,
+ * and now and then a promise (a kitty frame that has to be inflated or
+ * re-encoded). Everything goes through one FIFO per session so a promise can
+ * never let later bytes overtake earlier ones.
+ */
+function writeFromPty(session: TerminalSession, bytes: Uint8Array, done?: () => void) {
+  const parts: QueuedPart[] = session.images.feed(neutraliseThemeBackground(bytes));
+  if (done) {
+    if (parts.length) parts[parts.length - 1].done = done;
+    else parts.push({ done });
+  }
+  if (!parts.length) return;
+  session.pending.push(...parts);
+  drainPending(session);
+}
+
+function drainPending(session: TerminalSession) {
+  if (session.draining) return;
+  while (session.pending.length) {
+    const part = session.pending[0];
+    if (part.promise) {
+      session.draining = true;
+      part.promise
+        .catch(() => null)
+        .then((resolved) => {
+          session.draining = false;
+          if (session.pending[0] !== part) return;
+          session.pending.shift();
+          if (resolved?.length) session.term.write(resolved, part.done);
+          else part.done?.();
+          drainPending(session);
+        });
+      return;
+    }
+    session.pending.shift();
+    if (part.bytes?.length) session.term.write(part.bytes, part.done);
+    else part.done?.();
+  }
+}
+
 async function attach(session: TerminalSession) {
   if (session.attachToken !== null) return;
   try {
@@ -764,12 +839,12 @@ async function attach(session: TerminalSession) {
         // line. Mute keyboard/response output until the replay is parsed.
         first = false;
         session.replaying = true;
-        session.term.write(neutraliseThemeBackground(bytes), () => {
+        writeFromPty(session, bytes, () => {
           session.replaying = false;
         });
         return;
       }
-      session.term.write(neutraliseThemeBackground(bytes));
+      writeFromPty(session, bytes);
     });
     // The session may have been disposed while the invoke was in flight.
     if (!sessions.has(session.id)) {
@@ -777,9 +852,44 @@ async function attach(session: TerminalSession) {
       return;
     }
     session.attachToken = token;
+    // The PTY exists for sure now: a size that was refused while it was still
+    // spawning (see pushTerminalSize) gets through this time.
+    pushTerminalSize(session);
   } catch (err) {
     console.error(`Failed to attach terminal ${session.id}:`, err);
   }
+}
+
+/**
+ * Tell the backend the size xterm actually has.
+ *
+ * This has to be belt and braces, because a PTY whose row count disagrees
+ * with xterm's is *silently* broken: ConPTY anchors every absolute cursor
+ * move (`ESC [ row ; col H`) to the bottom of its own screen, so once the
+ * screen has filled, a terminal that is N rows taller than the PTY has
+ * everything drawn N rows too high — output lands on top of the lines above
+ * the prompt instead of below it (DEV-13, the fastfetch report). While the
+ * screen is still short, both sides count from the top and nothing shows,
+ * which is why it only bites after the first screenful.
+ *
+ * Two holes are closed here. `term.onResize` only fires when the size
+ * *changes*, so a shell spawned at a size that happens to equal xterm's
+ * starting 80×24 was never corrected; and the resize sent while the shell was
+ * still spawning was rejected by the backend ("No running terminal") and the
+ * error thrown away. So: send after every fit, remember what the backend
+ * accepted, and try again on the next fit and right after the attach.
+ */
+function pushTerminalSize(session: TerminalSession) {
+  const { cols, rows } = session.term;
+  if (cols < 2 || rows < 2) return;
+  if (session.sentSize?.cols === cols && session.sentSize.rows === rows) return;
+  const size = { cols, rows };
+  session.sentSize = size;
+  api.resizeTerminal(session.id, cols, rows).catch(() => {
+    // Most likely the PTY is not registered yet. Forget it so the next fit
+    // (or the attach) tries again instead of trusting a size nobody applied.
+    if (session.sentSize === size) session.sentSize = null;
+  });
 }
 
 /** Get (or lazily create) the session for a terminal id. */
@@ -839,6 +949,9 @@ export function fitTerminal(id: string) {
     // in XtermView calls us again once it does.
     return;
   }
+  // Re-assert the size even when xterm's did not change: `onResize` is not
+  // enough on its own (see pushTerminalSize).
+  pushTerminalSize(session);
   // Remember the size on the leaf: a restored shell is spawned at the size it
   // will have, instead of being resized after its prompt is already on screen.
   const { cols, rows } = session.term;
@@ -896,6 +1009,8 @@ export function disposeTerminal(id: string) {
   const session = sessions.get(id);
   if (!session) return;
   sessions.delete(id);
+  session.pending = [];
+  session.images.reset();
   if (session.attachToken !== null) {
     api.detachTerminal(id, session.attachToken).catch(() => {});
   }
