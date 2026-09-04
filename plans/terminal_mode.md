@@ -34,8 +34,13 @@ Oui, et c'est l'endroit le plus naturel :
 
 ### Ce qui reste hors périmètre (décidé)
 
-- **Pas de zone de saisie séparée façon Warp.** Flux classique + marqueurs de blocs. Les TUI, les
-  prompts et les agents interactifs continuent de marcher tels quels.
+- ~~**Pas de zone de saisie séparée façon Warp.**~~ **Décision levée par Alexis le 2026-09-04.**
+  Son argument : l'éditeur ne concerne que la ligne qu'on tape ; dès qu'une commande part, il
+  s'efface et tout repasse au flux classique — donc un TUI plein écran ne le voit jamais. Vérifié
+  depuis dans l'intégration shell de Warp, qui est en clair sur la machine : Warp ne désactive pas
+  le line editor du shell, il laisse simplement son buffer vide et écrit le texte + CR à la
+  validation. Voir `plans/universal_input.md` (ticket #15), qui couvre aussi le mode « prompt collé
+  en bas » demandé au passage.
 - **Pas de cloud, partage, notebooks, comptes.** CortX est local-first.
 - **Pas d'éditeur, git graph, LSP** (Terax en a, ce n'est pas notre périmètre).
 - **Pas de daemon** dans ce ticket. Les PTY vivent dans le process de l'app ; fermer l'app ferme les
