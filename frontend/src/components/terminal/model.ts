@@ -138,6 +138,13 @@ export function sortTabs(tabs: TerminalTab[]): TerminalTab[] {
   return tabs.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.order - b.order);
 }
 
+/**
+ * Header of the group holding the tabs that belong to no project. It is a
+ * section like any other — a plain description of what is in it, not a badge
+ * ("Free" read like a tier label).
+ */
+export const NO_PROJECT_GROUP_NAME = 'No project';
+
 export interface WorkspaceGroup {
   workspaceId: string;
   name: string;
@@ -147,7 +154,8 @@ export interface WorkspaceGroup {
 
 /**
  * The scoped tabs grouped by workspace the way the sessions rail shows them:
- * projects in sidebar order, "Free" last, pinned tabs first in each group.
+ * projects in sidebar order, the project-less group last, pinned tabs first
+ * in each group.
  */
 export function groupTabsByWorkspace(scopedTabs: TerminalTab[], projects: Project[]): WorkspaceGroup[] {
   const byWorkspace = new Map<string, TerminalTab[]>();
@@ -162,7 +170,7 @@ export function groupTabsByWorkspace(scopedTabs: TerminalTab[], projects: Projec
     const project = projectId ? projects.find((p) => p.id === projectId) : undefined;
     out.push({
       workspaceId,
-      name: workspaceId === FREE_WORKSPACE_ID ? 'Free' : project?.name ?? 'Unknown project',
+      name: workspaceId === FREE_WORKSPACE_ID ? NO_PROJECT_GROUP_NAME : project?.name ?? 'Unknown project',
       color: projectId ? projectColor(projectId) : null,
       tabs: sortTabs(tabs),
     });
