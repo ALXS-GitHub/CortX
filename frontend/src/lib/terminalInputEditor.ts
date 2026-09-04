@@ -43,6 +43,28 @@
  * - the grid's cursor is hidden (`cursorInactiveStyle: 'none'`) *and* the grid
  *   is explicitly blurred, so there is never a second cursor blinking next to
  *   ours.
+ *
+ * ## The mouse
+ *
+ * Drawing a caret is only half of "the cursor works": the user also has to be
+ * able to *put it somewhere*. The block is a full-width strip, but the only
+ * element in it that ever accepted the mouse was the `<textarea>`, and the
+ * textarea starts on the column the prompt ends on — everything left of it
+ * (the frame, the shell's own PS1 shown inside the block) and the padding
+ * above and below the row were `pointer-events: none` and let the click fall
+ * through to xterm's canvas, where it did nothing but start a grid selection.
+ * Clicking *on the prompt* therefore could not move the caret at all.
+ *
+ * So the block now has a hit layer (`.cortx-uinput-hit`) covering all of it,
+ * sitting *under* the text box so the textarea keeps the browser's own click,
+ * drag-select and double-click wherever it already worked. Outside it the
+ * point is mapped to a caret offset by `terminalInputHit.ts`, measured on the
+ * caret layer itself so it is exact for any font.
+ *
+ * The deliberate trade-off: a drag that *starts* on the prompt row no longer
+ * selects the grid's text there — a strip cannot be an editor and a grid
+ * selection at the same time, and Warp makes the same call. Every other row is
+ * untouched.
  */
 import type { IDisposable, Terminal } from '@xterm/xterm';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
@@ -51,6 +73,7 @@ import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import { copyOnSelectEnabled } from '@/lib/terminalKeys';
 import { TerminalInputMachine, type KeyDescriptor } from '@/lib/terminalInputState';
+import { caretOffsetAt } from '@/lib/terminalInputHit';
 
 /** The editor is beta: off unless the user asks for it. */
 export function inputEditorEnabled(): boolean {
@@ -86,6 +109,13 @@ const PAD_TOP = 2;
 const PAD_BOTTOM = 5;
 /** Space kept between the caret's column and the right edge of the block. */
 const TEXT_INSET_RIGHT = 6;
+/**
+ * Columns of typing room the text box is guaranteed, however far right the
+ * shell said its prompt ended. ConPTY repaints the screen on its own terms and
+ * a bogus `cursorX` would otherwise push the box off the right edge — an
+ * editor nothing can be typed or clicked into.
+ */
+const MIN_TEXT_COLS = 4;
 
 // ---------------------------------------------------------------------------
 // History for the in-editor ghost text
@@ -167,6 +197,8 @@ class InputEditorController {
   machine = new TerminalInputMachine();
   root: HTMLDivElement;
   frame: HTMLDivElement;
+  /** The whole strip's click target — see the header, "The mouse". */
+  hit: HTMLDivElement;
   text: HTMLDivElement;
   field: HTMLTextAreaElement;
   ghost: HTMLDivElement;
@@ -203,6 +235,14 @@ class InputEditorController {
     const frame = document.createElement('div');
     frame.className = 'cortx-uinput-frame';
 
+    // Appended *before* the text box on purpose: at equal z-index the later
+    // sibling wins the hit test, so the textarea still takes every click that
+    // falls inside it (native drag-select, double-click…) and this layer only
+    // ever sees the rest of the block.
+    const hit = document.createElement('div');
+    hit.className = 'cortx-uinput-hit';
+    hit.setAttribute('aria-hidden', 'true');
+
     const text = document.createElement('div');
     text.className = 'cortx-uinput-text';
 
@@ -236,11 +276,12 @@ class InputEditorController {
     caretLayer.append(this.caretLead, this.caret);
 
     text.append(ghost, field, caretLayer);
-    root.append(frame, text);
+    root.append(frame, hit, text);
     container.appendChild(root);
 
     this.root = root;
     this.frame = frame;
+    this.hit = hit;
     this.text = text;
     this.ghost = ghost;
     this.field = field;
@@ -285,7 +326,11 @@ class InputEditorController {
     on(this.field, 'input', () => this.onInput());
     on(this.field, 'paste', (e) => this.onPaste(e));
     on(this.field, 'keyup', () => this.syncCaret());
+    // A click moves `selectionStart` without ever firing a `keyup`, and a
+    // drag can end on the field, past it, or with a double-click's own
+    // `select`: read the caret back on all of them.
     on(this.field, 'mouseup', () => this.syncCaret());
+    on(this.field, 'click', () => this.syncCaret());
     on(this.field, 'select', () => this.syncCaret());
     // Chromium fires `selectionchange` on the field itself (since 121), which
     // is the only event that keeps our caret glued to the browser's while an
@@ -306,6 +351,16 @@ class InputEditorController {
     // A line longer than the block scrolls inside the textarea; the ghost and
     // the caret have to follow or they drift away from the text.
     on(this.field, 'scroll', () => this.syncScroll());
+
+    // The rest of the block (see the header, "The mouse"): a click on the
+    // shell's own prompt, in the frame's padding or past the right edge of
+    // the text used to reach xterm's canvas and do nothing. It now puts the
+    // caret where the pointer is.
+    on(this.hit, 'mousedown', (e) => this.onBlockMouseDown(e));
+    // …and because that layer takes the pointer, the wheel has to be handed
+    // back by hand or the pane would stop scrolling while the cursor rests on
+    // the prompt row.
+    on(this.hit, 'wheel', (e) => this.onBlockWheel(e));
 
     // Focus discipline (plan §6.5): while the editor is up it is the one
     // keyboard target. A mouse selection may take the focus for the duration
@@ -461,6 +516,67 @@ class InputEditorController {
     this.root.dataset.focus = document.activeElement === this.field ? 'true' : 'false';
   }
 
+  // -- mouse ----------------------------------------------------------------
+
+  /**
+   * A click anywhere on the block that the textarea did not already take.
+   *
+   * `preventDefault` comes *before* the focus on purpose: on a non-editable
+   * element it is what stops the webview moving the focus somewhere else and
+   * xterm starting a grid selection underneath, both of which would undo the
+   * caret we are about to place.
+   */
+  onBlockMouseDown(e: MouseEvent) {
+    // Only the primary button. The right one keeps the pane's own menu (copy /
+    // paste, the block menu): that listener is on the container and this event
+    // still bubbles up to it.
+    if (e.button !== 0) return;
+    if (!this.machine.isEditing || this.root.hidden) return;
+    const offset = this.offsetAt(e.clientX);
+    e.preventDefault();
+    this.field.focus({ preventScroll: true });
+    this.root.dataset.focus = document.activeElement === this.field ? 'true' : 'false';
+    this.field.setSelectionRange(offset, offset);
+    this.machine.setText(this.field.value, offset);
+    this.render();
+  }
+
+  /** The hit layer swallows the wheel; give the scroll back to the grid. */
+  onBlockWheel(e: WheelEvent) {
+    if (!this.machine.isEditing || this.root.hidden) return;
+    // `deltaMode`: 0 px, 1 lines, 2 pages. 20 px per line is xterm's own
+    // fallback for a pixel wheel when it has no cell height to hand.
+    const lines = e.deltaMode === 1 ? e.deltaY : e.deltaMode === 2 ? e.deltaY * this.term.rows : e.deltaY / 20;
+    if (!lines) return;
+    e.preventDefault();
+    this.term.scrollLines(Math.trunc(lines) || Math.sign(lines));
+  }
+
+  /**
+   * The caret offset a point on the block belongs to.
+   *
+   * Measured on the caret layer — the very element the caret is drawn on, so
+   * the same font, `letter-spacing` and `tab-size` — rather than divided by
+   * the cell width, which drifts on ligatures and double-width glyphs exactly
+   * as the ghost text does (`terminalSuggest.paint`). The search itself lives
+   * in `terminalInputHit.ts` and is tested there.
+   */
+  offsetAt(clientX: number): number {
+    const text = this.machine.text;
+    if (!text) return 0;
+    const rect = this.field.getBoundingClientRect();
+    const x = clientX - rect.left + this.field.scrollLeft;
+    const saved = this.caretLead.textContent;
+    const offset = caretOffsetAt(text, x, (index) => {
+      this.caretLead.textContent = text.slice(0, index);
+      // `offsetLeft` is measured from the caret layer (its offset parent) and
+      // ignores its `scrollLeft`, which is why `x` adds the scroll back in.
+      return this.caret.offsetLeft;
+    });
+    this.caretLead.textContent = saved;
+    return offset;
+  }
+
   // -- geometry -------------------------------------------------------------
 
   screenElement(): HTMLElement | null {
@@ -542,13 +658,19 @@ class InputEditorController {
     style.setProperty('--cortx-uinput-caret-w', `${Math.max(2, Math.round(cellWidth))}px`);
 
     // The text box starts on the column the prompt ended on, so what is typed
-    // lands where the shell would have echoed it.
-    const textLeft = Math.round(anchor.x * cellWidth);
+    // lands where the shell would have echoed it — but never so far right that
+    // there is nothing left to type into: `cursorX` comes from ConPTY, which
+    // repaints on its own terms, and one bad value must not cost the user the
+    // whole editor. The block itself stays full width and clickable either
+    // way (`onBlockMouseDown`).
+    const width = Math.round(rect.width);
+    const room = Math.max(0, width - Math.round(cellWidth * MIN_TEXT_COLS) - TEXT_INSET_RIGHT);
+    const textLeft = Math.min(Math.max(0, Math.round(anchor.x * cellWidth)), room);
     const text = this.text.style;
     text.left = `${textLeft}px`;
     text.top = `${Math.round(rowTop) - top}px`;
     text.height = `${Math.max(1, Math.round(cellHeight))}px`;
-    text.width = `${Math.max(cellWidth * 2, Math.round(rect.width) - textLeft - TEXT_INSET_RIGHT)}px`;
+    text.width = `${Math.max(cellWidth * 2, width - textLeft - TEXT_INSET_RIGHT)}px`;
     return true;
   }
 

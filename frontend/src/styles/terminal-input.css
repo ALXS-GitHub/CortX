@@ -40,6 +40,16 @@
    is suppressed (`caret-color: transparent`) and replaced by a caret drawn
    here, on a layer *above* the text, so a block cursor covers the glyph and
    redraws it inverted just like xterm's.
+
+   ## The mouse
+
+   A caret you cannot *place* is not a working cursor. The first two versions
+   of this file left the whole block `pointer-events: none` except the
+   `<textarea>` — and the textarea only covers the columns *after* the prompt,
+   because that is where typed text has to land. So a click on the frame, on
+   the shell's own PS1 inside the block, or in the padding above and below the
+   row fell straight through to xterm's canvas: clicking "in the prompt" could
+   not move the caret at all. `.cortx-uinput-hit` is the fix.
    ============================================================ */
 
 .cortx-uinput {
@@ -49,8 +59,9 @@
   white-space: pre;
   /* A prompt that ends near the right edge must not spill past the frame. */
   overflow: hidden;
-  /* Only the field takes the mouse: a selection that starts on the prompt
-     row still belongs to the grid. */
+  /* The root itself never takes the mouse; two of its children do (the field
+     and `.cortx-uinput-hit`), which is what keeps every row but this one
+     exactly as selectable as it was. */
   pointer-events: none;
 
   --cortx-uinput-fg: var(--terminal-fg, var(--foreground));
@@ -86,6 +97,27 @@
   box-shadow: inset 0 0 0 1px var(--cortx-uinput-glow);
   pointer-events: none;
   transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* The block's click target: all of it, the frame's padding included.
+
+   It is a sibling *before* `.cortx-uinput-text`, so at equal z-index the text
+   box wins the hit test wherever the two overlap — the `<textarea>` keeps the
+   browser's own click, drag-select and double-click untouched. This layer only
+   ever sees what is left: the prompt's columns, the padding above and below
+   the row, the last few pixels on the right. `lib/terminalInputEditor.ts`
+   turns such a point into a caret offset (`onBlockMouseDown`) and hands the
+   wheel back to the grid.
+
+   Deliberate consequence: a drag that *starts* on the prompt row no longer
+   selects the grid's text there. A strip cannot be an editor and a grid
+   selection at once; Warp makes the same choice, and every other row keeps
+   its selection exactly as before. */
+.cortx-uinput-hit {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  cursor: text;
 }
 
 /* The text box: exactly one grid row tall, starting on the column where the
