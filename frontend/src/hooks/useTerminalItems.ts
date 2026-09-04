@@ -1,6 +1,7 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { shellTabName } from '@/lib/terminalNames';
+import { ensureTerminalAgents, useTerminalAgentsStore } from '@/components/terminal/agentsStore';
 import type { TerminalItem } from '@/components/layout/terminal-dnd/types';
 
 /**
@@ -10,6 +11,12 @@ import type { TerminalItem } from '@/components/layout/terminal-dnd/types';
  */
 export function useTerminalItems(): TerminalItem[] {
   const { serviceRuntimes, scriptRuntimes, globalScriptRuntimes, shellRuntimes, globalScripts, projects, terminalStates, terminalAttention } = useAppStore();
+  // Agents running inside the terminals (DEV-13); the subscription is shared
+  // by every consumer of this hook and starts on first mount.
+  const terminalAgents = useTerminalAgentsStore((s) => s.agents);
+  useEffect(() => {
+    ensureTerminalAgents();
+  }, []);
 
   // Get service info helper
   const getServiceInfo = useCallback(
@@ -70,6 +77,7 @@ export function useTerminalItems(): TerminalItem[] {
         activeMode: runtime.activeMode,
         shell: terminalStates.get(`service:${serviceId}`),
         attention: terminalAttention.get(`service:${serviceId}`),
+        agent: terminalAgents.get(`service:${serviceId}`),
       });
     }
 
@@ -89,6 +97,7 @@ export function useTerminalItems(): TerminalItem[] {
         lastSuccess: runtime.lastSuccess,
         shell: terminalStates.get(`script:${scriptId}`),
         attention: terminalAttention.get(`script:${scriptId}`),
+        agent: terminalAgents.get(`script:${scriptId}`),
       });
     }
 
@@ -108,6 +117,7 @@ export function useTerminalItems(): TerminalItem[] {
         lastSuccess: runtime.lastSuccess,
         shell: terminalStates.get(`global-script:${scriptId}`),
         attention: terminalAttention.get(`global-script:${scriptId}`),
+        agent: terminalAgents.get(`global-script:${scriptId}`),
       });
     }
 
@@ -133,11 +143,12 @@ export function useTerminalItems(): TerminalItem[] {
         cwd: live?.cwd || runtime.cwd,
         shell: live,
         attention: terminalAttention.get(`shell:${shellId}`),
+        agent: terminalAgents.get(`shell:${shellId}`),
       });
     }
 
     return items;
-  }, [serviceRuntimes, scriptRuntimes, globalScriptRuntimes, shellRuntimes, globalScripts, projects, getServiceInfo, getScriptInfo, terminalStates, terminalAttention]);
+  }, [serviceRuntimes, scriptRuntimes, globalScriptRuntimes, shellRuntimes, globalScripts, projects, getServiceInfo, getScriptInfo, terminalStates, terminalAttention, terminalAgents]);
 
   return allTerminals;
 }

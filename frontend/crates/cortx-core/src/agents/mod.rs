@@ -15,12 +15,14 @@
 //! - `codex.rs`      — Codex sqlite index + rollout transcripts
 //! - `watcher.rs`    — recursive `notify` watcher over the provider roots
 //! - `launch.rs`     — resume command building + Warp launch configurations
+//! - `terminal_link.rs` — which CortX terminal runs which agent (DEV-13)
 
 pub mod claude_code;
 pub mod codex;
 pub mod index_cache;
 pub mod jsonl;
 pub mod launch;
+pub mod terminal_link;
 pub mod watcher;
 
 use chrono::{DateTime, Duration, Utc};
@@ -938,6 +940,173 @@ impl AgentIndex {
     }
 
     // ------------------------------------------------------------------
+    // Terminal ↔ agent correlation (DEV-13)
+    // ------------------------------------------------------------------
+
+    /// Which of these terminals is running an agent right now.
+    ///
+    /// Captures the OS process table once, then walks it upwards from every
+    /// known agent process to the terminal that owns it. Returns an empty
+    /// list (without touching the process table) when there is no terminal.
+    pub fn terminal_agents(
+        &self,
+        terminals: &[terminal_link::TerminalProcess],
+    ) -> Vec<terminal_link::TerminalAgent> {
+        if terminals.is_empty() {
+            return Vec::new();
+        }
+        let snapshot = terminal_link::ProcessSnapshot::capture();
+        self.terminal_agents_with(terminals, &snapshot)
+    }
+
+    /// Same, against an already-captured process table (tests, or several
+    /// passes over one snapshot).
+    pub fn terminal_agents_with(
+        &self,
+        terminals: &[terminal_link::TerminalProcess],
+        snapshot: &terminal_link::ProcessSnapshot,
+    ) -> Vec<terminal_link::TerminalAgent> {
+        let settings = self.settings();
+        let mut candidates: Vec<terminal_link::AgentCandidate> = Vec::new();
+
+        // --- Claude Code: the live registry is authoritative (pid, session,
+        // name, busy/idle). ---
+        if settings.claude_enabled {
+            let live = self.live.read();
+            if !live.is_empty() {
+                let titles = self.claude_live_titles(&live);
+                for (id, entry) in live.iter() {
+                    let name = entry
+                        .custom_name()
+                        .map(|n| single_line(n, TITLE_MAX_CHARS))
+                        .or_else(|| titles.get(id).cloned());
+                    candidates.push(terminal_link::AgentCandidate {
+                        provider: AgentProvider::ClaudeCode,
+                        pid: entry.pid,
+                        state: entry.state(),
+                        session_id: Some(id.clone()),
+                        name,
+                        cwd: Some(display_path(&entry.cwd)).filter(|c| !c.is_empty()),
+                        kind: entry.kind.clone(),
+                    });
+                }
+            }
+        }
+
+        // --- Codex: no registry, no pid file. The process table is the only
+        // live signal, and it says nothing about what the agent is doing. ---
+        if settings.codex_enabled {
+            for pid in snapshot.pids_named(terminal_link::is_codex_process) {
+                candidates.push(terminal_link::AgentCandidate {
+                    provider: AgentProvider::Codex,
+                    pid,
+                    state: AgentState::Unknown,
+                    session_id: None,
+                    name: None,
+                    cwd: None,
+                    kind: None,
+                });
+            }
+        }
+
+        let mut out = terminal_link::correlate(&candidates, terminals, snapshot);
+
+        // A Codex agent only gets a title when the terminal's directory holds
+        // exactly one recently-updated thread — anything looser would label a
+        // session with another session's title.
+        if settings.codex_enabled && out.iter().any(|a| a.provider == AgentProvider::Codex) {
+            let threshold = Duration::minutes(settings.codex_live_threshold_minutes.max(1) as i64);
+            for agent in out.iter_mut() {
+                if agent.provider != AgentProvider::Codex {
+                    continue;
+                }
+                let cwd = terminals
+                    .iter()
+                    .find(|t| t.terminal_id == agent.terminal_id)
+                    .and_then(|t| t.cwd.clone());
+                let Some(cwd) = cwd else { continue };
+                agent.cwd = Some(display_path(&cwd));
+                if let Some((id, title)) = self.unique_codex_thread_in(&cwd, threshold) {
+                    agent.session_id = Some(id);
+                    agent.name = Some(title);
+                }
+            }
+        }
+        out
+    }
+
+    /// Session titles (`ai-title`, `/rename`, `--name`) of the live sessions,
+    /// read from the index cache in one pass.
+    fn claude_live_titles(
+        &self,
+        live: &HashMap<String, claude_code::LiveEntry>,
+    ) -> HashMap<String, String> {
+        let cache = self.cache.read();
+        let mut out = HashMap::new();
+        for (path, entry) in cache.iter(AgentProvider::ClaudeCode) {
+            let id = match entry.summary.session_id.clone().or_else(|| {
+                Path::new(path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+            }) {
+                Some(id) => id,
+                None => continue,
+            };
+            if !live.contains_key(&id) {
+                continue;
+            }
+            let title = entry
+                .summary
+                .custom_title
+                .as_deref()
+                .or(entry.summary.agent_name.as_deref())
+                .or(entry.summary.auto_title.as_deref())
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(|t| single_line(t, TITLE_MAX_CHARS));
+            if let Some(title) = title {
+                out.insert(id, title);
+            }
+        }
+        out
+    }
+
+    /// `(id, title)` of the only non-stale Codex thread sitting in `cwd`.
+    /// `None` as soon as there are zero or several — an ambiguous match is a
+    /// wrong label, not a useful one.
+    fn unique_codex_thread_in(&self, cwd: &str, threshold: Duration) -> Option<(String, String)> {
+        let wanted = normalize_path(cwd);
+        if wanted.is_empty() {
+            return None;
+        }
+        let now = Utc::now();
+        let threads = self.codex_threads.read();
+        let mut found: Option<(String, String)> = None;
+        for thread in threads.iter() {
+            if normalize_path(&thread.cwd) != wanted {
+                continue;
+            }
+            if now - ms_to_datetime(thread.updated_at_ms) > threshold {
+                continue;
+            }
+            if found.is_some() {
+                return None;
+            }
+            let title = thread
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .unwrap_or(thread.title.trim());
+            if title.is_empty() {
+                return None;
+            }
+            found = Some((thread.id.clone(), single_line(title, TITLE_MAX_CHARS)));
+        }
+        found
+    }
+
+    // ------------------------------------------------------------------
     // Health
     // ------------------------------------------------------------------
 
@@ -1198,6 +1367,97 @@ mod tests {
 
     /// End-to-end: a fake `~/.claude` + `~/.codex` tree, full scan, append,
     /// incremental refresh, cache reuse across index instances.
+    /// End to end: a live Claude registry entry and a Codex process, both
+    /// running under a CortX shell, come back as terminal agents.
+    #[test]
+    fn terminal_agents_link_live_sessions_to_terminals() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude = dir.path().join("claude");
+        let codex = dir.path().join("codex");
+        let runtime = dir.path().join("runtime");
+        let proj = claude.join("projects").join("C--Users-Me-Proj-CortX");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::create_dir_all(claude.join("sessions")).unwrap();
+        std::fs::create_dir_all(codex.join("sessions")).unwrap();
+
+        let sid = "bbbb2222-0000-4000-8000-000000000002";
+        // The registry only keeps entries whose pid is alive: use our own.
+        let agent_pid = std::process::id();
+        std::fs::write(
+            claude.join("sessions").join(format!("{}.json", agent_pid)),
+            format!(
+                concat!(
+                    r#"{{"pid":{},"sessionId":"{}","cwd":"C:\\Users\\Me\\Proj\\CortX","#,
+                    r#""status":"idle","kind":"interactive","name":"cortx-80","nameSource":"derived"}}"#
+                ),
+                agent_pid, sid
+            ),
+        )
+        .unwrap();
+        // The transcript carries the title the agent gave itself.
+        std::fs::write(
+            proj.join(format!("{}.jsonl", sid)),
+            format!(
+                "{{\"type\":\"ai-title\",\"aiTitle\":\"Terminal agent statuses\",\"sessionId\":\"{}\"}}\n",
+                sid
+            ),
+        )
+        .unwrap();
+
+        let settings = AgentsSettings {
+            claude_config_dir: Some(claude.to_string_lossy().to_string()),
+            codex_home: Some(codex.to_string_lossy().to_string()),
+            ..Default::default()
+        };
+        let index = AgentIndex::new(settings, &runtime);
+        index.refresh_all();
+
+        // pwsh (the PTY) -> claude, and another pwsh -> codex.
+        let shell_pid = agent_pid + 100_000;
+        let shell2_pid = agent_pid + 200_000;
+        let codex_pid = agent_pid + 200_001;
+        let snapshot = terminal_link::ProcessSnapshot::from_entries(vec![
+            (shell_pid, None, "pwsh.exe"),
+            (agent_pid, Some(shell_pid), "claude.exe"),
+            (shell2_pid, None, "pwsh.exe"),
+            (codex_pid, Some(shell2_pid), "codex.exe"),
+        ]);
+        let terminals = vec![
+            terminal_link::TerminalProcess {
+                terminal_id: "shell:one".into(),
+                pid: shell_pid,
+                cwd: Some(r"C:\Users\Me\Proj\CortX".into()),
+            },
+            terminal_link::TerminalProcess {
+                terminal_id: "shell:two".into(),
+                pid: shell2_pid,
+                cwd: Some(r"C:\Users\Me\Proj\Other".into()),
+            },
+        ];
+
+        let agents = index.terminal_agents_with(&terminals, &snapshot);
+        assert_eq!(agents.len(), 2, "{:#?}", agents);
+
+        let claude_agent = &agents[0];
+        assert_eq!(claude_agent.terminal_id, "shell:one");
+        assert_eq!(claude_agent.provider, AgentProvider::ClaudeCode);
+        // `idle` with a live pid = the agent is waiting for the user.
+        assert_eq!(claude_agent.state, AgentState::Waiting);
+        assert_eq!(claude_agent.session_id.as_deref(), Some(sid));
+        // A derived name (`cortx-80`) is not a title: the ai-title wins.
+        assert_eq!(claude_agent.name.as_deref(), Some("Terminal agent statuses"));
+
+        let codex_agent = &agents[1];
+        assert_eq!(codex_agent.terminal_id, "shell:two");
+        assert_eq!(codex_agent.provider, AgentProvider::Codex);
+        // No live registry on the Codex side: presence yes, state no.
+        assert_eq!(codex_agent.state, AgentState::Unknown);
+        assert_eq!(codex_agent.name, None);
+
+        // No terminal, no process-table walk.
+        assert!(index.terminal_agents(&[]).is_empty());
+    }
+
     #[test]
     fn index_scans_and_refreshes_incrementally() {
         let dir = tempfile::tempdir().unwrap();

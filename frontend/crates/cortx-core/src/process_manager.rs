@@ -267,6 +267,62 @@ impl ProcessManager {
         &self.command_history
     }
 
+    /// Every terminal backed by a live OS process, with the directory we
+    /// believe it is in (live OSC 7 first, then the one it was opened in).
+    ///
+    /// Feeds the agent detection (DEV-13): an agent (`claude`, `codex`) runs
+    /// *under* one of these pids, never as the pid itself in the usual case,
+    /// so the correlation walks the process tree from the agent up to here.
+    pub fn pty_processes(&self) -> Vec<crate::agents::terminal_link::TerminalProcess> {
+        use crate::agents::terminal_link::TerminalProcess;
+        // Snapshot the live directories first: never hold two of the
+        // manager's locks at once.
+        let cwds: HashMap<String, String> = self
+            .terminal_states
+            .lock()
+            .iter()
+            .filter_map(|(id, s)| {
+                s.cwd
+                    .clone()
+                    .filter(|c| !c.is_empty())
+                    .map(|c| (id.clone(), c))
+            })
+            .collect();
+        let live_cwd = |terminal_id: &str| -> Option<String> { cwds.get(terminal_id).cloned() };
+
+        let mut out: Vec<TerminalProcess> = Vec::new();
+        for entry in self.shells.lock().values() {
+            let terminal_id = format!("shell:{}", entry.info.id);
+            let cwd = live_cwd(&terminal_id).or_else(|| {
+                Some(entry.info.cwd.clone()).filter(|c| !c.is_empty())
+            });
+            out.push(TerminalProcess {
+                terminal_id,
+                pid: entry.info.pid,
+                cwd,
+            });
+        }
+        // Services and scripts can host an agent too (a launch configuration
+        // or a script that ends with `claude`).
+        for (map, prefix) in [
+            (&self.processes, "service"),
+            (&self.scripts, "script"),
+            (&self.global_scripts, "global-script"),
+        ] {
+            for (id, info) in map.lock().iter() {
+                let terminal_id = format!("{}:{}", prefix, id);
+                let cwd = live_cwd(&terminal_id);
+                out.push(TerminalProcess {
+                    terminal_id,
+                    pid: info.pid,
+                    cwd,
+                });
+            }
+        }
+        out.sort_by(|a, b| a.terminal_id.cmp(&b.terminal_id));
+        out
+    }
+
     /// Get a clone of the shutdown flag for monitoring threads
     pub fn get_shutdown_flag(&self) -> Arc<AtomicBool> {
         self.shutdown_flag.clone()

@@ -13,15 +13,29 @@ import { restrictToHorizontalAxis } from '@dnd-kit/modifiers';
 import { Pin, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeIcon';
+import { AgentProviderIcon } from '@/components/agents/AgentProviderIcon';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
-import { tabsInScope, type TerminalTab } from '@/lib/terminalLayout';
+import { isAgentsScope, type TerminalTab } from '@/lib/terminalLayout';
 import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { closeTabAndRelease, openNewTerminal } from './actions';
 import { CloseConfirmDialog } from './CloseConfirmDialog';
-import { describeItem, projectColor, sortTabs, tabItem, tabLiveState, tabProject, tabTitle, useItemMap, type ItemMap } from './model';
+import {
+  describeItem,
+  projectColor,
+  sortTabs,
+  tabItem,
+  tabLiveState,
+  tabProject,
+  tabTitle,
+  useItemMap,
+  useScopedTabs,
+  useTabDisplay,
+  type ItemMap,
+  type ResolvedTabDisplay,
+} from './model';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
 import { useTabContextMenu, useTabRename } from './useTabMenu';
 import type { Project } from '@/types';
@@ -31,10 +45,11 @@ interface WindowTabProps {
   items: ItemMap;
   projects: Project[];
   isActive: boolean;
-  /** 1-based position in the strip (Ctrl+N jumps there); shown faintly on hover / while Ctrl is held. */
+  /** 1-based position in the strip (Ctrl+N jumps there); shown per `display.index`. */
   index: number;
-  /** Show the project chip (global scope). */
+  /** Show the project chip (scopes that mix projects). */
   showProject: boolean;
+  display: ResolvedTabDisplay;
   onSelect: () => void;
   onClose: () => void;
 }
@@ -43,19 +58,21 @@ interface WindowTabProps {
  * One tab of the strip: sortable, renamable on double-click, closable with
  * the X or a middle click, with a right-click menu anchored at the pointer.
  */
-function WindowTab({ tab, items, projects, isActive, index, showProject, onSelect, onClose }: WindowTabProps) {
+function WindowTab({ tab, items, projects, isActive, index, showProject, display, onSelect, onClose }: WindowTabProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
 
   const item = tabItem(tab, items);
   const live = tabLiveState(tab, items);
-  const title = tabTitle(tab, items);
+  const agent = display.agent ? live.agent : undefined;
+  const title = tabTitle(tab, items, display.agent);
   const project = tabProject(tab, projects);
 
   const rename = useTabRename(tab, title);
   const menu = useTabContextMenu();
 
   const accent = tab.color ?? undefined;
+  const showIndex = display.index !== 'never' && index <= 9 && !rename.editing;
 
   return (
     <div
@@ -94,12 +111,16 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, onSelec
           style={accent ? { backgroundColor: accent } : undefined}
         />
       )}
-      <TerminalTypeIcon
-        type={item?.type ?? 'shell'}
-        className="pointer-events-none size-3.5 shrink-0 text-faint"
-      />
+      {agent ? (
+        <AgentProviderIcon provider={agent.provider} plain className="pointer-events-none size-3.5 shrink-0" />
+      ) : (
+        <TerminalTypeIcon
+          type={item?.type ?? 'shell'}
+          className="pointer-events-none size-3.5 shrink-0 text-faint"
+        />
+      )}
       {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
-      <TerminalStatusGlyph live={live} className="pointer-events-none" />
+      {display.status && <TerminalStatusGlyph live={live} className="pointer-events-none" />}
       {rename.editing ? (
         <TabRenameInput value={rename.draft} onChange={rename.setDraft} onCommit={rename.commit} onCancel={rename.cancel} className="w-32" />
       ) : (
@@ -117,9 +138,12 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, onSelec
           <span className="truncate">{project.name}</span>
         </span>
       )}
-      {index <= 9 && !rename.editing && (
+      {showIndex && (
         <span
-          className="pointer-events-none ml-auto shrink-0 font-mono text-[10px] tabular-nums text-faint opacity-0 transition-opacity group-hover/tab:opacity-100 [html[data-ctrl-held]_&]:opacity-100"
+          className={cn(
+            'pointer-events-none ml-auto shrink-0 font-mono text-[10px] tabular-nums text-faint transition-opacity',
+            display.index === 'always' ? 'opacity-100' : 'opacity-0 [html[data-ctrl-held]_&]:opacity-100'
+          )}
           aria-hidden
         >
           {index}
@@ -129,7 +153,7 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, onSelec
         type="button"
         className={cn(
           'grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/tab:opacity-100',
-          index > 9 || rename.editing ? 'ml-auto' : ''
+          showIndex ? '' : 'ml-auto'
         )}
         onClick={(e) => {
           e.stopPropagation();
@@ -161,7 +185,9 @@ export function WindowTabStrip() {
   const setActiveTab = useTerminalLayoutStore((s) => s.setActiveTab);
   const reorderTabs = useTerminalLayoutStore((s) => s.reorderTabs);
 
-  const tabs = useMemo(() => sortTabs(tabsInScope(win, win.scope)), [win]);
+  const scoped = useScopedTabs(win);
+  const display = useTabDisplay();
+  const tabs = useMemo(() => sortTabs(scoped), [scoped]);
   const ids = useMemo(() => tabs.map((t) => t.id), [tabs]);
   const newCombo = comboLabelFor('tab.new', keybindings);
 
@@ -194,7 +220,8 @@ export function WindowTabStrip() {
                 projects={projects}
                 isActive={tab.id === win.activeTabId}
                 index={i + 1}
-                showProject={win.scope === 'global'}
+                showProject={win.scope === 'global' || isAgentsScope(win.scope)}
+                display={display}
                 onSelect={() => setActiveTab(tab.id)}
                 onClose={() => closeTabAndRelease(tab.id)}
               />

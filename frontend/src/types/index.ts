@@ -111,6 +111,16 @@ export interface TerminalConfig {
   notifyOnLongCommand?: boolean;
   /** Threshold for "long", in seconds. Default 10. */
   longCommandSeconds?: number;
+  /** Which finished commands are worth a notification. Undefined = derived from
+   *  `notifyOnLongCommand` (false → `never`, otherwise `failed`). */
+  notifyWhen?: TerminalNotifyWhen;
+  /** How a notification is delivered. Undefined = `both`. */
+  notifyStyle?: TerminalNotifyStyle;
+  /** Only notify for a terminal that is not on screen. Default true. */
+  notifyOnlyWhenHidden?: boolean;
+  /** Commands that never notify (program name, or a whole prefix like `npm run dev`).
+   *  Undefined = the built-in list; `[]` = nothing is muted. */
+  notifyMutedCommands?: string[];
   /** Terminal window: sessions rail on the left (default) or a tab strip on top — never both. */
   tabsPlacement?: 'sidebar' | 'top';
   /** Ask before closing a terminal — or quitting CortX — while a command is
@@ -177,12 +187,45 @@ export interface TerminalConfig {
   shiftEnter?: ShiftEnterKey;
   /** Wheel scrolling animation in ms; 0 scrolls instantly, line by line. Default 100. */
   smoothScrollDuration?: number;
+  /** What a tab shows in the sessions rail and the tab strip. */
+  tabDisplay?: TerminalTabDisplay;
+  /** Render kitty graphics (`ESC _ G …`) by translating them to the iTerm2
+   *  sequence the image addon draws. Default true. */
+  kittyGraphics?: boolean;
+  /** Underline file paths in the output and open them on click. Default true. */
+  filePathLinks?: boolean;
+}
+
+/** When a tab shows its Ctrl+N number. Default `ctrl`. */
+export type TabIndexDisplay = 'never' | 'ctrl' | 'always';
+
+/**
+ * What a terminal tab shows. The title is never optional — a tab needs a
+ * name; everything around it is. See `DEFAULT_TAB_DISPLAY` in
+ * `components/terminal/model.ts` for the defaults.
+ */
+export interface TerminalTabDisplay {
+  /** Second line: the directory the shell is in. Default true. */
+  cwd?: boolean;
+  /** Second line while a command runs: the command (takes over the directory). Default true. */
+  command?: boolean;
+  /** Status glyph (spinner, finished pill, runtime dot). Default true. */
+  status?: boolean;
+  /** Detected agent: its icon, the title it gave itself, its own state. Default true. */
+  agent?: boolean;
+  /** When the Ctrl+N number shows up. Default `ctrl` (only while Ctrl is held). */
+  index?: TabIndexDisplay;
 }
 
 /** What the terminal sends when Shift+Enter is pressed (see `lib/terminalKeys`). */
 export type ShiftEnterKey = 'escape-enter' | 'enter';
 
 export type TerminalTargetSurface = 'dock' | 'window';
+
+/** Which finished commands deserve a notification (see `notificationPolicy.ts`). */
+export type TerminalNotifyWhen = 'never' | 'failed' | 'failed-or-long' | 'all';
+/** How a terminal notification reaches you. */
+export type TerminalNotifyStyle = 'toast' | 'system' | 'both';
 
 // ---------------------------------------------------------------------------
 // Launch configurations (data/terminal/launch/*.yaml)
@@ -230,6 +273,26 @@ export interface TerminalShellState {
   lastFinishedAt?: number | null;
   /** Increments on every finished command. */
   completedCommands: number;
+}
+
+/**
+ * An agent (Claude Code, Codex) detected inside a terminal — the agent process
+ * is a descendant of the PTY's, found by walking the process tree
+ * (`terminal-agents` event / `get_terminal_agents`).
+ */
+export interface TerminalAgentInfo {
+  terminalId: string;
+  provider: AgentProvider;
+  /** `running` / `waiting` for Claude Code; `unknown` for Codex, which
+   *  publishes no live status at all. */
+  state: AgentState;
+  /** Pid of the agent itself, not of the shell. */
+  pid: number;
+  sessionId?: string;
+  /** Title the agent gave itself (`/rename`, `--name`, auto title). */
+  name?: string;
+  cwd?: string;
+  kind?: string;
 }
 
 /** One line of `runtime/command-history.jsonl`. */

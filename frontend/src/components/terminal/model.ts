@@ -5,8 +5,10 @@ import {
   FREE_WORKSPACE_ID,
   collectLeaves,
   findLeaf,
+  isAgentsScope,
   projectIdOfWorkspace,
   tabsInScope,
+  AGENTS_SCOPE,
   type LayoutNode,
   type LeafNode,
   type SplitNode,
@@ -14,9 +16,12 @@ import {
   type TerminalWindowLayout,
 } from '@/lib/terminalLayout';
 import { useTerminalItems } from '@/hooks/useTerminalItems';
+import { useTerminalAgentsStore } from './agentsStore';
+import { PROVIDER_LABEL, STATE_LABEL } from '@/components/agents/agentUtils';
+import { useAppStore } from '@/stores/appStore';
 import type { TerminalItem } from '@/components/layout/terminal-dnd/types';
 import type { TerminalAttention } from '@/stores/appStore';
-import type { Project } from '@/types';
+import type { Project, TerminalAgentInfo, TerminalTabDisplay } from '@/types';
 
 /**
  * Small read-only helpers shared by the Terminal window components: how a
@@ -42,9 +47,34 @@ export function tabItem(tab: TerminalTab, items: ItemMap): TerminalItem | undefi
   return items.get(activeLeafOf(tab).terminalId);
 }
 
-/** Manual title, else the active leaf's terminal name. */
-export function tabTitle(tab: TerminalTab, items: ItemMap): string {
-  return tab.title ?? tabItem(tab, items)?.name ?? 'Terminal';
+/**
+ * The agent running in the tab: the active leaf's, else the first leaf that
+ * has one — a split where only one pane runs `claude` is still an agent tab.
+ */
+export function tabAgent(tab: TerminalTab, items: ItemMap): TerminalAgentInfo | undefined {
+  const active = tabItem(tab, items)?.agent;
+  if (active) return active;
+  for (const leaf of collectLeaves(tab.layout)) {
+    const agent = items.get(leaf.terminalId)?.agent;
+    if (agent) return agent;
+  }
+  return undefined;
+}
+
+/**
+ * Manual title, else the title the agent gave itself, else the terminal name.
+ *
+ * An agent tab is named after its session ("Fix the drop targeting"), not
+ * after the process that runs it — `claude` on every tab tells you nothing.
+ * Pass `useAgentName = false` to get the plain terminal name.
+ */
+export function tabTitle(tab: TerminalTab, items: ItemMap, useAgentName = true): string {
+  if (tab.title) return tab.title;
+  if (useAgentName) {
+    const name = tabAgent(tab, items)?.name?.trim();
+    if (name) return name;
+  }
+  return tabItem(tab, items)?.name ?? 'Terminal';
 }
 
 export interface TabLiveState {
@@ -54,6 +84,8 @@ export interface TabLiveState {
   attention?: TerminalAttention;
   /** Runtime status of the active leaf, for the status dot. */
   status?: string;
+  /** Agent running in the tab, with its own state (working / waiting). */
+  agent?: TerminalAgentInfo;
 }
 
 /** Aggregate the live state of every leaf so the tab reflects all of them. */
@@ -66,7 +98,36 @@ export function tabLiveState(tab: TerminalTab, items: ItemMap): TabLiveState {
     if (item.shell?.phase === 'running') running = true;
     if (!attention && item.attention) attention = item.attention;
   }
-  return { running, attention, status: tabItem(tab, items)?.status };
+  return { running, attention, status: tabItem(tab, items)?.status, agent: tabAgent(tab, items) };
+}
+
+// ---------------------------------------------------------------------------
+// What a tab shows (`terminal.tabDisplay`)
+// ---------------------------------------------------------------------------
+
+export type ResolvedTabDisplay = Required<TerminalTabDisplay>;
+
+/**
+ * Defaults: the title, a second line, the status, the agent — and no number
+ * unless Ctrl is held, since that is the only moment it means anything.
+ */
+export const DEFAULT_TAB_DISPLAY: ResolvedTabDisplay = {
+  cwd: true,
+  command: true,
+  status: true,
+  agent: true,
+  index: 'ctrl',
+};
+
+export function resolveTabDisplay(config?: TerminalTabDisplay | null): ResolvedTabDisplay {
+  if (!config) return DEFAULT_TAB_DISPLAY;
+  return { ...DEFAULT_TAB_DISPLAY, ...config };
+}
+
+/** `terminal.tabDisplay` from the settings, with the defaults filled in. */
+export function useTabDisplay(): ResolvedTabDisplay {
+  const config = useAppStore((s) => s.settings?.terminal.tabDisplay);
+  return useMemo(() => resolveTabDisplay(config), [config]);
 }
 
 /** Working directory to display: the live one, else the one the shell opened in. */
@@ -101,13 +162,21 @@ export function describeActivity(item: TerminalItem): string | null {
   return null;
 }
 
-/** Native tooltip text: cwd + activity. */
+/** Native tooltip text: agent + cwd + activity. */
 export function describeItem(item: TerminalItem): string | undefined {
   const lines: string[] = [];
+  if (item.agent) {
+    lines.push(
+      [PROVIDER_LABEL[item.agent.provider], item.agent.name, STATE_LABEL[item.agent.state]]
+        .filter(Boolean)
+        .join(' · ')
+    );
+  }
   const cwd = itemCwd(item);
   if (cwd) lines.push(cwd);
   const activity = describeActivity(item);
-  if (activity) lines.push(activity);
+  // `claude` as "the running command" says nothing the agent line has not.
+  if (activity && !item.agent) lines.push(activity);
   return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
@@ -183,6 +252,38 @@ export function groupTabsByWorkspace(scopedTabs: TerminalTab[], projects: Projec
       projects.findIndex((p) => `project:${p.id}` === b.workspaceId)
     );
   });
+}
+
+/**
+ * The tabs of the current scope, for display.
+ *
+ * `tabsInScope` already answers for the `agents` scope (it reads the registry
+ * of terminals hosting an agent), but its result changes without the layout
+ * changing — hence the extra dependency on the agents store. The tab on
+ * screen is always kept in the list: an agent exiting must not make the rail
+ * disagree with the pane it is showing.
+ */
+export function useScopedTabs(win: TerminalWindowLayout): TerminalTab[] {
+  const revision = useTerminalAgentsStore((s) => s.revision);
+  return useMemo(() => {
+    const scoped = tabsInScope(win, win.scope);
+    if (!isAgentsScope(win.scope) || !win.activeTabId) return scoped;
+    if (scoped.some((t) => t.id === win.activeTabId)) return scoped;
+    const active = win.tabs.find((t) => t.id === win.activeTabId);
+    return active ? [...scoped, active].sort((a, b) => a.order - b.order) : scoped;
+    // `revision` is what makes the agent scope live; the layout alone is not enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [win, revision]);
+}
+
+/** How many tabs currently host an agent (drives the Agents scope pill). */
+export function useAgentTabCount(win: TerminalWindowLayout): number {
+  const revision = useTerminalAgentsStore((s) => s.revision);
+  return useMemo(
+    () => tabsInScope(win, AGENTS_SCOPE).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [win, revision]
+  );
 }
 
 /**

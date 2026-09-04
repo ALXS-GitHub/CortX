@@ -14,10 +14,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeIcon';
+import { AgentProviderIcon } from '@/components/agents/AgentProviderIcon';
+import { STATE_LABEL } from '@/components/agents/agentUtils';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { RAIL_WIDTH_COLLAPSED, useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
-import { tabsInScope, type TerminalTab } from '@/lib/terminalLayout';
+import { type TerminalTab } from '@/lib/terminalLayout';
 import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
@@ -31,7 +33,10 @@ import {
   tabLiveState,
   tabTitle,
   useItemMap,
+  useScopedTabs,
+  useTabDisplay,
   type ItemMap,
+  type ResolvedTabDisplay,
   type WorkspaceGroup,
 } from './model';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
@@ -74,15 +79,15 @@ function RailIconButton({
 /**
  * One session row (expanded rail): sortable within its group, renamable on
  * double-click, with the tab's colour as a left accent bar (and a faint tint
- * when active) and a right-click menu. The second line is the live cwd, or
- * the command while one runs — the only place this is shown now. `index` is
- * the tab's position for Ctrl+N, shown faintly on hover / while Ctrl is held.
+ * when active) and a right-click menu. What it shows — second line, status,
+ * agent, Ctrl+N number — follows `terminal.tabDisplay`.
  */
 function SessionRow({
   tab,
   items,
   active,
   index,
+  display,
   onSelect,
   onClose,
 }: {
@@ -90,15 +95,21 @@ function SessionRow({
   items: ItemMap;
   active: boolean;
   index: number;
+  display: ResolvedTabDisplay;
   onSelect: () => void;
   onClose: () => void;
 }) {
   const item = tabItem(tab, items);
   const live = tabLiveState(tab, items);
-  const title = tabTitle(tab, items);
-  const cwd = cwdLabel(item);
-  const running = item?.shell?.phase === 'running';
-  const secondary = running ? (item?.shell?.command ?? '(command)') : cwd;
+  const agent = display.agent ? live.agent : undefined;
+  const title = tabTitle(tab, items, display.agent);
+  const cwd = display.cwd ? cwdLabel(item) : undefined;
+  // `claude` runs from the moment the agent starts: showing it as "the
+  // running command" would hide the directory for the whole session.
+  const running = !agent && display.command && item?.shell?.phase === 'running';
+  // An agent waiting on you is the one thing worth a word rather than a dot.
+  const waiting = agent?.state === 'waiting';
+  const secondary = waiting ? STATE_LABEL.waiting : running ? (item?.shell?.command ?? '(command)') : cwd;
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
   const rename = useTabRename(tab, title);
@@ -149,10 +160,14 @@ function SessionRow({
           aria-hidden
         />
       )}
-      <TerminalTypeIcon
-        type={item?.type ?? 'shell'}
-        className="pointer-events-none size-3.5 shrink-0 text-faint"
-      />
+      {agent ? (
+        <AgentProviderIcon provider={agent.provider} plain className="pointer-events-none size-3.5 shrink-0" />
+      ) : (
+        <TerminalTypeIcon
+          type={item?.type ?? 'shell'}
+          className="pointer-events-none size-3.5 shrink-0 text-faint"
+        />
+      )}
       {rename.editing ? (
         <TabRenameInput
           value={rename.draft}
@@ -165,20 +180,31 @@ function SessionRow({
         <span className="pointer-events-none flex min-w-0 flex-1 flex-col leading-tight">
           <span className="truncate text-[12.5px]">{title}</span>
           {secondary && (
-            <span className={cn('truncate font-mono text-[10.5px]', running ? 'text-primary' : 'text-faint')}>{secondary}</span>
+            <span
+              className={cn(
+                'truncate text-[10.5px]',
+                waiting ? 'text-st-progress' : 'font-mono',
+                running ? 'text-primary' : !waiting && 'text-faint'
+              )}
+            >
+              {secondary}
+            </span>
           )}
         </span>
       )}
       {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
-      {index <= 9 && !rename.editing && (
+      {display.index !== 'never' && index <= 9 && !rename.editing && (
         <span
-          className="pointer-events-none shrink-0 font-mono text-[10px] tabular-nums text-faint opacity-0 transition-opacity group-hover:opacity-100 [html[data-ctrl-held]_&]:opacity-100"
+          className={cn(
+            'pointer-events-none shrink-0 font-mono text-[10px] tabular-nums text-faint transition-opacity',
+            display.index === 'always' ? 'opacity-100' : 'opacity-0 [html[data-ctrl-held]_&]:opacity-100'
+          )}
           aria-hidden
         >
           {index}
         </span>
       )}
-      <TerminalStatusGlyph live={live} className="pointer-events-none" />
+      {display.status && <TerminalStatusGlyph live={live} className="pointer-events-none" />}
       <button
         type="button"
         className="grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
@@ -209,6 +235,7 @@ function SessionGroupRows({
   items,
   activeTabId,
   firstIndex,
+  display,
   onSelect,
   onReorder,
 }: {
@@ -217,6 +244,7 @@ function SessionGroupRows({
   activeTabId: string | null;
   /** Position of the group's first tab in the whole rail (Ctrl+N numbering). */
   firstIndex: number;
+  display: ResolvedTabDisplay;
   onSelect: (tabId: string) => void;
   onReorder: (workspaceId: string, orderedIds: string[]) => void;
 }) {
@@ -248,6 +276,7 @@ function SessionGroupRows({
               items={items}
               active={tab.id === activeTabId}
               index={firstIndex + i}
+              display={display}
               onSelect={() => onSelect(tab.id)}
               onClose={() => closeTabAndRelease(tab.id)}
             />
@@ -301,10 +330,23 @@ function SessionGroupHeader({ group }: { group: WorkspaceGroup }) {
 }
 
 /** One session (collapsed rail): the type icon with the status in its corner. */
-function SessionIcon({ tab, items, active, onSelect }: { tab: TerminalTab; items: ItemMap; active: boolean; onSelect: () => void }) {
+function SessionIcon({
+  tab,
+  items,
+  active,
+  display,
+  onSelect,
+}: {
+  tab: TerminalTab;
+  items: ItemMap;
+  active: boolean;
+  display: ResolvedTabDisplay;
+  onSelect: () => void;
+}) {
   const item = tabItem(tab, items);
   const live = tabLiveState(tab, items);
-  const title = tabTitle(tab, items);
+  const agent = display.agent ? live.agent : undefined;
+  const title = tabTitle(tab, items, display.agent);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -317,10 +359,16 @@ function SessionIcon({ tab, items, active, onSelect }: { tab: TerminalTab; items
             active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
           )}
         >
-          <TerminalTypeIcon type={item?.type ?? 'shell'} className="size-4" />
-          <span className="absolute -right-0.5 -top-0.5 grid place-items-center">
-            <TerminalStatusGlyph live={live} className="scale-90" />
-          </span>
+          {agent ? (
+            <AgentProviderIcon provider={agent.provider} plain className="size-4" />
+          ) : (
+            <TerminalTypeIcon type={item?.type ?? 'shell'} className="size-4" />
+          )}
+          {display.status && (
+            <span className="absolute -right-0.5 -top-0.5 grid place-items-center">
+              <TerminalStatusGlyph live={live} className="scale-90" />
+            </span>
+          )}
         </button>
       </TooltipTrigger>
       <TooltipContent side="right">
@@ -342,7 +390,8 @@ export function SessionRail() {
   const keybindings = useAppStore((s) => s.settings?.terminal.keybindings);
   // Selectors must return stable references: derive the scoped list here.
   const win = useTerminalLayoutStore((s) => s.doc.window);
-  const scopedTabs = useMemo(() => tabsInScope(win, win.scope), [win]);
+  const scopedTabs = useScopedTabs(win);
+  const display = useTabDisplay();
   const activeTabId = win.activeTabId;
   const setActiveTab = useTerminalLayoutStore((s) => s.setActiveTab);
   const reorderTabs = useTerminalLayoutStore((s) => s.reorderTabs);
@@ -371,10 +420,18 @@ export function SessionRail() {
     [groups, reorderTabs]
   );
 
-  const runningCount = useMemo(
-    () => scopedTabs.filter((t) => tabLiveState(t, items).running).length,
-    [scopedTabs, items]
-  );
+  // "3 running" used to count agent tabs too — `claude` keeps a command
+  // running from start to finish, so every agent inflated the number.
+  const counts = useMemo(() => {
+    let running = 0;
+    let agents = 0;
+    for (const tab of scopedTabs) {
+      const live = tabLiveState(tab, items);
+      if (live.agent) agents += 1;
+      else if (live.running) running += 1;
+    }
+    return { running, agents };
+  }, [scopedTabs, items]);
 
   // Drag-resize (expanded only), same mechanics as the main sidebar.
   const [resizing, setResizing] = useState(false);
@@ -423,7 +480,13 @@ export function SessionRail() {
             <span className="min-w-0 flex-1 truncate text-[11px] tabular-nums text-faint">
               {scopedTabs.length === 0
                 ? 'none'
-                : `${scopedTabs.length}${runningCount > 0 ? ` · ${runningCount} running` : ''}`}
+                : [
+                    String(scopedTabs.length),
+                    counts.agents > 0 ? `${counts.agents} agent${counts.agents > 1 ? 's' : ''}` : null,
+                    counts.running > 0 ? `${counts.running} running` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
             </span>
           </>
         )}
@@ -450,7 +513,14 @@ export function SessionRail() {
             {collapsed ? (
               <div className="flex flex-col items-center gap-1">
                 {g.tabs.map((tab) => (
-                  <SessionIcon key={tab.id} tab={tab} items={items} active={tab.id === activeTabId} onSelect={() => setActiveTab(tab.id)} />
+                  <SessionIcon
+                    key={tab.id}
+                    tab={tab}
+                    items={items}
+                    active={tab.id === activeTabId}
+                    display={display}
+                    onSelect={() => setActiveTab(tab.id)}
+                  />
                 ))}
               </div>
             ) : (
@@ -459,6 +529,7 @@ export function SessionRail() {
                 items={items}
                 activeTabId={activeTabId}
                 firstIndex={groupOffsets[gi] ?? 1}
+                display={display}
                 onSelect={setActiveTab}
                 onReorder={reorderGroup}
               />

@@ -18,6 +18,7 @@ import type {
   ShellExitPayload,
   TerminalCapabilities,
   TerminalShellState,
+  TerminalAgentInfo,
   CommandRecord,
   LaunchConfig,
   TerminalTheme,
@@ -193,6 +194,11 @@ export async function openInExplorer(path: string): Promise<void> {
 
 export async function openInVscode(path: string): Promise<void> {
   return invoke('open_in_vscode', { path });
+}
+
+/** Open a file in VS Code at a position (`code -g path:line:col`). */
+export async function openInEditor(path: string, line?: number, column?: number): Promise<void> {
+  return invoke('open_in_editor', { path, line, column });
 }
 
 export async function validatePath(path: string): Promise<boolean> {
@@ -753,6 +759,36 @@ export async function getTerminalStates(): Promise<TerminalShellState[]> {
 /** Most recent finished commands across all terminals, newest first. */
 export async function getCommandHistory(limit = 200): Promise<CommandRecord[]> {
   return invoke('get_command_history', { limit });
+}
+
+// ============================================================================
+// Agents running inside terminals (DEV-13)
+// ============================================================================
+
+/** Which terminal runs which agent right now — seeds the GUI after a reload. */
+export async function getTerminalAgents(): Promise<TerminalAgentInfo[]> {
+  return invoke('get_terminal_agents');
+}
+
+/**
+ * Fired when the set of agents running in CortX terminals changes (an agent
+ * started or exited, Claude Code flipped between busy and idle). Carries the
+ * whole list, never a delta.
+ */
+export async function onTerminalAgents(
+  callback: (agents: TerminalAgentInfo[]) => void
+): Promise<UnlistenFn> {
+  return listen<TerminalAgentInfo[]>('terminal-agents', (event) => {
+    callback(event.payload);
+  });
+}
+
+/**
+ * Bring the main window up on a session of the Agents section (DEV-11), from
+ * the Terminal window. The main window listens for `open-agent-session`.
+ */
+export async function revealAgentSession(sessionId: string): Promise<void> {
+  return invoke('reveal_agent_session', { sessionId });
 }
 
 /** OS notification (toast centre). Fire-and-forget. */

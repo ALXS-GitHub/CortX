@@ -81,6 +81,27 @@ function App() {
     };
   }, []);
 
+  // "Open in Agents" from a terminal tab running Claude Code / Codex: the
+  // backend raises this window (`reveal_agent_session`) and names the session
+  // to open. Selecting it before switching view is safe — AgentsView only
+  // clears the selection when it unmounts.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen<string>('open-agent-session', (event) => {
+      const store = useAppStore.getState();
+      store.selectAgentSession(event.payload);
+      store.setCurrentView('agents');
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   const renderView = () => {
     switch (currentView) {
       case 'project':

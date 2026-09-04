@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Check, Ellipsis, Globe } from 'lucide-react';
+import { useEffect, useMemo } from 'react';
+import { Bot, Check, Ellipsis, Globe } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,9 +10,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
-import { projectIdOfWorkspace } from '@/lib/terminalLayout';
+import { AGENTS_SCOPE, isAgentsScope, projectIdOfWorkspace } from '@/lib/terminalLayout';
 import { cn } from '@/lib/utils';
-import { projectColor } from './model';
+import { projectColor, useAgentTabCount } from './model';
 
 function ProjectDot({ projectId, className }: { projectId: string; className?: string }) {
   return (
@@ -25,17 +25,30 @@ function ProjectDot({ projectId, className }: { projectId: string; className?: s
 }
 
 /**
- * Title-bar pill: "Global" + one entry per project that currently owns tabs,
- * and a "…" menu listing every project so a scope can be picked before it
- * has any terminal.
+ * Title-bar pill: "Global", "Agents" while agents are running, one entry per
+ * project that currently owns tabs, and a "…" menu listing every project so a
+ * scope can be picked before it has any terminal.
+ *
+ * The Agents scope is a filter over the very same sessions (managing agents
+ * is the Agents section's job, DEV-11). Its pill only exists while at least
+ * one agent runs: an empty scope makes the window open a shell to fill
+ * itself, which would make no sense here.
  */
 export function ScopeSwitcher() {
   const scope = useTerminalLayoutStore((s) => s.doc.window.scope);
-  const tabs = useTerminalLayoutStore((s) => s.doc.window.tabs);
+  const win = useTerminalLayoutStore((s) => s.doc.window);
+  const tabs = win.tabs;
   const setScope = useTerminalLayoutStore((s) => s.setScope);
   const projects = useAppStore((s) => s.projects);
+  const agentCount = useAgentTabCount(win);
 
-  const currentId = scope === 'global' ? null : scope.projectId;
+  // Last agent gone: fall back to Global rather than leave the window on a
+  // scope that can no longer hold anything.
+  useEffect(() => {
+    if (isAgentsScope(scope) && agentCount === 0) setScope('global');
+  }, [scope, agentCount, setScope]);
+
+  const currentId = typeof scope === 'string' ? null : scope.projectId;
 
   // Projects with at least one tab, in project order.
   const withTabs = useMemo(() => {
@@ -64,6 +77,18 @@ export function ScopeSwitcher() {
         <Globe className="size-3" />
         Global
       </button>
+      {(agentCount > 0 || isAgentsScope(scope)) && (
+        <button
+          type="button"
+          className={pillClass(isAgentsScope(scope))}
+          onClick={() => setScope(AGENTS_SCOPE)}
+          title="Only the sessions an agent is running in"
+        >
+          <Bot className="size-3" />
+          Agents
+          <span className="tabular-nums opacity-60">{agentCount}</span>
+        </button>
+      )}
       {pills.map((p) => (
         <button
           key={p.id}
@@ -90,6 +115,14 @@ export function ScopeSwitcher() {
             <Globe />
             Global
             {scope === 'global' && <Check className="ml-auto size-3.5 text-primary" />}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={agentCount === 0} onClick={() => setScope(AGENTS_SCOPE)}>
+            <Bot />
+            Agents
+            <span className="ml-auto flex items-center gap-2">
+              <span className="text-xs tabular-nums opacity-70">{agentCount}</span>
+              {isAgentsScope(scope) && <Check className="size-3.5 text-primary" />}
+            </span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {projects.length === 0 && <div className="px-2.5 py-2 text-xs text-faint">No project yet</div>}

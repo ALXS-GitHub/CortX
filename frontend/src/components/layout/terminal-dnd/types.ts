@@ -1,4 +1,4 @@
-import type { ServiceStatus, ScriptStatus, LogEntry, TerminalShellState } from '@/types';
+import type { ServiceStatus, ScriptStatus, LogEntry, TerminalAgentInfo, TerminalShellState } from '@/types';
 import type { TerminalAttention } from '@/stores/appStore';
 
 export type TerminalType = 'service' | 'script' | 'global-script' | 'shell';
@@ -21,6 +21,8 @@ export interface TerminalItem {
   shell?: TerminalShellState;
   /** A command finished while this tab was not in view. */
   attention?: TerminalAttention;
+  /** Claude Code / Codex running inside this terminal (DEV-13). */
+  agent?: TerminalAgentInfo;
 }
 
 export interface DragData {

@@ -916,6 +916,46 @@ pub fn open_in_vscode(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Open a file in VS Code **at a position**: `code -g <path>:<line>:<col>`.
+///
+/// `open_in_vscode` passes the path alone, which is all a project or a tool
+/// needs. A file path clicked in a terminal usually carries the line a
+/// compiler or a linter pointed at (`src/main.rs:42:7`, see `lib/terminalLinks`),
+/// and landing on line 1 wastes exactly the information that made the link
+/// worth clicking. Without a line this is `open_in_vscode`.
+#[tauri::command]
+pub fn open_in_editor(path: String, line: Option<u32>, column: Option<u32>) -> Result<(), String> {
+    let Some(line) = line else {
+        return open_in_vscode(path);
+    };
+    // `-g` takes one `path:line[:col]` argument; the path may hold spaces, and
+    // `spawn` passes each arg through without a shell, so no quoting is needed.
+    let target = match column {
+        Some(col) => format!("{}:{}:{}", path, line, col),
+        None => format!("{}:{}", path, line),
+    };
+    let err = |e: std::io::Error| {
+        format!(
+            "Failed to open VSCode: {}. Make sure VSCode is installed and 'code' command is in PATH.",
+            e
+        )
+    };
+
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd")
+        .args(["/C", "code", "-g", &target])
+        .spawn()
+        .map_err(err)?;
+
+    #[cfg(not(target_os = "windows"))]
+    std::process::Command::new("code")
+        .args(["-g", &target])
+        .spawn()
+        .map_err(err)?;
+
+    Ok(())
+}
+
 // Environment file commands
 
 /// Directories to skip during env file discovery
@@ -2707,6 +2747,32 @@ pub fn create_project_from_session(
 #[tauri::command]
 pub fn get_agents_health(state: State<AppState>) -> Result<AgentsHealth, String> {
     Ok(state.agents.health())
+}
+
+/// Which terminal is running which agent right now (DEV-13). Seeds the GUI
+/// after a reload; live updates arrive through the `terminal-agents` event.
+#[tauri::command]
+pub fn get_terminal_agents(
+    state: State<AppState>,
+) -> Vec<cortx_core::agents::terminal_link::TerminalAgent> {
+    compute_terminal_agents(&state)
+}
+
+/// Shared by the command and the background poller in `lib.rs`.
+pub fn compute_terminal_agents(
+    state: &AppState,
+) -> Vec<cortx_core::agents::terminal_link::TerminalAgent> {
+    let terminals = state.process_manager.pty_processes();
+    state.agents.terminal_agents(&terminals)
+}
+
+/// Bring the main window up and ask it to open a session in the Agents
+/// section (bridge from the Terminal window). The GUI listens for
+/// `open-agent-session`.
+#[tauri::command]
+pub fn reveal_agent_session(app_handle: AppHandle, session_id: String) {
+    crate::show_main_window(&app_handle);
+    let _ = app_handle.emit("open-agent-session", session_id);
 }
 
 // ============================================================================

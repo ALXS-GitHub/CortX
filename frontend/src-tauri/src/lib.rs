@@ -5,7 +5,7 @@ mod storage;
 mod tauri_emitter;
 
 use commands::AppState;
-use cortx_core::agents::{watcher as agent_watcher, AgentIndex};
+use cortx_core::agents::{terminal_link::TerminalAgent, watcher as agent_watcher, AgentIndex};
 use cortx_core::file_watcher;
 use cortx_core::runtime_state::RuntimeStore;
 use process_manager::ProcessManager;
@@ -26,6 +26,25 @@ fn show_main_window(app: &AppHandle) {
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+}
+
+/// Recompute which terminal runs which agent and broadcast it, but only when
+/// the answer changed — the payload lands in both windows and feeds the tab
+/// titles, so a needless event is a needless re-render everywhere.
+fn emit_terminal_agents(app: &AppHandle, last: &Arc<std::sync::Mutex<Vec<TerminalAgent>>>) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let current = commands::compute_terminal_agents(&state);
+    let Ok(mut previous) = last.lock() else {
+        return;
+    };
+    if *previous == current {
+        return;
+    }
+    *previous = current.clone();
+    drop(previous);
+    let _ = app.emit("terminal-agents", current);
 }
 
 /// Label of the dedicated Terminal window (DEV-13 P1).
@@ -370,11 +389,21 @@ pub fn run() {
 
             // Agents section: watch the provider roots (transcripts, live
             // registry, Codex sqlite) and refresh incrementally.
+            // Terminal ↔ agent link (DEV-13): the last payload sent, so the
+            // event only fires when something actually changed.
+            let terminal_agents: Arc<std::sync::Mutex<Vec<TerminalAgent>>> =
+                Arc::new(std::sync::Mutex::new(Vec::new()));
+
             let agents = state.agents.clone();
             let agents_app = app.handle().clone();
+            let ta_watch = terminal_agents.clone();
             match agent_watcher::start_agent_watching(agents.watch_roots(), move |changed| {
                 if agents.refresh_paths(&changed) {
                     let _ = agents_app.emit("agent-sessions-changed", ());
+                    // The Claude live registry is rewritten on every
+                    // busy/idle flip: react to it right away instead of
+                    // waiting for the next poll.
+                    emit_terminal_agents(&agents_app, &ta_watch);
                 }
             }) {
                 Ok(handle) => {
@@ -392,6 +421,18 @@ pub fn run() {
                 .spawn(move || {
                     agents.refresh_all();
                     let _ = agents_app.emit("agent-sessions-changed", ());
+                })
+                .ok();
+
+            // Agent detection needs the OS process table, which no watcher
+            // reports: poll it, cheaply, and only while terminals exist.
+            let ta_app = app.handle().clone();
+            let ta_poll = terminal_agents.clone();
+            std::thread::Builder::new()
+                .name("cortx-terminal-agents".into())
+                .spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    emit_terminal_agents(&ta_app, &ta_poll);
                 })
                 .ok();
 
@@ -606,6 +647,7 @@ pub fn run() {
             // Utility commands
             commands::open_in_explorer,
             commands::open_in_vscode,
+            commands::open_in_editor,
             commands::validate_path,
             // Environment file commands
             commands::discover_env_files,
@@ -697,6 +739,8 @@ pub fn run() {
             commands::get_agent_resume_command,
             commands::create_project_from_session,
             commands::get_agents_health,
+            commands::get_terminal_agents,
+            commands::reveal_agent_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

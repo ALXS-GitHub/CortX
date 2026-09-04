@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { Copy, CopyPlus, FolderOpen, Palette, Pencil, Pin, PinOff, X, XCircle } from 'lucide-react';
+import { Copy, CopyPlus, FolderOpen, Palette, Pencil, Pin, PinOff, Sparkles, X, XCircle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -27,7 +27,8 @@ import {
   tabsOfWorkspace,
   terminalCwd,
 } from './actions';
-import { activeLeafOf } from './model';
+import { activeLeafOf, tabAgent, useItemMap } from './model';
+import { revealAgentSession } from '@/lib/tauri';
 
 /**
  * The pieces a terminal tab shares between the tab strip and the sessions
@@ -141,6 +142,10 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
   const terminalId = activeLeafOf(tab).terminalId;
   // Read at open time only: the cwd is live state, the menu a snapshot.
   const cwd = open ? terminalCwd(terminalId) ?? activeLeafOf(tab).cwd ?? null : null;
+  // A Claude Code / Codex session detected in this tab: offer to open it in
+  // the Agents section, where the transcript and the annotations live.
+  const items = useItemMap();
+  const agent = tabAgent(tab, items);
   // Bulk closes (ticket "close a whole section of tabs"), counted at open time.
   const otherCount = open ? otherClosableTabs(tab.id).length : 0;
   const groupCount = open ? tabsOfWorkspace(tab.workspaceId).length : 0;
@@ -180,6 +185,15 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
           Duplicate tab
           {shortcut(comboLabelFor('tab.duplicate', keybindings))}
         </DropdownMenuItem>
+        {agent?.sessionId && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => void revealAgentSession(agent.sessionId!)}>
+              <Sparkles />
+              Open in Agents
+            </DropdownMenuItem>
+          </>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={!cwd} onClick={() => void copyTerminalCwd(terminalId)}>
           <Copy />

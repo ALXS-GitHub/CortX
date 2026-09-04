@@ -12,7 +12,35 @@
  *   scope switcher for filtering.
  */
 
-export type TerminalScope = 'global' | { projectId: string };
+/** The window is scoped to one project. */
+export interface ProjectScope {
+  projectId: string;
+  agents?: false;
+}
+
+/**
+ * The window is scoped to the sessions an agent is running in (DEV-13). It
+ * carries `projectId: null` so the callers that only ask "which project is
+ * this window scoped to?" keep working — the answer is simply "none".
+ */
+export interface AgentsScope {
+  projectId: null;
+  agents: true;
+}
+
+/**
+ * What the Terminal window shows: everything, one project, or only the
+ * sessions an agent is running in. The agent scope is a filter over the same
+ * list, not another way of managing agents (that is the Agents section).
+ */
+export type TerminalScope = 'global' | ProjectScope | AgentsScope;
+
+export const AGENTS_SCOPE: AgentsScope = { projectId: null, agents: true };
+
+export function isAgentsScope(scope: TerminalScope): scope is AgentsScope {
+  return typeof scope !== 'string' && scope.agents === true;
+}
+
 export type TerminalSurface = 'dock' | 'window';
 /** `horizontal` = children side by side, `vertical` = stacked. */
 export type SplitDirection = 'horizontal' | 'vertical';
@@ -82,6 +110,22 @@ export function emptyLayoutDoc(): TerminalLayoutDoc {
   };
 }
 
+/**
+ * A persisted document may carry a scope this build knows nothing about (an
+ * older CortX reading a newer `sessions.json`, or the other way round).
+ * Anything unrecognised falls back to Global rather than blowing up.
+ */
+export function normaliseScope(raw: unknown): TerminalScope {
+  if (raw === 'global') return 'global';
+  if (raw === 'agents') return AGENTS_SCOPE;
+  if (raw && typeof raw === 'object') {
+    const scope = raw as { projectId?: unknown; agents?: unknown };
+    if (scope.agents === true) return AGENTS_SCOPE;
+    if (typeof scope.projectId === 'string' && scope.projectId) return { projectId: scope.projectId };
+  }
+  return 'global';
+}
+
 /** Coerce whatever the backend hands back (possibly `null` or an older shape). */
 export function normaliseLayoutDoc(raw: unknown): TerminalLayoutDoc {
   const base = emptyLayoutDoc();
@@ -92,7 +136,7 @@ export function normaliseLayoutDoc(raw: unknown): TerminalLayoutDoc {
     version: 1,
     surfaces: doc.surfaces && typeof doc.surfaces === 'object' ? { ...doc.surfaces } : {},
     window: {
-      scope: win.scope ?? 'global',
+      scope: normaliseScope(win.scope),
       activeTabId: win.activeTabId ?? null,
       tabs: Array.isArray(win.tabs) ? win.tabs.slice() : [],
     },
@@ -114,12 +158,41 @@ export function projectIdOfWorkspace(workspaceId: string): string | null {
 }
 
 export function scopeEquals(a: TerminalScope, b: TerminalScope): boolean {
-  if (a === 'global' || b === 'global') return a === b;
+  if (typeof a === 'string' || typeof b === 'string') return a === b;
+  if (isAgentsScope(a) || isAgentsScope(b)) return isAgentsScope(a) && isAgentsScope(b);
   return a.projectId === b.projectId;
+}
+
+// ---------------------------------------------------------------------------
+// Terminals hosting an agent (DEV-13)
+// ---------------------------------------------------------------------------
+
+/**
+ * Terminal ids an agent is currently running in, kept next to the pure
+ * helpers so `tabInScope` can answer for the `agents` scope without every
+ * caller (the layout store, the window, the palette, the find bar) having to
+ * thread the agent list through. Written by
+ * `components/terminal/agentsStore.ts` on every `terminal-agents` event.
+ */
+let agentTerminalIds: ReadonlySet<string> = new Set();
+
+export function setAgentTerminalIds(ids: Iterable<string>): void {
+  agentTerminalIds = new Set(ids);
+}
+
+export function isAgentTerminal(terminalId: string): boolean {
+  return agentTerminalIds.has(terminalId);
+}
+
+/** Does this tab hold at least one terminal an agent is running in? */
+export function tabHasAgent(tab: TerminalTab): boolean {
+  if (agentTerminalIds.size === 0) return false;
+  return collectLeaves(tab.layout).some((l) => agentTerminalIds.has(l.terminalId));
 }
 
 export function tabInScope(tab: TerminalTab, scope: TerminalScope): boolean {
   if (scope === 'global') return true;
+  if (isAgentsScope(scope)) return tabHasAgent(tab);
   return tab.workspaceId === workspaceIdForProject(scope.projectId);
 }
 

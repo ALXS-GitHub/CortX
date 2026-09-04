@@ -376,6 +376,26 @@ pub struct TerminalConfig {
     pub notify_on_long_command: bool,
     #[serde(default = "default_long_command_seconds")]
     pub long_command_seconds: u32,
+    /// Which finished commands are worth a notification (DEV-13 #5). None =
+    /// derived from `notify_on_long_command` for settings written before this
+    /// existed: `false` → `Never`, anything else → `Failed`.
+    #[serde(default, deserialize_with = "lenient_opt_enum")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notify_when: Option<TerminalNotifyWhen>,
+    /// How a notification is delivered. None = `Both`.
+    #[serde(default, deserialize_with = "lenient_opt_enum")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notify_style: Option<TerminalNotifyStyle>,
+    /// Only notify for a terminal that is not on screen (the tab is hidden,
+    /// or its window is in the background). Off = notify even for the
+    /// terminal you are looking at.
+    #[serde(default = "default_true")]
+    pub notify_only_when_hidden: bool,
+    /// Commands that never notify, matched on the program name (or on a
+    /// whole prefix such as `npm run dev`). None = the built-in list of
+    /// long-lived interactive programs (`claude`, `codex`, `vim`, `ssh`…).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify_muted_commands: Option<Vec<String>>,
     /// Terminal window: where the tab list lives. One or the other, never both.
     #[serde(default)]
     #[serde(deserialize_with = "lenient_enum")]
@@ -495,6 +515,66 @@ pub struct TerminalConfig {
     /// running in it. Nothing running: it closes straight away either way.
     #[serde(default = "default_true")]
     pub confirm_close_running: bool,
+    /// What a tab shows in the sessions rail and the tab strip.
+    #[serde(default)]
+    pub tab_display: TerminalTabDisplay,
+    /// Draw kitty graphics (`ESC _ G …`). CortX translates them into the
+    /// iTerm2 inline-image sequence its renderer already knows.
+    #[serde(default = "default_true")]
+    pub kitty_graphics: bool,
+    /// Underline existing file paths in the output and open them on click.
+    #[serde(default = "default_true")]
+    pub file_path_links: bool,
+}
+
+/// What a terminal tab shows (sessions rail and tab strip alike).
+///
+/// The title is never optional — a tab needs a name. Everything around it is:
+/// the second line (directory, running command), the status glyph, the agent
+/// running inside, and the Ctrl+N number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalTabDisplay {
+    /// Second line: the directory the shell is in.
+    #[serde(default = "default_true")]
+    pub cwd: bool,
+    /// Second line while a command runs: the command itself (takes over the
+    /// directory).
+    #[serde(default = "default_true")]
+    pub command: bool,
+    /// Status glyph (spinner, finished pill, runtime dot).
+    #[serde(default = "default_true")]
+    pub status: bool,
+    /// Detected agent: its icon, the title it gave itself, and its own state.
+    #[serde(default = "default_true")]
+    pub agent: bool,
+    /// When the Ctrl+N number is shown.
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub index: TabIndexDisplay,
+}
+
+impl Default for TerminalTabDisplay {
+    fn default() -> Self {
+        Self {
+            cwd: true,
+            command: true,
+            status: true,
+            agent: true,
+            index: TabIndexDisplay::default(),
+        }
+    }
+}
+
+/// When a tab shows its Ctrl+N number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TabIndexDisplay {
+    Never,
+    /// Only while Ctrl is held — the moment the number is of any use.
+    #[default]
+    Ctrl,
+    Always,
 }
 
 /// What the terminal sends when Shift+Enter is pressed.
@@ -553,6 +633,53 @@ fn default_long_command_seconds() -> u32 {
     10
 }
 
+/// Which finished commands deserve a notification (DEV-13 #5). A long
+/// threshold alone is not enough: a Claude Code session lasts hours, so every
+/// one of them ends up "long".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalNotifyWhen {
+    /// Never notify when a command ends.
+    Never,
+    /// Only a non-zero exit code (the default).
+    #[default]
+    Failed,
+    /// A failure, or a successful command that ran at least
+    /// `long_command_seconds`.
+    FailedOrLong,
+    /// Every finished command.
+    All,
+}
+
+/// How a terminal notification reaches the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalNotifyStyle {
+    /// A toast inside the app only.
+    Toast,
+    /// An OS notification only.
+    System,
+    /// A toast, plus an OS notification when the window is in the background.
+    #[default]
+    Both,
+}
+
+/// Like [`lenient_enum`], for an optional field: an unknown string falls back
+/// to `None` instead of failing the whole settings file.
+fn lenient_opt_enum<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    use serde::de::IntoDeserializer;
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(raw.and_then(|s| {
+        let value: serde::de::value::StringDeserializer<serde::de::value::Error> =
+            s.into_deserializer();
+        T::deserialize(value).ok()
+    }))
+}
+
 fn default_restore_scrollback_lines() -> u32 {
     200
 }
@@ -607,6 +734,10 @@ impl Default for TerminalConfig {
             shell_integration: true,
             notify_on_long_command: true,
             long_command_seconds: default_long_command_seconds(),
+            notify_when: None,
+            notify_style: None,
+            notify_only_when_hidden: true,
+            notify_muted_commands: None,
             tabs_placement: TabsPlacement::default(),
             font_family: None,
             font_size: None,
@@ -642,6 +773,9 @@ impl Default for TerminalConfig {
             shift_enter: ShiftEnterKey::default(),
             smooth_scroll_duration: default_smooth_scroll_duration(),
             confirm_close_running: true,
+            tab_display: TerminalTabDisplay::default(),
+            kitty_graphics: true,
+            file_path_links: true,
         }
     }
 }
