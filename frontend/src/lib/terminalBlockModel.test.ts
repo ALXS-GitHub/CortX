@@ -1,0 +1,324 @@
+/**
+ * Tests for the command-block geometry (DEV-13 P4, ticket #7).
+ *
+ * Same shape as `terminalInputState.test.ts`: the module under test is pure,
+ * so this runs on plain Node with nothing but type stripping —
+ *
+ *     npm test          (node --test "src/**\/*.test.ts")
+ *
+ * A failure throws at the end of the module, so the exit code carries the
+ * result. What is pinned down here is the part that is easy to get subtly
+ * wrong and impossible to eyeball: the one-line difference between the shells'
+ * `133;C` / `133;D`, the clipping that keeps a fold covering its output while
+ * you scroll through it, prompt-to-prompt navigation, and the reassembly of
+ * wrapped rows into the command you actually typed.
+ */
+import {
+  type TerminalBlock,
+  blockAtLine,
+  blockFailed,
+  blockRange,
+  blockStatusLabel,
+  boundaryLine,
+  clipToViewport,
+  foldLabel,
+  foldedRange,
+  joinBufferRows,
+  navigateBlocks,
+  parseBlockMarker,
+  shortCommand,
+} from './terminalBlockModel.ts';
+
+// --- a test runner in twenty lines ----------------------------------------
+
+const failures: string[] = [];
+let passed = 0;
+
+function test(name: string, body: () => void) {
+  try {
+    body();
+    passed++;
+  } catch (error) {
+    failures.push(`${name}\n    ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+const assert = {
+  equal(actual: unknown, expected: unknown, note = '') {
+    if (!Object.is(actual, expected)) {
+      throw new Error(`expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}${note ? ` (${note})` : ''}`);
+    }
+  },
+  deepEqual(actual: unknown, expected: unknown, note = '') {
+    const a = JSON.stringify(actual);
+    const b = JSON.stringify(expected);
+    if (a !== b) throw new Error(`expected ${b}, got ${a}${note ? ` (${note})` : ''}`);
+  },
+};
+
+function report() {
+  console.log(`terminalBlockModel: ${passed} passed, ${failures.length} failed`);
+  if (failures.length) {
+    for (const f of failures) console.log(`  x ${f}`);
+    throw new Error(`${failures.length} test(s) failed`);
+  }
+}
+
+/** A finished block spanning `start`..`endExclusive`, output right after the command. */
+function block(over: Partial<TerminalBlock> = {}): TerminalBlock {
+  return {
+    id: 1,
+    start: 10,
+    outputStart: 11,
+    endExclusive: 20,
+    command: 'git status',
+    exitCode: 0,
+    status: 'done',
+    folded: false,
+    ...over,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Marker parsing
+// ---------------------------------------------------------------------------
+
+test('the four markers cortx init emits are recognised', () => {
+  assert.deepEqual(parseBlockMarker('A'), { kind: 'A' });
+  assert.deepEqual(parseBlockMarker('B'), { kind: 'B' });
+  assert.deepEqual(parseBlockMarker('D;0'), { kind: 'D', exitCode: 0 });
+  assert.deepEqual(parseBlockMarker('D;1'), { kind: 'D', exitCode: 1 });
+});
+
+test('133;C carries the command as base64', () => {
+  // `git status` → Z2l0IHN0YXR1cw==
+  assert.deepEqual(parseBlockMarker('C;cmd=Z2l0IHN0YXR1cw=='), { kind: 'C', command: 'git status' });
+});
+
+test('a 133;C without cmd= is still a command start', () => {
+  assert.deepEqual(parseBlockMarker('C'), { kind: 'C' });
+});
+
+test('unicode survives the base64 round trip', () => {
+  const command = 'echo "héllo → ✓"';
+  // Exactly what `cortx init` does in the shell: UTF-8, then base64.
+  const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(command)));
+  assert.equal(parseBlockMarker(`C;cmd=${b64}`)?.command, command);
+});
+
+test('a broken payload degrades instead of throwing', () => {
+  assert.deepEqual(parseBlockMarker('C;cmd=not base64!!'), { kind: 'C' });
+  assert.deepEqual(parseBlockMarker('D;notanumber'), { kind: 'D' });
+  assert.deepEqual(parseBlockMarker('D'), { kind: 'D' });
+});
+
+test('markers CortX does not use are ignored, not guessed at', () => {
+  // iTerm2 / WezTerm also send `P` (right prompt) and `L`; a foreign flavour
+  // must never invent a block.
+  assert.equal(parseBlockMarker('P;k=r'), null);
+  assert.equal(parseBlockMarker('L'), null);
+  assert.equal(parseBlockMarker(''), null);
+});
+
+// ---------------------------------------------------------------------------
+// Where a boundary falls (the one-line difference between the shells)
+// ---------------------------------------------------------------------------
+
+test('PowerShell: 133;C arrives with the cursor still on the typed line', () => {
+  // PSReadLine's Enter handler fires before the newline is echoed.
+  assert.equal(boundaryLine(42, 17), 43);
+});
+
+test('bash / zsh: 133;C arrives with the cursor already on the next line', () => {
+  // DEBUG trap / preexec run after the echo, cursor in column 0.
+  assert.equal(boundaryLine(43, 0), 43);
+});
+
+// ---------------------------------------------------------------------------
+// Ranges
+// ---------------------------------------------------------------------------
+
+test('a finished block covers exactly what the shell delimited', () => {
+  assert.deepEqual(blockRange(block(), 999), { start: 10, endExclusive: 20 });
+});
+
+test('a running block grows with the output', () => {
+  const running = block({ endExclusive: null, status: 'running', exitCode: null });
+  assert.deepEqual(blockRange(running, 14), { start: 10, endExclusive: 14 });
+  assert.deepEqual(blockRange(running, 260), { start: 10, endExclusive: 260 });
+});
+
+test('a block can never end before it starts', () => {
+  const running = block({ endExclusive: null, status: 'running' });
+  // The live end can lag behind after a clear; the range stays degenerate
+  // rather than inverted.
+  assert.deepEqual(blockRange(running, 3), { start: 10, endExclusive: 10 });
+});
+
+test('folding hides the output and never the command', () => {
+  assert.deepEqual(foldedRange(block(), 999), { start: 11, endExclusive: 20 });
+});
+
+test('a command that printed nothing has nothing to fold', () => {
+  assert.equal(foldedRange(block({ outputStart: 11, endExclusive: 11 }), 999), null);
+  assert.equal(foldedRange(block({ outputStart: null, endExclusive: null }), 999), null);
+});
+
+test('a folded block that is still running keeps swallowing its output', () => {
+  const running = block({ endExclusive: null, status: 'running', folded: true });
+  assert.deepEqual(foldedRange(running, 15), { start: 11, endExclusive: 15 });
+  assert.deepEqual(foldedRange(running, 400), { start: 11, endExclusive: 400 });
+});
+
+// ---------------------------------------------------------------------------
+// Clipping (what keeps a fold cover honest while the viewport moves)
+// ---------------------------------------------------------------------------
+
+test('a range fully on screen maps to its rows', () => {
+  assert.deepEqual(clipToViewport({ start: 12, endExclusive: 18 }, 10, 24), { row: 2, count: 6 });
+});
+
+test('a range starting above the viewport is clipped, not dropped', () => {
+  // This is the case that decides whether a long folded build stays folded
+  // when you scroll into the middle of it.
+  assert.deepEqual(clipToViewport({ start: 0, endExclusive: 400 }, 100, 24), { row: 0, count: 24 });
+});
+
+test('a range ending below the viewport is clipped too', () => {
+  assert.deepEqual(clipToViewport({ start: 20, endExclusive: 400 }, 10, 24), { row: 10, count: 14 });
+});
+
+test('a range entirely off screen draws nothing', () => {
+  assert.equal(clipToViewport({ start: 0, endExclusive: 5 }, 10, 24), null);
+  assert.equal(clipToViewport({ start: 100, endExclusive: 120 }, 10, 24), null);
+  assert.equal(clipToViewport({ start: 10, endExclusive: 10 }, 10, 24), null);
+});
+
+// ---------------------------------------------------------------------------
+// Navigation
+// ---------------------------------------------------------------------------
+
+const LADDER: TerminalBlock[] = [
+  block({ id: 1, start: 0, outputStart: 1, endExclusive: 10 }),
+  block({ id: 2, start: 10, outputStart: 11, endExclusive: 30 }),
+  block({ id: 3, start: 30, outputStart: 31, endExclusive: 55 }),
+];
+
+test('Ctrl+↑ walks up one prompt at a time', () => {
+  assert.equal(navigateBlocks(LADDER, 30, 'previous')?.id, 2);
+  assert.equal(navigateBlocks(LADDER, 10, 'previous')?.id, 1);
+  assert.equal(navigateBlocks(LADDER, 0, 'previous'), null, 'nothing above the first block');
+});
+
+test('Ctrl+↓ walks back down', () => {
+  assert.equal(navigateBlocks(LADDER, 0, 'next')?.id, 2);
+  assert.equal(navigateBlocks(LADDER, 10, 'next')?.id, 3);
+  assert.equal(navigateBlocks(LADDER, 30, 'next'), null, 'nothing below the last block');
+});
+
+test('with nothing selected the anchor is the top of the viewport', () => {
+  // Scrolled to the middle of block 2: up goes to its own prompt, down to the next.
+  assert.equal(navigateBlocks(LADDER, 20, 'previous')?.id, 2);
+  assert.equal(navigateBlocks(LADDER, 20, 'next')?.id, 3);
+});
+
+test('stepping is stable: jumping puts the anchor on the block start', () => {
+  let anchor = 55;
+  const seen: number[] = [];
+  for (let i = 0; i < 5; i++) {
+    const target = navigateBlocks(LADDER, anchor, 'previous');
+    if (!target) break;
+    seen.push(target.id);
+    anchor = target.start;
+  }
+  assert.deepEqual(seen, [3, 2, 1], 'each jump lands on the next prompt up, never twice on one');
+});
+
+test('navigation is a no-op without blocks', () => {
+  assert.equal(navigateBlocks([], 42, 'previous'), null);
+  assert.equal(navigateBlocks([], 42, 'next'), null);
+});
+
+test('a line resolves to the block that owns it', () => {
+  assert.equal(blockAtLine(LADDER, 0, 999)?.id, 1);
+  assert.equal(blockAtLine(LADDER, 9, 999)?.id, 1);
+  assert.equal(blockAtLine(LADDER, 10, 999)?.id, 2);
+  assert.equal(blockAtLine(LADDER, 54, 999)?.id, 3);
+  assert.equal(blockAtLine(LADDER, 55, 999), null, 'past the last block');
+});
+
+// ---------------------------------------------------------------------------
+// Reading the text back
+// ---------------------------------------------------------------------------
+
+test('wrapped rows come back as the single line that was typed', () => {
+  const text = joinBufferRows([
+    { text: 'git commit -m "a really long ', wrapped: false },
+    { text: 'message that wrapped"', wrapped: true },
+  ]);
+  assert.equal(text, 'git commit -m "a really long message that wrapped"');
+});
+
+test('unwrapped rows stay separate lines and are right-trimmed', () => {
+  assert.equal(joinBufferRows([{ text: 'one   ', wrapped: false }, { text: 'two ', wrapped: false }]), 'one\ntwo');
+});
+
+test('the blank rows a grid always has are dropped', () => {
+  const text = joinBufferRows([
+    { text: 'output', wrapped: false },
+    { text: '   ', wrapped: false },
+    { text: '', wrapped: false },
+  ]);
+  assert.equal(text, 'output');
+});
+
+test('a blank line inside the output is kept', () => {
+  const text = joinBufferRows([
+    { text: 'a', wrapped: false },
+    { text: '', wrapped: false },
+    { text: 'b', wrapped: false },
+  ]);
+  assert.equal(text, 'a\n\nb');
+});
+
+test('an empty block copies as an empty string, not as a crash', () => {
+  assert.equal(joinBufferRows([]), '');
+  assert.equal(joinBufferRows([{ text: '  ', wrapped: false }]), '');
+});
+
+test('a leading wrapped row (the block starts mid-wrap) is not glued to nothing', () => {
+  assert.equal(joinBufferRows([{ text: 'tail', wrapped: true }]), 'tail');
+});
+
+// ---------------------------------------------------------------------------
+// Labels
+// ---------------------------------------------------------------------------
+
+test('the status label says what happened', () => {
+  assert.equal(blockStatusLabel(block({ status: 'prompt' })), 'Prompt');
+  assert.equal(blockStatusLabel(block({ status: 'running' })), 'Running');
+  assert.equal(blockStatusLabel(block({ exitCode: 0 })), 'Succeeded');
+  assert.equal(blockStatusLabel(block({ exitCode: 130 })), 'Failed · exit 130');
+  assert.equal(blockStatusLabel(block({ exitCode: null })), 'Finished');
+});
+
+test('only a finished non-zero exit counts as a failure', () => {
+  assert.equal(blockFailed(block({ exitCode: 1 })), true);
+  assert.equal(blockFailed(block({ exitCode: 0 })), false);
+  assert.equal(blockFailed(block({ status: 'running', exitCode: null })), false);
+  assert.equal(blockFailed(block({ exitCode: null })), false);
+});
+
+test('a long command is elided for the menu, a short one is left alone', () => {
+  assert.equal(shortCommand('git status'), 'git status');
+  assert.equal(shortCommand('git   status\n--short'), 'git status --short');
+  assert.equal(shortCommand(null), '');
+  assert.equal(shortCommand('x'.repeat(80)).length, 48);
+});
+
+test('the fold label counts in plain English', () => {
+  assert.equal(foldLabel(1), '1 line hidden');
+  assert.equal(foldLabel(412), '412 lines hidden');
+});
+
+report();

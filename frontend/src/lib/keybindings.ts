@@ -52,6 +52,8 @@ export const KEYBINDING_ACTIONS = [
   { id: 'pane.resizeDown', label: 'Resize pane down', category: 'Panes', defaults: ['ctrl+alt+shift+down'] },
   { id: 'pane.maximize', label: 'Maximize / restore pane', category: 'Panes', defaults: ['ctrl+shift+enter'] },
   // --- Terminal
+  { id: 'block.previous', label: 'Previous block', category: 'Terminal', defaults: ['ctrl+up'] },
+  { id: 'block.next', label: 'Next block', category: 'Terminal', defaults: ['ctrl+down'] },
   { id: 'terminal.find', label: 'Find in terminal', category: 'Terminal', defaults: ['ctrl+shift+f'] },
   { id: 'terminal.clear', label: 'Clear terminal', category: 'Terminal', defaults: ['ctrl+shift+l'] },
   { id: 'terminal.zoomIn', label: 'Zoom in', category: 'Terminal', defaults: ['ctrl+='] },
