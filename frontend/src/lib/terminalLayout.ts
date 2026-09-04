@@ -4,12 +4,23 @@
  * `terminal-layout` event). Pure types and tree helpers; no store logic.
  *
  * - `surfaces` says where each terminal id is shown: in the bottom dock of the
- *   main window or in the dedicated Terminal window. A terminal lives in one
- *   surface at a time.
- * - `window` is the Terminal window itself: flat tabs, each tab owning a
- *   split tree of leaves (one terminal per leaf). Tabs belong to a workspace
- *   (`project:<id>` or `free`), which the rail uses for grouping and the
- *   scope switcher for filtering.
+ *   main window or in a Terminal window. A terminal lives in one surface at a
+ *   time.
+ * - `window` is *this* webview's view of the Terminal windows: `tabs` holds
+ *   every tab of every Terminal window (so whoever walks the whole document —
+ *   session restore, snapshot pruning — sees all of them), while `scope` and
+ *   `activeTabId` are the local window's. Each tab owns a split tree of leaves
+ *   (one terminal per leaf) and belongs to a workspace (`project:<id>` or
+ *   `free`), which the rail uses for grouping and the scope switcher for
+ *   filtering.
+ * - `windows` maps a Terminal window's Tauri label to its own scope and active
+ *   tab; a tab names its window with `windowId` (DEV-13, ticket #20). A tab
+ *   without one belongs to the first window, so a document written when there
+ *   could only be one opens unchanged.
+ *
+ * "Which window am I?" is module state (`setLocalTerminalWindowId`), set once
+ * by the layout store, so that every existing caller of `tabsInScope` keeps
+ * meaning "the tabs of the window I am rendering".
  */
 
 /** The window is scoped to one project. */
@@ -76,6 +87,12 @@ export interface TerminalTab {
   id: string;
   /** `project:<projectId>` or `free`. */
   workspaceId: string;
+  /**
+   * Tauri label of the Terminal window showing this tab. Absent = the first
+   * one (`PRIMARY_TERMINAL_WINDOW`), which is what every tab of a document
+   * written before ticket #20 is.
+   */
+  windowId?: string;
   /** Manual title; null = derived from the active leaf's terminal. */
   title: string | null;
   color: string | null;
@@ -88,25 +105,129 @@ export interface TerminalTab {
 }
 
 export interface TerminalWindowLayout {
+  /** Scope of the *local* Terminal window. */
   scope: TerminalScope;
+  /** Active tab of the *local* Terminal window. */
   activeTabId: string | null;
+  /** Every tab of every Terminal window (filter with `tabsInScope`). */
   tabs: TerminalTab[];
 }
 
+/** What a Terminal window keeps for itself; the tabs live in `window.tabs`. */
+export interface TerminalWindowState {
+  scope: TerminalScope;
+  activeTabId: string | null;
+}
+
 export interface TerminalLayoutDoc {
-  version: 1;
+  version: number;
   surfaces: Record<string, TerminalSurface>;
   window: TerminalWindowLayout;
-  /** Maintained by the backend: was the Terminal window up at the last quit? */
+  /** Scope + active tab of each Terminal window, by Tauri label. */
+  windows: Record<string, TerminalWindowState>;
+  /** Maintained by the backend: was a Terminal window up at the last quit? */
   windowOpen?: boolean;
+  /** Which Terminal windows were up, so the next start reopens them all. */
+  openWindows?: string[];
+}
+
+/**
+ * Document version this build writes. v1 knew a single Terminal window; v2
+ * (ticket #20) adds `windowId` on tabs and the `windows` / `openWindows`
+ * keys. `window.tabs` still holds every tab, so a v1 build opening a v2
+ * document shows all of them in its one window instead of losing any.
+ */
+export const LAYOUT_VERSION = 2;
+
+/** Tauri label of the first Terminal window (the one that always exists). */
+export const PRIMARY_TERMINAL_WINDOW = 'terminal';
+
+/**
+ * Which Terminal window this webview renders. The Terminal windows set their
+ * own label; the main window speaks for the first one (it is the window that
+ * restores its sessions and owns its tabs while it is closed), exactly as it
+ * did when there could only be one.
+ */
+let localWindowId: string = PRIMARY_TERMINAL_WINDOW;
+
+export function setLocalTerminalWindowId(id: string): void {
+  localWindowId = id || PRIMARY_TERMINAL_WINDOW;
+}
+
+export function localTerminalWindowId(): string {
+  return localWindowId;
+}
+
+/** The window a tab is shown in (absent `windowId` = the first window). */
+export function terminalWindowIdOf(tab: TerminalTab): string {
+  return tab.windowId || PRIMARY_TERMINAL_WINDOW;
+}
+
+/** Is this tab shown by the window this webview renders? */
+export function tabIsLocal(tab: TerminalTab): boolean {
+  return terminalWindowIdOf(tab) === localWindowId;
+}
+
+/**
+ * Put a tab in a window. The first window is stored as *no* `windowId`, so a
+ * document that never used a second window stays exactly what it was.
+ */
+export function setTabWindow(tab: TerminalTab, windowId: string): TerminalTab {
+  if (windowId === PRIMARY_TERMINAL_WINDOW) {
+    if (tab.windowId === undefined) return tab;
+    const rest: TerminalTab = { ...tab };
+    delete rest.windowId;
+    return rest;
+  }
+  return tab.windowId === windowId ? tab : { ...tab, windowId };
+}
+
+export function tabsOfWindow(layout: TerminalWindowLayout, windowId: string): TerminalTab[] {
+  return layout.tabs.filter((t) => terminalWindowIdOf(t) === windowId).sort((a, b) => a.order - b.order);
+}
+
+/** Every window label the document knows about, first window first. */
+export function terminalWindowIds(doc: TerminalLayoutDoc): string[] {
+  const ids = new Set<string>([PRIMARY_TERMINAL_WINDOW, ...Object.keys(doc.windows)]);
+  for (const tab of doc.window.tabs) ids.add(terminalWindowIdOf(tab));
+  for (const id of doc.openWindows ?? []) ids.add(id);
+  return [PRIMARY_TERMINAL_WINDOW, ...[...ids].filter((id) => id !== PRIMARY_TERMINAL_WINDOW).sort()];
+}
+
+/**
+ * A free label for a new Terminal window: `terminal-2`, `terminal-3`… The
+ * lowest free number is reused so the labels stay readable in logs and the
+ * window titles stay small after a few detach / close rounds.
+ */
+export function nextTerminalWindowLabel(doc: TerminalLayoutDoc): string {
+  const taken = new Set(terminalWindowIds(doc));
+  for (let n = 2; n < 1000; n++) {
+    const label = `${PRIMARY_TERMINAL_WINDOW}-${n}`;
+    if (!taken.has(label)) return label;
+  }
+  return `${PRIMARY_TERMINAL_WINDOW}-${Date.now()}`;
+}
+
+/** 1 for the first window, 2 for `terminal-2`… (window titles, menus). */
+export function terminalWindowNumber(windowId: string): number {
+  if (windowId === PRIMARY_TERMINAL_WINDOW) return 1;
+  const n = Number(windowId.slice(`${PRIMARY_TERMINAL_WINDOW}-`.length));
+  return Number.isFinite(n) && n > 1 ? n : 1;
+}
+
+export function terminalWindowName(windowId: string): string {
+  const n = terminalWindowNumber(windowId);
+  return n === 1 ? 'Terminal' : `Terminal ${n}`;
 }
 
 export function emptyLayoutDoc(): TerminalLayoutDoc {
   return {
-    version: 1,
+    version: LAYOUT_VERSION,
     surfaces: {},
     window: { scope: 'global', activeTabId: null, tabs: [] },
+    windows: { [localWindowId]: { scope: 'global', activeTabId: null } },
     windowOpen: false,
+    openWindows: [],
   };
 }
 
@@ -126,22 +247,72 @@ export function normaliseScope(raw: unknown): TerminalScope {
   return 'global';
 }
 
+/**
+ * Read the `windows` map, migrating a v1 document on the way: a document
+ * written before ticket #20 has no `windows`, and its single window's scope
+ * and active tab are the first window's. Rust does the same when it loads
+ * `sessions.json` (`terminal/layout.rs::migrate`); this is the second line of
+ * defence, for a document that reached us some other way.
+ */
+function normaliseWindowStates(raw: unknown, win: Partial<TerminalWindowLayout>): Record<string, TerminalWindowState> {
+  const out: Record<string, TerminalWindowState> = {};
+  if (raw && typeof raw === 'object') {
+    for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (!id) continue;
+      const state = (value ?? {}) as Partial<TerminalWindowState>;
+      out[id] = { scope: normaliseScope(state.scope), activeTabId: state.activeTabId ?? null };
+    }
+  }
+  if (Object.keys(out).length === 0) {
+    out[PRIMARY_TERMINAL_WINDOW] = { scope: normaliseScope(win.scope), activeTabId: win.activeTabId ?? null };
+  }
+  return out;
+}
+
 /** Coerce whatever the backend hands back (possibly `null` or an older shape). */
 export function normaliseLayoutDoc(raw: unknown): TerminalLayoutDoc {
   const base = emptyLayoutDoc();
   if (!raw || typeof raw !== 'object') return base;
   const doc = raw as Partial<TerminalLayoutDoc>;
   const win = doc.window && typeof doc.window === 'object' ? doc.window : base.window;
+  const windows = normaliseWindowStates(doc.windows, win);
+  // A window with no entry yet (freshly created, or the local one on a first
+  // run) starts Global with nothing selected.
+  const local = windows[localWindowId] ?? { scope: 'global' as TerminalScope, activeTabId: null };
+  windows[localWindowId] = local;
   return {
-    version: 1,
+    version: typeof doc.version === 'number' && doc.version > LAYOUT_VERSION ? doc.version : LAYOUT_VERSION,
     surfaces: doc.surfaces && typeof doc.surfaces === 'object' ? { ...doc.surfaces } : {},
     window: {
-      scope: normaliseScope(win.scope),
-      activeTabId: win.activeTabId ?? null,
+      scope: local.scope,
+      activeTabId: local.activeTabId,
       tabs: Array.isArray(win.tabs) ? win.tabs.slice() : [],
     },
+    windows,
     windowOpen: doc.windowOpen === true,
+    openWindows: Array.isArray(doc.openWindows) ? doc.openWindows.filter((id) => typeof id === 'string') : [],
   };
+}
+
+/**
+ * Fold the local window's `scope` / `activeTabId` back into `windows` before
+ * the document is shared, and drop the windows nothing refers to any more.
+ * Every mutation goes through here (see `terminalLayoutStore.commit`), which
+ * is what lets the rest of the code keep mutating `doc.window` as if there
+ * were still one Terminal window.
+ */
+export function withLocalWindow(doc: TerminalLayoutDoc): TerminalLayoutDoc {
+  const referenced = new Set<string>([localWindowId, PRIMARY_TERMINAL_WINDOW, ...(doc.openWindows ?? [])]);
+  for (const tab of doc.window.tabs) referenced.add(terminalWindowIdOf(tab));
+  const windows: Record<string, TerminalWindowState> = {};
+  for (const [id, state] of Object.entries(doc.windows)) {
+    if (referenced.has(id)) windows[id] = state;
+  }
+  windows[localWindowId] = { scope: doc.window.scope, activeTabId: doc.window.activeTabId };
+  for (const id of referenced) {
+    windows[id] ??= { scope: 'global', activeTabId: null };
+  }
+  return { ...doc, version: doc.version || LAYOUT_VERSION, windows };
 }
 
 export function newLayoutId(): string {
@@ -190,7 +361,14 @@ export function tabHasAgent(tab: TerminalTab): boolean {
   return collectLeaves(tab.layout).some((l) => agentTerminalIds.has(l.terminalId));
 }
 
+/**
+ * Is this tab on screen here? A tab shown by another Terminal window is never
+ * in scope — that is what keeps every existing caller of `tabsInScope` (the
+ * rail, the strip, the palette, "which panes are visible") meaning "of this
+ * window" now that `window.tabs` holds them all.
+ */
 export function tabInScope(tab: TerminalTab, scope: TerminalScope): boolean {
+  if (!tabIsLocal(tab)) return false;
   if (scope === 'global') return true;
   if (isAgentsScope(scope)) return tabHasAgent(tab);
   return tab.workspaceId === workspaceIdForProject(scope.projectId);
@@ -298,18 +476,26 @@ export function nextTabOrder(layout: TerminalWindowLayout): number {
   return layout.tabs.reduce((m, t) => Math.max(m, t.order), 0) + 1;
 }
 
-export function makeTab(terminalId: string, workspaceId: string, order: number): TerminalTab {
+export function makeTab(
+  terminalId: string,
+  workspaceId: string,
+  order: number,
+  windowId: string = localWindowId
+): TerminalTab {
   const leaf = makeLeaf(terminalId);
-  return {
-    id: newLayoutId(),
-    workspaceId,
-    title: null,
-    color: null,
-    pinned: false,
-    order,
-    layout: leaf,
-    activeLeafId: leaf.id,
-  };
+  return setTabWindow(
+    {
+      id: newLayoutId(),
+      workspaceId,
+      title: null,
+      color: null,
+      pinned: false,
+      order,
+      layout: leaf,
+      activeLeafId: leaf.id,
+    },
+    windowId
+  );
 }
 
 /** Apply `fn` to every leaf, returning a new tree (unchanged leaves keep identity). */

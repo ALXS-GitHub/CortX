@@ -9,7 +9,6 @@ import {
   useSensors,
   type DragStartEvent,
   type DragEndEvent,
-  type DragOverEvent,
   type CollisionDetection,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
@@ -86,7 +85,7 @@ interface TerminalDndContextProps {
   allTerminals: TerminalItem[];
 }
 
-export function TerminalDndContext({ children, allTerminals: _allTerminals }: TerminalDndContextProps) {
+export function TerminalDndContext({ children }: TerminalDndContextProps) {
   const {
     terminals,
     addPane,
@@ -130,10 +129,6 @@ export function TerminalDndContext({ children, allTerminals: _allTerminals }: Te
     if (data?.terminal) {
       setActiveTerminal(data.terminal);
     }
-  }, []);
-
-  const handleDragOver = useCallback((_event: DragOverEvent) => {
-    // We can use this for additional visual feedback if needed
   }, []);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
@@ -198,7 +193,6 @@ export function TerminalDndContext({ children, allTerminals: _allTerminals }: Te
       sensors={sensors}
       collisionDetection={edgePriorityCollisionDetection}
       onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
       modifiers={[restrictToWindowEdges]}

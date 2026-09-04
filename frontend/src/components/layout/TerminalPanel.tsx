@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo, Component, type ReactNode, Fragment } from 'react';
 import { useAppStore, parseTerminalId, type TerminalPane } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
-import { openTerminalWindow } from '@/lib/tauri';
+import { openTerminalWindow } from '@/components/terminal/terminalWindows';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,

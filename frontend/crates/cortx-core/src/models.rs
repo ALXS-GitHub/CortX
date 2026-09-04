@@ -525,6 +525,79 @@ pub struct TerminalConfig {
     /// Underline existing file paths in the output and open them on click.
     #[serde(default = "default_true")]
     pub file_path_links: bool,
+    /// Which key opens the completion menu above the prompt (#17). `Off`
+    /// leaves the ghost text alone and never intercepts anything; `Tab`
+    /// takes Tab away from the shell's own completion, so it isn't the
+    /// default.
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub completion_menu: CompletionMenuKey,
+    /// Learn a command's flags and subcommands by running `<cmd> --help`
+    /// once and remembering the result (`runtime/command-specs/`). Only ever
+    /// for a bare program name already on the PATH — see the safety policy on
+    /// `terminal::spec`. Off = history and context completions only.
+    #[serde(default = "default_true")]
+    pub completion_specs: bool,
+    /// Context-aware completions in the terminal's own directory: git refs
+    /// (`git checkout <TAB>`), `package.json` scripts (`npm run <TAB>`) and
+    /// file paths.
+    #[serde(default = "default_true")]
+    pub completion_context: bool,
+    /// Where the input line sits in a pane (ticket #15, U0). `Flow` is what
+    /// CortX has always done — the prompt follows the output down the pane;
+    /// `Bottom` pins it to the bottom and stacks the output above it, like
+    /// Warp's `pinned_to_bottom`. Purely visual: it is a CSS offset on the
+    /// xterm host, `rows` / `cols` and the PTY never change.
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub input_position: TerminalInputPosition,
+    /// Beta (ticket #15, U1): type the command into a CortX editor at the
+    /// prompt instead of the shell's own line editor. Only ever active
+    /// between the shell's `OSC 133;B` and the submission, so a session
+    /// without shell integration — `ssh`, a REPL, a TUI, a broken profile —
+    /// behaves exactly as it does today.
+    #[serde(default)]
+    pub input_editor: bool,
+    /// A key the editor cannot honour (Tab, Ctrl+R, ↑/↓…) writes the line to
+    /// the PTY *without* a CR and gives the key to the shell, which completes
+    /// or searches it as it does today. Off: the key is swallowed.
+    #[serde(default = "default_true")]
+    pub input_editor_handoff: bool,
+    /// Command blocks (DEV-13 P4, ticket #7): the `OSC 133` markers the shell
+    /// already emits become one block per command — Ctrl+Up / Ctrl+Down jump
+    /// prompt to prompt, and a block can be copied, folded or run again. It is
+    /// an overlay and nothing else: the grid, the PTY and the classic flow are
+    /// untouched, and a session without shell integration never sees it.
+    #[serde(default = "default_true")]
+    pub blocks: bool,
+    /// The clickable status bars in the pane's left padding (green / red per
+    /// exit code). Off keeps navigation, copying and folding.
+    #[serde(default = "default_true")]
+    pub block_gutter: bool,
+}
+
+/// Where the input line sits in a terminal pane (ticket #15, U0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalInputPosition {
+    /// The prompt follows the output down the pane (CortX's behaviour so far).
+    #[default]
+    Flow,
+    /// The prompt is pinned to the bottom of the pane; output stacks above it.
+    Bottom,
+}
+
+/// What opens the completion menu (#17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum CompletionMenuKey {
+    /// No menu at all; ghost text only.
+    Off,
+    /// Ctrl+Space (default): never competes with the shell's own bindings.
+    #[default]
+    CtrlSpace,
+    /// Tab. Takes it away from PSReadLine / zsh completion while at a prompt.
+    Tab,
 }
 
 /// What a terminal tab shows (sessions rail and tab strip alike).
@@ -776,6 +849,14 @@ impl Default for TerminalConfig {
             tab_display: TerminalTabDisplay::default(),
             kitty_graphics: true,
             file_path_links: true,
+            completion_menu: CompletionMenuKey::default(),
+            completion_specs: true,
+            completion_context: true,
+            input_position: TerminalInputPosition::default(),
+            input_editor: false,
+            input_editor_handoff: true,
+            blocks: true,
+            block_gutter: true,
         }
     }
 }

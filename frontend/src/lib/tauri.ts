@@ -20,6 +20,10 @@ import type {
   TerminalShellState,
   TerminalAgentInfo,
   CommandRecord,
+  CommandSpec,
+  CommandSuggestion,
+  SpecItem,
+  PathCompletion,
   LaunchConfig,
   TerminalTheme,
   TerminalThemeSummary,
@@ -759,6 +763,51 @@ export async function getTerminalStates(): Promise<TerminalShellState[]> {
 /** Most recent finished commands across all terminals, newest first. */
 export async function getCommandHistory(limit = 200): Promise<CommandRecord[]> {
   return invoke('get_command_history', { limit });
+}
+
+/**
+ * The shared command history ranked for one terminal (#17): frequency,
+ * recency, same directory, same project, minus what never worked. The result
+ * is independent of the typed prefix, so it is fetched once per prompt and
+ * filtered locally.
+ */
+export async function suggestHistory(
+  cwd?: string,
+  projectId?: string,
+  limit = 400
+): Promise<CommandSuggestion[]> {
+  return invoke('suggest_history', { cwd, projectId, limit });
+}
+
+/**
+ * Flags and subcommands of `command`, learned from its `--help` page once and
+ * cached on disk. `null` when the name may not be probed (it must be a bare
+ * program name already on the PATH; see `terminal::spec`).
+ */
+export async function getCommandSpec(
+  command: string,
+  refresh = false
+): Promise<CommandSpec | null> {
+  return invoke('get_command_spec', { command, refresh });
+}
+
+/** Branches, remotes and tags of the repository at `cwd`. */
+export async function completeGitRefs(cwd: string): Promise<string[]> {
+  return invoke('complete_git_refs', { cwd });
+}
+
+/** `scripts` of the `package.json` in `cwd`. */
+export async function completeNpmScripts(cwd: string): Promise<SpecItem[]> {
+  return invoke('complete_npm_scripts', { cwd });
+}
+
+/** Directory entries matching a half-typed path, resolved against `cwd`. */
+export async function completePaths(
+  cwd: string,
+  fragment: string,
+  limit = 60
+): Promise<PathCompletion[]> {
+  return invoke('complete_paths', { cwd, fragment, limit });
 }
 
 // ============================================================================

@@ -24,10 +24,10 @@ import {
   onTerminalLayout,
 } from '@/lib/tauri';
 import { formatDuration, terminalDisplayName } from '@/lib/terminalNames';
-import { restoreTerminalSessions } from '@/lib/terminalRestore';
+import { bootTerminalRestore } from '@/lib/terminalRestore';
 import { startTerminalSnapshotScheduler, storeTerminalSnapshots } from '@/lib/terminalSnapshots';
 import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
-import { IS_TERMINAL_WINDOW } from '@/stores/terminalLayoutStore';
+import { IS_TERMINAL_WINDOW, TERMINAL_WINDOW_ID } from '@/stores/terminalLayoutStore';
 import { listen } from '@tauri-apps/api/event';
 import type { LogEntry } from '@/types';
 
@@ -58,7 +58,15 @@ function terminalWindowVisibleIds(): string[] {
 function ownsTerminal(terminalId: string): boolean {
   const doc = useTerminalLayoutStore.getState().doc;
   const surface = doc.surfaces[terminalId] ?? 'dock';
-  if (IS_TERMINAL_WINDOW) return surface === 'window';
+  // With a tab detached into `terminal-2`, both Terminal windows hold the
+  // event: only the one the tab actually lives in speaks for it.
+  if (IS_TERMINAL_WINDOW) {
+    return (
+      surface === 'window' &&
+      (useTerminalLayoutStore.getState().windowIdOfTerminal(terminalId) ?? TERMINAL_WINDOW_ID) ===
+        TERMINAL_WINDOW_ID
+    );
+  }
   // The main window also speaks for the Terminal window's terminals while
   // that window is closed — otherwise nobody would.
   return surface === 'dock' || doc.windowOpen !== true;
@@ -108,8 +116,10 @@ export function useAppBootstrap() {
         useAppStore
           .getState()
           .loadShells()
-          // Session restore (main window only): reopen last time's tabs.
-          .then(() => restoreTerminalSessions())
+          // Starting CortX must not start a terminal: this only tidies the
+          // snapshots and reopens the Terminal window when it was up at the
+          // last quit. The shells come back when terminal mode is entered.
+          .then(() => bootTerminalRestore())
           .catch((e) => console.warn('Session restore failed', e))
       );
     useAppStore.getState().loadTerminalStates();

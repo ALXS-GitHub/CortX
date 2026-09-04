@@ -194,7 +194,41 @@ export interface TerminalConfig {
   kittyGraphics?: boolean;
   /** Underline file paths in the output and open them on click. Default true. */
   filePathLinks?: boolean;
+  /** Key that opens the completion menu above the prompt. `tab` takes Tab
+   *  away from the shell's own completion, so the default is `ctrlSpace`. */
+  completionMenu?: CompletionMenuKey;
+  /** Learn a command's flags and subcommands by running `<cmd> --help` once
+   *  (PATH-resolved names only, cached on disk). Default true. */
+  completionSpecs?: boolean;
+  /** Git refs, package.json scripts and file paths in the terminal's own
+   *  directory. Default true. */
+  completionContext?: boolean;
+  /** Where the input line sits in a pane: `flow` = after the output, as today;
+   *  `bottom` = pinned to the bottom of the pane, output stacking above it
+   *  (Warp's `pinned_to_bottom`). Purely visual — the PTY size never changes.
+   *  Default `flow`. */
+  inputPosition?: TerminalInputPosition;
+  /** Beta: type the command into a CortX editor at the prompt instead of the
+   *  shell's own line editor. Only ever active between the shell's `OSC 133;B`
+   *  and the submission, so anything without shell integration (ssh, a REPL, a
+   *  TUI) behaves exactly as it does today. Default false. */
+  inputEditor?: boolean;
+  /** A key the editor cannot honour (Tab, Ctrl+R, ↑/↓…) writes the line to the
+   *  PTY without a CR and gives the key to the shell, which completes or
+   *  searches it as it does today. Off: the key is swallowed. Default true. */
+  inputEditorHandoff?: boolean;
+  /** Command blocks (#7): the OSC 133 markers become one block per command —
+   *  Ctrl+↑ / Ctrl+↓ jump prompt to prompt, a block can be copied, folded or
+   *  run again. Purely an overlay: the grid, the PTY and the flow are
+   *  untouched, and nothing appears without shell integration. Default true. */
+  blocks?: boolean;
+  /** The clickable status bars in the pane's left padding (green / red per
+   *  exit code). Off keeps navigation, copy and folding. Default true. */
+  blockGutter?: boolean;
 }
+
+/** Where the input line sits in a terminal pane (ticket #15, U0). */
+export type TerminalInputPosition = 'flow' | 'bottom';
 
 /** When a tab shows its Ctrl+N number. Default `ctrl`. */
 export type TabIndexDisplay = 'never' | 'ctrl' | 'always';
@@ -305,6 +339,58 @@ export interface CommandRecord {
   exitCode?: number;
   durationMs: number;
 }
+
+/**
+ * One command from the shared history, ranked for a terminal's context
+ * (`suggest_history`). Every part of `score` is independent of what has been
+ * typed, so the frontend fetches the list once per prompt and filters it
+ * locally. See `cortx_core::terminal::rank_commands`.
+ */
+export interface CommandSuggestion {
+  command: string;
+  score: number;
+  /** How many times it was run, all directories together. */
+  count: number;
+  lastTs: number;
+  /** Never once exited 0. Only offered when nothing else matches. */
+  failed: boolean;
+  sameCwd: boolean;
+  sameProject: boolean;
+}
+
+/** A completable token of a command specification: a subcommand or a flag. */
+export interface SpecItem {
+  name: string;
+  description?: string;
+  /** The flag expects a value, so accepting it shouldn't add a space. */
+  takesValue: boolean;
+}
+
+/**
+ * What CortX learned about a command by reading its own `--help` page once
+ * (`runtime/command-specs/<name>.json`).
+ */
+export interface CommandSpec {
+  command: string;
+  subcommands: SpecItem[];
+  flags: SpecItem[];
+  fetchedAt: number;
+  exePath?: string;
+  exeMtime?: number;
+  /** `--help`, `-h`, or `none` when the program printed nothing useful. */
+  source: string;
+}
+
+/** One filesystem entry offered as a completion. */
+export interface PathCompletion {
+  name: string;
+  /** The whole word once accepted, directory part included. */
+  value: string;
+  isDir: boolean;
+}
+
+/** Which key opens the terminal completion menu. */
+export type CompletionMenuKey = 'off' | 'ctrlSpace' | 'tab';
 
 export interface AppearanceConfig {
   theme: 'light' | 'dark' | 'system';

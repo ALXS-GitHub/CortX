@@ -31,7 +31,17 @@ import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { getXtermThemeOverride, isWindowThemeActive, themeToXterm } from '@/lib/terminalTheme';
 import { copyOnSelectEnabled, overrideKeySequence, smoothScrollDuration } from '@/lib/terminalKeys';
 import { TerminalImageFilter, type ImagePart } from '@/lib/terminalImages';
+import { attachInputPosition, inputPositionSetting, refreshInputPositions } from '@/lib/terminalInputPosition';
+import { attachInputEditor, inputEditorEnabled, refreshInputEditors } from '@/lib/terminalInputEditor';
 import { registerFileLinkProvider } from '@/lib/terminalLinks';
+import {
+  attachBlocks,
+  blockGutterEnabled,
+  blocksEnabled,
+  copySelectedBlock,
+  openSelectedBlockMenu,
+  refreshBlocks,
+} from '@/lib/terminalBlocks';
 
 /** One queued piece of output, plus the callback owed to whoever wrote it. */
 interface QueuedPart extends ImagePart {
@@ -79,7 +89,10 @@ const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
  *  so the theme's window opacity / wallpaper show behind the text). */
 const IS_TERMINAL_WINDOW = (() => {
   try {
-    return getCurrentWindow().label === 'terminal';
+    const label = getCurrentWindow().label;
+    // `terminal`, plus `terminal-2`… for a window a tab was detached into
+    // (ticket #20) — they are see-through and themed just the same.
+    return label === 'terminal' || label.startsWith('terminal-');
   } catch {
     return false;
   }
@@ -355,6 +368,11 @@ export function applyTerminalPadding() {
   for (const s of sessions.values()) {
     if (s.container.isConnected) fitTerminal(s.id);
   }
+  // The usable height changed, so did the number of blank rows under the
+  // prompt (ticket #15, U0).
+  refreshInputPositions();
+  // The block gutter is drawn inside that padding (#7).
+  refreshBlocks();
 }
 
 let settingsSubscribed = false;
@@ -368,6 +386,9 @@ function ensureSettingsSubscription() {
   let lastCursor = JSON.stringify(terminalCursorOptions());
   let lastPadding = terminalPadding();
   let lastSmoothScroll = smoothScrollDuration();
+  let lastInputPosition = inputPositionSetting();
+  let lastInputEditor = inputEditorEnabled();
+  let lastBlocks = `${blocksEnabled()}|${blockGutterEnabled()}`;
   useAppStore.subscribe(() => {
     const font = terminalFontOptions();
     const fontKey = JSON.stringify(font);
@@ -377,6 +398,8 @@ function ensureSettingsSubscription() {
         applyFontMetrics(s.term, font);
         if (s.container.isConnected) fitTerminal(s.id);
       }
+      // The cell height moved: the bottom-pinned offset is measured in cells.
+      refreshInputPositions();
     }
     applyRendererToAll();
     const cursor = terminalCursorOptions();
@@ -397,6 +420,25 @@ function ensureSettingsSubscription() {
     if (smooth !== lastSmoothScroll) {
       lastSmoothScroll = smooth;
       for (const s of sessions.values()) s.term.options.smoothScrollDuration = smooth;
+    }
+    // Ticket #15: both are inert while off, but flipping them has to take
+    // effect without reopening the terminals.
+    const position = inputPositionSetting();
+    if (position !== lastInputPosition) {
+      lastInputPosition = position;
+      refreshInputPositions();
+    }
+    const editor = inputEditorEnabled();
+    if (editor !== lastInputEditor) {
+      lastInputEditor = editor;
+      refreshInputEditors();
+    }
+    // Ticket #7: switching blocks off tears the overlay down; switching the
+    // gutter off only stops drawing the bars.
+    const blocks = `${blocksEnabled()}|${blockGutterEnabled()}`;
+    if (blocks !== lastBlocks) {
+      lastBlocks = blocks;
+      refreshBlocks();
     }
   });
 }
@@ -605,9 +647,12 @@ function createSession(id: string): TerminalSession {
     const mod = e.ctrlKey || e.metaKey;
     if (!mod) return true;
     if (e.code === 'KeyC') {
-      // Ctrl/Cmd+Shift+C always copies.
+      // Ctrl/Cmd+Shift+C always copies. With nothing selected it used to copy
+      // nothing at all; when a command block is selected (Ctrl+↑ / Ctrl+↓ or a
+      // click on its gutter bar) it copies that block instead — see #7.
       if (e.shiftKey) {
         e.preventDefault();
+        if (!term.hasSelection() && copySelectedBlock(id)) return false;
         void copySelection(term);
         return false;
       }
@@ -643,12 +688,15 @@ function createSession(id: string): TerminalSession {
 
   container.addEventListener('paste', noteWebviewPaste, true);
 
-  // Right-click: copy the selection if there is one, otherwise paste.
+  // Right-click: copy the selection if there is one, otherwise paste — except
+  // over a command block the user has deliberately selected (#7), which opens
+  // that block's menu instead. Right-click keeps meaning "paste" everywhere
+  // else, and always when no block is selected.
   container.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (term.hasSelection()) {
       void copySelection(term);
-    } else {
+    } else if (!openSelectedBlockMenu(id, e.clientX, e.clientY)) {
       void pasteFromClipboard(term);
     }
   });
@@ -909,6 +957,16 @@ export function mountTerminal(id: string, parent: HTMLElement): TerminalSession 
   if (!session.opened) {
     session.term.open(session.container);
     session.opened = true;
+    // Ticket #15. Both need `term.element`, so they can only start once xterm
+    // has opened; both are inert until their setting is switched on, and both
+    // live on the session container, which is what gets re-parented between
+    // the dock and the Terminal window.
+    session.disposables.push(attachInputPosition(id, session.term, session.container));
+    session.disposables.push(attachInputEditor(id, session.term, session.container, () => session.replaying));
+    // Command blocks (#7): same deal — an overlay on the session container,
+    // inert until the shell emits its first OSC 133 marker, and silent while
+    // a restored snapshot is being replayed.
+    session.disposables.push(attachBlocks(id, session.term, session.container, () => session.replaying));
     // Fit before the first output is consumed, and so the pane's size is
     // known to the next shell that spawns.
     fitTerminal(id);
@@ -918,7 +976,16 @@ export function mountTerminal(id: string, parent: HTMLElement): TerminalSession 
   // 20 tabs holds one WebGL context per *visible* pane, not per tab.
   applyRenderer(session);
   // Two frames: layout must settle before fit() can measure the container.
-  requestAnimationFrame(() => requestAnimationFrame(() => fitTerminal(id)));
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      fitTerminal(id);
+      // The pane moved (tab switched, detached to the Terminal window): the
+      // bottom offset and the editor's anchor are measured in this container.
+      refreshInputPositions();
+      refreshInputEditors();
+      refreshBlocks();
+    })
+  );
   return session;
 }
 

@@ -304,6 +304,66 @@ pub fn shell_integration_block(shell: &Shell) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Sub-shells (ticket #16 — "warpify")
+// ---------------------------------------------------------------------------
+
+/// Single quoting for POSIX shells (`'` closes, escapes, reopens).
+fn sq(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+/// The integration as **one line typed into an already-running shell**.
+///
+/// The startup injection in `process_manager::inject_shell_integration` only
+/// reaches the shell CortX spawns itself. A shell started *inside* it — `bash`
+/// from PowerShell, `docker exec -it … bash`, `ssh host`, `wsl` — has to be
+/// handed the block after the fact, which is what Warp calls "warpifying" a
+/// sub-shell. Warp does it by typing a bootstrap into the PTY; so do we.
+///
+/// The line is self-contained on purpose: it carries the block base64-encoded
+/// and sets `CORTX_TERMINAL_ID` itself, so it also works where the variable
+/// was not inherited (ssh, containers, WSL) and where `cortx` is not
+/// installed. It starts with a space so shells configured to ignore
+/// space-prefixed lines keep it out of the history.
+///
+/// **Never send this to something that is not a shell.** A CortX terminal
+/// cannot tell an interactive `python` from a `bash`, so this is only ever
+/// emitted on an explicit user action (see `components/terminal/subshell.ts`).
+pub fn subshell_injection(shell: &Shell, terminal_id: &str, opts: InitOptions) -> String {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(shell_integration_snippet(shell).as_bytes());
+    match shell {
+        Shell::PowerShell => {
+            // PowerShell needs no base64 helper on the far side: it decodes
+            // the block itself. (Warp declines PowerShell sub-shells; we can
+            // do them, because our block is already a single statement.)
+            let mut line = format!(
+                " $env:CORTX_TERMINAL_ID = '{}'; Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{}')))",
+                terminal_id.replace('\'', "''"),
+                b64
+            );
+            if opts.disable_shell_predictions {
+                line.push_str("; ");
+                line.push_str(DISABLE_PSREADLINE_PREDICTION.trim_end());
+            }
+            line
+        }
+        Shell::Fish => format!(
+            " set -gx CORTX_TERMINAL_ID {}; printf %s {} | base64 -d 2>/dev/null | source",
+            sq(terminal_id),
+            sq(&b64)
+        ),
+        // bash and zsh: `base64 -d` on GNU coreutils, `-D` on the older BSD
+        // tool that still ships on macOS.
+        _ => format!(
+            " CORTX_TERMINAL_ID={0}; export CORTX_TERMINAL_ID; eval \"$(printf %s {1} | {{ base64 -d 2>/dev/null || base64 -D; }})\"",
+            sq(terminal_id),
+            sq(&b64)
+        ),
+    }
+}
+
 /// Shell-integration block appended by `cortx init` when
 /// `settings.terminal.shell_integration` is on. Every shell guards on
 /// `CORTX_TERMINAL_ID` (set by CortX's PTYs) so external terminals never see
@@ -490,6 +550,45 @@ mod tests {
 
     fn func_alias(name: &str, command: &str) -> ShellAlias {
         ShellAlias::new(name.to_string(), command.to_string())
+    }
+
+    #[test]
+    fn subshell_injection_is_a_single_space_prefixed_line_per_shell() {
+        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
+            let line = subshell_injection(&shell, "shell:abc", InitOptions::default());
+            assert!(line.starts_with(' '), "{shell:?}: {line}");
+            assert!(!line.contains('\n'), "{shell:?}: {line}");
+            assert!(line.contains("shell:abc"), "{shell:?}: {line}");
+            assert!(line.contains("CORTX_TERMINAL_ID"), "{shell:?}: {line}");
+        }
+    }
+
+    #[test]
+    fn subshell_injection_carries_the_whole_block() {
+        use base64::Engine;
+        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
+            let line = subshell_injection(&shell, "shell:abc", InitOptions::default());
+            let b64 = base64::engine::general_purpose::STANDARD.encode(shell_integration_snippet(&shell).as_bytes());
+            assert!(line.contains(&b64), "{shell:?} does not carry its own snippet");
+        }
+    }
+
+    #[test]
+    fn subshell_injection_quotes_a_hostile_terminal_id() {
+        let line = subshell_injection(&Shell::Bash, "shell:'; rm -rf /; #", InitOptions::default());
+        // The quote is closed, escaped and reopened, so the rest stays a
+        // literal value instead of becoming a second command.
+        assert!(line.contains(r#"CORTX_TERMINAL_ID='shell:'\''; rm -rf /; #'"#), "{line}");
+        let pwsh = subshell_injection(&Shell::PowerShell, "shell:'; rm x", InitOptions::default());
+        assert!(pwsh.contains("$env:CORTX_TERMINAL_ID = 'shell:''; rm x'"), "{pwsh}");
+    }
+
+    #[test]
+    fn powershell_subshell_injection_can_add_the_psreadline_guard() {
+        let opts = InitOptions { shell_integration: true, disable_shell_predictions: true };
+        let line = subshell_injection(&Shell::PowerShell, "shell:abc", opts);
+        assert!(line.contains("Set-PSReadLineOption"), "{line}");
+        assert!(!line.contains('\n'), "{line}");
     }
 
     #[test]

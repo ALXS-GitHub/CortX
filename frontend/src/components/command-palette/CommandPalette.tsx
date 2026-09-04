@@ -12,7 +12,8 @@ import {
 import { useAppStore } from '@/stores/appStore';
 import { toast } from 'sonner';
 import { Rocket, SquareTerminal } from 'lucide-react';
-import { listLaunchConfigs, openTerminalWindow } from '@/lib/tauri';
+import { listLaunchConfigs } from '@/lib/tauri';
+import { openTerminalWindow } from '@/components/terminal/terminalWindows';
 import { runLaunchConfig } from '@/lib/launchConfigs';
 import type { LaunchConfig } from '@/types';
 

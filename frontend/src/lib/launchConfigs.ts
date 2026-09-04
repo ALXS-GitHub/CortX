@@ -8,6 +8,7 @@
  * and history apply exactly as if the user had typed it.
  */
 import * as api from '@/lib/tauri';
+import { openTerminalWindow } from '@/components/terminal/terminalWindows';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import {
@@ -124,7 +125,7 @@ export async function runLaunchConfig(config: LaunchConfig, target?: 'window' | 
       built.map((b) => b.tab),
       projectId ?? null
     );
-    api.openTerminalWindow(projectId ?? null).catch(() => {});
+    openTerminalWindow(undefined, { projectId }).catch(() => {});
   }
   // Commands go in after the prompts are up (typed, not executed by Rust).
   const commands = built.flatMap((b) => b.commands);

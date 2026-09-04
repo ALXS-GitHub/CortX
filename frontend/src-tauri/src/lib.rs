@@ -55,9 +55,30 @@ pub const TERMINAL_WINDOW_LABEL: &str = "terminal";
 /// frontend picks the terminal root. A project scope travels in the URL on
 /// creation, or as the `terminal-scope` event when the window is already up.
 pub fn open_terminal_window(app: &AppHandle, project_id: Option<&str>, launch: Option<&str>) -> Result<(), String> {
+    open_terminal_window_labelled(app, TERMINAL_WINDOW_LABEL, project_id, launch, None)
+}
+
+/// Is this a Terminal window? The first one keeps the bare label; a window a
+/// tab was detached into is `terminal-2`, `terminal-3`… (ticket #20).
+pub fn is_terminal_window_label(label: &str) -> bool {
+    label == TERMINAL_WINDOW_LABEL || label.starts_with("terminal-")
+}
+
+/// Open, or focus, one Terminal window. `position` (logical screen pixels)
+/// places a brand-new window where a dragged tab was dropped.
+pub fn open_terminal_window_labelled(
+    app: &AppHandle,
+    label: &str,
+    project_id: Option<&str>,
+    launch: Option<&str>,
+    position: Option<(f64, f64)>,
+) -> Result<(), String> {
+    if !is_terminal_window_label(label) {
+        return Err(format!("Not a Terminal window label: {}", label));
+    }
     // Remembered in the layout document so the next start reopens the window.
     set_terminal_window_open(app, true);
-    if let Some(w) = app.get_webview_window(TERMINAL_WINDOW_LABEL) {
+    if let Some(w) = app.get_webview_window(label) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -77,8 +98,14 @@ pub fn open_terminal_window(app: &AppHandle, project_id: Option<&str>, launch: O
         *state.terminal_window_scope.lock().unwrap() = project_id.map(|s| s.to_string());
         *state.terminal_window_launch.lock().unwrap() = launch.map(|s| s.to_string());
     }
-    let builder = tauri::WebviewWindowBuilder::new(app, TERMINAL_WINDOW_LABEL, tauri::WebviewUrl::App("index.html".into()))
-        .title("CortX Terminal")
+    // "CortX Terminal" for the first, "CortX Terminal 2" for a detached one.
+    let title = if label == TERMINAL_WINDOW_LABEL {
+        "CortX Terminal".to_string()
+    } else {
+        format!("CortX Terminal {}", label.trim_start_matches("terminal-"))
+    };
+    let builder = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
+        .title(title)
         .inner_size(1180.0, 760.0)
         .min_inner_size(720.0, 460.0)
         .resizable(true)
@@ -95,6 +122,10 @@ pub fn open_terminal_window(app: &AppHandle, project_id: Option<&str>, launch: O
         .hidden_title(true);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
+    let builder = match position {
+        Some((x, y)) => builder.position(x, y),
+        None => builder,
+    };
     let window = builder.build().map_err(|e| e.to_string())?;
     // Backdrop effect + opacity from the settings, before the first paint.
     if let Some(state) = app.try_state::<AppState>() {
@@ -526,8 +557,21 @@ pub fn run() {
                 if !is_quitting {
                     api.prevent_close();
                     let _ = window.hide();
-                    if window.label() == TERMINAL_WINDOW_LABEL {
-                        set_terminal_window_open(&app_handle, false);
+                    // `windowOpen` says "reopen a Terminal window next time",
+                    // so it may only be cleared once the *last* one is gone —
+                    // a tab detached into `terminal-2` still counts.
+                    if is_terminal_window_label(window.label()) {
+                        let still_open = app_handle
+                            .webview_windows()
+                            .iter()
+                            .any(|(l, w)| {
+                                l != window.label()
+                                    && is_terminal_window_label(l)
+                                    && w.is_visible().unwrap_or(false)
+                            });
+                        if !still_open {
+                            set_terminal_window_open(&app_handle, false);
+                        }
                     }
                     return;
                 }
@@ -611,10 +655,17 @@ pub fn run() {
             commands::remove_terminal,
             commands::get_terminal_states,
             commands::get_command_history,
+            commands::suggest_history,
+            commands::get_command_spec,
+            commands::complete_git_refs,
+            commands::complete_npm_scripts,
+            commands::complete_paths,
             commands::send_os_notification,
             commands::get_terminal_layout,
             commands::set_terminal_layout,
             commands::open_terminal_window,
+            commands::open_terminal_window_labelled,
+            commands::terminal_subshell_snippet,
             commands::show_main_window,
             commands::take_terminal_window_scope,
             commands::take_terminal_window_launch,

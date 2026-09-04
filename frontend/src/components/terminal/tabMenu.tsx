@@ -1,5 +1,19 @@
-import { useRef } from 'react';
-import { Copy, CopyPlus, FolderOpen, Palette, Pencil, Pin, PinOff, Sparkles, X, XCircle } from 'lucide-react';
+import { useMemo, useRef } from 'react';
+import {
+  AppWindow,
+  Copy,
+  CopyPlus,
+  ExternalLink,
+  FolderOpen,
+  Palette,
+  Pencil,
+  Pin,
+  PinOff,
+  Plug,
+  Sparkles,
+  X,
+  XCircle,
+} from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -8,6 +22,9 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAppStore } from '@/stores/appStore';
@@ -22,12 +39,16 @@ import {
   closeWorkspaceTabs,
   copyTerminalCwd,
   duplicateTab,
+  moveTabToNewWindow,
+  moveTabToWindow,
   openTerminalCwd,
   otherClosableTabs,
+  otherTerminalWindows,
   tabsOfWorkspace,
   terminalCwd,
 } from './actions';
-import { activeLeafOf, tabAgent, useItemMap } from './model';
+import { NO_PROJECT_GROUP_NAME, activeLeafOf, tabAgent, useItemMap } from './model';
+import { detectSubshell, warpifySubshell, type SubshellShell } from './subshell';
 import { revealAgentSession } from '@/lib/tauri';
 
 /**
@@ -118,6 +139,14 @@ export function TabRenameInput({
   );
 }
 
+/** Shells the "Shell integration here" submenu can target (ticket #16). */
+const SUBSHELL_CHOICES: Array<{ id: SubshellShell; label: string }> = [
+  { id: 'bash', label: 'bash' },
+  { id: 'zsh', label: 'zsh' },
+  { id: 'fish', label: 'fish' },
+  { id: 'powershell', label: 'PowerShell' },
+];
+
 interface TabContextMenuProps {
   tab: TerminalTab;
   open: boolean;
@@ -149,9 +178,18 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
   // Bulk closes (ticket "close a whole section of tabs"), counted at open time.
   const otherCount = open ? otherClosableTabs(tab.id).length : 0;
   const groupCount = open ? tabsOfWorkspace(tab.workspaceId).length : 0;
+  // Terminal windows this tab could move to (ticket #20), read at open time.
+  const otherWindows = useMemo(() => (open ? otherTerminalWindows() : []), [open]);
+  // A sub-shell running in this pane, for "Enable shell integration here"
+  // (ticket #16). The entry is always there — detection only preselects the
+  // shell — because CortX cannot be sure what a program really is.
+  const running = useAppStore((s) => s.terminalStates.get(terminalId));
+  const subshell = open && running?.phase === 'running' ? detectSubshell(running.command) : null;
+  const enableIn = (shell: SubshellShell) =>
+    void warpifySubshell(terminalId, shell, { remote: subshell?.remote ?? false });
   const groupName =
     tab.workspaceId === FREE_WORKSPACE_ID
-      ? 'Free'
+      ? NO_PROJECT_GROUP_NAME
       : projects.find((p) => `project:${p.id}` === tab.workspaceId)?.name ?? 'this project';
   const shortcut = (label: string | null) => (label ? <DropdownMenuShortcut>{label}</DropdownMenuShortcut> : null);
   return (
@@ -193,6 +231,54 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
               Open in Agents
             </DropdownMenuItem>
           </>
+        )}
+        <DropdownMenuSeparator />
+        {/* Ticket #16: a shell started inside this one (ssh, docker, a plain
+            `bash`) has no CortX integration unless its own rc file sets it up.
+            One click types the block into it — explicitly, because a terminal
+            cannot tell a shell from any other interactive program. */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Plug />
+            Shell integration here
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="min-w-52">
+            <DropdownMenuLabel className="font-normal text-[11px] leading-snug text-faint">
+              {subshell
+                ? `${subshell.what} is running here. Wait for its prompt, then pick its shell.`
+                : 'Type the CortX integration into the shell running in this pane. Only do this at a shell prompt.'}
+            </DropdownMenuLabel>
+            {SUBSHELL_CHOICES.map((s) => (
+              <DropdownMenuItem key={s.id} onClick={() => enableIn(s.id)}>
+                {s.label}
+                {subshell?.shell === s.id && <span className="ml-auto text-[10px] text-faint">detected</span>}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSeparator />
+        {/* Several Terminal windows (ticket #20): the shell keeps running,
+            the tab is simply redrawn in the window it lands in. */}
+        <DropdownMenuItem onClick={() => void moveTabToNewWindow(tab.id)}>
+          <ExternalLink />
+          Move to new window
+        </DropdownMenuItem>
+        {otherWindows.length > 0 && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <AppWindow />
+              Move to window
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="min-w-44">
+              {otherWindows.map((w) => (
+                <DropdownMenuItem key={w.id} onClick={() => void moveTabToWindow(tab.id, w.id)}>
+                  <AppWindow />
+                  <span className="truncate">{w.name}</span>
+                  <span className="ml-auto text-xs tabular-nums opacity-70">{w.tabs}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={!cwd} onClick={() => void copyTerminalCwd(terminalId)}>

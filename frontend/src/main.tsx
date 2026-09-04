@@ -12,7 +12,10 @@ import { TerminalWindow } from './windows/TerminalWindow.tsx'
 // label decides which root renders.
 const isTerminalWindow = (() => {
   try {
-    return getCurrentWindow().label === 'terminal';
+    const label = getCurrentWindow().label;
+    // `terminal`, plus `terminal-2`, `terminal-3`… for the windows a tab was
+    // detached into (ticket #20).
+    return label === 'terminal' || label.startsWith('terminal-');
   } catch {
     return false;
   }

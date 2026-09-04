@@ -75,7 +75,7 @@ export const TERMINAL_SECTION_KEYWORDS = {
   external:
     'terminal application external windows terminal powershell cmd warp custom path arguments cortx terminal preset',
   integrated:
-    'integrated terminal shell integration inline suggestions ghost font size line height weight letter spacing selection renderer tabs placement rail restore sessions scrollback close busy open in dock window processes dev sessions dock theme file path links clickable paths kitty graphics images tab display number cwd agent',
+    'integrated terminal shell integration inline suggestions ghost font size line height weight letter spacing selection renderer tabs placement rail restore sessions scrollback close busy open in dock window processes dev sessions dock theme file path links clickable paths kitty graphics images tab display number cwd agent completion menu flags subcommands git branches npm scripts input line position bottom pinned universal input editor blocks gutter fold prompt navigation',
   notifications:
     'terminal notifications notify toast system desktop long command failed exit code muted commands claude codex vim ssh hidden background password prompt',
   appearance:

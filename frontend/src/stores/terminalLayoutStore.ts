@@ -16,8 +16,14 @@ import {
   tabContainingTerminal,
   tabsInScope,
   tabInScope,
+  tabIsLocal,
   nextTabOrder,
+  setLocalTerminalWindowId,
+  setTabWindow,
+  terminalWindowIdOf,
+  withLocalWindow,
   workspaceIdForProject,
+  PRIMARY_TERMINAL_WINDOW,
   type TerminalLayoutDoc,
   type TerminalScope,
   type TerminalTab,
@@ -25,6 +31,8 @@ import {
   type LayoutNode,
   mapLeaves,
 } from '@/lib/terminalLayout';
+import { disposeTerminal, hasTerminalSession } from '@/lib/terminalSessions';
+import { openTerminalWindow } from '@/components/terminal/terminalWindows';
 import { useAppStore } from '@/stores/appStore';
 import { registerFocusInTerminalWindow, registerSendToTerminalWindow } from '@/lib/terminalWindowBridge';
 
@@ -45,7 +53,21 @@ export const WINDOW_LABEL: string = (() => {
   }
 })();
 
-export const IS_TERMINAL_WINDOW = WINDOW_LABEL === 'terminal';
+/**
+ * A Terminal window is the first one (`terminal`) or one detached from it
+ * (`terminal-2`, `terminal-3`… — see `nextTerminalWindowLabel`).
+ */
+export const IS_TERMINAL_WINDOW =
+  WINDOW_LABEL === PRIMARY_TERMINAL_WINDOW || WINDOW_LABEL.startsWith(`${PRIMARY_TERMINAL_WINDOW}-`);
+
+/**
+ * Which Terminal window this webview speaks for. The main window speaks for
+ * the first one: it is the window that restores its sessions and keeps its
+ * tabs while it is closed, exactly as before there could be several.
+ */
+export const TERMINAL_WINDOW_ID = IS_TERMINAL_WINDOW ? WINDOW_LABEL : PRIMARY_TERMINAL_WINDOW;
+
+setLocalTerminalWindowId(TERMINAL_WINDOW_ID);
 
 export interface SplitFrom {
   tabId: string;
@@ -113,6 +135,16 @@ interface TerminalLayoutState {
   sendToDock: (terminalId: string) => void;
   /** Remove a whole tab; returns the terminal ids it held. */
   closeTab: (tabId: string) => string[];
+  /** Move a tab to another Terminal window (ticket #20); the shells keep running. */
+  moveTabToWindow: (tabId: string, windowId: string) => void;
+  /** Pull one pane out of its tab into a tab of its own in `windowId`. */
+  moveLeafToWindow: (terminalId: string, windowId: string) => void;
+  /** Which Terminal window shows a terminal, or null when none does. */
+  windowIdOfTerminal: (terminalId: string) => string | null;
+  /** Record that a Terminal window is up (restore reopens the ones that were). */
+  markWindowOpen: (windowId: string) => void;
+  /** Record that a Terminal window was closed. */
+  markWindowClosed: (windowId: string) => void;
   /** Record a terminal's live cwd on its leaf (debounced; session restore reopens it there). */
   updateLeafCwd: (terminalId: string, cwd: string) => void;
   /** Remember a pane's size so a restored shell spawns at that size. */
@@ -169,9 +201,51 @@ function reconcileDock(doc: TerminalLayoutDoc) {
       app.loadShells();
       app.loadTerminalStates();
     }
+    releaseMovedSessions(doc);
     return;
   }
   app.syncTerminalSurfaces(doc.surfaces);
+}
+
+/**
+ * A tab that left this window for another one (ticket #20) must stop being
+ * rendered here: the PTY lives in the app process and both webviews may
+ * attach to it, so a session left behind would keep consuming its output and
+ * holding an xterm buffer for a pane the user cannot see. Disposing detaches;
+ * the window that now shows the tab attaches and replays the scrollback from
+ * `TerminalHub`, which is the same path a hidden tab already takes.
+ *
+ * Only terminals the document still knows about are touched — a session for a
+ * shell this window has just spawned is not in the document yet.
+ */
+function releaseMovedSessions(doc: TerminalLayoutDoc) {
+  const mine = new Set<string>();
+  const elsewhere = new Set<string>();
+  for (const tab of doc.window.tabs) {
+    const target = tabIsLocal(tab) ? mine : elsewhere;
+    for (const leaf of collectLeaves(tab.layout)) target.add(leaf.terminalId);
+  }
+  for (const id of elsewhere) {
+    if (!mine.has(id) && hasTerminalSession(id)) disposeTerminal(id);
+  }
+  // Terminals handed back to the dock are rendered by the main window now.
+  for (const [id, surface] of Object.entries(doc.surfaces)) {
+    if (surface === 'dock' && !mine.has(id) && hasTerminalSession(id)) disposeTerminal(id);
+  }
+}
+
+/**
+ * May this window record the live cwd / pane size of a terminal? Whoever
+ * shows it does; when no Terminal window shows it, the main window speaks for
+ * it. Without this the windows would fight over the same leaf.
+ */
+function ownsLeafWrites(doc: TerminalLayoutDoc, terminalId: string): boolean {
+  const tab = tabContainingTerminal(doc.window, terminalId);
+  if (!tab) return false;
+  const windowId = terminalWindowIdOf(tab);
+  if (IS_TERMINAL_WINDOW) return windowId === TERMINAL_WINDOW_ID;
+  if ((doc.openWindows ?? []).includes(windowId)) return false;
+  return !(windowId === PRIMARY_TERMINAL_WINDOW && doc.windowOpen === true);
 }
 
 export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => ({
@@ -205,7 +279,10 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
   },
 
   commit: (mutate) => {
-    const next = mutate(get().doc);
+    // `withLocalWindow` folds this window's scope / active tab back into the
+    // shared `windows` map, so every mutator can keep working on `doc.window`
+    // as if there were a single Terminal window.
+    const next = withLocalWindow(mutate(get().doc));
     set({ doc: next });
     reconcileDock(next);
     api.setTerminalLayout(next, WINDOW_LABEL)
@@ -307,16 +384,23 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
       const existing = tabContainingTerminal(doc.window, terminalId);
       if (existing) {
         const leaf = findLeafByTerminal(existing.layout, terminalId)!;
+        const surfaces = { ...doc.surfaces, [terminalId]: 'window' as const };
+        const tabs = activate
+          ? doc.window.tabs.map((t) => (t.id === existing.id ? { ...t, activeLeafId: leaf.id } : t))
+          : doc.window.tabs;
+        // Already shown by another Terminal window: select it *there* rather
+        // than stealing the tab (the caller raises that window).
+        if (!tabIsLocal(existing)) {
+          const owner = terminalWindowIdOf(existing);
+          const windows = activate
+            ? { ...doc.windows, [owner]: { ...(doc.windows[owner] ?? { scope: 'global' as TerminalScope }), activeTabId: existing.id } }
+            : doc.windows;
+          return { ...doc, surfaces, windows, window: { ...doc.window, tabs } };
+        }
         return {
           ...doc,
-          surfaces: { ...doc.surfaces, [terminalId]: 'window' },
-          window: activate
-            ? {
-                ...doc.window,
-                activeTabId: existing.id,
-                tabs: doc.window.tabs.map((t) => (t.id === existing.id ? { ...t, activeLeafId: leaf.id } : t)),
-              }
-            : doc.window,
+          surfaces,
+          window: activate ? { ...doc.window, activeTabId: existing.id, tabs } : doc.window,
         };
       }
       const surfaces = { ...doc.surfaces, [terminalId]: 'window' as const };
@@ -403,12 +487,99 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     return ids;
   },
 
-  updateLeafCwd: (terminalId, cwd) => {
-    // The Terminal window writes while it is open; the main window only when
-    // it is not, so the two never race over the same leaf.
+  moveTabToWindow: (tabId, windowId) =>
+    get().commit((doc) => {
+      const tab = doc.window.tabs.find((t) => t.id === tabId);
+      if (!tab || terminalWindowIdOf(tab) === windowId) return doc;
+      const tabs = doc.window.tabs.map((t) => (t.id === tabId ? setTabWindow(t, windowId) : t));
+      // The tab is selected in the window it lands in; the window it leaves
+      // falls back to whatever is still in scope there.
+      const target = doc.windows[windowId] ?? { scope: 'global' as TerminalScope, activeTabId: null };
+      const windows = { ...doc.windows, [windowId]: { ...target, activeTabId: tabId } };
+      // A tab moved into a window scoped to another project would be
+      // invisible on arrival: widen that window to Global.
+      if (target.scope !== 'global' && !tabInScope(setTabWindow(tab, windowId), target.scope)) {
+        windows[windowId] = { ...windows[windowId], scope: 'global' };
+      }
+      const next = { ...doc, windows, window: { ...doc.window, tabs } };
+      return { ...next, window: { ...next.window, activeTabId: pickActiveTab(next) } };
+    }),
+
+  moveLeafToWindow: (terminalId, windowId) =>
+    get().commit((doc) => {
+      const from = tabContainingTerminal(doc.window, terminalId);
+      if (!from) return doc;
+      const leaf = findLeafByTerminal(from.layout, terminalId)!;
+      const leaves = collectLeaves(from.layout);
+      // The only pane of its tab: the whole tab travels, keeping its title,
+      // colour and pin — nothing is recreated.
+      if (leaves.length === 1) {
+        if (terminalWindowIdOf(from) === windowId) return doc;
+        const tabs = doc.window.tabs.map((t) => (t.id === from.id ? setTabWindow(t, windowId) : t));
+        const target = doc.windows[windowId] ?? { scope: 'global' as TerminalScope, activeTabId: null };
+        const windows = { ...doc.windows, [windowId]: { ...target, activeTabId: from.id, scope: 'global' as TerminalScope } };
+        const next = { ...doc, windows, window: { ...doc.window, tabs } };
+        return { ...next, window: { ...next.window, activeTabId: pickActiveTab(next) } };
+      }
+      const trimmed = removeLeaf(from.layout, leaf.id)!;
+      const moved = setTabWindow(
+        {
+          ...makeTab(terminalId, from.workspaceId, nextTabOrder(doc.window), windowId),
+          color: from.color,
+        },
+        windowId
+      );
+      const tabs = doc.window.tabs.map((t) =>
+        t.id === from.id
+          ? {
+              ...t,
+              layout: trimmed,
+              activeLeafId: t.activeLeafId === leaf.id ? collectLeaves(trimmed)[0].id : t.activeLeafId,
+              maximizedLeafId: t.maximizedLeafId === leaf.id ? null : t.maximizedLeafId,
+            }
+          : t
+      );
+      tabs.push(moved);
+      const target = doc.windows[windowId] ?? { scope: 'global' as TerminalScope, activeTabId: null };
+      const windows = { ...doc.windows, [windowId]: { ...target, activeTabId: moved.id, scope: 'global' as TerminalScope } };
+      return { ...doc, windows, window: { ...doc.window, tabs } };
+    }),
+
+  windowIdOfTerminal: (terminalId) => {
+    const tab = tabContainingTerminal(get().doc.window, terminalId);
+    return tab ? terminalWindowIdOf(tab) : null;
+  },
+
+  markWindowOpen: (windowId) => {
     const { doc } = get();
-    if (!IS_TERMINAL_WINDOW && doc.windowOpen) return;
-    if (!tabContainingTerminal(doc.window, terminalId)) return;
+    const open = doc.openWindows ?? [];
+    if (open.includes(windowId) && doc.windowOpen === true) return;
+    get().commit((d) => ({
+      ...d,
+      windowOpen: true,
+      openWindows: (d.openWindows ?? []).includes(windowId)
+        ? (d.openWindows ?? [])
+        : [...(d.openWindows ?? []), windowId],
+    }));
+  },
+
+  markWindowClosed: (windowId) => {
+    const { doc } = get();
+    const open = doc.openWindows ?? [];
+    if (!open.includes(windowId) && doc.windowOpen !== true) return;
+    // `windowOpen` is what session restore reads to know whether to bring a
+    // Terminal window back at all; keep it meaning "at least one was up".
+    get().commit((d) => {
+      const rest = (d.openWindows ?? []).filter((id) => id !== windowId);
+      return { ...d, openWindows: rest, windowOpen: rest.length > 0 };
+    });
+  },
+
+  updateLeafCwd: (terminalId, cwd) => {
+    // Whichever window shows the pane writes; the main window speaks for the
+    // Terminal windows that are closed. The two never race over a leaf.
+    const { doc } = get();
+    if (!ownsLeafWrites(doc, terminalId)) return;
     pendingCwd.set(terminalId, cwd);
     if (cwdTimer !== null) return;
     cwdTimer = window.setTimeout(() => {
@@ -426,9 +597,8 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
   updateLeafSize: (terminalId, cols, rows) => {
     // Same ownership rule as updateLeafCwd: whichever window shows the pane.
     const { doc } = get();
-    if (!IS_TERMINAL_WINDOW && doc.windowOpen) return;
     if (cols < 2 || rows < 2) return;
-    if (!tabContainingTerminal(doc.window, terminalId)) return;
+    if (!ownsLeafWrites(doc, terminalId)) return;
     pendingSize.set(terminalId, { cols, rows });
     if (sizeTimer !== null) return;
     sizeTimer = window.setTimeout(() => {
@@ -450,7 +620,9 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
       let order = nextTabOrder(doc.window);
       const placed = tabs.map((t) => {
         for (const leaf of collectLeaves(t.layout)) surfaces[leaf.terminalId] = 'window';
-        return { ...t, order: order++ };
+        // Ready-made tabs (launch configs, "reopen closed tab") land in the
+        // window that asked for them, not always the first one.
+        return setTabWindow({ ...t, order: order++ }, TERMINAL_WINDOW_ID);
       });
       const window = { ...doc.window, tabs: [...doc.window.tabs, ...placed] };
       const scope: TerminalScope = projectId ? { projectId } : window.scope;
@@ -478,13 +650,17 @@ if (import.meta.env.DEV) {
 // "Open" a terminal that already lives in the Terminal window: activate its
 // tab there and bring the window up (used by appStore.openTerminal).
 registerFocusInTerminalWindow((terminalId) => {
-  useTerminalLayoutStore.getState().addTerminalToWindow(terminalId, { activate: true });
-  if (!IS_TERMINAL_WINDOW) api.openTerminalWindow().catch(() => {});
+  const store = useTerminalLayoutStore.getState();
+  store.addTerminalToWindow(terminalId, { activate: true });
+  // The terminal may already live in a detached window: raise that one.
+  const target = useTerminalLayoutStore.getState().windowIdOfTerminal(terminalId) ?? TERMINAL_WINDOW_ID;
+  if (target !== WINDOW_LABEL) openTerminalWindow(target).catch(() => {});
 });
 
 // A freshly started process placed in the window by the "open processes in"
 // setting (used by appStore.openTerminal).
 registerSendToTerminalWindow((terminalId, projectId) => {
   useTerminalLayoutStore.getState().sendToWindow(terminalId, projectId);
-  if (!IS_TERMINAL_WINDOW) api.openTerminalWindow().catch(() => {});
+  const target = useTerminalLayoutStore.getState().windowIdOfTerminal(terminalId) ?? TERMINAL_WINDOW_ID;
+  if (target !== WINDOW_LABEL) openTerminalWindow(target).catch(() => {});
 });

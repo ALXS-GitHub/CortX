@@ -15,7 +15,12 @@ import { Code, Field, Section, ToggleField } from '@/components/settings/Setting
 import { NumberField, TextField } from './controls';
 import { useTerminalSettings } from './useTerminalSettings';
 import { resolveTabDisplay } from '@/components/terminal/model';
-import type { TabIndexDisplay, TerminalTargetSurface } from '@/types';
+import type {
+  TabIndexDisplay,
+  CompletionMenuKey,
+  TerminalInputPosition,
+  TerminalTargetSurface,
+} from '@/types';
 
 /** The parts of a tab that can be switched off, in the order they are drawn. */
 const TAB_DISPLAY_TOGGLES = [
@@ -111,6 +116,140 @@ export function IntegratedTerminalSection() {
           checked={terminal?.inlineSuggestions ?? true}
           onCheckedChange={(v) => patch({ inlineSuggestions: v })}
           disabled={!terminal || !shellIntegration}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="terminal-blocks"
+        label="Command blocks"
+        hint={
+          <>
+            Each command and its output become a block, from the same OSC 133 markers as the tab titles.{' '}
+            <Code>Ctrl+↑</Code> / <Code>Ctrl+↓</Code> jump from one prompt to the previous or next one; a block can be
+            copied, folded away or run again from its gutter bar. It is drawn over the terminal, never in it — no line
+            moves, and a shell without <Code>cortx init</Code> shows nothing at all.
+          </>
+        }
+      >
+        <Switch
+          id="terminal-blocks"
+          checked={terminal?.blocks ?? true}
+          onCheckedChange={(v) => patch({ blocks: v })}
+          disabled={!terminal || !shellIntegration}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="terminal-block-gutter"
+        label={<span className="text-xs text-muted-foreground">Block gutter</span>}
+        hint="A thin bar in the pane's left padding for each block, green or red according to the exit code the shell reported. Click it to select the block, double-click to fold its output, right-click for the block menu. Off, the shortcuts and the menu still work."
+      >
+        <Switch
+          id="terminal-block-gutter"
+          checked={terminal?.blockGutter ?? true}
+          onCheckedChange={(v) => patch({ blockGutter: v })}
+          disabled={!terminal || !shellIntegration || !(terminal?.blocks ?? true)}
+        />
+      </ToggleField>
+
+      <Field
+        label={<span className="text-xs text-muted-foreground">Completion menu</span>}
+        htmlFor="completion-menu"
+        hint="A list of subcommands, flags, git branches and npm scripts, on top of the ghost text. Ctrl+Space by default rather than Tab, because Tab already reaches your shell's own completion — with Tab, CortX only takes the key when it has something to offer."
+      >
+        <Select
+          value={terminal?.completionMenu ?? 'ctrlSpace'}
+          onValueChange={(v: CompletionMenuKey) => patch({ completionMenu: v })}
+          disabled={!terminal || !(terminal?.inlineSuggestions ?? true)}
+        >
+          <SelectTrigger id="completion-menu" className="w-[260px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ctrlSpace">Ctrl+Space (default)</SelectItem>
+            <SelectItem value="tab">Tab</SelectItem>
+            <SelectItem value="off">Off</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <ToggleField
+        id="completion-specs"
+        label={<span className="text-xs text-muted-foreground">Learn a command's flags</span>}
+        hint="Runs a program's own --help once, in the background, to learn its subcommands and flags. Only for a program already found in your PATH, never with anything you typed as an argument, and never for one that reads input (ssh, sudo, python…)."
+      >
+        <Switch
+          id="completion-specs"
+          checked={terminal?.completionSpecs ?? true}
+          onCheckedChange={(v) => patch({ completionSpecs: v })}
+          disabled={!terminal || !(terminal?.inlineSuggestions ?? true)}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="completion-context"
+        label={<span className="text-xs text-muted-foreground">Complete from the directory</span>}
+        hint="Git branches, package.json scripts and file paths, read from the terminal's own working directory."
+      >
+        <Switch
+          id="completion-context"
+          checked={terminal?.completionContext ?? true}
+          onCheckedChange={(v) => patch({ completionContext: v })}
+          disabled={!terminal || !(terminal?.inlineSuggestions ?? true)}
+        />
+      </ToggleField>
+
+      <Field
+        label="Input line position"
+        htmlFor="input-position"
+        hint="Where the line you type sits in the pane. Pinned to the bottom keeps it against the bottom edge and stacks the output above it, like Warp; the terminal itself is not resized, so nothing under the PTY can tell the difference."
+      >
+        <Select
+          value={terminal?.inputPosition ?? 'flow'}
+          onValueChange={(v: TerminalInputPosition) => patch({ inputPosition: v })}
+          disabled={!terminal}
+        >
+          <SelectTrigger id="input-position" className="w-[260px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="flow">Follow the output (default)</SelectItem>
+            <SelectItem value="bottom">Pinned to the bottom</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <ToggleField
+        id="input-editor"
+        label="Universal input editor (beta)"
+        hint={
+          <>
+            Type the command into a CortX editor at the prompt instead of the shell&apos;s own line editor: accents and
+            dead keys behave, a multi-line paste can never run by accident, and Ctrl+D stops being able to close the
+            shell while you are writing. It only ever appears once the shell has announced its prompt (OSC 133), so{' '}
+            <Code>ssh</Code>, a REPL, a full-screen program or a shell without <Code>cortx init</Code> keep today&apos;s
+            behaviour exactly.
+          </>
+        }
+      >
+        <Switch
+          id="input-editor"
+          checked={terminal?.inputEditor ?? false}
+          onCheckedChange={(v) => patch({ inputEditor: v })}
+          disabled={!terminal || !shellIntegration}
+        />
+      </ToggleField>
+
+      <ToggleField
+        id="input-editor-handoff"
+        label={<span className="text-xs text-muted-foreground">Hand unknown keys back to the shell</span>}
+        hint="Tab, Ctrl+R, ↑ and ↓ write what you have typed to the shell without running it, close the editor and let the shell take the key — so PSReadLine completes and searches exactly as it does today. Off, those keys do nothing while the editor is open."
+      >
+        <Switch
+          id="input-editor-handoff"
+          checked={terminal?.inputEditorHandoff ?? true}
+          onCheckedChange={(v) => patch({ inputEditorHandoff: v })}
+          disabled={!terminal || !(terminal?.inputEditor ?? false)}
         />
       </ToggleField>
 

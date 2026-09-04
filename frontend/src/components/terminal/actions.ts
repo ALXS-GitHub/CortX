@@ -3,9 +3,10 @@ import { toast } from 'sonner';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { emit } from '@tauri-apps/api/event';
 import { useAppStore } from '@/stores/appStore';
-import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
+import { useTerminalLayoutStore, TERMINAL_WINDOW_ID } from '@/stores/terminalLayoutStore';
 import { useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
 import { adjustTerminalZoom, clearTerminal, focusTerminal, resetTerminalZoom } from '@/lib/terminalSessions';
+import { jumpToBlock } from '@/lib/terminalBlocks';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
 import { basename } from '@/lib/terminalNames';
 import type { KeybindingActionId } from '@/lib/keybindings';
@@ -14,13 +15,18 @@ import {
   collectLeaves,
   mapLeaves,
   newLayoutId,
+  nextTerminalWindowLabel,
   projectIdOfWorkspace,
   removeLeaf,
   tabContainingTerminal,
+  terminalWindowIdOf,
+  terminalWindowIds,
+  terminalWindowName,
   type LayoutNode,
   type SplitDirection,
   type TerminalTab,
 } from '@/lib/terminalLayout';
+import { openTerminalWindow } from './terminalWindows';
 
 /**
  * Imperative actions of the Terminal window. They read the stores at call
@@ -315,6 +321,97 @@ export function otherClosableTabs(tabId: string): TerminalTab[] {
 /** Hand a terminal back to the main window's dock. */
 export function sendLeafToDock(terminalId: string): void {
   useTerminalLayoutStore.getState().sendToDock(terminalId);
+}
+
+// ---------------------------------------------------------------------------
+// Several Terminal windows (ticket #20)
+// ---------------------------------------------------------------------------
+
+/**
+ * Moving a tab between windows never touches the shell. The PTY lives in the
+ * app process, keyed by terminal id; what a window owns is an xterm instance.
+ * So the document is told which window shows the tab, the window that had it
+ * disposes its session (`releaseMovedSessions` in the layout store) and the
+ * window that gets it attaches and replays the scrollback from `TerminalHub`
+ * — the very path a tab already takes when it comes back from being hidden.
+ */
+
+/** The other Terminal windows a tab could be moved to, in menu order. */
+export function otherTerminalWindows(): Array<{ id: string; name: string; tabs: number }> {
+  const { doc } = useTerminalLayoutStore.getState();
+  return terminalWindowIds(doc)
+    .filter((id) => id !== TERMINAL_WINDOW_ID)
+    .map((id) => ({
+      id,
+      name: terminalWindowName(id),
+      tabs: doc.window.tabs.filter((t) => terminalWindowIdOf(t) === id).length,
+    }));
+}
+
+/** Where a detached window should appear, from a drop point in screen pixels. */
+export interface DetachPosition {
+  x: number;
+  y: number;
+}
+
+/** Move a tab to an existing Terminal window and raise it. */
+export async function moveTabToWindow(tabId: string, windowId: string): Promise<void> {
+  useTerminalLayoutStore.getState().moveTabToWindow(tabId, windowId);
+  try {
+    await openTerminalWindow(windowId);
+  } catch (error) {
+    toast.error('Could not open that terminal window', { description: String(error) });
+  }
+}
+
+/** Move a tab into a brand-new Terminal window (menu, or a drop outside). */
+export async function moveTabToNewWindow(tabId: string, position?: DetachPosition | null): Promise<string | null> {
+  const store = useTerminalLayoutStore.getState();
+  const label = nextTerminalWindowLabel(store.doc);
+  store.moveTabToWindow(tabId, label);
+  try {
+    await openTerminalWindow(label, { position });
+    return label;
+  } catch (error) {
+    // The window could not be created: put the tab back where it was rather
+    // than leaving it in a window that does not exist.
+    useTerminalLayoutStore.getState().moveTabToWindow(tabId, TERMINAL_WINDOW_ID);
+    toast.error('Could not open a new terminal window', { description: String(error) });
+    return null;
+  }
+}
+
+/** Same, for one pane of a split: it leaves as a tab of its own. */
+export async function moveLeafToNewWindow(terminalId: string, position?: DetachPosition | null): Promise<string | null> {
+  const store = useTerminalLayoutStore.getState();
+  const label = nextTerminalWindowLabel(store.doc);
+  store.moveLeafToWindow(terminalId, label);
+  try {
+    await openTerminalWindow(label, { position });
+    return label;
+  } catch (error) {
+    useTerminalLayoutStore.getState().moveLeafToWindow(terminalId, TERMINAL_WINDOW_ID);
+    toast.error('Could not open a new terminal window', { description: String(error) });
+    return null;
+  }
+}
+
+/** Move one pane to an existing Terminal window and raise it. */
+export async function moveLeafToWindow(terminalId: string, windowId: string): Promise<void> {
+  useTerminalLayoutStore.getState().moveLeafToWindow(terminalId, windowId);
+  try {
+    await openTerminalWindow(windowId);
+  } catch (error) {
+    toast.error('Could not open that terminal window', { description: String(error) });
+  }
+}
+
+/** Move the active tab of this window out into a new one (palette entry). */
+export function moveActiveTabToNewWindow(): boolean {
+  const tab = useTerminalLayoutStore.getState().activeTab();
+  if (!tab) return false;
+  void moveTabToNewWindow(tab.id);
+  return true;
 }
 
 /** Close the active leaf of the active tab (Ctrl+Shift+W). */
@@ -776,6 +873,15 @@ export function runAction(id: KeybindingActionId): boolean {
       return resizeActiveLeaf('down');
     case 'pane.maximize':
       return toggleMaximizeActiveLeaf();
+    // Prompt-to-prompt navigation (ticket #7). Returns false when there is no
+    // block that way, so the key reaches the program instead — which is what
+    // keeps Ctrl+arrow usable inside Claude Code and the like.
+    case 'block.previous':
+    case 'block.next': {
+      const terminalId = activeTerminalId();
+      if (!terminalId) return false;
+      return jumpToBlock(terminalId, id === 'block.previous' ? 'previous' : 'next');
+    }
     case 'terminal.find':
       return openFindInActiveTerminal();
     case 'terminal.clear': {

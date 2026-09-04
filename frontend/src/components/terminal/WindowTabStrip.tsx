@@ -10,6 +10,7 @@ import {
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToHorizontalAxis } from '@dnd-kit/modifiers';
+import { useDetachDrag } from './useDetachDrag';
 import { Pin, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeIcon';
@@ -195,22 +196,34 @@ export function WindowTabStrip() {
   // from being swallowed by the drag sensor.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
+  // Dragging a tab past the edge of the window detaches it (ticket #20).
+  const detach = useDetachDrag();
+
   const onDragEnd = useCallback(
     (e: DragEndEvent) => {
       const { active, over } = e;
+      // Dropped outside: the tab left for another window, nothing to reorder.
+      if (detach.finish(String(active.id))) return;
       if (!over || active.id === over.id) return;
       const from = ids.indexOf(String(active.id));
       const to = ids.indexOf(String(over.id));
       if (from === -1 || to === -1) return;
       reorderTabs(arrayMove(ids, from, to));
     },
-    [ids, reorderTabs]
+    [ids, reorderTabs, detach]
   );
 
   return (
     <div className="flex h-9 shrink-0 items-stretch border-b border-border bg-background/70">
       <div className="no-scrollbar flex min-w-0 flex-1 items-stretch overflow-x-auto">
-        <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToHorizontalAxis]} onDragEnd={onDragEnd}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToHorizontalAxis]}
+          onDragStart={detach.start}
+          onDragCancel={detach.cancel}
+          onDragEnd={onDragEnd}
+        >
           <SortableContext items={ids} strategy={horizontalListSortingStrategy}>
             {tabs.map((tab, i) => (
               <WindowTab

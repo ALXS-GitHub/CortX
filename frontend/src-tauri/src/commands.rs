@@ -2892,6 +2892,88 @@ pub fn get_command_history(
 }
 
 // ---------------------------------------------------------------------------
+// Completions and suggestions (#17)
+// ---------------------------------------------------------------------------
+
+/// How many history records the ranking looks at. The file is capped at
+/// 10 MB and read in full by `recent`, so this bounds the work, not the file.
+const SUGGEST_SCAN: usize = 4000;
+
+/// Commands from the shared history, ranked for one terminal's context.
+///
+/// The score mixes frequency, recency, "ran in this very directory" and "ran
+/// in this project", and sinks commands that never once exited 0 — see
+/// `cortx_core::terminal::rank_commands`. Every component is independent of
+/// what the user has typed so far, which is what lets the frontend fetch the
+/// list once per prompt and filter it locally without touching the disk on
+/// each keystroke.
+#[tauri::command]
+pub fn suggest_history(
+    state: State<AppState>,
+    cwd: Option<String>,
+    project_id: Option<String>,
+    limit: Option<usize>,
+) -> Vec<cortx_core::terminal::CommandSuggestion> {
+    let ctx = cortx_core::terminal::SuggestContext {
+        cwd,
+        project_id,
+        now_ms: Utc::now().timestamp_millis(),
+    };
+    state
+        .process_manager
+        .command_history()
+        .suggestions(&ctx, SUGGEST_SCAN, limit.unwrap_or(400).min(2000))
+}
+
+/// Flags and subcommands of `command`, learned from its own `--help` page the
+/// first time and remembered under `runtime/command-specs/`.
+///
+/// Returns `None` when the name may not be probed at all (see the safety
+/// policy on `cortx_core::terminal::spec`): it must be a bare, well-formed
+/// program name that already resolves on the PATH and isn't on the deny list.
+/// Runs off the UI thread; the `--help` child is killed after 5 s and its
+/// output capped.
+#[tauri::command]
+pub async fn get_command_spec(
+    state: State<'_, AppState>,
+    command: String,
+    refresh: Option<bool>,
+) -> Result<Option<cortx_core::terminal::CommandSpec>, String> {
+    let store = cortx_core::terminal::SpecStore::new(state.process_manager.runtime_store().dir());
+    let refresh = refresh.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || store.get_or_learn(&command, refresh))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Branches, remotes and tags of the repository at `cwd` (`git for-each-ref`).
+/// Empty when it isn't a repository or git isn't installed.
+#[tauri::command]
+pub async fn complete_git_refs(cwd: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        cortx_core::terminal::git_refs(Path::new(&cwd))
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// `scripts` of the `package.json` in `cwd` (for `npm run <TAB>`).
+#[tauri::command]
+pub fn complete_npm_scripts(cwd: String) -> Vec<cortx_core::terminal::SpecItem> {
+    cortx_core::terminal::npm_scripts(Path::new(&cwd))
+}
+
+/// Directory entries matching a half-typed path, resolved against `cwd`.
+#[tauri::command]
+pub fn complete_paths(
+    cwd: String,
+    fragment: String,
+    limit: Option<usize>,
+) -> Vec<cortx_core::terminal::PathCompletion> {
+    cortx_core::terminal::complete_path(Path::new(&cwd), &fragment, limit.unwrap_or(60))
+}
+
+// ---------------------------------------------------------------------------
 // Terminal layout + Terminal window (DEV-13 P1)
 // ---------------------------------------------------------------------------
 
@@ -2947,6 +3029,59 @@ pub async fn open_terminal_window(
     launch: Option<String>,
 ) -> Result<(), String> {
     crate::open_terminal_window(&app_handle, project_id.as_deref(), launch.as_deref())
+}
+
+/// Open (or focus) one Terminal window by label — `terminal`, `terminal-2`…
+/// `x` / `y` (logical screen pixels) place a brand-new window where a tab was
+/// dropped. `async` for the same reason as `open_terminal_window`: a
+/// synchronous window build leaves the WebView on about:blank under Windows.
+#[tauri::command]
+pub async fn open_terminal_window_labelled(
+    app_handle: AppHandle,
+    label: String,
+    project_id: Option<String>,
+    launch: Option<String>,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Result<(), String> {
+    let position = match (x, y) {
+        (Some(x), Some(y)) => Some((x, y)),
+        _ => None,
+    };
+    crate::open_terminal_window_labelled(
+        &app_handle,
+        &label,
+        project_id.as_deref(),
+        launch.as_deref(),
+        position,
+    )
+}
+
+/// The one line to type into a sub-shell so it reports its directory and its
+/// commands to CortX (ticket #16). Self-contained: it carries the integration
+/// block base64-encoded and sets `CORTX_TERMINAL_ID` itself, so it also works
+/// over ssh or inside a container, where neither the variable nor the `cortx`
+/// binary exists.
+#[tauri::command]
+pub fn terminal_subshell_snippet(
+    state: State<AppState>,
+    shell: String,
+    terminal_id: String,
+) -> Result<String, String> {
+    let shell_type = cortx_core::shell_init::Shell::from_str(&shell)
+        .ok_or_else(|| format!("Unknown shell: {}", shell))?;
+    let tcfg = state.storage.get_settings().terminal;
+    if !tcfg.shell_integration {
+        return Err("Shell integration is turned off".into());
+    }
+    Ok(cortx_core::shell_init::subshell_injection(
+        &shell_type,
+        &terminal_id,
+        cortx_core::shell_init::InitOptions {
+            shell_integration: true,
+            disable_shell_predictions: tcfg.inline_suggestions,
+        },
+    ))
 }
 
 /// Show / focus the main window (from the Terminal window).
@@ -3287,8 +3422,13 @@ pub fn set_terminal_window_effect(
         "vibrancy" => WindowEffect::Vibrancy,
         _ => WindowEffect::None,
     };
-    let Some(window) = app_handle.get_webview_window(crate::TERMINAL_WINDOW_LABEL) else {
-        return Ok(());
-    };
-    apply_terminal_window_effect(&window, effect, opacity, tint.as_deref(), dark.unwrap_or(true))
+    // Every Terminal window, not just the first: a window a tab was detached
+    // into (`terminal-2`…) wears the same theme (ticket #20).
+    for (label, window) in app_handle.webview_windows() {
+        if !crate::is_terminal_window_label(&label) {
+            continue;
+        }
+        apply_terminal_window_effect(&window, effect, opacity, tint.as_deref(), dark.unwrap_or(true))?;
+    }
+    Ok(())
 }

@@ -41,6 +41,7 @@ import {
 } from './model';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
 import { useTabContextMenu, useTabRename } from './useTabMenu';
+import { useDetachDrag } from './useDetachDrag';
 
 /**
  * Icon button with a tooltip. Extra props (and the ref) land on the button so
@@ -253,20 +254,33 @@ function SessionGroupRows({
   // from being swallowed by the drag sensor.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
+  // Dragging a row past the edge of the window detaches the tab (ticket #20).
+  // The row itself stays inside (the modifiers below); `DetachDropHint` is
+  // what tells the user what releasing will do.
+  const detach = useDetachDrag();
+
   const onDragEnd = useCallback(
     (e: DragEndEvent) => {
       const { active, over } = e;
+      if (detach.finish(String(active.id))) return;
       if (!over || active.id === over.id) return;
       const from = ids.indexOf(String(active.id));
       const to = ids.indexOf(String(over.id));
       if (from === -1 || to === -1) return;
       onReorder(group.workspaceId, arrayMove(ids, from, to));
     },
-    [ids, group.workspaceId, onReorder]
+    [ids, group.workspaceId, onReorder, detach]
   );
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis, restrictToParentElement]} onDragEnd={onDragEnd}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+      onDragStart={detach.start}
+      onDragCancel={detach.cancel}
+      onDragEnd={onDragEnd}
+    >
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
         <div className="flex flex-col gap-0.5">
           {group.tabs.map((tab, i) => (
