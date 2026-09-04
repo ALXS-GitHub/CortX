@@ -271,9 +271,15 @@ export class TerminalInputMachine {
     if (k.meta && !k.ctrl) return { type: 'none' };
 
     if (k.key === 'Enter') {
-      // Shift+Enter has no multi-line meaning yet (that is U2): give the line
-      // back and let the shell see the ESC+CR it sees today.
-      if (k.shift && !k.ctrl && !k.alt) return this.handoff(ESC_CR_SEQUENCE);
+      // Ctrl+Shift+Enter is the app's `pane.maximize` shortcut (handled on a
+      // capturing listener long before this): swallow it so the textarea
+      // cannot slip a line break in behind the window's back.
+      if (k.ctrl && k.shift && !k.alt) return { type: 'edit' };
+      // Shift+Enter — and Ctrl+Enter, which Warp accepts too, and Alt+Enter,
+      // which xterm already encodes this way — mean "new line, do not
+      // submit". Multi-line is U2, so for now give the line back and let the
+      // shell see the ESC+CR it sees today.
+      if (k.shift || k.ctrl || k.alt) return this.handoff(ESC_CR_SEQUENCE);
       const text = this.text;
       this.draft = null;
       this.leave();

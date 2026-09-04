@@ -198,6 +198,51 @@ test('Shift+Enter hands the line over with the ESC+CR of today', () => {
   assert.equal(m.phase, 'classic');
 });
 
+test('Ctrl+Enter is Shift+Enter (Warp accepts both)', () => {
+  const m = editing('claude');
+  assert.deepEqual(type(m, 'Enter', { ctrl: true }), {
+    type: 'handoff',
+    flush: 'claude',
+    data: ESC_CR_SEQUENCE,
+  });
+  assert.equal(m.phase, 'classic');
+});
+
+test('Ctrl+Enter on an empty editor still means "new line", never submit', () => {
+  const m = editing();
+  assert.deepEqual(type(m, 'Enter', { ctrl: true }), {
+    type: 'handoff',
+    flush: '',
+    data: ESC_CR_SEQUENCE,
+  });
+});
+
+test('Ctrl+Shift+Enter stays the pane shortcut: nothing runs, nothing is typed', () => {
+  const m = editing('rm -rf /');
+  // `edit` is preventDefault'd by the caller, so the textarea cannot slip a
+  // line break in either. The line is untouched and we are still editing.
+  assert.deepEqual(type(m, 'Enter', { ctrl: true, shift: true }), { type: 'edit' });
+  assert.equal(m.phase, 'editing');
+  assert.equal(m.text, 'rm -rf /');
+});
+
+test('Alt+Enter is the new-line chord too (what xterm already encodes)', () => {
+  const m = editing('x');
+  assert.deepEqual(type(m, 'Enter', { alt: true }), {
+    type: 'handoff',
+    flush: 'x',
+    data: ESC_CR_SEQUENCE,
+  });
+});
+
+test('a plain Enter is still the only thing that runs a command', () => {
+  for (const mods of [{ shift: true }, { ctrl: true }, { alt: true }, { ctrl: true, shift: true }]) {
+    const m = editing('echo boom');
+    assert.equal(type(m, 'Enter', mods).type === 'submit', false, JSON.stringify(mods));
+  }
+  assert.equal(type(editing('echo ok'), 'Enter').type, 'submit');
+});
+
 // ---------------------------------------------------------------------------
 // Ctrl+D — the trap the plan singled out (§3.c)
 // ---------------------------------------------------------------------------

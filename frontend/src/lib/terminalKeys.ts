@@ -22,6 +22,14 @@
  * only turns them on for a hard-coded list of terminals (iTerm2, kitty,
  * WezTerm, Ghostty, tmux, Windows Terminal, Warp), so answering its queries
  * would not help CortX. Hence ESC CR.
+ *
+ * ## Ctrl+Enter
+ *
+ * Warp accepts **both** Shift+Enter and Ctrl+Enter for "new line, do not
+ * submit", so a habit built in Warp carries over. CortX does the same: the
+ * two combinations are the same key here, encoded by the same `shiftEnter`
+ * setting. Ctrl+**Shift**+Enter is deliberately left alone — it is the
+ * `pane.maximize` shortcut (see `lib/keybindings.ts`).
  */
 import { useAppStore } from '@/stores/appStore';
 import type { ShiftEnterKey } from '@/types';
@@ -34,9 +42,19 @@ export const DEFAULT_SHIFT_ENTER: ShiftEnterKey = 'escape-enter';
 export const DEFAULT_SMOOTH_SCROLL_DURATION = 100;
 const MAX_SMOOTH_SCROLL_DURATION = 500;
 
-/** How Shift+Enter is encoded (`escape-enter` unless the user says otherwise). */
+/** How Shift+Enter (and Ctrl+Enter) is encoded (`escape-enter` by default). */
 export function shiftEnterMode(): ShiftEnterKey {
   return useAppStore.getState().settings?.terminal.shiftEnter ?? DEFAULT_SHIFT_ENTER;
+}
+
+/**
+ * True for the two chords that mean "new line, do not submit": Shift+Enter
+ * and Ctrl+Enter. Ctrl+Shift+Enter is **not** one of them (`pane.maximize`),
+ * and neither is anything carrying Alt or Meta.
+ */
+export function isNewlineEnter(e: KeyboardEvent): boolean {
+  if (e.key !== 'Enter' || e.altKey || e.metaKey) return false;
+  return e.shiftKey !== e.ctrlKey;
 }
 
 /** A mouse selection is copied as soon as it ends (default true). */
@@ -55,13 +73,17 @@ export function smoothScrollDuration(): number {
  * The bytes to send for a key xterm.js would encode ambiguously, or null to
  * let xterm handle the event as usual.
  *
- * Only Shift+Enter qualifies today. Everything else — Enter, Ctrl+C/D/Z, the
- * arrows, Alt+arrows, Home/End, Tab and Shift+Tab — is left to xterm, which
- * already encodes them the way the shell expects.
+ * Only Shift+Enter and Ctrl+Enter qualify today. Everything else — Enter,
+ * Ctrl+C/D/Z, the arrows, Alt+arrows, Home/End, Tab and Shift+Tab — is left
+ * to xterm, which already encodes them the way the shell expects.
+ *
+ * This is the **classic** path, the one used when the universal input editor
+ * is off (which is the default): it is what makes Ctrl+Enter work inside
+ * Claude Code today. The editor has the same rule of its own, in
+ * `terminalInputState.ts`.
  */
 export function overrideKeySequence(e: KeyboardEvent): string | null {
   if (e.type !== 'keydown') return null;
-  if (e.key !== 'Enter') return null;
-  if (!e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return null;
+  if (!isNewlineEnter(e)) return null;
   return shiftEnterMode() === 'escape-enter' ? ESC_CR : null;
 }

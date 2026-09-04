@@ -1,12 +1,13 @@
 /**
  * Universal input editor — the surface (ticket #15, phase U1).
  *
- * A `<textarea>` laid over the grid exactly where the shell's input line
- * starts, driven by the pure state machine in `terminalInputState.ts`. The
- * editor owns the text: nothing reaches the PTY while the user types, and the
- * whole line goes out at once on Enter, so the shell's own line editor
- * (PSReadLine, ZLE) does all its usual work — history, alias expansion, the
- * `133;C` marker — on a line it reads in one go.
+ * A **block** laid over the row the shell's prompt is on: a framed, full-width
+ * strip (see `styles/terminal-input.css`) holding a `<textarea>`, driven by
+ * the pure state machine in `terminalInputState.ts`. The editor owns the text:
+ * nothing reaches the PTY while the user types, and the whole line goes out at
+ * once on Enter, so the shell's own line editor (PSReadLine, ZLE) does all its
+ * usual work — history, alias expansion, the `133;C` marker — on a line it
+ * reads in one go.
  *
  * It only ever appears between an `OSC 133;B` the shell really emitted and the
  * submission. Without shell integration, over `ssh`, inside a REPL, in the
@@ -24,6 +25,24 @@
  * Everything is plain DOM: the editor is a child of the session container, so
  * it is re-parented with it between the dock and the Terminal window, it
  * inherits the U0 `translateY`, and no React surface has to know it exists.
+ *
+ * ## The cursor
+ *
+ * The first version relied on the browser's own textarea caret. It is a 1 px
+ * hairline, it does not follow the terminal's `cursorStyle` / `cursorBlink`,
+ * and — the actual bug — it draws *nothing at all* when the field does not
+ * hold the DOM focus, which happened every time the prompt came back while
+ * the focus was anywhere but inside this pane. The grid, still focused, kept
+ * drawing *its* cursor and swallowed the keystrokes. So:
+ *
+ * - the native caret is suppressed and a caret of our own is drawn on a layer
+ *   above the text (`renderCaret`), following `cursorStyle` and `cursorBlink`;
+ * - `takeFocus()` is deliberate about when the field may claim the keyboard,
+ *   and the focus is bounced back to it whenever anything inside the pane
+ *   steals it;
+ * - the grid's cursor is hidden (`cursorInactiveStyle: 'none'`) *and* the grid
+ *   is explicitly blurred, so there is never a second cursor blinking next to
+ *   ours.
  */
 import type { IDisposable, Terminal } from '@xterm/xterm';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
@@ -56,6 +75,17 @@ const ADOPT_WINDOW_MS = 600;
 
 const MIN_GHOST_PREFIX = 2;
 const HISTORY_LIMIT = 400;
+
+/**
+ * Breathing room around the prompt row, in px. Asymmetric on purpose: above
+ * the row there is output (a tall frame would draw its border through the
+ * descenders of the line before), below it there is nothing until the command
+ * runs — so the block grows downwards.
+ */
+const PAD_TOP = 2;
+const PAD_BOTTOM = 5;
+/** Space kept between the caret's column and the right edge of the block. */
+const TEXT_INSET_RIGHT = 6;
 
 // ---------------------------------------------------------------------------
 // History for the in-editor ghost text
@@ -118,6 +148,15 @@ function firstLine(text: string): { line: string; truncated: boolean } {
   return { line: normalised.slice(0, index), truncated: normalised.slice(index + 1).trim().length > 0 };
 }
 
+/** A colour that would paint nothing (the Terminal window's canvas is see-through). */
+function isTransparent(colour: string | undefined): boolean {
+  if (!colour) return true;
+  const value = colour.trim().toLowerCase();
+  if (value === 'transparent' || value === 'none') return true;
+  // `rgba(0, 0, 0, 0)` and `#rrggbb00`.
+  return /,\s*0(\.0+)?\s*\)$/.test(value) || /^#[0-9a-f]{6}00$/.test(value);
+}
+
 class InputEditorController {
   id: string;
   term: Terminal;
@@ -127,10 +166,16 @@ class InputEditorController {
 
   machine = new TerminalInputMachine();
   root: HTMLDivElement;
+  frame: HTMLDivElement;
+  text: HTMLDivElement;
   field: HTMLTextAreaElement;
   ghost: HTMLDivElement;
   ghostTyped: HTMLSpanElement;
   ghostRest: HTMLSpanElement;
+  caretLayer: HTMLDivElement;
+  caretLead: HTMLSpanElement;
+  caret: HTMLElement;
+  caretGlyph: HTMLSpanElement;
 
   /** Remainder currently offered as ghost text (→ accepts it). */
   suggestion = '';
@@ -138,7 +183,8 @@ class InputEditorController {
   adoptUntil = 0;
   /** `cursorInactiveStyle` to put back when the editor closes. */
   previousInactiveCursor: Terminal['options']['cursorInactiveStyle'];
-  frame = 0;
+  frameId = 0;
+  syncFrame = 0;
   disposables: IDisposable[] = [];
   cleanup: Array<() => void> = [];
 
@@ -150,28 +196,55 @@ class InputEditorController {
     this.previousInactiveCursor = term.options.cursorInactiveStyle;
 
     const root = document.createElement('div');
-    root.className = 'cortx-input';
+    root.className = 'cortx-uinput';
     root.hidden = true;
+    root.dataset.focus = 'false';
+
+    const frame = document.createElement('div');
+    frame.className = 'cortx-uinput-frame';
+
+    const text = document.createElement('div');
+    text.className = 'cortx-uinput-text';
+
     const ghost = document.createElement('div');
-    ghost.className = 'cortx-input-ghost';
+    ghost.className = 'cortx-uinput-ghost';
     ghost.setAttribute('aria-hidden', 'true');
     this.ghostTyped = document.createElement('span');
-    this.ghostTyped.className = 'cortx-input-ghost-typed';
+    this.ghostTyped.className = 'cortx-uinput-ghost-typed';
     this.ghostRest = document.createElement('span');
-    this.ghostRest.className = 'cortx-input-ghost-rest';
+    this.ghostRest.className = 'cortx-uinput-ghost-rest';
     ghost.append(this.ghostTyped, this.ghostRest);
+
     const field = document.createElement('textarea');
-    field.className = 'cortx-input-field';
+    field.className = 'cortx-uinput-field';
     field.rows = 1;
+    field.wrap = 'off';
     field.spellcheck = false;
     field.autocapitalize = 'off';
     field.setAttribute('autocorrect', 'off');
     field.setAttribute('aria-label', 'Terminal input');
-    root.append(ghost, field);
+
+    const caretLayer = document.createElement('div');
+    caretLayer.className = 'cortx-uinput-caret-layer';
+    caretLayer.setAttribute('aria-hidden', 'true');
+    this.caretLead = document.createElement('span');
+    this.caret = document.createElement('i');
+    this.caret.className = 'cortx-uinput-caret';
+    this.caretGlyph = document.createElement('span');
+    this.caretGlyph.className = 'cortx-uinput-caret-glyph';
+    this.caret.append(this.caretGlyph);
+    caretLayer.append(this.caretLead, this.caret);
+
+    text.append(ghost, field, caretLayer);
+    root.append(frame, text);
     container.appendChild(root);
+
     this.root = root;
+    this.frame = frame;
+    this.text = text;
     this.ghost = ghost;
     this.field = field;
+    this.caretLayer = caretLayer;
 
     this.listen();
     void loadHistory();
@@ -213,12 +286,26 @@ class InputEditorController {
     on(this.field, 'paste', (e) => this.onPaste(e));
     on(this.field, 'keyup', () => this.syncCaret());
     on(this.field, 'mouseup', () => this.syncCaret());
-    on(this.field, 'blur', () => this.setGhost(''));
-    // A line longer than the pane scrolls inside the textarea; the ghost has
-    // to follow or the suggestion drifts away from the caret.
-    on(this.field, 'scroll', () => {
-      this.ghost.scrollLeft = this.field.scrollLeft;
+    on(this.field, 'select', () => this.syncCaret());
+    // Chromium fires `selectionchange` on the field itself (since 121), which
+    // is the only event that keeps our caret glued to the browser's while an
+    // arrow key auto-repeats — `keyup` never fires then.
+    {
+      const onSelectionChange = () => this.syncCaret();
+      this.field.addEventListener('selectionchange', onSelectionChange);
+      this.cleanup.push(() => this.field.removeEventListener('selectionchange', onSelectionChange));
+    }
+    on(this.field, 'focus', () => {
+      this.root.dataset.focus = 'true';
+      this.restartBlink();
     });
+    on(this.field, 'blur', () => {
+      this.root.dataset.focus = 'false';
+      this.setGhost('');
+    });
+    // A line longer than the block scrolls inside the textarea; the ghost and
+    // the caret have to follow or they drift away from the text.
+    on(this.field, 'scroll', () => this.syncScroll());
 
     // Focus discipline (plan §6.5): while the editor is up it is the one
     // keyboard target. A mouse selection may take the focus for the duration
@@ -227,41 +314,47 @@ class InputEditorController {
       if (!this.machine.isEditing || this.root.hidden) return;
       if (e.target === this.field) return;
       if (this.term.hasSelection()) return;
-      this.field.focus();
+      this.focusField();
     });
     on(this.container, 'mouseup', () => {
       if (!this.machine.isEditing || this.root.hidden) return;
       if (this.term.hasSelection()) return;
-      this.field.focus();
+      this.focusField();
     });
     // …and a key typed while the grid still holds the focus (right after a
-    // selection) is routed into the editor instead of being lost to the PTY.
+    // selection, or after `focusTerminal()` put it back) is routed into the
+    // editor instead of being lost to the PTY.
     on(
       this.container,
       'keydown',
       (e) => {
         if (!this.machine.isEditing || this.root.hidden) return;
         if (e.target === this.field) return;
-        if (e.ctrlKey || e.altKey || e.metaKey) return;
-        const printable = e.key.length === 1;
-        if (!printable && !['Enter', 'Backspace', 'Tab', 'Escape'].includes(e.key) && !e.key.startsWith('Arrow')) return;
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        this.field.focus();
-        if (printable) {
+        if (this.term.hasSelection()) return;
+        if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return;
+        this.focusField();
+        if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
           this.machine.insert(e.key);
           this.syncOut();
-        } else {
-          this.onKeyDown(e);
+          return;
         }
+        // Everything else goes through the very same path as a key typed in
+        // the field. Only stop it when the machine actually claimed it, so
+        // an app shortcut the editor ignores still reaches xterm.
+        this.onKeyDown(e);
+        if (e.defaultPrevented) e.stopImmediatePropagation();
       },
       true
     );
   }
 
   dispose() {
-    if (this.frame) cancelAnimationFrame(this.frame);
-    this.frame = 0;
+    if (this.frameId) cancelAnimationFrame(this.frameId);
+    this.frameId = 0;
+    if (this.syncFrame) cancelAnimationFrame(this.syncFrame);
+    this.syncFrame = 0;
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
     for (const off of this.cleanup) off();
@@ -296,9 +389,9 @@ class InputEditorController {
   }
 
   schedule() {
-    if (this.frame) return;
-    this.frame = requestAnimationFrame(() => {
-      this.frame = 0;
+    if (this.frameId) return;
+    this.frameId = requestAnimationFrame(() => {
+      this.frameId = 0;
       this.refresh();
     });
   }
@@ -309,8 +402,10 @@ class InputEditorController {
       return;
     }
     this.adoptTypeahead();
+    // Placed *before* it is shown: focusing a zero-sized element is what a
+    // browser is least reliable about.
+    if (!this.place()) return;
     if (this.root.hidden) this.show();
-    this.place();
   }
 
   /** Force the editor shut (setting turned off, session going away). */
@@ -324,19 +419,15 @@ class InputEditorController {
     // The grid's own cursor would sit under ours at the prompt.
     this.previousInactiveCursor = this.term.options.cursorInactiveStyle;
     this.term.options.cursorInactiveStyle = 'none';
-    this.applyFont();
+    this.applyStyle();
     this.syncOut();
-    // Never steal the keyboard from another pane: only take it when this pane
-    // already had it.
-    const active = document.activeElement;
-    if (active instanceof HTMLElement && this.container.contains(active) && active !== this.field) {
-      this.field.focus();
-    }
+    this.focusField();
   }
 
   hide() {
     if (this.root.hidden) return;
     this.root.hidden = true;
+    this.root.dataset.focus = 'false';
     this.term.options.cursorInactiveStyle = this.previousInactiveCursor;
     const hadFocus = document.activeElement === this.field;
     this.field.value = '';
@@ -345,53 +436,120 @@ class InputEditorController {
     if (hadFocus) this.term.focus();
   }
 
+  // -- focus ----------------------------------------------------------------
+
+  /**
+   * Claim the keyboard — but never from somewhere it legitimately is.
+   *
+   * Taking it whenever the prompt comes back would steal it from another pane
+   * or from a text field in the app; taking it *only* when this pane already
+   * had it (what the first version did) left the editor caret-less and mute
+   * whenever the focus had wandered to the body, which is the common case
+   * after a click on the window chrome or a tab switch.
+   */
+  focusField() {
+    if (this.root.hidden || !this.machine.isEditing) return;
+    if (document.activeElement === this.field) return;
+    const active = document.activeElement;
+    const inside = active instanceof HTMLElement && this.container.contains(active);
+    const idle = !active || active === document.body || active === document.documentElement;
+    if (!inside && !idle) return;
+    // Taking the focus is what blurs xterm's own helper textarea, which is
+    // what makes `cursorInactiveStyle: 'none'` take effect — so this single
+    // call is also what guarantees there is never a second cursor.
+    this.field.focus({ preventScroll: true });
+    this.root.dataset.focus = document.activeElement === this.field ? 'true' : 'false';
+  }
+
   // -- geometry -------------------------------------------------------------
 
   screenElement(): HTMLElement | null {
     return (this.term.element?.querySelector('.xterm-screen') as HTMLElement | null) ?? null;
   }
 
-  applyFont() {
+  /** Font and colours, straight from the terminal — never the app's chrome. */
+  applyStyle() {
     const { options } = this.term;
     const style = this.root.style;
     style.fontFamily = String(options.fontFamily ?? 'monospace');
     style.fontSize = `${options.fontSize ?? 12}px`;
     style.fontWeight = String(options.fontWeight ?? 400);
     style.letterSpacing = `${options.letterSpacing ?? 0}px`;
+    const theme = options.theme;
+    if (theme?.foreground) style.setProperty('--cortx-uinput-fg', theme.foreground);
+    if (theme?.cursor) style.setProperty('--cortx-uinput-caret', theme.cursor);
+    // The glyph a block caret covers is redrawn in the background colour —
+    // except in the Terminal window, where the canvas is see-through and the
+    // real colour is the one the stylesheet falls back to.
+    if (theme?.background && !isTransparent(theme.background)) {
+      style.setProperty('--cortx-uinput-caret-fg', theme.background);
+    } else {
+      style.removeProperty('--cortx-uinput-caret-fg');
+    }
+    this.root.dataset.cursor = options.cursorStyle ?? 'bar';
+    this.root.dataset.blink = options.cursorBlink ? 'on' : 'off';
   }
 
-  /** Put the editor on the prompt's own cell, whatever the pane's layout. */
-  place() {
+  /**
+   * Lay the block over the prompt's row, across the grid.
+   *
+   * Returns false when there is nothing to place on (no screen element yet,
+   * anchor scrolled out of sight): the caller must not then show the editor.
+   */
+  place(): boolean {
     const screen = this.screenElement();
     const anchor = this.machine.anchor;
     // Defensive: `hide()` and not `hidden = true`, so the grid cursor is put
     // back and the keyboard does not stay on an invisible field.
     if (!screen || !anchor) {
       this.hide();
-      return;
+      return false;
     }
     const buf = this.term.buffer.active;
     const row = anchor.y - buf.viewportY;
-    // Scrolled out of sight: hide rather than draw the editor over the output.
+    // Scrolled out of sight: hide rather than draw the block over the output.
     if (row < 0 || row >= this.term.rows) {
       this.root.style.visibility = 'hidden';
-      return;
+      return !this.root.hidden;
     }
     this.root.style.visibility = '';
     // Re-applied every pass: the font, the zoom and the theme can all change
     // while the editor is open, and it has to stay the terminal's own text.
-    this.applyFont();
+    this.applyStyle();
+
     const host = this.container.getBoundingClientRect();
     const rect = screen.getBoundingClientRect();
     const cellHeight = rect.height / Math.max(1, this.term.rows);
     const cellWidth = rect.width / Math.max(1, this.term.cols);
-    const left = rect.left - host.left + anchor.x * cellWidth;
-    const top = rect.top - host.top + row * cellHeight;
-    this.root.style.left = `${Math.round(left)}px`;
-    this.root.style.top = `${Math.round(top)}px`;
-    this.root.style.height = `${Math.max(1, Math.round(cellHeight))}px`;
-    this.root.style.width = `${Math.max(cellWidth * 2, rect.width - anchor.x * cellWidth)}px`;
-    this.root.style.lineHeight = `${Math.max(1, Math.round(cellHeight))}px`;
+    const gridLeft = rect.left - host.left;
+    const gridTop = rect.top - host.top;
+    const rowTop = gridTop + row * cellHeight;
+
+    // The frame breathes around the row it wraps. Below the grid it may run a
+    // few pixels into the pane's own padding (`.cortx-xterm-host` clips at its
+    // padding box, not at its content box), which is what keeps the block from
+    // looking sawn off in the "pinned to bottom" mode.
+    const top = Math.max(0, Math.round(rowTop - PAD_TOP));
+    const bottom = Math.min(host.height + PAD_BOTTOM, Math.round(rowTop + cellHeight + PAD_BOTTOM));
+
+    const style = this.root.style;
+    style.left = `${Math.round(gridLeft)}px`;
+    style.width = `${Math.max(1, Math.round(rect.width))}px`;
+    style.top = `${top}px`;
+    style.height = `${Math.max(1, bottom - top)}px`;
+    style.lineHeight = `${Math.max(1, Math.round(cellHeight))}px`;
+    // A block / underline caret is exactly one cell wide, like the grid's.
+    style.setProperty('--cortx-uinput-caret-w', `${Math.max(2, Math.round(cellWidth))}px`);
+
+    // The text box starts on the column the prompt ended on, so what is typed
+    // lands where the shell would have echoed it.
+    const textLeft = Math.round(anchor.x * cellWidth);
+    const text = this.text.style;
+    text.left = `${textLeft}px`;
+    text.top = `${Math.round(rowTop) - top}px`;
+    text.height = `${Math.max(1, Math.round(cellHeight))}px`;
+    text.width = `${Math.max(cellWidth * 2, Math.round(rect.width) - textLeft - TEXT_INSET_RIGHT)}px`;
+    return true;
   }
 
   // -- text in and out ------------------------------------------------------
@@ -403,13 +561,26 @@ class InputEditorController {
     if (field.selectionStart !== machine.caret || field.selectionEnd !== machine.caret) {
       field.setSelectionRange(machine.caret, machine.caret);
     }
-    this.updateGhost();
+    this.render();
   }
 
   syncCaret() {
     if (!this.machine.isEditing) return;
     this.machine.setText(this.field.value, this.field.selectionStart ?? this.field.value.length);
-    this.updateGhost();
+    this.render();
+  }
+
+  /**
+   * Read the caret back *after* the browser has acted on a key we let through
+   * (an arrow, Home, End). Doing it on `keyup` alone loses an auto-repeating
+   * arrow, which never sends one.
+   */
+  deferSync() {
+    if (this.syncFrame) return;
+    this.syncFrame = requestAnimationFrame(() => {
+      this.syncFrame = 0;
+      this.syncCaret();
+    });
   }
 
   onInput() {
@@ -433,7 +604,7 @@ class InputEditorController {
     // Typing snaps back to the bottom, exactly like `scrollOnUserInput` does
     // for the grid — otherwise the editor is off screen while you type in it.
     this.term.scrollToBottom();
-    this.updateGhost();
+    this.render();
   }
 
   onPaste(e: ClipboardEvent) {
@@ -457,6 +628,15 @@ class InputEditorController {
     }
   }
 
+  // -- drawing --------------------------------------------------------------
+
+  /** Everything that depends on the text: the ghost and the caret. */
+  render() {
+    this.updateGhost();
+    this.renderCaret();
+    this.syncScroll();
+  }
+
   setGhost(rest: string) {
     this.suggestion = rest;
     this.ghostTyped.textContent = rest ? this.machine.text : '';
@@ -474,6 +654,40 @@ class InputEditorController {
       return;
     }
     this.setGhost(findSuggestion(text) ?? '');
+  }
+
+  /**
+   * The caret. Positioned by the text that precedes it, repeated transparent
+   * on its own layer — no measuring, so tabs, accents and double-width glyphs
+   * all land where the browser itself would have put the caret.
+   */
+  renderCaret() {
+    const text = this.machine.text;
+    const caret = Math.max(0, Math.min(this.machine.caret, text.length));
+    this.caretLead.textContent = text.slice(0, caret);
+    // A block caret covers the glyph under it and redraws it inverted, the way
+    // the grid's own block cursor does.
+    const block = this.root.dataset.cursor === 'block';
+    const under = block ? text.slice(caret, caret + 1) : '';
+    this.caretGlyph.textContent = under === '\t' ? '' : under;
+    this.restartBlink();
+  }
+
+  /** Blinking restarts on every edit: a moving caret must never be invisible. */
+  restartBlink() {
+    if (this.root.dataset.blink !== 'on') return;
+    const style = this.caret.style;
+    style.animation = 'none';
+    // Force a reflow so the animation really starts over.
+    void this.caret.offsetWidth;
+    style.animation = '';
+  }
+
+  /** Long line: the textarea scrolls, both overlays must scroll with it. */
+  syncScroll() {
+    const left = this.field.scrollLeft;
+    if (this.ghost.scrollLeft !== left) this.ghost.scrollLeft = left;
+    if (this.caretLayer.scrollLeft !== left) this.caretLayer.scrollLeft = left;
   }
 
   // -- keyboard -------------------------------------------------------------
@@ -518,6 +732,9 @@ class InputEditorController {
     const action = this.machine.key(describe(e));
     switch (action.type) {
       case 'none':
+        // Left to the textarea (arrows, Home/End, a plain character): the
+        // caret it moves is ours, so redraw it once the browser has moved it.
+        this.deferSync();
         return;
       case 'edit':
         e.preventDefault();

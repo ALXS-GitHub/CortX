@@ -1,0 +1,221 @@
+/* ============================================================
+   Universal input editor — the block (ticket #15, U1).
+   See `lib/terminalInputEditor.ts`.
+
+   Kept in its own file, imported from `src/main.tsx` right after
+   `terminal-window.css`: the command blocks (#7) and this input block are
+   worked on independently, and neither should have to touch the other's
+   stylesheet. Loading order matters only in that every class here is new
+   (`cortx-uinput-*`), so nothing collides with anything.
+
+   ## What this has to look like
+
+   Warp's input is a *block*: a framed, full-width strip that the eye reads as
+   "the place where I type", clearly separate from the output above it. That
+   is the whole point of the redesign — an invisible `<textarea>` laid over a
+   grid cell was indistinguishable from the grid, which is exactly what was
+   wrong with the first attempt.
+
+   Verified on this machine (Warp 2026.08, `resources/settings_schema.json`):
+   the frame is not themable — Warp themes carry `accent / background /
+   foreground / details / terminal_colors / background_image` and nothing
+   about the input box — so its chrome is *derived* from the terminal
+   palette. We do the same: every colour below is a mix of the terminal's own
+   foreground over whatever is behind it, so the block works on a light theme,
+   a dark theme, a gradient and a wallpaper without a single hard-coded value,
+   and it never borrows the app's chrome.
+
+   ## Geometry
+
+   The block is laid over the row the shell's prompt is on and spans the grid,
+   so the shell's own PS1 shows *inside* it (Warp's classic input does exactly
+   this) and no glyph is hidden: the fill is a translucent wash, never opaque.
+   `lib/terminalInputEditor.ts` positions it; the rules here only paint.
+
+   ## The caret
+
+   The native textarea caret is a 1 px hairline that does not blink in the
+   terminal's rhythm, does not follow `cursorStyle`, and shows nothing at all
+   when the field loses the focus — the reason the cursor "did not work". It
+   is suppressed (`caret-color: transparent`) and replaced by a caret drawn
+   here, on a layer *above* the text, so a block cursor covers the glyph and
+   redraws it inverted just like xterm's.
+   ============================================================ */
+
+.cortx-uinput {
+  position: absolute;
+  z-index: 5; /* over the grid and over the command blocks (4) */
+  box-sizing: border-box;
+  white-space: pre;
+  /* A prompt that ends near the right edge must not spill past the frame. */
+  overflow: hidden;
+  /* Only the field takes the mouse: a selection that starts on the prompt
+     row still belongs to the grid. */
+  pointer-events: none;
+
+  --cortx-uinput-fg: var(--terminal-fg, var(--foreground));
+  --cortx-uinput-caret: var(--terminal-cursor, var(--cortx-uinput-fg));
+  --cortx-uinput-caret-fg: var(--terminal-window-solid, var(--bg-terminal, var(--card)));
+  --cortx-uinput-border: color-mix(in srgb, var(--cortx-uinput-fg) 18%, transparent);
+  --cortx-uinput-fill: color-mix(in srgb, var(--cortx-uinput-fg) 6%, transparent);
+  --cortx-uinput-glow: transparent;
+}
+
+.cortx-uinput[hidden] {
+  display: none !important;
+}
+
+/* Focused: the frame firms up a little. Enough to answer "is this thing
+   listening to me?" at a glance, never enough to shout. */
+.cortx-uinput[data-focus='true'] {
+  --cortx-uinput-border: color-mix(in srgb, var(--cortx-uinput-caret) 42%, transparent);
+  --cortx-uinput-fill: color-mix(in srgb, var(--cortx-uinput-fg) 9%, transparent);
+  --cortx-uinput-glow: color-mix(in srgb, var(--cortx-uinput-caret) 12%, transparent);
+}
+
+/* The visible block. A separate element from the root so the text box inside
+   it can be positioned on the prompt's own column without the border moving. */
+.cortx-uinput-frame {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--cortx-uinput-border);
+  border-radius: 7px;
+  background: var(--cortx-uinput-fill);
+  /* Inset, so the root can clip without eating the ring. */
+  box-shadow: inset 0 0 0 1px var(--cortx-uinput-glow);
+  pointer-events: none;
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* The text box: exactly one grid row tall, starting on the column where the
+   shell's prompt ended. Three layers share it, in paint order:
+   ghost → field → caret. */
+.cortx-uinput-text {
+  position: absolute;
+  overflow: hidden;
+}
+
+.cortx-uinput-field,
+.cortx-uinput-ghost,
+.cortx-uinput-caret-layer {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  white-space: pre;
+  overflow: hidden;
+  overflow-wrap: normal;
+  word-break: normal;
+  tab-size: 8;
+}
+
+.cortx-uinput-field {
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--cortx-uinput-fg);
+  /* The block draws its own caret (see the header): never two. */
+  caret-color: transparent;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+.cortx-uinput-field::-webkit-scrollbar {
+  display: none;
+}
+.cortx-uinput-field::selection {
+  background: var(--terminal-selection, color-mix(in srgb, var(--cortx-uinput-fg) 25%, transparent));
+}
+
+/* Ghost text (history suggestion), behind the field: the typed part is
+   repeated in `transparent` so the remainder lands on the right column
+   without measuring anything. */
+.cortx-uinput-ghost {
+  pointer-events: none;
+}
+.cortx-uinput-ghost-typed {
+  color: transparent;
+}
+.cortx-uinput-ghost-rest {
+  color: color-mix(in srgb, var(--cortx-uinput-fg) 45%, transparent);
+}
+
+/* The caret layer sits *above* the field: same trick, the text before the
+   caret is repeated transparent so the caret needs no measurement, and a
+   block caret can cover the glyph and redraw it inverted. */
+.cortx-uinput-caret-layer {
+  pointer-events: none;
+  color: transparent;
+}
+
+.cortx-uinput-caret {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 100%;
+  vertical-align: top;
+}
+.cortx-uinput-caret::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: var(--cortx-uinput-caret-w, 2px);
+  border-radius: 1px;
+  background: var(--cortx-uinput-caret);
+}
+/* The glyph under a block caret, redrawn in the background colour. */
+.cortx-uinput-caret-glyph {
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--cortx-uinput-caret-fg);
+}
+
+.cortx-uinput[data-cursor='bar'] {
+  --cortx-uinput-caret-w: 2px;
+}
+.cortx-uinput[data-cursor='underline'] .cortx-uinput-caret::before {
+  top: auto;
+  bottom: 0;
+  height: 2px;
+  border-radius: 0;
+}
+
+/* Blinking follows the terminal's own `cursorBlink`, and stops while the
+   user is typing (the animation is restarted on every edit) — the same
+   behaviour every line editor has. */
+@keyframes cortx-uinput-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.cortx-uinput[data-blink='on'][data-focus='true'] .cortx-uinput-caret {
+  animation: cortx-uinput-blink 1.06s steps(1, end) infinite;
+}
+/* Unfocused: a dim, still caret — the grid's `cursorInactiveStyle` is set to
+   `none` while we are up, so this is the only cursor on screen. */
+.cortx-uinput:not([data-focus='true']) .cortx-uinput-caret {
+  opacity: 0.4;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cortx-uinput-frame {
+    transition: none;
+  }
+  .cortx-uinput[data-blink='on'][data-focus='true'] .cortx-uinput-caret {
+    animation: none;
+  }
+}
