@@ -314,8 +314,8 @@ pub fn shell_integration_block_for(shell: &Shell, spacing: TerminalBlockSpacing)
 // Block spacing (DEV-13 #7 — Warp's `appearance.spacing`)
 // ---------------------------------------------------------------------------
 
-/// Placeholder the four snippets carry, replaced by `1` / `0` when the block
-/// is generated (see [`shell_integration_snippet_for`]).
+/// Placeholder the four snippets carry, replaced by the *number of blank
+/// lines* the spacing asks for when the block is generated (see [`shell_integration_snippet_for`]).
 const GAP_TOKEN: &str = "__CORTX_GAP__";
 
 /// The spacing the *current* settings ask for.
@@ -342,6 +342,7 @@ pub fn resolve_block_spacing() -> TerminalBlockSpacing {
         match raw {
             "compact" => Some(TerminalBlockSpacing::Compact),
             "normal" => Some(TerminalBlockSpacing::Normal),
+            "comfortable" => Some(TerminalBlockSpacing::Comfortable),
             _ => None,
         }
     }
@@ -427,8 +428,8 @@ pub fn shell_integration_snippet(shell: &Shell) -> String {
 }
 
 /// [`shell_integration_snippet`] with the spacing spelled out. Pure: the only
-/// thing the setting changes is the `1` / `0` the snippet initialises its
-/// `__cortx_gap` flag with, so both variants are the same script and the
+/// thing the setting changes is the number the snippet initialises its
+/// `__cortx_gap` counter with, so every variant is the same script and the
 /// PowerShell one stays a single base64 line.
 pub fn shell_integration_snippet_for(shell: &Shell, spacing: TerminalBlockSpacing) -> String {
     let template = match shell {
@@ -438,8 +439,9 @@ pub fn shell_integration_snippet_for(shell: &Shell, spacing: TerminalBlockSpacin
         Shell::Fish => FISH_INTEGRATION,
     };
     let gap = match spacing {
-        TerminalBlockSpacing::Normal => "1",
         TerminalBlockSpacing::Compact => "0",
+        TerminalBlockSpacing::Normal => "1",
+        TerminalBlockSpacing::Comfortable => "2",
     };
     template.replace(GAP_TOKEN, gap)
 }
@@ -448,8 +450,8 @@ const POWERSHELL_INTEGRATION: &str = r##"
 # --- CortX shell integration (OSC 7 / OSC 133) — active only inside a CortX terminal ---
 if ($env:CORTX_TERMINAL_ID) {
     $global:__cortx_ran = $false
-    # 1 = leave a blank line between a command's output and the next prompt
-    # (settings.terminal.blockSpacing = normal); 0 = compact.
+    # How many blank lines between a command's output and the next prompt
+    # 0 = compact, 1 = normal, 2 = comfortable (settings.terminal.blockSpacing).
     $global:__cortx_gap = __CORTX_GAP__
     function global:__cortx_urlencode([string]$p) {
         return $p.Replace('%', '%25').Replace(' ', '%20').Replace('#', '%23').Replace('?', '%3F')
@@ -480,9 +482,11 @@ if ($env:CORTX_TERMINAL_ID) {
                 # CR LF and not just LF: a command that ended without a newline
                 # of its own leaves the cursor mid-row, and a bare LF would
                 # start the prompt in that column.
-                if ($global:__cortx_gap -eq 1) {
+                if ($global:__cortx_gap -gt 0) {
                     $head = $flat -replace '^(?:\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07)+', ''
-                    if ($head -notmatch '^\r?\n') { $out += "`r`n" }
+                    $need = $global:__cortx_gap
+                    if ($head -match '^\r?\n') { $need = $need - 1 }
+                    for ($i = 0; $i -lt $need; $i++) { $out += "`r`n" }
                 }
             }
             if ($loc.Provider.Name -eq 'FileSystem') {
@@ -517,17 +521,18 @@ if ($env:CORTX_TERMINAL_ID) {
 const BASH_INTEGRATION: &str = r##"
 # --- CortX shell integration (OSC 7 / OSC 133) — active only inside a CortX terminal ---
 if [ -n "$CORTX_TERMINAL_ID" ] && [ -n "$BASH_VERSION" ]; then
-  # 1 = leave a blank line between a command's output and the next prompt
-  # (settings.terminal.blockSpacing = normal); 0 = compact.
+  # How many blank lines between a command's output and the next prompt
+  # 0 = compact, 1 = normal, 2 = comfortable (settings.terminal.blockSpacing).
   __cortx_gap=__CORTX_GAP__
   __cortx_osc() { printf '\033]%s\007' "$1"; }
   __cortx_urlencode() { local s="$1"; s="${s//%/%25}"; s="${s// /%20}"; s="${s//#/%23}"; s="${s//\?/%3F}"; printf '%s' "$s"; }
   # The blank line that separates two blocks. Skipped when PS1 already opens
   # on a new line (a two-line prompt), which would otherwise double it.
   __cortx_gap_line() {
-    [ "$__cortx_gap" = 1 ] || return 0
-    case "$PS1" in $'\n'*|'\n'*) return 0 ;; esac
-    printf '\n'
+    local n="$__cortx_gap"
+    [ "$n" -gt 0 ] 2>/dev/null || return 0
+    case "$PS1" in $'\n'*|'\n'*) n=$((n - 1)) ;; esac
+    while [ "$n" -gt 0 ]; do printf '\n'; n=$((n - 1)); done
   }
   __cortx_preexec() {
     [ "$__cortx_mode" = on ] || return 0
@@ -560,17 +565,18 @@ const ZSH_INTEGRATION: &str = r##"
 # --- CortX shell integration (OSC 7 / OSC 133) — active only inside a CortX terminal ---
 if [[ -n "$CORTX_TERMINAL_ID" && -n "$ZSH_VERSION" ]]; then
   autoload -Uz add-zsh-hook
-  # 1 = leave a blank line between a command's output and the next prompt
-  # (settings.terminal.blockSpacing = normal); 0 = compact.
+  # How many blank lines between a command's output and the next prompt
+  # 0 = compact, 1 = normal, 2 = comfortable (settings.terminal.blockSpacing).
   __cortx_gap=__CORTX_GAP__
   __cortx_osc() { printf '\033]%s\007' "$1"; }
   __cortx_urlencode() { local s="$1"; s="${s//\%/%25}"; s="${s// /%20}"; s="${s//\#/%23}"; s="${s//\?/%3F}"; printf '%s' "$s"; }
   # The blank line that separates two blocks. Skipped when PS1 already opens
   # on a new line (a two-line prompt), which would otherwise double it.
   __cortx_gap_line() {
-    [[ "$__cortx_gap" == 1 ]] || return 0
-    [[ "$PS1" == $'\n'* || "$PS1" == '\n'* ]] && return 0
-    printf '\n'
+    local n="$__cortx_gap"
+    [[ "$n" -gt 0 ]] || return 0
+    [[ "$PS1" == $'\n'* || "$PS1" == '\n'* ]] && n=$((n - 1))
+    while [[ "$n" -gt 0 ]]; do printf '\n'; n=$((n - 1)); done
   }
   __cortx_preexec() {
     __cortx_osc "133;C;cmd=$(printf '%s' "$1" | base64 2>/dev/null | tr -d '\n')"
@@ -593,8 +599,8 @@ fi
 const FISH_INTEGRATION: &str = r##"
 # --- CortX shell integration (OSC 7 / OSC 133) — active only inside a CortX terminal ---
 if set -q CORTX_TERMINAL_ID
-    # 1 = leave a blank line between a command's output and the next prompt
-    # (settings.terminal.blockSpacing = normal); 0 = compact.
+    # How many blank lines between a command's output and the next prompt
+    # 0 = compact, 1 = normal, 2 = comfortable (settings.terminal.blockSpacing).
     set -g __cortx_gap __CORTX_GAP__
     function __cortx_osc
         printf '\033]%s\007' $argv[1]
@@ -622,7 +628,7 @@ if set -q CORTX_TERMINAL_ID
         # `blockSpacing = compact` is the answer there.
         if set -q __cortx_gap_pending
             set -e __cortx_gap_pending
-            if test "$__cortx_gap" = 1
+            for __cortx_i in (seq $__cortx_gap)
                 printf '\n'
             end
         end
@@ -736,7 +742,7 @@ mod tests {
     #[test]
     fn a_prompt_that_starts_on_a_new_line_is_left_alone() {
         let pwsh = shell_integration_snippet_for(&Shell::PowerShell, TerminalBlockSpacing::Normal);
-        assert!(pwsh.contains("$head -notmatch '^\\r?\\n'"), "{pwsh}");
+        assert!(pwsh.contains("$head -match '^\\r?\\n'"), "{pwsh}");
         for shell in [Shell::Bash, Shell::Zsh] {
             let snippet = shell_integration_snippet_for(&shell, TerminalBlockSpacing::Normal);
             assert!(snippet.contains("$PS1"), "{shell:?}: the prompt is not looked at");
@@ -769,7 +775,13 @@ mod tests {
             let opens = fish
                 .lines()
                 .map(str::trim_start)
-                .filter(|l| l.starts_with("function ") || l.starts_with("if ") || l.starts_with("if("))
+                .filter(|l| {
+                    l.starts_with("function ")
+                        || l.starts_with("if ")
+                        || l.starts_with("if(")
+                        || l.starts_with("for ")
+                        || l.starts_with("while ")
+                })
                 .count();
             let ends = fish.lines().map(str::trim).filter(|l| *l == "end").count();
             assert_eq!(opens, ends, "fish {spacing:?}: unbalanced blocks");

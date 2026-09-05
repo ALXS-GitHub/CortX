@@ -220,6 +220,20 @@ test('a spacing line puts the divider through its middle', () => {
   assert.equal(dividerOffsetRows('first'), 0.5);
 });
 
+test('the divider is centred in the whole run of blank rows', () => {
+  // `comfortable` leaves two: half a row up would put a row and a half of air
+  // under the output and half a row over the prompt. Half the run is the
+  // middle whatever the spacing setting is.
+  assert.equal(dividerOffsetRows('above', 2), -1);
+  assert.equal(dividerOffsetRows('above', 3), -1.5);
+  // A count of zero cannot happen (there is a blank row, that is what `above`
+  // means) but must not collapse the rule onto the prompt if it ever did.
+  assert.equal(dividerOffsetRows('above', 0), -0.5);
+  // The block's own first row is one row by construction; a count there is
+  // meaningless and must not move it.
+  assert.equal(dividerOffsetRows('first', 2), 0.5);
+});
+
 // ---------------------------------------------------------------------------
 // Navigation
 // ---------------------------------------------------------------------------

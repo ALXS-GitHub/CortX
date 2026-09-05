@@ -181,7 +181,8 @@ export function IntegratedTerminalSection() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="normal">Normal (default)</SelectItem>
+            <SelectItem value="comfortable">Comfortable (two lines, like Warp)</SelectItem>
+            <SelectItem value="normal">Normal (one line)</SelectItem>
             <SelectItem value="compact">Compact</SelectItem>
           </SelectContent>
         </Select>

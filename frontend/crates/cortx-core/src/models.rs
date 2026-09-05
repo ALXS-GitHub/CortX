@@ -618,13 +618,18 @@ pub struct TerminalConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum TerminalBlockSpacing {
-    /// One blank line between a command's output and the next prompt (Warp's
-    /// default, and ours).
+    /// One blank line between a command's output and the next prompt.
     #[default]
     Normal,
     /// Nothing is added: the prompt follows the output immediately, which is
     /// what CortX did before this setting existed.
     Compact,
+    /// Two blank lines — what Warp actually leaves. Its own spacing is given
+    /// in *grid cells* (1.1 above a block, 1.0 below), so ~2.1 cells of air;
+    /// a grid can only be spaced in whole rows, and two is the nearest we can
+    /// express. One row, `Normal`, is a quarter of that and reads as a plain
+    /// line break rather than a boundary.
+    Comfortable,
 }
 
 /// Where the input line sits in a terminal pane (ticket #15, U0).

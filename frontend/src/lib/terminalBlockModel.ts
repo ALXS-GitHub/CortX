@@ -191,8 +191,13 @@ export type BlockSpacingRow = 'above' | 'first' | null;
  * `0` — the block's own top edge — when there is no such row, which is what
  * `compact` gives and what CortX has always drawn.
  */
-export function dividerOffsetRows(spacing: BlockSpacingRow): number {
-  if (spacing === 'above') return -0.5;
+export function dividerOffsetRows(spacing: BlockSpacingRow, blankRows = 1): number {
+  // Centred in the *whole* run of blank rows, not half a row up. With
+  // `comfortable` the shell leaves two of them, and a rule half a row above
+  // the prompt puts a row and a half of air under the output and half a row
+  // over the prompt — visibly bottom-heavy. Half the run puts the boundary in
+  // the middle whatever the spacing setting is.
+  if (spacing === 'above') return -Math.max(1, blankRows) / 2;
   if (spacing === 'first') return 0.5;
   return 0;
 }

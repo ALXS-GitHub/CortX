@@ -14,9 +14,11 @@
  *   edge. This is what makes a block a thing you *see* rather than a thing the
  *   app knows about — Warp's `appearance.blocks.show_block_dividers`, which is
  *   on by default there and here. It is a *neutral* wash (white on a dark
- *   palette, black on a light one) and weak enough to be guessed rather than
- *   read; it carries no status colour, because a full-width red rule is the
- *   loudest thing on a pane.
+ *   palette, black on a light one), strong enough to be read as a boundary:
+ *   the first pass aimed for "sensed rather than read" and, with real air
+ *   around it, a rule that faint simply disappeared and the pane looked like
+ *   plain scrollback. It carries no status colour, because a full-width red
+ *   rule is the loudest thing on a pane.
  * - **A bracket, not a band**: the block under the pointer (and the selected
  *   one) is shown by its own hairline and the next block's coming up slightly,
  *   so its extent is obvious. Nothing is ever painted *over* a block's rows:
@@ -52,15 +54,17 @@
  * shift the pane's own idea of where every glyph is. So no overlay, in any
  * renderer, can space two blocks apart.
  *
- * The room therefore has to *exist*, as a real blank line in the buffer, and
- * the only thing that can put one there without lying to the PTY is the shell:
- * `terminal.blockSpacing = normal` (the default, as in Warp) makes the shell
- * integration print one before a prompt that follows a command — see
- * `shell_init.rs`. Everything here only *reads* the result: when the row above
- * a block paints nothing, the divider moves into the middle of it and the
- * action bar is centred on the same offset, which is how the boundary ends up
- * with padding above and below it and the toolbar ends up over nothing at all.
- * `compact` needs no code of its own — there is simply no such row.
+ * The room therefore has to *exist*, as real blank lines in the buffer, and
+ * the only thing that can put them there without lying to the PTY is the
+ * shell: `terminal.blockSpacing` makes the shell integration print `normal` =
+ * one before a prompt that follows a command, `comfortable` = two (Warp's own
+ * air is ~2.1 grid cells, and whole rows are all a grid can express) — see
+ * `shell_init.rs`. Everything here only *reads* the result: the divider is
+ * centred in the whole run of blank rows, not half a row up, so two of them
+ * give a row of padding on each side instead of one and a half below and half
+ * above. The action bar is centred on the same offset and therefore lands over
+ * nothing anyone wrote. `compact` needs no code of its own — there is simply
+ * no such row.
  *
  * ## Why the overlay never takes the mouse
  *
@@ -972,9 +976,13 @@ class BlockController {
       // the pane the spacing line has scrolled off and at the very bottom
       // there is nothing under the last row to move into.
       const spacing = this.spacingRow(block.start);
+      // How many blank rows the shell actually left: `comfortable` asks for
+      // two, and the rule belongs in the middle of the run rather than half a
+      // row above the prompt.
+      const blanks = spacing === 'above' ? this.blankRowsAbove(block.start) : 1;
       const usable =
-        (spacing === 'above' && dividerRow >= 1) || (spacing === 'first' && dividerRow < rows);
-      const offset = usable ? dividerOffsetRows(spacing) : 0;
+        (spacing === 'above' && dividerRow >= blanks / 2) || (spacing === 'first' && dividerRow < rows);
+      const offset = usable ? dividerOffsetRows(spacing, blanks) : 0;
       if (dividers && dividerRow >= 0 && dividerRow <= rows) {
         const rule = this.element(keep, `${block.id}:rule`, 'cortx-blocks-rule', layer);
         rule.style.top = `${Math.round(metrics.top + (dividerRow + offset) * metrics.cell)}px`;
@@ -1201,6 +1209,19 @@ class BlockController {
     return null;
   }
 
+  /**
+   * How many blank rows sit immediately above `start`, so the divider can be
+   * centred in the whole gap. `terminal.blockSpacing = comfortable` leaves
+   * two; a prompt that opens on a newline of its own can add one more.
+   * Capped: past a handful the run is scrollback, not spacing, and every row
+   * costs a measurement.
+   */
+  private blankRowsAbove(start: number, max = 4): number {
+    let n = 0;
+    while (n < max && start - 1 - n >= 0 && this.usedColumns(start - 1 - n) === 0) n += 1;
+    return Math.max(1, n);
+  }
+
   /** The uncached half of `usedColumns`. */
   private measureColumns(line: number): number {
     const buf = this.term.buffer.active;
@@ -1329,7 +1350,12 @@ class BlockController {
     // actually drawing with, not from the app's light/dark chrome, so an
     // imported Warp theme gets the right one in a window of either mode.
     const dark = terminalIsDark(theme.background, theme.foreground);
-    layer.style.setProperty('--cortx-block-line', dark ? 'rgb(255 255 255 / 0.11)' : 'rgb(0 0 0 / 0.13)');
+    // Strong enough to be *read* as a boundary, not merely sensed. The first
+    // pass aimed for "guessed rather than read" and the result was a pane that
+    // looked like plain scrollback: with a real gap around it, a rule this
+    // faint disappears. Warp's own dividers are plainly visible, including
+    // over a background image, which is what these are measured against.
+    layer.style.setProperty('--cortx-block-line', dark ? 'rgb(255 255 255 / 0.24)' : 'rgb(0 0 0 / 0.22)');
     layer.style.setProperty(
       '--cortx-block-line-active',
       dark ? 'rgb(255 255 255 / 0.30)' : 'rgb(0 0 0 / 0.32)'

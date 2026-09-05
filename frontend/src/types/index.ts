@@ -248,8 +248,10 @@ export interface TerminalConfig {
   blockSpacing?: TerminalBlockSpacing;
 }
 
-/** How much room a block gets above it (ticket #7). Default `normal`. */
-export type TerminalBlockSpacing = 'normal' | 'compact';
+/** How much room a block gets above it (ticket #7). Default `normal`.
+ *  `comfortable` leaves two blank lines — Warp's own spacing is ~2.1 grid
+ *  cells, and two whole rows is the nearest a grid can express. */
+export type TerminalBlockSpacing = 'normal' | 'compact' | 'comfortable';
 
 /** Where the input line sits in a terminal pane (ticket #15, U0). */
 export type TerminalInputPosition = 'flow' | 'bottom';
