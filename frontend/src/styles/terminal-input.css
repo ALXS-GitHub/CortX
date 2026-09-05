@@ -8,22 +8,24 @@
    stylesheet. Loading order matters only in that every class here is new
    (`cortx-uinput-*`), so nothing collides with anything.
 
-   ## What this has to look like
+   ## What this has to look like: nothing
 
-   Warp's input is a *block*: a framed, full-width strip that the eye reads as
-   "the place where I type", clearly separate from the output above it. That
-   is the whole point of the redesign — an invisible `<textarea>` laid over a
-   grid cell was indistinguishable from the grid, which is exactly what was
-   wrong with the first attempt.
+   An earlier pass framed the strip, on the reasoning that the eye needs to be
+   told where it types. It does not: the shell's prompt is on that row and the
+   caret is in it, so the frame only announced that a widget had been dropped
+   on the terminal. Warp's *universal* input is framed because it is a
+   separate surface with its own affordances; its **classic** input — which is
+   what this is — is not, and CortX ships the classic behaviour.
 
-   Verified on this machine (Warp 2026.08, `resources/settings_schema.json`):
-   the frame is not themable — Warp themes carry `accent / background /
-   foreground / details / terminal_colors / background_image` and nothing
-   about the input box — so its chrome is *derived* from the terminal
-   palette. We do the same: every colour below is a mix of the terminal's own
-   foreground over whatever is behind it, so the block works on a light theme,
-   a dark theme, a gradient and a wallpaper without a single hard-coded value,
-   and it never borrows the app's chrome.
+   So the chrome tokens below are all `transparent` and the strip is
+   invisible. Everything else is unchanged: this file still owns the caret,
+   the ghost text and the hit layer, which are the parts that actually make
+   the block work. The tokens are kept rather than deleted so the frame is one
+   edit away should it ever be wanted — and if it comes back it must stay
+   *derived* from the terminal palette (Warp themes carry `accent /
+   background / foreground / details / terminal_colors / background_image` and
+   nothing about the input box), never borrowed from the app's chrome, or it
+   will clash with a wallpaper the first time it meets one.
 
    ## Geometry
 
@@ -67,8 +69,15 @@
   --cortx-uinput-fg: var(--terminal-fg, var(--foreground));
   --cortx-uinput-caret: var(--terminal-cursor, var(--cortx-uinput-fg));
   --cortx-uinput-caret-fg: var(--terminal-window-solid, var(--bg-terminal, var(--card)));
-  --cortx-uinput-border: color-mix(in srgb, var(--cortx-uinput-fg) 18%, transparent);
-  --cortx-uinput-fill: color-mix(in srgb, var(--cortx-uinput-fg) 6%, transparent);
+  /* No chrome. The input sits on the shell's own prompt row, and a framed
+     strip there reads as a foreign widget dropped on the terminal rather than
+     as the prompt itself — the pane already says where you type, because the
+     prompt is right there and the caret is in it. Warp's *universal* input is
+     framed because it is a separate surface with its own affordances; its
+     classic input, which is what this is, is not. The tokens stay so the
+     frame can be brought back in one place. */
+  --cortx-uinput-border: transparent;
+  --cortx-uinput-fill: transparent;
   --cortx-uinput-glow: transparent;
 }
 
@@ -76,13 +85,8 @@
   display: none !important;
 }
 
-/* Focused: the frame firms up a little. Enough to answer "is this thing
-   listening to me?" at a glance, never enough to shout. */
-.cortx-uinput[data-focus='true'] {
-  --cortx-uinput-border: color-mix(in srgb, var(--cortx-uinput-caret) 42%, transparent);
-  --cortx-uinput-fill: color-mix(in srgb, var(--cortx-uinput-fg) 9%, transparent);
-  --cortx-uinput-glow: color-mix(in srgb, var(--cortx-uinput-caret) 12%, transparent);
-}
+/* Focus is answered by the caret — it blinks when the block has the keyboard
+   and dims when it does not — so the frame has nothing left to say. */
 
 /* The visible block. A separate element from the root so the text box inside
    it can be positioned on the prompt's own column without the border moving. */
@@ -98,6 +102,9 @@
   pointer-events: none;
   transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
 }
+/* The element stays — it is what the geometry is measured against, and it is
+   one token away from being visible again — but with the tokens transparent
+   it paints nothing at all. */
 
 /* The block's click target: all of it, the frame's padding included.
 
