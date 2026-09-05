@@ -573,6 +573,42 @@ impl ThemeStore {
         Ok(self.dir.join(format!("{}.yaml", key)))
     }
 
+    /// The file whose *slugified* stem is `key`, for the cases where the two
+    /// do not already agree.
+    ///
+    /// [`Self::import_file`] always writes `<slug>.yaml`, so a theme that came
+    /// through the importer is found by [`Self::path_for`] alone. But the
+    /// themes folder is a plain directory, and copying a Warp `.yaml` straight
+    /// into it is the obvious thing to do — `aespa_wda.yaml` then slugifies to
+    /// `aespa-wda`, the listing shows it (it reads every file and slugifies
+    /// each stem) and every load of it fails, silently, because
+    /// `aespa-wda.yaml` does not exist. Scanning is the fallback, never the
+    /// rule: it only runs when the direct path is missing.
+    fn path_by_slug(&self, key: &str) -> Option<PathBuf> {
+        for entry in fs::read_dir(&self.dir).ok()?.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if slugify(stem) == key {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    /// The file a key names, whether or not the stem was already a slug.
+    fn resolve_path(&self, key: &str) -> Option<PathBuf> {
+        let direct = self.path_for(key).ok()?;
+        if direct.exists() {
+            return Some(direct);
+        }
+        self.path_by_slug(key)
+    }
+
     /// Write the compiled-in themes that are missing on disk.
     fn materialize_bundled(&self) -> Result<(), String> {
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
@@ -648,7 +684,7 @@ impl ThemeStore {
     /// the file is missing). Falls back to the compiled-in copy for bundled
     /// keys whose file is unreadable.
     pub fn get(&self, key: &str) -> Option<TerminalTheme> {
-        let path = self.path_for(key).ok()?;
+        let path = self.resolve_path(key).or_else(|| self.path_for(key).ok())?;
         let mut theme = match self.read_file(&path) {
             Ok(t) => t,
             Err(_) => bundled_theme(key)?,
@@ -843,14 +879,24 @@ impl ThemeStore {
         if is_bundled(key) {
             return Err(format!("'{}' is a bundled theme and cannot be deleted", key));
         }
-        let path = self.path_for(key)?;
+        // Same reason as in `get`: a hand-copied file may not be named after
+        // its own key, and a delete that silently removed nothing would leave
+        // the theme in the list.
+        let path = self.resolve_path(key).map_or_else(|| self.path_for(key), Ok)?;
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(key)
+            .to_string();
         match fs::remove_file(&path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.to_string()),
         }
         for ext in IMAGE_EXTENSIONS {
-            let img = self.dir.join(format!("{}.{}", key, ext));
+            // The wallpaper sits next to the yaml and is named after it, so it
+            // follows the file's stem rather than the key.
+            let img = self.dir.join(format!("{}.{}", stem, ext));
             if img.exists() {
                 let _ = fs::remove_file(img);
             }
@@ -1160,6 +1206,62 @@ terminal_colors:
         assert_eq!(slugify("aespa_wda"), "aespa-wda");
         assert_eq!(slugify("  ../weird::name!! "), "weird-name");
         assert_eq!(prettify("solarized_dark"), "Solarized Dark");
+    }
+
+    #[test]
+    fn a_theme_file_copied_in_by_hand_loads_even_when_its_name_is_not_a_slug() {
+        // The themes folder is a plain directory and copying a Warp `.yaml`
+        // straight into it is the obvious thing to do. `aespa_wda.yaml`
+        // slugifies to `aespa-wda`, so the listing showed it and every load
+        // failed silently: the settings pointed at a key no file was named
+        // after.
+        let tmp = tempfile::tempdir().unwrap();
+        let store = ThemeStore::new(tmp.path());
+        let yaml = "\
+name: aespa_wda
+background: \"#713d39\"
+accent: \"#0c161f\"
+foreground: \"#ffffff\"
+details: darker
+terminal_colors:
+  normal:
+    black: \"#616161\"
+    red: \"#ff8272\"
+    green: \"#b4fa72\"
+    yellow: \"#fefdc2\"
+    blue: \"#a5d5fe\"
+    magenta: \"#ff8ffd\"
+    cyan: \"#d0d1fe\"
+    white: \"#f1f1f1\"
+  bright:
+    black: \"#8e8e8e\"
+    red: \"#ffc4bd\"
+    green: \"#d6fcb9\"
+    yellow: \"#fefdd5\"
+    blue: \"#c1e3fe\"
+    magenta: \"#ffb1fe\"
+    cyan: \"#e5e6fe\"
+    white: \"#feffff\"
+";
+        // `list` is what creates the folder (it materialises the bundled
+        // themes), so drop the file in afterwards, where the store looks.
+        store.list();
+        std::fs::write(store.dir().join("aespa_wda.yaml"), yaml).unwrap();
+
+        let listed = store.list();
+        let summary = listed
+            .iter()
+            .find(|t| t.key == "aespa-wda")
+            .expect("the listing slugifies the stem, so it is there");
+        assert_eq!(summary.name, "aespa_wda");
+
+        let theme = store
+            .get("aespa-wda")
+            .expect("and the key the listing gave must load");
+        assert_eq!(theme.background, "#713d39");
+
+        // A key that matches nothing still resolves to nothing.
+        assert!(store.get("no-such-theme").is_none());
     }
 
     #[test]
