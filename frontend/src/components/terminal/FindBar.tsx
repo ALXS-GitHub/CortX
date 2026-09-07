@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { CaseSensitive, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { CaseSensitive, ChevronDown, ChevronUp, Regex, WholeWord, X } from 'lucide-react';
 import type { ISearchOptions } from '@xterm/addon-search';
 import { focusTerminal, getTerminalSession, hasTerminalSession } from '@/lib/terminalSessions';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
@@ -26,11 +26,20 @@ function tokenHex(name: string, fallback: string): string {
   }
 }
 
-function searchOptions(caseSensitive: boolean, incremental: boolean): ISearchOptions {
+/** The three match modifiers, as the bar holds them. */
+interface FindModes {
+  caseSensitive: boolean;
+  regex: boolean;
+  wholeWord: boolean;
+}
+
+function searchOptions(modes: FindModes, incremental: boolean): ISearchOptions {
   const match = tokenHex('--warning', '#f0a517');
   const active = tokenHex('--primary', '#0d9488');
   return {
-    caseSensitive,
+    caseSensitive: modes.caseSensitive,
+    regex: modes.regex,
+    wholeWord: modes.wholeWord,
     incremental,
     decorations: {
       matchBackground: match,
@@ -40,6 +49,40 @@ function searchOptions(caseSensitive: boolean, incremental: boolean): ISearchOpt
     },
   };
 }
+
+/**
+ * A half-typed pattern is a normal state, not an error: `foo(` is what
+ * `foo(bar)` looks like three keystrokes in. The addon compiles the term with
+ * `new RegExp`, which throws on it, so the search is simply not run — the bar
+ * keeps the text, the highlights and the focus, and says the pattern is not
+ * finished yet.
+ */
+function patternIsUsable(query: string, regex: boolean): boolean {
+  if (!regex) return true;
+  try {
+    new RegExp(query);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Below this, an incremental search is not worth its cost: one character over
+ * a scrollback of tens of thousands of lines matches most of the buffer and
+ * tells the user nothing (issue 41). Enter / next / previous ignore the floor
+ * — searching for a single `$` on purpose is a deliberate act.
+ */
+const MIN_INCREMENTAL_LENGTH = 2;
+
+/**
+ * How long the field must be still before the buffer is searched. The search
+ * is synchronous over the whole scrollback, on the main thread; running it on
+ * every keystroke is what made the window stutter while typing (issue 41).
+ * Long enough to swallow a burst of typing, short enough that the result feels
+ * immediate once the fingers stop.
+ */
+const INCREMENTAL_DEBOUNCE_MS = 180;
 
 function BarButton({ label, active, onClick, children }: { label: string; active?: boolean; onClick: () => void; children: ReactNode }) {
   return (
@@ -69,6 +112,16 @@ function BarButton({ label, active, onClick, children }: { label: string; active
  * top-right of the pane being searched. Typing searches as you go, Enter /
  * Shift+Enter step through the matches, Esc closes and gives the terminal its
  * focus back. Mount once in the window; it follows the pane on its own.
+ *
+ * Three modifiers, the same three every editor has: match case, regular
+ * expression, whole word. They are `ISearchOptions` fields, so the addon does
+ * the work.
+ *
+ * Searching as you type is *deferred* (see `INCREMENTAL_DEBOUNCE_MS`), never
+ * skipped: the addon walks the whole scrollback synchronously, and doing that
+ * on every keystroke is what froze the window on a big buffer. Toggling a
+ * modifier, pressing Enter and the two arrows are all immediate — a click and
+ * a keypress are not typing.
  */
 export function FindBar() {
   const open = useFindStore((s) => s.open);
@@ -76,10 +129,21 @@ export function FindBar() {
   const closeFind = useFindStore((s) => s.closeFind);
   const layoutRevision = useTerminalLayoutStore((s) => s.doc);
   const [query, setQuery] = useState('');
+  // What the search actually runs on: `query`, once the typing has settled.
+  const [settledQuery, setSettledQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
-  const [result, setResult] = useState<{ index: number; count: number } | null>(null);
+  const [regex, setRegex] = useState(false);
+  const [wholeWord, setWholeWord] = useState(false);
+  // The count is stamped with the text it counted, so the bar never shows a
+  // number that belongs to what was in the field two keystrokes ago.
+  const [result, setResult] = useState<{ index: number; count: number; query: string } | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const queryRef = useRef('');
+  /** Key of the last search actually handed to the addon (see `runKey`). */
+  const lastRun = useRef('');
+  const modes: FindModes = { caseSensitive, regex, wholeWord };
+  const runKey = (text: string) => `${caseSensitive ? 'c' : ''}${regex ? 'r' : ''}${wholeWord ? 'w' : ''}:${text}`;
 
   const session = open && terminalId && hasTerminalSession(terminalId) ? getTerminalSession(terminalId) : null;
   const search = session?.search ?? null;
@@ -126,24 +190,66 @@ export function FindBar() {
     return () => cancelAnimationFrame(frame);
   }, [open, terminalId]);
 
+  // What the addon is looking at, so a result that arrives can be stamped
+  // with it. A ref, not state: nothing renders from it.
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
+
+  // A different pane — or the bar closing, which drops the highlights — means
+  // nothing has been searched *there* yet, whatever the field still says.
+  // Declared before the search effect so it runs first.
+  useEffect(() => {
+    lastRun.current = '';
+  }, [search]);
+
   // Match counter, from the addon.
   useEffect(() => {
     if (!search) return;
     const sub = search.onDidChangeResults((e) => {
-      setResult(e.resultCount > 0 ? { index: e.resultIndex, count: e.resultCount } : { index: -1, count: 0 });
+      const q = queryRef.current;
+      setResult(e.resultCount > 0 ? { index: e.resultIndex, count: e.resultCount, query: q } : { index: -1, count: 0, query: q });
     });
     return () => sub.dispose();
   }, [search]);
 
-  // Search as you type; clearing the field clears the highlights.
+  // Typing only moves `query`; `settledQuery` follows it once the field has
+  // been still for `INCREMENTAL_DEBOUNCE_MS`, and only from the length the
+  // incremental search starts at. Going back below that length — emptying the
+  // field included — is handled in the field's own `onChange`, so the
+  // highlights drop the moment the text stops saying what they mean.
+  useEffect(() => {
+    if (query.length < MIN_INCREMENTAL_LENGTH || query === settledQuery) return;
+    const timer = window.setTimeout(() => setSettledQuery(query), INCREMENTAL_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [query, settledQuery]);
+
+  // Search the settled text. Also the path a modifier takes, which is why it
+  // fires the moment one is toggled: a click is not typing and waits for
+  // nothing. `lastRun` keeps it from repeating a search Enter has just done —
+  // a second, *incremental* `findNext` right after a `findPrevious` would
+  // walk back the step the user asked for.
   useEffect(() => {
     if (!search) return;
-    if (!query) {
+    if (!settledQuery) {
       search.clearDecorations();
+      lastRun.current = '';
       return;
     }
-    search.findNext(query, searchOptions(caseSensitive, true));
-  }, [search, query, caseSensitive]);
+    // Half-typed pattern: keep what is on screen and wait for the rest.
+    if (!patternIsUsable(settledQuery, regex)) return;
+    const key = runKey(settledQuery);
+    if (key === lastRun.current) return;
+    lastRun.current = key;
+    try {
+      search.findNext(settledQuery, searchOptions({ caseSensitive, regex, wholeWord }, true));
+    } catch {
+      // The addon compiles the term itself; a pattern `RegExp` accepts and it
+      // does not must not take the bar down with it.
+    }
+    // `runKey` is derived from the three modifiers, which are in the list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, settledQuery, caseSensitive, regex, wholeWord]);
 
   // Closing (or the pane going away) drops the highlights.
   useEffect(() => {
@@ -153,10 +259,19 @@ export function FindBar() {
 
   if (!open || !terminalId) return null;
 
+  // Enter, Shift+Enter and the two arrows are deliberate: no debounce, and no
+  // minimum length either — looking for a single `$` is a decision, not a
+  // half-typed word.
   const step = (forward: boolean) => {
-    if (!search || !query) return;
-    if (forward) search.findNext(query, searchOptions(caseSensitive, false));
-    else search.findPrevious(query, searchOptions(caseSensitive, false));
+    if (!search || !query || !patternIsUsable(query, regex)) return;
+    lastRun.current = runKey(query);
+    setSettledQuery(query);
+    try {
+      if (forward) search.findNext(query, searchOptions(modes, false));
+      else search.findPrevious(query, searchOptions(modes, false));
+    } catch {
+      // Same guard as the incremental path: never take the bar down.
+    }
   };
 
   const close = () => {
@@ -164,7 +279,18 @@ export function FindBar() {
     focusTerminal(terminalId);
   };
 
-  const counter = !query ? null : result && result.count > 0 ? `${result.index + 1}/${result.count}` : 'No match';
+  /**
+   * Nothing at all until something has actually been searched: a one-letter
+   * query nobody pressed Enter on was never run, and "No match" would be a
+   * lie. `Incomplete` is the half-typed regex — faint, never the red of a
+   * failed search, because `foo(` is on its way to `foo(bar)`.
+   */
+  const counter = (() => {
+    if (!query) return null;
+    if (!patternIsUsable(query, regex)) return 'Incomplete';
+    if (!result || result.query !== query) return null;
+    return result.count > 0 ? `${result.index + 1}/${result.count}` : 'No match';
+  })();
 
   return (
     <div
@@ -187,7 +313,15 @@ export function FindBar() {
       <input
         ref={inputRef}
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          setQuery(next);
+          // Back below the floor (emptying the field included): there is
+          // nothing left to search, so drop the highlights now rather than
+          // leaving the previous word lit under a field that no longer says
+          // it. Enter still searches whatever is in there.
+          if (next.length < MIN_INCREMENTAL_LENGTH) setSettledQuery('');
+        }}
         placeholder="Find…"
         aria-label="Find in terminal"
         spellCheck={false}
@@ -205,6 +339,12 @@ export function FindBar() {
       </span>
       <BarButton label="Match case" active={caseSensitive} onClick={() => setCaseSensitive((v) => !v)}>
         <CaseSensitive className="size-3.5" />
+      </BarButton>
+      <BarButton label="Whole word" active={wholeWord} onClick={() => setWholeWord((v) => !v)}>
+        <WholeWord className="size-3.5" />
+      </BarButton>
+      <BarButton label="Regular expression" active={regex} onClick={() => setRegex((v) => !v)}>
+        <Regex className="size-3.5" />
       </BarButton>
       <BarButton label="Previous match (Shift+Enter)" onClick={() => step(false)}>
         <ChevronUp className="size-3.5" />
