@@ -9,7 +9,7 @@
     "build:sidecars": "bun run scripts/build-sidecars.ts",
     "build:app": "bun run build:sidecars && bun run build",
     "lint": "eslint .",
-    "test": "node --test \"src/**/*.test.ts\"",
+    "test": "node --test \"src/**/*.test.ts\" && node scripts/check-source-bytes.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
