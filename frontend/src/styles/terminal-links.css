@@ -1,0 +1,130 @@
+/* The hover surface of a terminal link (see lib/terminalLinks.ts).
+ *
+ * Ticket #31: a path was underlined and opened on click, and that was the
+ * whole story — nothing said *what* it pointed at, and nothing but the click
+ * itself could act on it. Warp shows a tooltip (`general.link_tooltip`); this
+ * is that tooltip plus the two actions the ticket asks for, on one surface:
+ *
+ *   ┌──────────────────────────────────┐
+ *   │ C:\dev\CortX\src\main.rs:42:7    │  ← the *resolved* target
+ *   │ [ Open ]  [ Open folder ]        │  ← what you can do with it
+ *   └──────────────────────────────────┘
+ *
+ * ## Why the colours come from the terminal, not from the app
+ *
+ * The panel floats over the grid, so on a themed Terminal window it sits on
+ * the wallpaper. Anything derived from the *app* chrome (`--primary`,
+ * `--card`, a strong `--foreground` mix) is a stain there: an accent that is
+ * almost black on `aespa_wda` paints a dark blob on a photograph, and white
+ * at 34 % over a brown-red ground reads pink. So the panel takes exactly two
+ * tokens, both written inline by `terminalLinks.ts` from the palette xterm is
+ * *actually* drawing with (`term.options.theme`), and every other value is a
+ * low-alpha mix of those two — the same contract as the block toolbar.
+ *
+ *   --cortx-link-fg   the theme's foreground
+ *   --cortx-link-bg   the theme's background (the plate, blurred)
+ *
+ * ## Why `position: fixed` on `<body>`
+ *
+ * The pane clips (`.cortx-xterm-host` is `overflow: hidden`), so a panel
+ * parented inside it would be cut off on the first rows — exactly where a
+ * compiler error usually is. `fixed` on the document also means one and the
+ * same surface works in the dock and in the Terminal window.
+ */
+
+.cortx-link-pop {
+  position: fixed;
+  /* Over the completion menu (60), under the block context menu (90). */
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  box-sizing: border-box;
+  max-width: min(620px, calc(100vw - 24px));
+  padding: 6px 7px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--cortx-link-fg, currentcolor) 18%, transparent);
+  background: color-mix(in srgb, var(--cortx-link-bg, black) 92%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.3);
+  color: var(--cortx-link-fg, currentcolor);
+  font-size: 11.5px;
+  line-height: 1.35;
+  animation: cortx-link-pop-in 90ms ease-out;
+}
+
+.cortx-link-pop[hidden] {
+  display: none !important;
+}
+
+@keyframes cortx-link-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The target line — the point of the tooltip. It is the *resolved* absolute
+   path (or the real URL), which is never what the output printed: `src/x.rs`
+   says nothing about which checkout it lives in, and a URL's visible text is
+   not necessarily its destination. Monospace, because it is a path. */
+.cortx-link-target {
+  display: block;
+  overflow: hidden;
+  max-width: 100%;
+  padding: 0 2px;
+  color: color-mix(in srgb, var(--cortx-link-fg, currentcolor) 70%, transparent);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The `:42:7` a compiler appended: the reason the link was worth clicking, so
+   it stays legible when the path in front of it fades. */
+.cortx-link-pos {
+  color: color-mix(in srgb, var(--cortx-link-fg, currentcolor) 92%, transparent);
+}
+
+.cortx-link-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cortx-link-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: color-mix(in srgb, var(--cortx-link-fg, currentcolor) 72%, transparent);
+  font: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 90ms ease, color 90ms ease;
+}
+
+.cortx-link-action > svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.cortx-link-action:hover {
+  background: color-mix(in srgb, var(--cortx-link-fg, currentcolor) 15%, transparent);
+  color: var(--cortx-link-fg, currentcolor);
+}
+
+.cortx-link-action:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--cortx-link-fg, currentcolor) 45%, transparent);
+  outline-offset: 1px;
+}

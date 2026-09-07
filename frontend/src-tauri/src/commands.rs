@@ -886,34 +886,48 @@ pub fn validate_path(path: String) -> bool {
     Path::new(&path).exists()
 }
 
-#[tauri::command]
-pub fn open_in_vscode(path: String) -> Result<(), String> {
+/// Launch VS Code with `args`, and fail loudly when it is not installed.
+///
+/// The Windows arm used to be `cmd /C code …`. `spawn` then reports on `cmd`,
+/// which always starts — so a machine without `code` on its PATH got `Ok(())`,
+/// a console window that blinked once, and nothing opened. A path clicked in
+/// the terminal (ticket #31) looked like a dead link with no way to tell why.
+/// Resolve the launcher ourselves instead: `resolve_in_path` already walks
+/// PATH through PATHEXT, which is what finds the `code.cmd` shim the VS Code
+/// installer actually drops. On Unix `spawn` reports NotFound by itself.
+fn spawn_vscode(args: &[&str]) -> Result<(), String> {
+    let not_installed =
+        "VS Code was not found: no `code` on this machine's PATH. Install it, or run          \"Shell Command: Install 'code' command in PATH\" from VS Code's command palette."
+            .to_string();
+
     #[cfg(target_os = "windows")]
     {
-        // On Windows, try 'code' command (requires VSCode in PATH)
-        std::process::Command::new("cmd")
-            .args(["/C", "code", &path])
+        use std::os::windows::process::CommandExt;
+        let exe = cortx_core::terminal::spec::resolve_in_path("code").ok_or(not_installed)?;
+        std::process::Command::new(exe)
+            .args(args)
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW — the .cmd shim would flash one
             .spawn()
-            .map_err(|e| format!("Failed to open VSCode: {}. Make sure VSCode is installed and 'code' command is in PATH.", e))?;
+            .map_err(|e| format!("Failed to open VS Code: {e}"))?;
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_os = "windows"))]
     {
         std::process::Command::new("code")
-            .arg(&path)
+            .args(args)
             .spawn()
-            .map_err(|e| format!("Failed to open VSCode: {}. Make sure VSCode is installed and 'code' command is in PATH.", e))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("code")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to open VSCode: {}. Make sure VSCode is installed and 'code' command is in PATH.", e))?;
+            .map_err(|e| match e.kind() {
+                std::io::ErrorKind::NotFound => not_installed,
+                _ => format!("Failed to open VS Code: {e}"),
+            })?;
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn open_in_vscode(path: String) -> Result<(), String> {
+    spawn_vscode(&[&path])
 }
 
 /// Open a file in VS Code **at a position**: `code -g <path>:<line>:<col>`.
@@ -931,29 +945,10 @@ pub fn open_in_editor(path: String, line: Option<u32>, column: Option<u32>) -> R
     // `-g` takes one `path:line[:col]` argument; the path may hold spaces, and
     // `spawn` passes each arg through without a shell, so no quoting is needed.
     let target = match column {
-        Some(col) => format!("{}:{}:{}", path, line, col),
-        None => format!("{}:{}", path, line),
+        Some(col) => format!("{path}:{line}:{col}"),
+        None => format!("{path}:{line}"),
     };
-    let err = |e: std::io::Error| {
-        format!(
-            "Failed to open VSCode: {}. Make sure VSCode is installed and 'code' command is in PATH.",
-            e
-        )
-    };
-
-    #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd")
-        .args(["/C", "code", "-g", &target])
-        .spawn()
-        .map_err(err)?;
-
-    #[cfg(not(target_os = "windows"))]
-    std::process::Command::new("code")
-        .args(["-g", &target])
-        .spawn()
-        .map_err(err)?;
-
-    Ok(())
+    spawn_vscode(&["-g", &target])
 }
 
 // Environment file commands
