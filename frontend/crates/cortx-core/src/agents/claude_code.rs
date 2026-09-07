@@ -13,6 +13,7 @@ use super::{
 use chrono::{DateTime, Utc};
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -385,6 +386,11 @@ pub struct LiveEntry {
     pub version: Option<String>,
     #[serde(default)]
     pub kind: Option<String>,
+    /// Creation time of the process, as the registry writes it (a Windows
+    /// FILETIME string here). It is what tells a live session apart from a
+    /// leftover file whose pid the OS has since handed to somebody else.
+    #[serde(default)]
+    pub proc_start: Option<serde_json::Value>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -403,6 +409,11 @@ impl LiveEntry {
         }
     }
 
+    /// `procStart` in epoch seconds, when the entry carries one we can read.
+    pub fn proc_start_secs(&self) -> Option<u64> {
+        proc_start_epoch_secs(self.proc_start.as_ref()?)
+    }
+
     /// A user-chosen name (`--name`, `/rename`); derived names such as
     /// `cortx-80` are not titles.
     pub fn custom_name(&self) -> Option<&str> {
@@ -414,7 +425,47 @@ impl LiveEntry {
     }
 }
 
-/// Parse `<sessions_dir>/*.json`, keeping only entries whose pid is alive.
+/// How far the process table's start time may sit from the registry's
+/// `procStart` and still be the same process: both are truncated to whole
+/// seconds, from two different clocks.
+const PROC_START_TOLERANCE_SECS: u64 = 2;
+
+/// Turn a `procStart` into epoch seconds.
+///
+/// The registry writes a Windows FILETIME (100 ns ticks since 1601) as a
+/// string; a millisecond or second epoch is accepted too, in case another
+/// platform writes one. Anything else gives `None`, which means "no
+/// opinion" — the entry is then judged on its pid alone, as before.
+fn proc_start_epoch_secs(raw: &serde_json::Value) -> Option<u64> {
+    let value: u128 = match raw {
+        serde_json::Value::String(s) => s.trim().parse().ok()?,
+        serde_json::Value::Number(n) => n.as_u64()? as u128,
+        _ => return None,
+    };
+    /// Seconds between the FILETIME epoch (1601-01-01) and the Unix one.
+    const FILETIME_EPOCH_DIFF: u128 = 11_644_473_600;
+    let secs = if value >= 100_000_000_000_000_000 {
+        (value / 10_000_000).checked_sub(FILETIME_EPOCH_DIFF)?
+    } else if value >= 100_000_000_000_000 {
+        value / 1_000_000
+    } else if value >= 100_000_000_000 {
+        value / 1_000
+    } else if value >= 1_000_000_000 {
+        value
+    } else {
+        return None;
+    };
+    u64::try_from(secs).ok()
+}
+
+/// Parse `<sessions_dir>/*.json`, keeping only the entries a live process
+/// still backs.
+///
+/// "The pid exists" is not enough (ticket #32). A registry file outlives a
+/// crashed session, and Windows hands recently-freed pids out first, so the
+/// number in a leftover file is regularly the `pwsh` of a tab opened
+/// seconds ago. When the entry says *when* its process started, that has to
+/// match too — same pid, different birthday, different process.
 pub fn read_live_registry(sessions_dir: &Path) -> Vec<LiveEntry> {
     let mut entries: Vec<LiveEntry> = Vec::new();
     let Ok(rd) = std::fs::read_dir(sessions_dir) else {
@@ -437,20 +488,32 @@ pub fn read_live_registry(sessions_dir: &Path) -> Vec<LiveEntry> {
     if entries.is_empty() {
         return entries;
     }
-    let alive = alive_pids(entries.iter().map(|e| e.pid));
-    entries.retain(|e| alive.contains(&e.pid));
+    let alive = alive_pid_starts(entries.iter().map(|e| e.pid));
+    entries.retain(|e| match alive.get(&e.pid) {
+        None => false,
+        Some(started) => match (e.proc_start_secs(), started) {
+            (Some(want), Some(got)) => want.abs_diff(*got) <= PROC_START_TOLERANCE_SECS,
+            // No `procStart`, or a process table without a start time: the
+            // pid being alive is all we have.
+            _ => true,
+        },
+    });
     entries
 }
 
-fn alive_pids(pids: impl Iterator<Item = u32>) -> Vec<u32> {
+/// The pids of `pids` that still exist, with the start time (epoch seconds)
+/// the process table reports for each.
+fn alive_pid_starts(pids: impl Iterator<Item = u32>) -> HashMap<u32, Option<u64>> {
     use sysinfo::{Pid, ProcessesToUpdate, System};
     let wanted: Vec<Pid> = pids.map(|p| Pid::from(p as usize)).collect();
     let mut sys = System::new();
     sys.refresh_processes(ProcessesToUpdate::Some(&wanted), false);
     wanted
         .into_iter()
-        .filter(|p| sys.process(*p).is_some())
-        .map(|p| p.as_u32())
+        .filter_map(|p| {
+            let process = sys.process(p)?;
+            Some((p.as_u32(), Some(process.start_time()).filter(|s| *s > 0)))
+        })
         .collect()
 }
 
@@ -869,5 +932,44 @@ mod tests {
         let live = read_live_registry(dir.path());
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].session_id, "alive");
+    }
+
+    #[test]
+    fn proc_start_reads_a_filetime_and_shrugs_at_nonsense() {
+        // The value Claude Code writes on Windows, and the epoch second it
+        // means (checked against the `startedAt` of the same entry).
+        let secs = proc_start_epoch_secs(&serde_json::json!("134332724004717918"));
+        assert_eq!(secs, Some(1788798800));
+        assert_eq!(
+            proc_start_epoch_secs(&serde_json::json!(1788798800u64)),
+            Some(1788798800)
+        );
+        assert_eq!(
+            proc_start_epoch_secs(&serde_json::json!(1788798800123u64)),
+            Some(1788798800)
+        );
+        // Not a time we can read: no opinion, rather than a wrong one.
+        assert_eq!(proc_start_epoch_secs(&serde_json::json!("42")), None);
+        assert_eq!(proc_start_epoch_secs(&serde_json::json!(null)), None);
+        assert_eq!(proc_start_epoch_secs(&serde_json::json!("nope")), None);
+    }
+
+    #[test]
+    fn live_registry_drops_a_recycled_pid() {
+        // The file is a leftover: the pid is alive, but it belongs to another
+        // process now (here: this test), started at another time.
+        let dir = tempfile::tempdir().unwrap();
+        let me = std::process::id();
+        // 2010-01-01, comfortably before anything running today.
+        std::fs::write(
+            dir.path().join(format!("{}.json", me)),
+            format!(
+                r#"{{"pid":{},"sessionId":"ghost","status":"busy","procStart":"{}"}}"#,
+                me,
+                (1262304000u128 + 11_644_473_600) * 10_000_000
+            ),
+        )
+        .unwrap();
+        assert!(read_live_registry(dir.path()).is_empty());
     }
 }
