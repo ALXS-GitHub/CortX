@@ -19,16 +19,32 @@
  *   around it, a rule that faint simply disappeared and the pane looked like
  *   plain scrollback. It carries no status colour, because a full-width red
  *   rule is the loudest thing on a pane.
- * - **A bracket, not a band**: the block under the pointer (and the selected
- *   one) is shown by its own hairline and the next block's coming up slightly,
- *   so its extent is obvious. Nothing is ever painted *over* a block's rows:
- *   a wash, however faint, recolours the text the shell drew and is the first
- *   thing the eye finds on a themed pane.
+ * - **A bracket for hover, a plate for the two states that matter**: the block
+ *   under the pointer is shown by its own hairline and the next block's coming
+ *   up, so its extent is obvious without touching its rows. Two things do get
+ *   a wash over the grid, and only two: a **failed** block (`terminal
+ *   .blockFailedWash`) and the **selected** one.
+ *
+ *   An earlier pass here forbade that outright — "a wash, however faint,
+ *   recolours the text the shell drew and is the first thing the eye finds on
+ *   a themed pane". That is still true of an *opaque* tint, and of anything
+ *   with a hue borrowed from the app chrome; it is not true at the strength
+ *   Warp actually uses. Warp paints a failed block at **10 %** of its failure
+ *   colour over the whole block (`draw_block_background`), and that is what a
+ *   red `exit 1` needs to be findable in a pane full of output — the 3 px
+ *   gutter bar out in the margin is missed. So the rule now reads: a wash of
+ *   ~10 %, mixed from the *terminal's own palette* (never `--destructive`,
+ *   never `--accent`), yes; repainting the text, or any tint strong enough to
+ *   change the colour a glyph reads as, no. The selection plate is weaker
+ *   still and achromatic, for the same reason the divider is.
  * - **A hover toolbar** near the block's top-right corner: copy the command,
  *   copy the output, copy both, run it again, fold it away, and a `⋯` opening
- *   the full menu. It only ever lands on a row whose right-hand end is empty —
- *   preferably the gap on the divider — so a right-hand prompt (a clock, a git
- *   status) is never covered; when no such row exists it is not drawn at all.
+ *   the full menu. It prefers a row whose right-hand end is empty — the gap on
+ *   the divider — so a right-hand prompt (a clock, a git status) is left
+ *   alone; when there is no such row it is drawn anyway, on an opaque plate
+ *   over the prompt's right-hand end, exactly as Warp does. Disappearing was
+ *   worse: with a two-line oh-my-posh prompt no row is ever free and the
+ *   actions silently did not exist.
  * - **A clickable gutter** in the pane's left padding: one bar per block,
  *   coloured by the exit code the shell reported. Click selects, double-click
  *   folds, right-click opens the block menu.
@@ -138,6 +154,7 @@ import { comboFromEvent, effectiveCombos } from '@/lib/keybindings';
 import { closeBlockMenu, openBlockMenu } from '@/lib/terminalBlockMenu';
 import { blockIconSvg } from '@/lib/terminalBlockIcons';
 import {
+  accentUsableAsEdge,
   blockActions,
   blockAtLine,
   blockFailed,
@@ -154,6 +171,8 @@ import {
   navigateBlocks,
   parseBlockMarker,
   shortCommand,
+  spacingRowMax,
+  spacingRowsAbove,
   terminalIsDark,
   type BlockActionId,
   type BlockSpacingRow,
@@ -185,6 +204,29 @@ export function blockDividersEnabled(): boolean {
 /** The toolbar that appears at a block's top-right corner on hover. */
 export function blockActionBarEnabled(): boolean {
   return useAppStore.getState().settings?.terminal.blockActions !== false;
+}
+
+/**
+ * The 10 % wash over a block whose command failed, plus the full-strength
+ * gutter pole that goes with it (Warp's `draw_block_background`). On by
+ * default: a failed command you cannot find is the whole reason blocks exist.
+ *
+ * Read off the settings object rather than through its type, because the field
+ * is being added to `TerminalSettings` / `models.rs` in a separate change; the
+ * `!== false` keeps the default at "on" until it lands and afterwards.
+ */
+export function blockFailedWashEnabled(): boolean {
+  const terminal = useAppStore.getState().settings?.terminal as Record<string, unknown> | undefined;
+  return terminal?.blockFailedWash !== false;
+}
+
+/**
+ * How many blank rows above a prompt may be read as the gap between two blocks
+ * (see `spacingRowMax`). The setting is the ceiling; the buffer still decides
+ * how many are really there.
+ */
+function blockSpacingRowMax(): number {
+  return spacingRowMax(useAppStore.getState().settings?.terminal.blockSpacing);
 }
 
 /** The universal input editor owns the prompt line (ticket #15, U1). */
@@ -221,6 +263,17 @@ const TOOLBAR_RIGHT_MARGIN = 16;
 
 /** How far down a block we look for a row the toolbar can sit on. */
 const TOOLBAR_SEARCH_ROWS = 24;
+
+/**
+ * `topRightReserve`, in px. An element counts as furniture in the toolbar's
+ * corner when its right edge is within `SLACK` of the pane's (the cluster sits
+ * at `right-3`, and a scrollbar's worth of margin is allowed on top of that)
+ * and its top is within `REACH` of the pane's top. `GAP` is the air kept under
+ * it, so the two never touch.
+ */
+const PANE_FURNITURE_SLACK = 28;
+const PANE_FURNITURE_REACH = 64;
+const PANE_FURNITURE_GAP = 4;
 
 /** The grid's geometry inside the session container, in px. */
 interface Metrics {
@@ -931,27 +984,68 @@ class BlockController {
     const gutter = blockGutterEnabled();
     const dividers = blockDividersEnabled();
     const toolbars = blockActionBarEnabled();
+    const failedWash = blockFailedWashEnabled();
+    const spacingMax = blockSpacingRowMax();
     const keep = new Set<string>();
-    // A hovered / selected block is shown by the two hairlines that *bracket*
-    // it — its own, and the one belonging to the block below — never by a
-    // wash over its rows: a tint over the grid changes the colour of the text
-    // the shell drew, and on a wallpaper theme it is the first thing the eye
-    // lands on. The bracket plus the gutter bar say the same thing and cover
-    // nothing.
+    // A *hovered* block is still shown by the two hairlines that bracket it —
+    // its own and the one belonging to the block below — and by its gutter
+    // bar: hover follows the pointer and a plate that chases it around the
+    // pane is noise. The plate is reserved for the two states that persist,
+    // selection and failure (see the module header).
     const bracketed = new Set<number>();
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
-      if (block.id !== this.selectedId && block.id !== this.hoveredId) continue;
+      if (!this.isSelected(block.id) && block.id !== this.hoveredId) continue;
       bracketed.add(block.id);
       const below = blocks[i + 1];
       if (below) bracketed.add(below.id);
     }
 
-    for (const block of blocks) {
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
       const range = blockRange(block, liveEnd);
       const visible = clipToViewport(range, viewportY, rows);
-      const selected = block.id === this.selectedId;
+      const selected = this.isSelected(block.id);
       const hovered = block.id === this.hoveredId;
+
+      // The two plates, both under everything else on the layer (their
+      // z-indexes are in `terminal-window.css`): the failure wash first, the
+      // selection over it, so a selected block that failed still reads as
+      // selected.
+      //
+      // The wash is Warp's `draw_block_background` — 10 % of the palette's own
+      // red over the whole block. It is the only thing on a busy pane that
+      // makes an `exit 1` findable; the gutter bar is three pixels in the
+      // margin and is missed. It never takes the mouse and never touches the
+      // block's own colours beyond that 10 %.
+      if (visible && failedWash && blockFailed(block)) {
+        const wash = this.element(keep, `${block.id}:wash`, 'cortx-blocks-wash', layer);
+        wash.style.top = `${Math.round(metrics.top + visible.row * metrics.cell)}px`;
+        wash.style.height = `${Math.max(1, Math.round(visible.count * metrics.cell))}px`;
+      }
+
+      // The selected block: a weak achromatic plate plus an edge down each
+      // side, in the accent when the accent is actually visible against this
+      // pane (see `applyPalette`). Warp borders a selection on all four sides
+      // but only draws the top and bottom edges at the *ends* of a continuous
+      // run, so several selected blocks read as one object rather than a
+      // stack of boxes (`compute_border_info`). Multi-block selection is a
+      // separate change (ticket #10); this asks `isSelected` about the
+      // neighbours rather than comparing ids, so it only has to grow a set.
+      if (visible && selected) {
+        const plate = this.element(keep, `${block.id}:select`, 'cortx-blocks-select', layer);
+        plate.style.top = `${Math.round(metrics.top + visible.row * metrics.cell)}px`;
+        plate.style.height = `${Math.max(1, Math.round(visible.count * metrics.cell))}px`;
+        // Only cap the run where it really ends — and only where the block's
+        // own edge is on screen, so a selection scrolled through does not grow
+        // a lid at the top of the viewport.
+        const above = blocks[i - 1];
+        const below = blocks[i + 1];
+        const opensRun = !above || !this.isSelected(above.id);
+        const closesRun = !below || !this.isSelected(below.id);
+        plate.dataset.top = opensRun && range.start >= viewportY ? 'true' : 'false';
+        plate.dataset.bottom = closesRun && range.endExclusive <= viewportY + rows ? 'true' : 'false';
+      }
 
       // The divider that opens the block: a 1 px rule the full width of the
       // pane, drawn on the boundary between the previous block's last output
@@ -975,11 +1069,13 @@ class BlockController {
       // The blank row is only used when it is on screen: at the very top of
       // the pane the spacing line has scrolled off and at the very bottom
       // there is nothing under the last row to move into.
-      const spacing = this.spacingRow(block.start);
+      const spacing = this.spacingRow(block.start, spacingMax);
       // How many blank rows the shell actually left: `comfortable` asks for
       // two, and the rule belongs in the middle of the run rather than half a
-      // row above the prompt.
-      const blanks = spacing === 'above' ? this.blankRowsAbove(block.start) : 1;
+      // row above the prompt. Capped at what the setting can have printed, so
+      // a command that ends on blank lines does not drag the rule up into its
+      // own output (ticket #15).
+      const blanks = spacing === 'above' ? this.blankRowsAbove(block.start, spacingMax) : 1;
       const usable =
         (spacing === 'above' && dividerRow >= blanks / 2) || (spacing === 'first' && dividerRow < rows);
       const offset = usable ? dividerOffsetRows(spacing, blanks) : 0;
@@ -995,6 +1091,12 @@ class BlockController {
         bar.style.height = `${Math.max(2, Math.round(visible.count * metrics.cell))}px`;
         bar.dataset.status = barStatus(block);
         bar.dataset.selected = selected || hovered ? 'true' : 'false';
+        // The flag pole: for a failed block the bar goes to full colour and
+        // full width, so the wash has an anchor in the margin — but *not* when
+        // the block is already selected, which is Warp's rule too
+        // (`!is_selected_by_anyone`). Two markings of the same block say
+        // nothing the first one did not.
+        bar.dataset.pole = failedWash && !selected && blockFailed(block) ? 'true' : 'false';
         setText(bar, 'title', `${blockStatusLabel(block)}${block.command ? ` · ${shortCommand(block.command)}` : ''}`);
         this.bindBar(bar, block.id);
       }
@@ -1031,6 +1133,19 @@ class BlockController {
     }
   }
 
+  /**
+   * Is this block part of the selection?
+   *
+   * One block today. It is a predicate and not an `=== this.selectedId`
+   * scattered through `render` so that multi-block selection (ticket #10) is a
+   * change of state and not a change of drawing: the selection plate already
+   * asks it about the blocks above and below to decide where the run's top and
+   * bottom edges go.
+   */
+  private isSelected(id: number): boolean {
+    return id === this.selectedId;
+  }
+
   /** Reuse the element of the previous frame, or make one. */
   private element(keep: Set<string>, key: string, className: string, layer: HTMLElement): HTMLElement {
     keep.add(key);
@@ -1050,8 +1165,11 @@ class BlockController {
    * signature is stashed on the element) — this runs on every rendered frame,
    * including while a command is printing.
    *
-   * Where it goes is decided by `placeToolbar`, and when that answers "nowhere"
-   * the bar is simply not drawn: it may never cover a glyph the shell wrote.
+   * Where it goes is decided by `placeToolbar`, which prefers a row that
+   * paints nothing at its right-hand end and, failing that, hands back the
+   * block's top-right corner with `occluded` set — the bar then gets an opaque
+   * plate of its own (`data-occluded`, see the CSS) and covers whatever the
+   * prompt draws there, which is what Warp does.
    */
   private toolbar(
     keep: Set<string>,
@@ -1066,13 +1184,18 @@ class BlockController {
     const specs = this.actionsFor(block).filter((spec) => spec.primary);
     // `+ 1` for the "More actions" button, which is always there.
     const width = blockToolbarWidth(specs.length + 1);
-    const slot = this.placeToolbar(block, metrics, visible, viewportY, rows, width, spacing);
+    // Measured here and not in `render`: at most one block has a toolbar, and
+    // this costs a layout read on a path that runs on every frame the pane
+    // paints — including while a command is printing.
+    const reserve = this.topRightReserve();
+    const slot = this.placeToolbar(block, metrics, visible, viewportY, rows, width, spacing, reserve);
     if (!slot) return;
     this.toolbarRows = slot.rows;
 
     const bar = this.element(keep, `${block.id}:actions`, 'cortx-blocks-actions', layer);
     bar.style.top = `${Math.round(slot.top)}px`;
     bar.style.height = `${Math.round(slot.height)}px`;
+    bar.dataset.occluded = slot.occluded ? 'true' : 'false';
 
     const signature = specs.map((spec) => `${spec.id}\u0000${spec.label}\u0000${spec.disabled}`).join('\u0001');
     if (bar.dataset.signature === signature) return;
@@ -1085,14 +1208,13 @@ class BlockController {
   }
 
   /**
-   * Find a place for a block's toolbar that hides nothing.
+   * Find a place for a block's toolbar.
    *
    * The prompt line is not free real estate: a right-hand prompt — oh-my-posh's
    * clock, a git status, an exit code — sits exactly where a top-right toolbar
-   * would go, and covering it is the one thing this overlay must never do. So
-   * the bar only ever lands on a row whose right-hand end paints *nothing*, and
-   * it is squeezed to a single row's height so it cannot spill into the rows
-   * above and below either.
+   * would go. So the bar prefers a row whose right-hand end paints *nothing*,
+   * and it is squeezed to a single row's height so it cannot spill into the
+   * rows above and below either.
    *
    * Candidates, in the order that reads best:
    *
@@ -1105,11 +1227,23 @@ class BlockController {
    *    expects a boundary control;
    * 2. the row just above the divider on its own;
    * 3. the block's first row on its own;
-   * 4. failing those, the first free row going down through the block.
+   * 4. failing those, the first free row going down through the block;
+   * 5. and when *nothing* is free, the block's top-right corner anyway, with
+   *    `occluded` set (ticket zorg #24).
    *
-   * When every candidate is occupied the toolbar is not drawn at all. The
-   * gutter bar still opens the same menu on a right-click, so nothing is lost
-   * but the shortcut.
+   * Step 5 is new and it reverses the original decision. Refusing to draw was
+   * defensible while this was designed from screenshots; it is not once you
+   * run a prompt with a right-hand component, because then **no row is ever
+   * free** and the actions simply never appear — which is what Alexis hit
+   * ("des fois quand on hover un bloc les options ne sont pas affichées").
+   * Warp does not disappear either: it measures the overlap and draws an
+   * opaque plate behind the toolbelt (`block_list_element.rs`, the
+   * `prompt_max_x > … || display_rprompt` branch). The plate is what makes
+   * covering the prompt honest — the icons are legible, and the thing they
+   * hide is visibly hidden rather than smeared.
+   *
+   * `reserve` is the pane's own furniture at the top-right (`topRightReserve`):
+   * no candidate may sit under it, whether free or occluded.
    */
   private placeToolbar(
     block: TerminalBlock,
@@ -1118,21 +1252,29 @@ class BlockController {
     viewportY: number,
     rows: number,
     width: number,
-    spacing: BlockSpacingRow
-  ): { top: number; height: number; rows: number[] } | null {
+    spacing: BlockSpacingRow,
+    reserve: number
+  ): { top: number; height: number; rows: number[]; occluded: boolean } | null {
     const height = Math.min(TOOLBAR_HEIGHT, Math.floor(metrics.cell));
     if (height < TOOLBAR_MIN_HEIGHT || metrics.column <= 0) return null;
+
+    /** Where a bar centred on viewport row `row` would start, in container px. */
+    const topOf = (row: number) => metrics.top + (row + 0.5) * metrics.cell - height / 2;
+    /** Clear of anything the pane floats over its own top-right corner. */
+    const clearOfPane = (top: number) => top >= reserve;
 
     const need = width + TOOLBAR_RIGHT_MARGIN;
     const free = (row: number) => {
       if (row < 0 || row >= rows) return false;
+      if (!clearOfPane(topOf(row))) return false;
       return (this.term.cols - this.usedColumns(viewportY + row)) * metrics.column >= need;
     };
     /** A `height`-tall bar centred on one viewport row. */
     const onRow = (row: number) => ({
-      top: metrics.top + (row + 0.5) * metrics.cell - height / 2,
+      top: topOf(row),
       height,
       rows: [row],
+      occluded: false,
     });
 
     const startRow = block.start - viewportY;
@@ -1148,11 +1290,10 @@ class BlockController {
     const firstFree = free(startRow);
     // Centred on the divider itself: half of it in each of two free rows.
     if (aboveFree && firstFree) {
-      return {
-        top: metrics.top + startRow * metrics.cell - height / 2,
-        height,
-        rows: [startRow - 1, startRow],
-      };
+      const top = metrics.top + startRow * metrics.cell - height / 2;
+      if (clearOfPane(top)) {
+        return { top, height, rows: [startRow - 1, startRow], occluded: false };
+      }
     }
     if (aboveFree) return onRow(startRow - 1);
     if (firstFree) return onRow(startRow);
@@ -1160,11 +1301,68 @@ class BlockController {
     // Nothing at the top edge: walk down the block's visible rows, skipping
     // the first one when that is the row just refused.
     const from = startRow === visible.row ? visible.row + 1 : visible.row;
-    const to = Math.min(visible.row + visible.count - 1, rows - 1, from + TOOLBAR_SEARCH_ROWS);
+    const last = Math.min(visible.row + visible.count - 1, rows - 1);
+    const to = Math.min(last, from + TOOLBAR_SEARCH_ROWS);
     for (let row = from; row <= to; row++) {
       if (free(row)) return onRow(row);
     }
+
+    // Every row this block shows is written on, right up to its end. Draw the
+    // bar anyway, at the top-right corner, and let the CSS give it an opaque
+    // plate — the alternative is a block whose actions do not exist, which is
+    // the bug this replaces. The first row clear of the pane's own furniture
+    // wins; a block that is *entirely* underneath it is the one case left
+    // where nothing is drawn, and the gutter bar still opens the same menu on
+    // a right-click.
+    for (let row = visible.row; row <= last; row++) {
+      if (clearOfPane(topOf(row))) return { ...onRow(row), occluded: true };
+    }
     return null;
+  }
+
+  /**
+   * How far down the pane's own floating furniture reaches at the top-right,
+   * in px from the top of the session container — the split / maximize / dock
+   * / close cluster `LeafPane` pins there (`right-3 top-2`, `z-20`).
+   *
+   * This is the second half of ticket zorg #24 ("quand elles sont affichées,
+   * elles sont masquées par les options de la session"), and it is a stacking
+   * problem that cannot be won on `z-index`: the cluster is a sibling of the
+   * whole terminal, and this overlay is *inside* it at `z-index: 4`, below the
+   * universal input editor at 5 (`terminal-input.css`). Raising the layer over
+   * the cluster's 20 would also raise it over the editor and take the caret
+   * with it. So the toolbar steps aside instead — which is the better answer
+   * anyway: two floating toolbars in the same corner is a collision even when
+   * the right one wins.
+   *
+   * Measured rather than hard-coded, from whatever the pane floats over its own
+   * top-right corner, so it keeps working if that cluster grows a button or
+   * moves. In the dock (`TerminalPanel`) the pane's actions are in a header row
+   * above the grid and nothing matches, which is the `0` case.
+   *
+   * The room is kept whether or not the cluster is currently *visible* — it
+   * fades on hover but always has a box. That is on purpose: the cluster comes
+   * up exactly when a block is hovered, and a toolbar that slid down as the
+   * cluster faded in would be worse than one that was simply never there.
+   */
+  private topRightReserve(): number {
+    const pane = this.container.closest('[data-leaf-id]');
+    if (!pane) return 0;
+    const host = this.container.getBoundingClientRect();
+    if (host.width <= 0) return 0;
+    let bottom = 0;
+    for (const child of Array.from(pane.children)) {
+      // The subtree the grid itself lives in is never furniture.
+      if (child.contains(this.container)) continue;
+      const rect = child.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      // Only what hugs the pane's top-right corner: something pinned bottom-left
+      // (a status strip, a future banner) is not in the toolbar's way.
+      if (rect.right < host.right - PANE_FURNITURE_SLACK) continue;
+      if (rect.top > host.top + PANE_FURNITURE_REACH) continue;
+      bottom = Math.max(bottom, rect.bottom - host.top);
+    }
+    return bottom > 0 ? bottom + PANE_FURNITURE_GAP : 0;
   }
 
   /**
@@ -1198,9 +1396,16 @@ class BlockController {
    *
    * `start - 1` is an *absolute* buffer line, so a spacing row scrolled just
    * off the top of the viewport is still recognised.
+   *
+   * The setting does get one word, as a ceiling (`maxRows`, ticket #15): under
+   * `compact` the integration prints nothing at all, so a blank row above a
+   * prompt is the tail of the command that just finished and moving the rule
+   * half a row up into it marks nothing. `first` is not capped — that row
+   * comes from the user's own prompt, not from the setting, and exists in
+   * every mode.
    */
-  private spacingRow(start: number): BlockSpacingRow {
-    if (start >= 1 && this.usedColumns(start - 1) === 0) return 'above';
+  private spacingRow(start: number, maxRows: number): BlockSpacingRow {
+    if (maxRows >= 1 && start >= 1 && this.usedColumns(start - 1) === 0) return 'above';
     // A prompt that opens on a newline of its own (oh-my-posh, starship's
     // `add_newline`) puts the blank row *inside* the block: `OSC 133;A` lands
     // before the newline. The shell integration adds nothing in that case, so
@@ -1211,15 +1416,17 @@ class BlockController {
 
   /**
    * How many blank rows sit immediately above `start`, so the divider can be
-   * centred in the whole gap. `terminal.blockSpacing = comfortable` leaves
-   * two; a prompt that opens on a newline of its own can add one more.
-   * Capped: past a handful the run is scrollback, not spacing, and every row
-   * costs a measurement.
+   * centred in the whole gap — capped at what the spacing setting can possibly
+   * have printed (`spacingRowMax`, at most two).
+   *
+   * The cap is the whole point (ticket #15). It used to count four rows deep,
+   * and a command that ends on blank lines — `npm run build`, `cargo test`,
+   * practically anything — had that tail counted as spacing, which pushed the
+   * rule up to two rows above the boundary it exists to mark. It then sat in
+   * the middle of the previous block's output, saying nothing.
    */
-  private blankRowsAbove(start: number, max = 4): number {
-    let n = 0;
-    while (n < max && start - 1 - n >= 0 && this.usedColumns(start - 1 - n) === 0) n += 1;
-    return Math.max(1, n);
+  private blankRowsAbove(start: number, max: number): number {
+    return spacingRowsAbove(start, (line) => this.usedColumns(line) === 0, max);
   }
 
   /** The uncached half of `usedColumns`. */
@@ -1360,6 +1567,34 @@ class BlockController {
       '--cortx-block-line-active',
       dark ? 'rgb(255 255 255 / 0.30)' : 'rgb(0 0 0 / 0.32)'
     );
+
+    // The selected block's plate. Warp has a theme token of its own for this
+    // (`block_selection_color`); imported Warp themes do not carry one, so it
+    // is derived — and derived *achromatically*, for exactly the reason the
+    // divider is. A mix of the theme's foreground would be a white veil on
+    // `aespa_wda` and a pink one wherever the foreground is tinted; white over
+    // a dark ground and black over a light one says "this block" without
+    // saying a colour. Weak enough that the glyphs underneath keep their own.
+    layer.style.setProperty('--cortx-block-select', dark ? 'rgb(255 255 255 / 0.07)' : 'rgb(0 0 0 / 0.05)');
+
+    // …and its left and right edges, which are where Warp puts the accent
+    // (`block_list_element.rs`: the border fill is `accent()`, the background
+    // is not). `--accent` is banned everywhere else in this window because an
+    // imported theme is free to make it a near-black — `aespa_wda`'s is
+    // `#0c161f` — so it is allowed here only behind a contrast guard against
+    // the pane's own background. Below the bar it falls back to the neutral
+    // edge, which is the colour the selection had before this existed.
+    //
+    // Only computed when something is selected: this runs on every frame, and
+    // reading a custom property off the cascade costs a style recalculation.
+    const neutralEdge = dark ? 'rgb(255 255 255 / 0.55)' : 'rgb(0 0 0 / 0.45)';
+    if (this.selectedId !== null) {
+      const accent = getComputedStyle(layer).getPropertyValue('--primary').trim();
+      const usable = accentUsableAsEdge(accent, theme.background);
+      layer.style.setProperty('--cortx-block-select-edge', usable ? accent : neutralEdge);
+    } else {
+      layer.style.setProperty('--cortx-block-select-edge', neutralEdge);
+    }
     // The pane's own background, for the toolbar's plate: a themed Terminal
     // window is see-through down to the wallpaper, and icons floating on a
     // photograph are unreadable.

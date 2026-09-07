@@ -95,18 +95,32 @@
    from the text. Everything in it is drawn *over* the grid: not a single glyph
    moves, which is the whole contract of this feature.
 
-   Three things are drawn: a 1 px divider on each block's top edge, the gutter
-   bar, and — only while the pointer is inside a block — its action toolbar.
-   The gutter bars and the dividers reach into the pane's left padding
-   (`--terminal-padding`, applied by `.cortx-xterm-host`) with a negative
-   `left`: the host clips at its border box and the padding is inside it, so
-   they show without stealing a column.
+   What is drawn: a 1 px divider on each block's top edge, the gutter bar, a
+   plate under a failed or selected block, and — only while the pointer is
+   inside a block — its action toolbar. The gutter bars and the dividers reach
+   into the pane's left padding (`--terminal-padding`, applied by
+   `.cortx-xterm-host`) with a negative `left`: the host clips at its border box
+   and the padding is inside it, so they show without stealing a column.
 
-   Nothing is drawn *over* a block's rows. There is no hover or selection wash:
-   the block under the pointer is the one whose hairline — and the next one's —
-   comes up, with its gutter bar at full strength. A tint over the grid, however
-   faint, changes the colour of the text the shell wrote, and on a theme with a
-   background image it is the first thing the eye lands on.
+   Paint order inside the layer, which is why every rule below carries a
+   `z-index` (elements are reused between frames, so their DOM order is
+   creation order and says nothing):
+
+     0  the failure wash          under everything
+     1  the selection plate       over the wash: a selected block that failed
+                                  still reads as selected
+     2  the dividers
+     3  the gutter bars
+     4  a fold cover              opaque, so it must beat the plates
+     5  the action toolbar        always on top; it is the only thing here
+                                  that is ever deliberately over a glyph
+
+   *Hover* still paints nothing over the rows: the block under the pointer is
+   the one whose hairline — and the next one's — comes up, with its gutter bar
+   at full strength. The two plates are for the states that persist. Both are
+   weak (10 % for the failure wash, 5–7 % for the selection) and both are mixed
+   from the *terminal's* palette, never from the app chrome — see the module
+   header of `lib/terminalBlocks.ts` for why that line moved.
 
    Status colours come from the *terminal* palette (the ANSI colours xterm is
    drawing with, pushed onto the layer as `--cortx-block-*` by `applyPalette`),
@@ -127,11 +141,67 @@
   display: none !important;
 }
 
+/* A failed block, washed at 10 % of the palette's own red — Warp's
+   `draw_block_background`. This is the one thing that makes an `exit 1`
+   findable in a pane full of output; the gutter bar is 3 px out in the margin
+   and is missed. The colour is `--cortx-block-fail`, i.e. the theme's ANSI
+   red, so an imported theme washes in its own red and a wallpaper theme stays
+   inside its palette (`--destructive` from the app chrome would not).
+
+   10 % is the number, not a starting point: it is what Warp uses, and it is
+   the level at which the eye finds the block without the text underneath
+   reading as tinted. `terminal.blockFailedWash` turns it off. */
+.cortx-blocks-wash {
+  position: absolute;
+  z-index: 0;
+  left: calc(0px - var(--terminal-padding, 8px));
+  right: 0;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--cortx-block-fail) 10%, transparent);
+}
+
+/* The selected block: a plate plus an edge down each side.
+
+   The plate is achromatic and very weak — see `--cortx-block-select` in
+   `applyPalette`. The edges are the accent, when `applyPalette`'s contrast
+   guard says the accent is actually visible against this pane, and the old
+   neutral otherwise; `--cortx-block-select-edge` holds whichever won.
+
+   Top and bottom edges are attributes rather than a fixed border because a
+   selection will be able to span several blocks (ticket #10): the run gets a
+   lid only where it really opens and closes, so three selected blocks read as
+   one object instead of three boxes. Today the run is always one block long
+   and both attributes are true — except where the block's own edge is off
+   screen, in which case the selection is drawn open, as it should be. */
+.cortx-blocks-select {
+  position: absolute;
+  z-index: 1;
+  /* Into the pane's left padding, but not as far as the gutter bar (which
+     starts at `--cortx-block-gutter-x` and is 3–4 px wide): the accent edge
+     and the status bar are two different statements and must not sit on top of
+     one another. `min()` keeps it at the grid's own edge when the padding is
+     too small to share — a pane with no padding has no room for either. */
+  left: min(0px, calc(4px - var(--terminal-padding, 8px)));
+  right: 0;
+  pointer-events: none;
+  box-sizing: border-box;
+  background: var(--cortx-block-select, rgb(255 255 255 / 0.07));
+  border-left: 2px solid var(--cortx-block-select-edge, rgb(255 255 255 / 0.55));
+  border-right: 2px solid var(--cortx-block-select-edge, rgb(255 255 255 / 0.55));
+}
+.cortx-blocks-select[data-top='true'] {
+  border-top: 2px solid var(--cortx-block-select-edge, rgb(255 255 255 / 0.55));
+}
+.cortx-blocks-select[data-bottom='true'] {
+  border-bottom: 2px solid var(--cortx-block-select-edge, rgb(255 255 255 / 0.55));
+}
+
 /* One bar per block. The element is a wide, invisible hit target; the visible
    3 px bar is its pseudo-element, so the thing is easy to click without
    painting a 10 px slab over the padding. */
 .cortx-blocks-bar {
   position: absolute;
+  z-index: 3;
   left: var(--cortx-block-gutter-x, -7px);
   width: 10px;
   display: flex;
@@ -168,6 +238,19 @@
   width: calc(var(--cortx-block-bar-width, 3px) + 1px);
   opacity: 1;
 }
+/* The flag pole of a failed block (Warp's `draw_flag_pole`): full colour, full
+   width, the full height of the block, so the wash has an anchor in the margin
+   and the eye can follow the failure down the pane.
+
+   It is deliberately absent when the block is *selected* — Warp's
+   `!is_selected_by_anyone`. The selection already draws an edge down that same
+   side; two markings of one block add nothing, and the pole in the theme's red
+   next to an accent border is just noise. `render` decides, so the rule below
+   only has to be stronger than the `failed` one above it. */
+.cortx-blocks-bar[data-pole='true']::before {
+  width: calc(var(--cortx-block-bar-width, 3px) + 1px);
+  opacity: 1;
+}
 
 /* The divider that opens a block: one hairline, edge to edge, on the boundary
    between the previous block's last output row and this block's prompt.
@@ -189,6 +272,7 @@
    where the geometry says. */
 .cortx-blocks-rule {
   position: absolute;
+  z-index: 2;
   /* Out into the host's left padding, so the rule really does cross the whole
      pane like Warp's — the grid starts after that padding, and the host clips
      at its border box, not at its padding box (same trick as the gutter). */
@@ -205,12 +289,11 @@
   background: var(--cortx-block-line-active, rgb(255 255 255 / 0.3));
 }
 
-/* The block's actions. It is the only part of the overlay that sits over the
-   grid, so `placeToolbar` only ever puts it on a row whose right-hand end
-   paints nothing — no glyph, no coloured plate — and sizes it to exactly one
-   row so it cannot spill into the neighbours. Its own plate is the terminal's
-   background, blurred, because a themed window is see-through down to the
-   wallpaper and icons floating on a photograph are unreadable. */
+/* The block's actions. `placeToolbar` prefers a row whose right-hand end
+   paints nothing — no glyph, no coloured plate — and sizes the bar to exactly
+   one row so it cannot spill into the neighbours. Its own plate is the
+   terminal's background, blurred, because a themed window is see-through down
+   to the wallpaper and icons floating on a photograph are unreadable. */
 .cortx-blocks-actions {
   position: absolute;
   /* Clear of the scrollbar. `TOOLBAR_RIGHT_MARGIN` in lib/terminalBlocks.ts is
@@ -218,7 +301,7 @@
   right: 10px;
   /* Elements are reused across frames, so their DOM order is creation order
      and not paint order; the one thing that must always win is this. */
-  z-index: 2;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 1px;
@@ -236,6 +319,32 @@
   box-shadow: 0 1px 6px rgb(0 0 0 / 0.22);
   pointer-events: auto;
   animation: cortx-blocks-actions-in 110ms ease-out;
+}
+/* No free row: the bar is drawn at the block's top-right corner anyway and
+   covers the right-hand end of the prompt (ticket zorg #24). This is Warp's
+   answer to the same problem — it draws an opaque plate behind the toolbelt
+   whenever `prompt_max_x` reaches under it or an rprompt is displayed — and it
+   is the only honest way to cover something: the icons stay legible and what
+   is hidden is visibly hidden rather than smeared over.
+
+   Opaque, so squarer: 4 px, the radius Warp gives that plate, instead of the
+   pill the floating bar wears. The fill is the *terminal's* card — its own
+   background lifted a few percent towards its own foreground, the same recipe
+   `chromeTokens` uses for `--card` — so it reads as a surface laid on the pane
+   rather than a hole cut in it. Never `--accent`, which an imported theme is
+   free to make a near-black, and never the app's `--card`, which belongs to a
+   different palette. The blur goes with the transparency: there is nothing
+   left to see through. */
+.cortx-blocks-actions[data-occluded='true'] {
+  border-radius: 4px;
+  background: color-mix(
+    in srgb,
+    var(--cortx-block-fg) 7%,
+    var(--terminal-window-solid, var(--cortx-block-bg))
+  );
+  border-color: color-mix(in srgb, var(--cortx-block-fg) 28%, transparent);
+  backdrop-filter: none;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
 }
 @keyframes cortx-blocks-actions-in {
   from {
@@ -280,7 +389,7 @@
    drawing decision, not an edit. */
 .cortx-blocks-fold {
   position: absolute;
-  z-index: 1;
+  z-index: 4;
   left: 0;
   /* Wide of the scrollbar: this one takes clicks and must not swallow it. */
   right: 10px;

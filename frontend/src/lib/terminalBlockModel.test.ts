@@ -14,9 +14,12 @@
  * wrapped rows into the command you actually typed.
  */
 import {
+  ACCENT_EDGE_MIN_CONTRAST,
+  MAX_SPACING_ROWS,
   type BlockActionContext,
   type BlockActionId,
   type TerminalBlock,
+  accentUsableAsEdge,
   blockActions,
   blockAtLine,
   blockFailed,
@@ -27,6 +30,7 @@ import {
   boundaryLine,
   clipToViewport,
   colorLuminance,
+  contrastRatio,
   dividerOffsetRows,
   foldLabel,
   foldedRange,
@@ -34,6 +38,8 @@ import {
   navigateBlocks,
   parseBlockMarker,
   shortCommand,
+  spacingRowMax,
+  spacingRowsAbove,
   terminalIsDark,
 } from './terminalBlockModel.ts';
 
@@ -232,6 +238,56 @@ test('the divider is centred in the whole run of blank rows', () => {
   // The block's own first row is one row by construction; a count there is
   // meaningless and must not move it.
   assert.equal(dividerOffsetRows('first', 2), 0.5);
+});
+
+// --- the ceiling on the run of blank rows (ticket #15) ---------------------
+
+/** `isBlank` for a buffer where lines `blank` are empty and the rest are not. */
+function blankLines(...blank: number[]): (line: number) => boolean {
+  const set = new Set(blank);
+  return (line) => set.has(line);
+}
+
+test('the spacing setting is what caps the run, not a magic number', () => {
+  // `compact` prints nothing before a prompt, so nothing above one is spacing.
+  assert.equal(spacingRowMax('compact'), 0);
+  assert.equal(spacingRowMax('normal'), 1);
+  assert.equal(spacingRowMax('comfortable'), 2);
+  // Unset: the largest, so the buffer keeps deciding. Never four.
+  assert.equal(spacingRowMax(undefined), MAX_SPACING_ROWS);
+  assert.equal(MAX_SPACING_ROWS, 2);
+});
+
+test('output ending on three blank lines does not drag the divider up', () => {
+  // The bug: `npm run build` finishes with blank lines, the prompt lands at
+  // 100, and rows 97/98/99 are all empty. Counting all three centred the rule
+  // at -1.5 rows — a row and a half above the boundary, in the middle of the
+  // previous block's output, marking nothing.
+  const buffer = blankLines(97, 98, 99);
+  assert.equal(spacingRowsAbove(100, buffer, 2), 2, 'two rows is all `comfortable` can have printed');
+  assert.equal(dividerOffsetRows('above', spacingRowsAbove(100, buffer, 2)), -1);
+  // Under `normal` only one of the three is spacing.
+  assert.equal(spacingRowsAbove(100, buffer, 1), 1);
+  assert.equal(dividerOffsetRows('above', spacingRowsAbove(100, buffer, 1)), -0.5);
+  // What it used to do, kept here as the thing we are no longer allowed to do.
+  assert.equal(spacingRowsAbove(100, buffer, 4), 3);
+});
+
+test('a real gap is still counted in full', () => {
+  // `comfortable` leaves two and both belong to the gap.
+  assert.equal(spacingRowsAbove(100, blankLines(98, 99), 2), 2);
+  // `normal` leaves one.
+  assert.equal(spacingRowsAbove(100, blankLines(99), 2), 1);
+});
+
+test('the run never collapses below one row, and stops at the buffer’s top', () => {
+  // The caller only asks once it knows there is a blank row up there; a zero
+  // would put the rule back on the prompt.
+  assert.equal(spacingRowsAbove(100, blankLines(), 2), 1);
+  assert.equal(spacingRowsAbove(0, blankLines(), 2), 1, 'nothing above line 0 to read');
+  assert.equal(spacingRowsAbove(1, blankLines(0), 2), 1);
+  // `compact` asks for none at all: the caller then never reports `above`.
+  assert.equal(spacingRowsAbove(100, blankLines(98, 99), 0), 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -507,6 +563,39 @@ test('light, dark and half-configured palettes each pick a side', () => {
   assert.equal(terminalIsDark(undefined, '#111111'), false);
   // Nothing at all: a terminal is dark until told otherwise.
   assert.equal(terminalIsDark(undefined, undefined), true);
+});
+
+// --- the accent guard on a selected block's edge (ticket #5) ---------------
+
+test('contrast is measured symmetrically, or not at all', () => {
+  assert.equal(contrastRatio('#000000', '#ffffff'), 21);
+  assert.equal(contrastRatio('#ffffff', '#000000'), 21);
+  assert.equal(contrastRatio('#123456', '#123456'), 1);
+  assert.equal(contrastRatio('#000000', 'rebeccapurple'), null, 'an unreadable notation is not a guess');
+  assert.equal(contrastRatio('linear-gradient(#000, #fff)', '#000000'), null);
+});
+
+test('the accent that broke the block selection is refused', () => {
+  // `aespa_wda`: accent `#0c161f`, a near-black, on a `#713d39` ground. It
+  // comes out at ~2.11 — under the bar, so the edge falls back to neutral.
+  // This guard is the condition the accent was let back into this window on.
+  const ratio = contrastRatio('#0c161f', '#713d39');
+  assert.equal(ratio !== null && ratio < ACCENT_EDGE_MIN_CONTRAST, true);
+  assert.equal(accentUsableAsEdge('#0c161f', '#713d39'), false);
+});
+
+test('a normal accent is allowed through', () => {
+  // CortX's own teal on the default dark pane, and on a light one.
+  assert.equal(accentUsableAsEdge('#2dd4bf', '#0b1220'), true);
+  assert.equal(accentUsableAsEdge('#0d9488', '#ffffff'), true);
+});
+
+test('an accent we cannot read is refused rather than gambled on', () => {
+  // `oklch()` (the classic skin) and gradient accents both land here, as does
+  // a theme that never set a background.
+  assert.equal(accentUsableAsEdge('oklch(0.87 0 0)', '#1e1e1e'), false);
+  assert.equal(accentUsableAsEdge('#2dd4bf', undefined), false);
+  assert.equal(accentUsableAsEdge('', '#1e1e1e'), false);
 });
 
 test('the toolbar width is predicted before the toolbar exists', () => {

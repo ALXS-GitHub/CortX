@@ -202,6 +202,62 @@ export function dividerOffsetRows(spacing: BlockSpacingRow, blankRows = 1): numb
   return 0;
 }
 
+/**
+ * `terminal.blockSpacing`, mirrored here rather than imported: this module has
+ * no imports at all, which is what lets its tests run on plain Node.
+ */
+export type BlockSpacingSetting = 'normal' | 'compact' | 'comfortable';
+
+/**
+ * The most blank rows above a prompt that can possibly be *spacing* rather
+ * than output, for a given `terminal.blockSpacing`.
+ *
+ * This is the ceiling that stops the divider from floating away (ticket #15).
+ * The rule is centred in the run of blank rows above a prompt, and the run was
+ * counted straight off the buffer up to four rows deep — so a command that
+ * ends on blank lines (`npm run build`, `cargo test`, near enough everything)
+ * had its *output* counted as spacing and the rule ended up two rows above the
+ * boundary it is supposed to mark, in the middle of the previous block.
+ *
+ * The shell integration prints a known number of rows (`shell_init.rs`), so
+ * that number is the ceiling: anything past it is output, whatever it looks
+ * like. `compact` prints none, which is why it answers `0` — a blank row above
+ * a prompt there belongs to the command that just finished.
+ *
+ * An unset setting answers the largest value rather than the current default:
+ * the buffer is still the source of truth for how many rows are *actually*
+ * there, and this only ever caps it.
+ */
+export function spacingRowMax(spacing: BlockSpacingSetting | undefined): number {
+  if (spacing === 'compact') return 0;
+  if (spacing === 'normal') return 1;
+  return MAX_SPACING_ROWS;
+}
+
+/** The most spacing rows any setting asks for (`comfortable`). */
+export const MAX_SPACING_ROWS = 2;
+
+/**
+ * How many blank rows immediately above `start` count as the gap between two
+ * blocks, given `isBlank` for an absolute buffer line.
+ *
+ * Never more than `max` (see `spacingRowMax`) and never less than one — the
+ * caller only asks once it knows there is a blank row up there. Reading the
+ * buffer rather than the setting is deliberate: a prompt of the user's own
+ * that opens on a new line, or a session started before the setting changed,
+ * both get the layout they actually have. The cap is what keeps that from
+ * swallowing the tail of the previous command's output.
+ */
+export function spacingRowsAbove(
+  start: number,
+  isBlank: (line: number) => boolean,
+  max = MAX_SPACING_ROWS
+): number {
+  let n = 0;
+  while (n < max && start - 1 - n >= 0 && isBlank(start - 1 - n)) n += 1;
+  return Math.max(1, n);
+}
+
 // ---------------------------------------------------------------------------
 // Navigation
 // ---------------------------------------------------------------------------
@@ -339,6 +395,48 @@ export function terminalIsDark(background?: string | null, foreground?: string |
   const fg = colorLuminance(foreground);
   if (fg !== null) return fg >= 0.2;
   return true;
+}
+
+/**
+ * WCAG contrast ratio between two CSS colours, 1 (identical) to 21 (black on
+ * white), or `null` when either colour cannot be read (a gradient, `oklch()`,
+ * a named colour — see `colorLuminance`).
+ */
+export function contrastRatio(a: string | null | undefined, b: string | null | undefined): number | null {
+  const la = colorLuminance(a);
+  const lb = colorLuminance(b);
+  if (la === null || lb === null) return null;
+  const [hi, lo] = la >= lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * The least contrast an accent must have against the terminal's own background
+ * before it may be used as the edge of a selected block.
+ *
+ * A 2 px border is a thin thing to read, so it needs real separation — but it
+ * is decoration, not text, so the 3:1 of WCAG's non-text rule is stricter than
+ * it has to be. 2.5 is the line drawn from the case that made this guard
+ * necessary: `aespa_wda`'s accent is `#0c161f` on a `#713d39` ground, which
+ * comes out at 2.11 and is invisible.
+ */
+export const ACCENT_EDGE_MIN_CONTRAST = 2.5;
+
+/**
+ * May the theme's accent be used as the edge of a selected block?
+ *
+ * `--accent` is otherwise banned in the Terminal window, and for a good reason
+ * — an imported theme is free to make it a near-black. Warp draws the border
+ * of a selected block in its accent, which is worth having, so the ban is
+ * lifted *here only* and paid for with this guard: an accent that does not
+ * separate from the pane's own background is refused and the caller falls back
+ * to the neutral edge. An unreadable colour notation (a gradient accent,
+ * `oklch()` from the classic skin) is refused for the same reason — we cannot
+ * prove it is visible, so we do not bet on it.
+ */
+export function accentUsableAsEdge(accent: string | null | undefined, background: string | null | undefined): boolean {
+  const ratio = contrastRatio(accent, background);
+  return ratio !== null && ratio >= ACCENT_EDGE_MIN_CONTRAST;
 }
 
 // ---------------------------------------------------------------------------
