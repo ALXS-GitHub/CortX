@@ -427,6 +427,18 @@ pub struct TerminalConfig {
     /// Selection colour of the terminals (any CSS colour). None = the theme's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection_color: Option<String>,
+    /// Lines of output kept behind the viewport, per terminal. Clamped to
+    /// 1 000–200 000 by the frontend, which is the only reader.
+    ///
+    /// The non-obvious part: trimming the scrollback destroys the `OSC 133`
+    /// markers the command blocks are built on, so this number is also how
+    /// far back the block navigation (Ctrl+Up / Ctrl+Down) can still go. And
+    /// it is paid per terminal — twenty open tabs hold twenty buffers.
+    ///
+    /// Not to be confused with [`TerminalConfig::restore_scrollback_lines`],
+    /// which is how much of the *previous* session is replayed on start.
+    #[serde(default = "default_scrollback_lines")]
+    pub scrollback_lines: u32,
     /// Reopen the Terminal window's tabs (shells in their last directory,
     /// nothing re-run) when the app starts.
     #[serde(default = "default_true")]
@@ -434,6 +446,9 @@ pub struct TerminalConfig {
     /// Seed restored shells with the tail of their previous scrollback.
     #[serde(default = "default_true")]
     pub restore_scrollback: bool,
+    /// How many lines of the previous session are replayed into a restored
+    /// shell — a one-off seed at start, not the live buffer size (that is
+    /// [`TerminalConfig::scrollback_lines`]).
     #[serde(default = "default_restore_scrollback_lines")]
     pub restore_scrollback_lines: u32,
     /// Where a started service / script shows up.
@@ -629,6 +644,42 @@ pub struct TerminalConfig {
     #[serde(default)]
     #[serde(deserialize_with = "lenient_enum")]
     pub osc52: Osc52Access,
+    /// What a `BEL` byte does (issue 11). See [`TerminalBell`].
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub bell: TerminalBell,
+    /// Join `!=`, `=>`, `->` into the ligature the font draws for them.
+    ///
+    /// Off by default: the addon registers a character joiner that runs over
+    /// every rendered row, and the ligatures a terminal grid can show are
+    /// only the ones that fit the cells they replace. Only the frontend reads
+    /// this (`lib/terminalSessions.ts`).
+    #[serde(default)]
+    pub ligatures: bool,
+}
+
+/// What a `BEL` (`0x07`) does (issue 11).
+///
+/// Warp has a dedicated `audible_bell` module; these are the same three
+/// levels every terminal offers. The signal stays **inside the pane** — a
+/// flash, or a short tone — and never becomes a toast or a desktop
+/// notification: those belong to the command-finished policy
+/// (`settings/notificationPolicy.ts`), and one event must not be announced
+/// twice on two channels.
+///
+/// Only the frontend reads this: `BEL` is handled by the terminal emulator,
+/// never in the backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalBell {
+    /// Nothing at all.
+    Off,
+    /// The default: a brief flash of the pane the bell came from. Says
+    /// *which* terminal rang, which a sound cannot, and disturbs nobody.
+    #[default]
+    Visual,
+    /// A short tone, on top of the flash.
+    Audible,
 }
 
 /// What OSC 52 is allowed to do (issue 36).
@@ -911,6 +962,10 @@ fn default_restore_scrollback_lines() -> u32 {
     200
 }
 
+fn default_scrollback_lines() -> u32 {
+    10_000
+}
+
 fn default_dev_sessions_target() -> TerminalTarget {
     TerminalTarget::Window
 }
@@ -974,6 +1029,7 @@ impl Default for TerminalConfig {
             font_weight_bold: None,
             renderer: TerminalRenderer::default(),
             selection_color: None,
+            scrollback_lines: default_scrollback_lines(),
             restore_sessions: true,
             restore_scrollback: true,
             restore_scrollback_lines: default_restore_scrollback_lines(),
@@ -1020,6 +1076,8 @@ impl Default for TerminalConfig {
             mac_option_as_meta: MacOptionAsMeta::default(),
             link_tooltip: true,
             osc52: Osc52Access::default(),
+            bell: TerminalBell::default(),
+            ligatures: false,
         }
     }
 }

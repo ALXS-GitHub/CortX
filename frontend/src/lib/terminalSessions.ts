@@ -21,12 +21,13 @@ import { ImageAddon } from '@xterm/addon-image';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { ClipboardAddon, type IClipboardProvider } from '@xterm/addon-clipboard';
 import { SerializeAddon } from '@xterm/addon-serialize';
+import type { LigaturesAddon } from '@xterm/addon-ligatures';
 import '@xterm/xterm/css/xterm.css';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { toast } from 'sonner';
-import type { TerminalOsc52Access } from '@/types';
+import type { TerminalBellStyle, TerminalOsc52Access } from '@/types';
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
@@ -54,6 +55,7 @@ import {
   refreshBlocks,
 } from '@/lib/terminalBlocks';
 import { openTerminalSettingsPanel } from '@/components/terminal/settings/meta';
+import { decideCommandNotification } from '@/components/terminal/settings/notificationPolicy';
 
 /** One queued piece of output, plus the callback owed to whoever wrote it. */
 interface QueuedPart extends ImagePart {
@@ -73,6 +75,11 @@ export interface TerminalSession {
   webgl: WebglAddon | null;
   /** Canvas renderer (alternative GPU-free accelerated renderer). */
   canvas: CanvasAddon | null;
+  /** Font ligatures, when `terminal.ligatures` is on (issue 12). Needs
+   *  `term.element`, so it is only ever loaded after `open()`. */
+  ligatures: LigaturesAddon | null;
+  /** Timer that takes the visual bell's flash class back off (issue 11). */
+  bellTimer: number | null;
   disposables: IDisposable[];
   /** True while the backend scrollback snapshot is being parsed (see attach). */
   replaying: boolean;
@@ -286,6 +293,214 @@ export function terminalFontOptions(): {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Scrollback (issue 42)
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_SCROLLBACK_LINES = 10000;
+export const MIN_SCROLLBACK_LINES = 1000;
+export const MAX_SCROLLBACK_LINES = 200000;
+/**
+ * Past this, the settings card warns. Not a limit — a number worth thinking
+ * about: it is paid *per terminal*, and twenty open tabs at 50 000 lines are
+ * a million lines of grid held in memory.
+ */
+export const SCROLLBACK_WARN_LINES = 50000;
+
+/** Lines kept behind the viewport, per terminal. Clamped, never trusted raw. */
+export function terminalScrollbackLines(): number {
+  const raw = useAppStore.getState().settings?.terminal.scrollbackLines;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return DEFAULT_SCROLLBACK_LINES;
+  return Math.min(MAX_SCROLLBACK_LINES, Math.max(MIN_SCROLLBACK_LINES, Math.round(raw)));
+}
+
+// ---------------------------------------------------------------------------
+// Bell (issue 11)
+// ---------------------------------------------------------------------------
+
+export function bellStyle(): TerminalBellStyle {
+  return useAppStore.getState().settings?.terminal.bell ?? 'visual';
+}
+
+/** A second bell inside this window is the same event, not a new one. */
+const BELL_COALESCE_MS = 400;
+/**
+ * A bell that lands this soon after a command ended in the same terminal is
+ * that command's own bell — the `\a` a build prints on its last line. If the
+ * notification policy is going to announce that command anyway, the pane says
+ * nothing: one event, one signal. See the note on `handleBell`.
+ */
+const BELL_AFTER_COMMAND_MS = 2000;
+/** How long the pane stays lit. Long enough to catch the eye, short enough
+ *  not to be read as a state. Matches `--cortx-bell-flash` in the CSS. */
+const BELL_FLASH_MS = 260;
+
+let bellAudio: AudioContext | null | undefined;
+
+/**
+ * A short tone, synthesised rather than shipped: a WAV asset would have to be
+ * bundled, and no platform exposes "play the system beep" to a webview.
+ * Deliberately quiet and brief — a bell is a hint, not an alarm.
+ */
+function playBellTone() {
+  try {
+    if (bellAudio === undefined) {
+      const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      bellAudio = Ctor ? new Ctor() : null;
+    }
+    const ctx = bellAudio;
+    if (!ctx) return;
+    if (ctx.state === 'suspended') void ctx.resume();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.06, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.18);
+  } catch {
+    // No audio device, autoplay refused, context creation blocked: a bell is
+    // never worth an error.
+    bellAudio = null;
+  }
+}
+
+/** Epoch ms of the last bell honoured, per terminal. */
+const lastBellAt = new Map<string, number>();
+
+/**
+ * `BEL` (`0x07`) — until now CortX did nothing at all with it, so a build that
+ * ended on a bell produced no sign of any kind (issue 11).
+ *
+ * **Why this never turns into a toast or a desktop notification.** Those two
+ * channels already belong to `notificationPolicy`, which fires on `OSC 133;D`
+ * — the end of a command. A build that fails *and* rings would then announce
+ * itself twice for one event. So the bell is confined to the pane it came
+ * from (a flash, plus a tone at `audible`), which is a channel the policy
+ * never uses; and on top of that, a bell arriving in the wake of a command
+ * the policy is about to report is dropped outright.
+ *
+ * The flash is also the more useful half: it says *which* pane rang, which a
+ * sound cannot.
+ */
+function handleBell(session: TerminalSession) {
+  // A restored snapshot is replayed byte for byte, bells included.
+  if (session.replaying) return;
+  const style = bellStyle();
+  if (style === 'off') return;
+
+  const now = Date.now();
+  // `printf '\a\a\a'` is one bell, not three.
+  const previous = lastBellAt.get(session.id);
+  if (previous !== undefined && now - previous < BELL_COALESCE_MS) return;
+
+  if (bellIsCommandNotification(session.id, now)) return;
+  lastBellAt.set(session.id, now);
+
+  const el = session.container;
+  if (session.bellTimer !== null) window.clearTimeout(session.bellTimer);
+  // Off then on, so a second bell restarts the animation instead of landing
+  // mid-fade and being invisible.
+  el.classList.remove('cortx-bell');
+  void el.offsetWidth;
+  el.classList.add('cortx-bell');
+  session.bellTimer = window.setTimeout(() => {
+    el.classList.remove('cortx-bell');
+    session.bellTimer = null;
+  }, BELL_FLASH_MS);
+
+  if (style === 'audible') playBellTone();
+}
+
+/**
+ * True when this bell is the tail of a command the notification policy is
+ * going to report on its own. Exactly the same decision the policy makes, on
+ * the same facts, so nothing is suppressed that would not have been announced.
+ */
+function bellIsCommandNotification(id: string, now: number): boolean {
+  try {
+    const store = useAppStore.getState();
+    const state = store.terminalStates.get(id);
+    const finishedAt = state?.lastFinishedAt ?? null;
+    if (!finishedAt || now - finishedAt > BELL_AFTER_COMMAND_MS) return false;
+    return (
+      decideCommandNotification(store.settings?.terminal, {
+        command: state?.lastCommand ?? null,
+        exitCode: state?.lastExitCode ?? null,
+        durationMs: state?.lastDurationMs ?? 0,
+        inView: store.isTerminalInView(id),
+        windowFocused: typeof document === 'undefined' || document.hasFocus(),
+      }) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ligatures (issue 12)
+// ---------------------------------------------------------------------------
+
+export function ligaturesEnabled(): boolean {
+  return useAppStore.getState().settings?.terminal.ligatures === true;
+}
+
+/**
+ * Load or unload `@xterm/addon-ligatures` to match the setting.
+ *
+ * Three facts about the installed version (0.10.0) that decide the shape of
+ * this:
+ *
+ *  - `activate()` throws unless `term.element` exists, so it can only run
+ *    once the session has been opened — never from `createSession`.
+ *  - it sets `font-feature-settings` on `term.element` and registers a
+ *    character joiner. The joiner is honoured by all three renderers, but the
+ *    GPU one bakes the font features into its texture atlas when it starts,
+ *    so it has to be reloaded *after* the addon or the atlas keeps the
+ *    unligated glyphs. Hence the renderer reload below.
+ *  - it bundles a whole OpenType parser (~200 KB) for the fonts it can read
+ *    through the browser's local-font API, and the setting is off by default.
+ *    So it is imported dynamically: nobody pays to parse it until they ask
+ *    for ligatures.
+ */
+async function applyLigatures(session: TerminalSession) {
+  if (!session.opened) return;
+  const wanted = ligaturesEnabled();
+  if (wanted === !!session.ligatures) return;
+  if (!wanted) {
+    session.ligatures?.dispose();
+    session.ligatures = null;
+  } else {
+    try {
+      const { LigaturesAddon } = await import('@xterm/addon-ligatures');
+      // Switched off again, session gone, or another call got there first
+      // while the chunk was loading.
+      if (!ligaturesEnabled() || !sessions.has(session.id) || !session.opened || session.ligatures) return;
+      const addon = new LigaturesAddon();
+      session.term.loadAddon(addon);
+      session.ligatures = addon;
+    } catch (err) {
+      console.warn('Ligatures unavailable:', err);
+      session.ligatures = null;
+      return;
+    }
+  }
+  // Rebuild the accelerated renderer against the new font features.
+  if (session.webgl) {
+    session.webgl.dispose();
+    session.webgl = null;
+  }
+  if (session.canvas) {
+    session.canvas.dispose();
+    session.canvas = null;
+  }
+  applyRenderer(session);
+}
+
 /**
  * Default line height per renderer. The GPU renderer redraws box / powerline
  * glyphs to the cell, so it tolerates a roomier line; the browser renderer
@@ -446,6 +661,8 @@ function ensureSettingsSubscription() {
   let lastBlocks = blockSettingsKey();
   let lastMacOption = macOptionIsMetaOption();
   let lastOsc52 = osc52Access();
+  let lastScrollback = terminalScrollbackLines();
+  let lastLigatures = ligaturesEnabled();
   useAppStore.subscribe(() => {
     const font = terminalFontOptions();
     const fontKey = JSON.stringify(font);
@@ -511,6 +728,21 @@ function ensureSettingsSubscription() {
     if (osc52 !== lastOsc52) {
       lastOsc52 = osc52;
       for (const s of sessions.values()) attachOsc52(s);
+    }
+    // Issue 42: xterm takes `scrollback` live and trims the buffer on the
+    // spot when it shrinks — which also drops the block markers past the new
+    // limit, exactly as the settings card warns.
+    const scrollback = terminalScrollbackLines();
+    if (scrollback !== lastScrollback) {
+      lastScrollback = scrollback;
+      for (const s of sessions.values()) s.term.options.scrollback = scrollback;
+    }
+    // Issue 12: only the sessions already opened can load the addon; the
+    // others pick it up in `mountTerminal`.
+    const ligatures = ligaturesEnabled();
+    if (ligatures !== lastLigatures) {
+      lastLigatures = ligatures;
+      for (const s of sessions.values()) void applyLigatures(s);
     }
   });
 }
@@ -735,7 +967,7 @@ function createSession(id: string): TerminalSession {
     letterSpacing: font.letterSpacing ?? DEFAULT_LETTER_SPACING,
     fontWeight: font.fontWeight,
     fontWeightBold: font.fontWeightBold,
-    scrollback: 10000,
+    scrollback: terminalScrollbackLines(),
     theme: buildTerminalTheme(),
     // ⌥ on macOS: off by default so the ordinary ⌥ layer of a French,
     // Swiss or AZERTY keyboard ([ ] { } | @) still types characters. The
@@ -790,6 +1022,8 @@ function createSession(id: string): TerminalSession {
     attachToken: null,
     webgl: null,
     canvas: null,
+    ligatures: null,
+    bellTimer: null,
     disposables: [],
     replaying: false,
     images: new TerminalImageFilter({
@@ -827,6 +1061,10 @@ function createSession(id: string): TerminalSession {
       pushTerminalSize(session);
     })
   );
+
+  // `BEL` (issue 11): a flash of the pane, and a tone at `audible`. Never a
+  // toast — see `handleBell`.
+  session.disposables.push(term.onBell(() => handleBell(session)));
 
   // Copy / paste conventions (Windows Terminal style): Ctrl+C with a selection
   // copies instead of interrupting (unless copy on select already did it);
@@ -1176,6 +1414,9 @@ export function mountTerminal(id: string, parent: HTMLElement): TerminalSession 
   if (!session.opened) {
     session.term.open(session.container);
     session.opened = true;
+    // Issue 12: needs `term.element`, and has to come before the accelerated
+    // renderer so the texture atlas is built with the font features on.
+    void applyLigatures(session);
     // Ticket #15. Both need `term.element`, so they can only start once xterm
     // has opened; both are inert until their setting is switched on, and both
     // live on the session container, which is what gets re-parented between
@@ -1304,8 +1545,13 @@ export function disposeTerminal(id: string) {
   session.osc52?.dispose();
   session.osc52 = null;
   osc52Notified.delete(id);
+  if (session.bellTimer !== null) window.clearTimeout(session.bellTimer);
+  session.bellTimer = null;
+  lastBellAt.delete(id);
   session.webgl?.dispose();
   session.canvas?.dispose();
+  session.ligatures?.dispose();
+  session.ligatures = null;
   session.term.dispose();
   session.container.remove();
 }

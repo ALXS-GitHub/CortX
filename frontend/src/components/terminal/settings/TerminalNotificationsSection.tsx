@@ -24,8 +24,9 @@ import {
   resolveNotifyStyle,
   resolveNotifyWhen,
 } from './notificationPolicy';
+import { BELL_OPTIONS, resolveBellStyle } from './meta';
 import { useTerminalSettings } from './useTerminalSettings';
-import type { TerminalNotifyStyle, TerminalNotifyWhen } from '@/types';
+import type { TerminalBellStyle, TerminalNotifyStyle, TerminalNotifyWhen } from '@/types';
 
 export function TerminalNotificationsSection() {
   const { terminal, patch } = useTerminalSettings();
@@ -43,8 +44,10 @@ export function TerminalNotificationsSection() {
   const [mutedText, setMutedText] = useState('');
   const [mutedFocused, setMutedFocused] = useState(false);
 
+  const bell = resolveBellStyle(terminal);
   const whenHint = NOTIFY_WHEN_OPTIONS.find((o) => o.value === when)?.hint;
   const styleHint = NOTIFY_STYLE_OPTIONS.find((o) => o.value === style)?.hint;
+  const bellHint = BELL_OPTIONS.find((o) => o.value === bell)?.hint;
   const isDefaultMuted = formatMutedCommands([...DEFAULT_MUTED_COMMANDS]) === storedMuted;
 
   return (
@@ -156,6 +159,28 @@ export function TerminalNotificationsSection() {
           Reset the list
         </Button>
       )}
+
+      <Field
+        label="When a program rings the bell"
+        hint={
+          <>
+            {bellHint} A <Code>BEL</Code> is a byte a program sends to ask for attention — the end of a long build, a
+            shell completion that found nothing. It is a different event from the rules above, which fire when a{' '}
+            <em>command</em> ends, so the two are kept on separate channels: the bell never becomes a toast or a desktop
+            notification, and a bell that arrives in the wake of a command already being reported is dropped, so one
+            event is never signalled twice.
+          </>
+        }
+      >
+        <div className={!terminal ? 'pointer-events-none opacity-50' : undefined}>
+          <Segmented<TerminalBellStyle>
+            value={bell}
+            onChange={(v) => patch({ bell: v })}
+            options={BELL_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            size="sm"
+          />
+        </div>
+      </Field>
 
       <p className="text-xs text-faint">
         CortX cannot tell that a program is waiting for a password: shell integration reports command boundaries, not what

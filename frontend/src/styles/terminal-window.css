@@ -555,3 +555,39 @@
 :root.terminal-window [data-slot="tooltip-content"] {
   color: var(--terminal-window-solid, var(--card));
 }
+
+/* ------------------------------------------------------------------
+   Visual bell (issue 11)
+
+   `BEL` used to do nothing at all, so a build that ended on a bell left no
+   trace of any kind. The pane it came from lights up for a quarter of a
+   second — which says *which* terminal rang, something a tone cannot.
+
+   The wash is the terminal's own foreground at a low percentage, never the
+   accent and never the app's chrome: on a wallpaper theme an accent-derived
+   colour is a stain and a strong `--foreground` mix goes pink (see
+   plans/warp_reference.md §"Rappels de tokens"). Above the input editor (5)
+   so the flash is not hidden behind it, and inert to the mouse.
+   ------------------------------------------------------------------ */
+.cortx-xterm.cortx-bell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--terminal-fg, var(--foreground)) 16%, transparent);
+  animation: cortx-bell-flash 260ms ease-out forwards;
+}
+
+@keyframes cortx-bell-flash {
+  0% {
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

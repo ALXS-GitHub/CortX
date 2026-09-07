@@ -3,7 +3,7 @@
  * out of the `.tsx` files so each of those only exports components (fast
  * refresh).
  */
-import type { TerminalPreset } from '@/types';
+import type { TerminalBellStyle, TerminalConfig, TerminalPreset } from '@/types';
 
 export type Platform = 'windows' | 'macos' | 'linux';
 
@@ -92,14 +92,52 @@ export const TERMINAL_PRESETS: {
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Bell (issue 11)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a `BEL` (`0x07`) does. Kept here rather than in `notificationPolicy`
+ * because it is deliberately *not* part of that policy: `BEL` is a byte a
+ * program sends to ask for attention, `OSC 133;D` is the shell reporting that
+ * a command ended. Two events, so two channels — the bell never becomes a
+ * toast or a desktop notification, only a flash of the pane it came from and,
+ * at `audible`, a short tone. `lib/terminalSessions` closes the last gap by
+ * dropping a bell that lands in the wake of a command the notification policy
+ * is already going to announce, so a build that fails *and* rings is signalled
+ * once.
+ *
+ * `visual` is the default: better than the nothing CortX did before, and it
+ * surprises nobody.
+ */
+export const DEFAULT_BELL: TerminalBellStyle = 'visual';
+
+export const BELL_OPTIONS: { value: TerminalBellStyle; label: string; hint: string }[] = [
+  { value: 'off', label: 'Ignore it', hint: 'A bell does nothing, as it did before this setting existed.' },
+  {
+    value: 'visual',
+    label: 'Flash the pane',
+    hint: 'The default: the terminal that rang lights up for a quarter of a second — which says which one it was, something a sound cannot.',
+  },
+  {
+    value: 'audible',
+    label: 'Flash and beep',
+    hint: 'The flash, plus a short tone. Audible from another window; heard for every bell, wherever it came from.',
+  },
+];
+
+export function resolveBellStyle(cfg?: Partial<TerminalConfig> | null): TerminalBellStyle {
+  return cfg?.bell ?? DEFAULT_BELL;
+}
+
 /** Search keywords of each terminal settings card, shared by both surfaces. */
 export const TERMINAL_SECTION_KEYWORDS = {
   external:
     'terminal application external windows terminal powershell cmd warp custom path arguments cortx terminal preset',
   integrated:
-    'integrated terminal shell integration inline suggestions ghost font size line height weight letter spacing selection renderer tabs placement rail restore sessions scrollback close busy open in dock window processes dev sessions dock theme file path links clickable paths kitty graphics images tab display number cwd agent completion menu flags subcommands git branches npm scripts input line position bottom pinned universal input editor blocks dividers gutter fold prompt navigation suggestions from output confidence ghost text smooth scrolling block spacing comfortable failed tint wash link tooltip hover target option meta alt key macos word keys dead keys azerty swiss font family missing not installed nerd font mono osc52 osc 52 clipboard access escape sequence tmux neovim yank write only read write deny security ssh',
+    'integrated terminal shell integration inline suggestions ghost font size line height weight letter spacing selection renderer tabs placement rail restore sessions scrollback close busy open in dock window processes dev sessions dock theme file path links clickable paths kitty graphics images tab display number cwd agent completion menu flags subcommands git branches npm scripts input line position bottom pinned universal input editor blocks dividers gutter fold prompt navigation suggestions from output confidence ghost text smooth scrolling block spacing comfortable failed tint wash link tooltip hover target option meta alt key macos word keys dead keys azerty swiss font family missing not installed nerd font mono osc52 osc 52 clipboard access escape sequence tmux neovim yank write only read write deny security ssh scrollback lines kept buffer memory history block navigation trim markers ligatures font ligature calt fira code cascadia jetbrains arrow glyph',
   notifications:
-    'terminal notifications notify toast system desktop long command failed exit code muted commands claude codex vim ssh hidden background password prompt',
+    'terminal notifications notify toast system desktop long command failed exit code muted commands claude codex vim ssh hidden background password prompt bell BEL 0x07 visual flash audible beep sound ring attention',
   appearance:
     'terminal appearance theme picker wallpaper opacity blur dim cursor padding window opacity effect acrylic mica vibrancy chrome',
   shortcuts: 'terminal shortcuts keybindings keyboard combo copy on select shift enter smooth scroll keys selection',

@@ -141,11 +141,17 @@ export interface TerminalConfig {
   renderer?: 'dom' | 'webgl' | 'canvas';
   /** Selection colour (any CSS colour). Undefined = the theme's. */
   selectionColor?: string;
+  /** Lines of output kept behind the viewport, per terminal (1 000–200 000).
+   *  Default 10 000. Also caps how far back the command blocks stay
+   *  navigable: trimming the scrollback destroys the markers the blocks are
+   *  built on. Applies to the terminals already open. */
+  scrollbackLines?: number;
   /** Reopen the Terminal window's tabs on start (shells in their last cwd, nothing re-run). Default true. */
   restoreSessions?: boolean;
   /** Seed restored shells with the tail of their previous scrollback. Default true. */
   restoreScrollback?: boolean;
-  /** Lines kept per terminal. Default 200. */
+  /** Lines *replayed* into a restored shell on start (not the same thing as
+   *  `scrollbackLines`, which is how much a live terminal keeps). Default 200. */
   restoreScrollbackLines?: number;
   /** Where a started service / script shows up. Default dock. */
   openProcessesIn?: TerminalTargetSurface;
@@ -261,7 +267,23 @@ export interface TerminalConfig {
   /** What a program running in the terminal may do with the system clipboard
    *  through the OSC 52 escape sequence. Default `deny` (issue 36). */
   osc52?: TerminalOsc52Access;
+  /** What a `BEL` (`0x07`) does. Default `visual` (issue 11). */
+  bell?: TerminalBellStyle;
+  /** Join `!=`, `=>`, `->` into the ligatures the font draws for them. Off by
+   *  default: the joiner runs over every rendered row. Default false. */
+  ligatures?: boolean;
 }
+
+/**
+ * What a `BEL` byte does (issue 11). Warp has a whole `audible_bell` module;
+ * this is the same three levels every terminal offers.
+ *
+ * The signal is deliberately confined to the pane — a flash, or a short tone
+ * — and never reaches the toast or the desktop notification: those two
+ * channels belong to the command-finished policy
+ * (`settings/notificationPolicy.ts`), and one event must not arrive twice.
+ */
+export type TerminalBellStyle = 'off' | 'visual' | 'audible';
 
 /**
  * What OSC 52 is allowed to do (issue 36) — Warp's

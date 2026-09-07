@@ -22,7 +22,13 @@ import { Group, NumberField, TextField } from './controls';
 import { useTerminalSettings } from './useTerminalSettings';
 import { getPlatform, TERMINAL_FONT_SUGGESTIONS } from './meta';
 import { DEFAULT_MAC_OPTION_AS_META, DEFAULT_SMOOTH_SCROLL_DURATION } from '@/lib/terminalKeys';
-import { fontFamilyResolves } from '@/lib/terminalSessions';
+import {
+  DEFAULT_SCROLLBACK_LINES,
+  MAX_SCROLLBACK_LINES,
+  MIN_SCROLLBACK_LINES,
+  SCROLLBACK_WARN_LINES,
+  fontFamilyResolves,
+} from '@/lib/terminalSessions';
 import { resolveTabDisplay } from '@/components/terminal/model';
 import type {
   MacOptionAsMeta,
@@ -50,6 +56,7 @@ export function IntegratedTerminalSection() {
   const renderer = terminal?.renderer ?? 'canvas';
   const restoreSessions = terminal?.restoreSessions ?? true;
   const restoreScrollback = terminal?.restoreScrollback ?? true;
+  const scrollbackLines = terminal?.scrollbackLines ?? DEFAULT_SCROLLBACK_LINES;
   const selectionColor = terminal?.selectionColor ?? '';
   const blocks = terminal?.blocks ?? true;
   const suggestions = terminal?.inlineSuggestions ?? true;
@@ -240,6 +247,27 @@ export function IntegratedTerminalSection() {
             </SelectContent>
           </Select>
         </Field>
+
+        <ToggleField
+          id="terminal-ligatures"
+          label="Font ligatures"
+          hint={
+            <>
+              Draws <Code>!=</Code>, <Code>=&gt;</Code> and <Code>-&gt;</Code> as the single glyph the font has for them,
+              in families that carry one — JetBrains Mono (bundled), Fira Code, Cascadia Code, Iosevka. Off by default:
+              it registers a joiner that inspects every rendered row, and a font without ligatures gains nothing. All
+              three renderers above honour it; on the GPU one the glyph atlas is rebuilt when you switch this, so the
+              change is visible immediately. Applies to the terminals already open.
+            </>
+          }
+        >
+          <Switch
+            id="terminal-ligatures"
+            checked={terminal?.ligatures ?? false}
+            onCheckedChange={(v) => patch({ ligatures: v })}
+            disabled={!terminal}
+          />
+        </ToggleField>
 
         <ToggleField
           id="dock-terminal-theme"
@@ -546,6 +574,36 @@ export function IntegratedTerminalSection() {
       </Group>
 
       <Group title="Output, links and images">
+        <NumberField
+          id="terminal-scrollback-lines"
+          label="Scrollback — lines kept per terminal"
+          hint={
+            <>
+              How far back you can scroll in a live terminal. It is paid <strong>per terminal</strong>: twenty open tabs
+              hold twenty buffers, so a large number is a large number twenty times over. The part that is not obvious:{' '}
+              <strong>this is also how far back the command blocks reach</strong> — trimming the scrollback destroys the{' '}
+              <Code>OSC 133</Code> markers a block is built on, so a block that falls off the top stops being navigable
+              with <span className="kbd">Ctrl ↑</span> / <span className="kbd">Ctrl ↓</span>, foldable or re-runnable.
+              Applies to the terminals already open; lowering it trims them at once. Nothing to do with{' '}
+              <em>Lines replayed on start</em> under Sessions, which only seeds a restored tab.
+            </>
+          }
+          value={scrollbackLines}
+          min={MIN_SCROLLBACK_LINES}
+          max={MAX_SCROLLBACK_LINES}
+          step={1000}
+          className="w-32"
+          onCommit={(v) => patch({ scrollbackLines: v ?? DEFAULT_SCROLLBACK_LINES })}
+          disabled={!terminal}
+        />
+        {scrollbackLines > SCROLLBACK_WARN_LINES && (
+          <p className="text-xs text-st-progress">
+            Above {SCROLLBACK_WARN_LINES.toLocaleString('en-US')} lines the memory starts to show — every cell of every
+            row is held, in every open terminal at once. Worth it for a build log you really do scroll back through;
+            expensive for twenty idle shells.
+          </p>
+        )}
+
         <ToggleField
           id="smooth-scroll"
           label="Smooth scrolling"
@@ -777,7 +835,8 @@ export function IntegratedTerminalSection() {
 
         <NumberField
           id="restore-scrollback-lines"
-          label={<span className="text-xs text-muted-foreground">Lines</span>}
+          label={<span className="text-xs text-muted-foreground">Lines replayed on start</span>}
+          hint="A one-off seed of the previous session, written into the tab as it reopens. Not the size of the live buffer — that is Scrollback, under “Output, links and images”."
           value={terminal?.restoreScrollbackLines ?? 200}
           min={20}
           max={2000}
