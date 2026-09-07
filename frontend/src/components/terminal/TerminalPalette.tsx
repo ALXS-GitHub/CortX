@@ -38,7 +38,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { showMainWindow } from '@/lib/tauri';
 import { collectLeaves, projectIdOfWorkspace } from '@/lib/terminalLayout';
-import { comboLabelFor, type KeybindingActionId } from '@/lib/keybindings';
+import { comboLabelFor, tabShortcutNumber, type KeybindingActionId } from '@/lib/keybindings';
 import { openThemePicker, runAction, sendLeafToDock, terminalCwd } from './actions';
 import { openTerminalSettingsPanel } from './settings/meta';
 import { activeLeafOf, tabTitle, useItemMap, visibleTabOrder } from './model';
@@ -220,7 +220,10 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
               <CommandGroup heading="Tabs">
                 {orderedTabs.map((tab, i) => {
                   const n = i + 1;
-                  const actionId = n <= 9 ? (`tab.goto${n}` as KeybindingActionId) : null;
+                  // Past nine tabs Ctrl+9 means "the last tab", so only the
+                  // tabs a digit really reaches carry a hint (ticket #34).
+                  const shortcut = tabShortcutNumber(n, orderedTabs.length);
+                  const actionId = shortcut ? (`tab.goto${shortcut}` as KeybindingActionId) : null;
                   return (
                     <CommandItem
                       key={tab.id}

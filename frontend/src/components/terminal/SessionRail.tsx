@@ -20,7 +20,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { RAIL_WIDTH_COLLAPSED, useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
 import { collectLeaves, type TerminalTab } from '@/lib/terminalLayout';
-import { comboLabelFor } from '@/lib/keybindings';
+import { comboLabelFor, tabShortcutNumber } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { closeTabAndRelease, closeWorkspaceTabs, openNewTerminal } from './actions';
@@ -95,6 +95,7 @@ function SessionRow({
   items,
   active,
   index,
+  total,
   display,
   onSelect,
   onClose,
@@ -102,7 +103,10 @@ function SessionRow({
   tab: TerminalTab;
   items: ItemMap;
   active: boolean;
+  /** 1-based position across the whole rail. */
   index: number;
+  /** How many tabs the rail holds — Ctrl+9 means "the last one" of them. */
+  total: number;
   display: ResolvedTabDisplay;
   onSelect: () => void;
   onClose: () => void;
@@ -124,6 +128,7 @@ function SessionRow({
   const panes = usePaneEntries(tab, items, display.agent);
   const selectPane = useSelectPane();
   const grouped = panes.length > 1;
+  const shortcutNumber = tabShortcutNumber(index, total);
   // A group header names the tab; a path would be cut mid-word here.
   const headline = grouped ? groupHeadline(title) : title;
   // Under a group header, the active pane's directory only repeats a row
@@ -227,7 +232,9 @@ function SessionRow({
             </span>
           )}
           {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
-          {display.index !== 'never' && index <= 9 && !rename.editing && (
+          {/* Only the rows a Ctrl+N actually reaches get a number (ticket
+              #34): 1…8, then 9 on the last one, where Ctrl+9 goes. */}
+          {display.index !== 'never' && shortcutNumber !== null && !rename.editing && (
             <span
               className={cn(
                 'pointer-events-none shrink-0 font-mono text-[10px] tabular-nums text-faint transition-opacity',
@@ -235,7 +242,7 @@ function SessionRow({
               )}
               aria-hidden
             >
-              {index}
+              {shortcutNumber}
             </span>
           )}
           {/* Grouped: every pane row carries its own status; the tab-wide one
@@ -282,6 +289,7 @@ function SessionGroupRows({
   items,
   activeTabId,
   firstIndex,
+  total,
   display,
   onSelect,
   onReorder,
@@ -291,6 +299,8 @@ function SessionGroupRows({
   activeTabId: string | null;
   /** Position of the group's first tab in the whole rail (Ctrl+N numbering). */
   firstIndex: number;
+  /** Tabs in the whole rail, so the last one can wear the 9. */
+  total: number;
   display: ResolvedTabDisplay;
   onSelect: (tabId: string) => void;
   onReorder: (workspaceId: string, orderedIds: string[]) => void;
@@ -347,6 +357,7 @@ function SessionGroupRows({
               items={items}
               active={tab.id === activeTabId}
               index={firstIndex + i}
+              total={total}
               display={display}
               onSelect={() => onSelect(tab.id)}
               onClose={() => closeTabAndRelease(tab.id)}
@@ -614,6 +625,7 @@ export function SessionRail() {
                 items={items}
                 activeTabId={activeTabId}
                 firstIndex={groupOffsets[gi] ?? 1}
+                total={scopedTabs.length}
                 display={display}
                 onSelect={setActiveTab}
                 onReorder={reorderGroup}

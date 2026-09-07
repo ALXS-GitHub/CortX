@@ -268,6 +268,31 @@ export function formatCombo(combo: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Tab numbering
+// ---------------------------------------------------------------------------
+
+/** The last tab number a Ctrl+N shortcut can address: Ctrl+9 is "the last tab". */
+export const TAB_SHORTCUT_LAST = 9;
+
+/**
+ * The Ctrl+N number that reaches the tab sitting at `index` (1-based) in a
+ * strip of `total` tabs, or null when no shortcut reaches it (ticket #34).
+ *
+ * There are only nine digits, so past nine tabs the ninth digit has to mean
+ * something other than "the ninth tab" — every browser, VS Code, Warp and
+ * iTerm2 make it "the last tab", and `gotoTab` already does. What was missing
+ * is the strip saying so: it numbered its first nine rows 1…9, which made
+ * Ctrl+9 look like it would land on the ninth of twelve tabs. With more than
+ * nine tabs the badges now stop at 8 and the 9 moves to the end, where the
+ * key actually goes; the tabs in between are simply not reachable by number.
+ */
+export function tabShortcutNumber(index: number, total: number): number | null {
+  if (index < 1 || index > total) return null;
+  if (index === total) return Math.min(total, TAB_SHORTCUT_LAST);
+  return index < TAB_SHORTCUT_LAST ? index : null;
+}
+
+// ---------------------------------------------------------------------------
 // Resolution
 // ---------------------------------------------------------------------------
 

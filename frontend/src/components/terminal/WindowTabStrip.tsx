@@ -18,7 +18,7 @@ import { AgentProviderIcon } from '@/components/agents/AgentProviderIcon';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { collectLeaves, isAgentsScope, type TerminalTab } from '@/lib/terminalLayout';
-import { comboLabelFor } from '@/lib/keybindings';
+import { comboLabelFor, tabShortcutNumber } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { closeTabAndRelease, openNewTerminal } from './actions';
@@ -48,8 +48,10 @@ interface WindowTabProps {
   items: ItemMap;
   projects: Project[];
   isActive: boolean;
-  /** 1-based position in the strip (Ctrl+N jumps there); shown per `display.index`. */
+  /** 1-based position in the strip. */
   index: number;
+  /** How many tabs the strip holds — Ctrl+9 means "the last one" of them. */
+  total: number;
   /** Show the project chip (scopes that mix projects). */
   showProject: boolean;
   display: ResolvedTabDisplay;
@@ -69,7 +71,7 @@ interface WindowTabProps {
  * reorder and detach still act on the tab, which is what the layout document
  * knows.
  */
-function WindowTab({ tab, items, projects, isActive, index, showProject, display, onSelect, onClose }: WindowTabProps) {
+function WindowTab({ tab, items, projects, isActive, index, total, showProject, display, onSelect, onClose }: WindowTabProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
 
@@ -88,7 +90,10 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, display
   const headline = grouped ? groupHeadline(title) : title;
 
   const accent = tab.color ?? undefined;
-  const showIndex = display.index !== 'never' && index <= 9 && !rename.editing;
+  // Only the tabs a Ctrl+N actually reaches get a number (ticket #34): 1…8,
+  // then 9 on the last one, which is where Ctrl+9 goes.
+  const shortcutNumber = tabShortcutNumber(index, total);
+  const showIndex = display.index !== 'never' && shortcutNumber !== null && !rename.editing;
 
   return (
     <div
@@ -191,7 +196,7 @@ function WindowTab({ tab, items, projects, isActive, index, showProject, display
           )}
           aria-hidden
         >
-          {index}
+          {shortcutNumber}
         </span>
       )}
       <button
@@ -289,6 +294,7 @@ export function WindowTabStrip() {
                 projects={projects}
                 isActive={tab.id === win.activeTabId}
                 index={i + 1}
+                total={tabs.length}
                 showProject={win.scope === 'global' || isAgentsScope(win.scope)}
                 display={display}
                 onSelect={() => setActiveTab(tab.id)}
