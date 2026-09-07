@@ -63,6 +63,10 @@ export const KEYBINDING_ACTIONS = [
   { id: 'terminal.openCwd', label: 'Open working directory in Explorer', category: 'Terminal', defaults: [] },
   // --- Window
   { id: 'window.palette', label: 'Command palette', category: 'Window', defaults: ['ctrl+k', 'ctrl+shift+p'] },
+  // Ctrl+Shift+H, not Ctrl+R: a bare Ctrl+R is the shell's own reverse search
+  // (and is what the input editor will bind when its history palette lands —
+  // this same view, opened to pick a command). Shift keeps it out of the PTY.
+  { id: 'window.history', label: 'Command history', category: 'Window', defaults: ['ctrl+shift+h'] },
   { id: 'window.rail', label: 'Toggle the sessions rail', category: 'Window', defaults: ['ctrl+b'] },
   { id: 'window.scopeGlobal', label: 'Scope: global', category: 'Window', defaults: [] },
 ] as const satisfies readonly { id: string; label: string; category: KeybindingCategory; defaults: readonly string[] }[];

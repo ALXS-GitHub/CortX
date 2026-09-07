@@ -43,6 +43,8 @@ import { openThemePicker, runAction, sendLeafToDock, terminalCwd } from './actio
 import { openTerminalSettingsPanel } from './settings/meta';
 import { activeLeafOf, tabTitle, useItemMap, visibleTabOrder } from './model';
 import { SaveLaunchConfigDialog } from './launch/SaveLaunchConfigDialog';
+import { CommandHistoryView } from './history/CommandHistoryView';
+import { openCommandHistory } from './history/openHistory';
 import { launchProjectName, runLaunchConfigWithToast, sortLaunchConfigs, useLaunchConfigs } from './launch/useLaunchConfigs';
 
 interface TerminalPaletteProps {
@@ -207,6 +209,25 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
               Reset zoom
               <Hint>{combo('terminal.zoomReset')}</Hint>
             </CommandItem>
+            <CommandItem
+              value="command history search past commands rerun failures"
+              onSelect={() =>
+                run(() =>
+                  // After the dialog's exit animation, like find and rename:
+                  // two dialogs must not fight over the keyboard focus.
+                  // Scoped to a project, the history opens on that project;
+                  // in Global scope it opens on everything, like the window.
+                  void setTimeout(() => openCommandHistory({ projectId: scopedProjectId ?? undefined }), 300)
+                )
+              }
+            >
+              <History />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span>Command history…</span>
+                <span className="truncate text-xs text-faint">Search, filter and re-run what has run here before</span>
+              </div>
+              <Hint>{combo('window.history')}</Hint>
+            </CommandItem>
             <CommandItem value="toggle sessions rail sidebar" onSelect={() => run(() => void runAction('window.rail'))}>
               <PanelLeft />
               Toggle the sessions rail
@@ -301,6 +322,14 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
         </CommandList>
       </CommandDialog>
       <SaveLaunchConfigDialog open={saveOpen} onOpenChange={setSaveOpen} />
+      {/*
+        The history view (#39) is mounted here rather than in the window root
+        because it is opened the same way the palette is — from a keybinding,
+        from this list, and later from the input editor — and because a
+        surface nobody has opened must cost nothing: it renders null until an
+        `openCommandHistory` event arrives.
+      */}
+      <CommandHistoryView />
     </>
   );
 }

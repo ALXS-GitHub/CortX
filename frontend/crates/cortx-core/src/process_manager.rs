@@ -1432,6 +1432,14 @@ fn spawn_pty_reader(
                     for event in scanner.feed(chunk) {
                         let update = tracker.apply(event, now_ms());
                         if let Some(done) = update.finished {
+                            // The branch the command ran on (#39). Read from
+                            // `.git/HEAD` here, at the end of the command, so
+                            // it records what was actually checked out while
+                            // it ran — a few filesystem lookups, no `git`.
+                            let git_head = done
+                                .cwd
+                                .as_deref()
+                                .and_then(|c| crate::terminal::history::git_head(Path::new(c)));
                             tracking.history.append(&CommandRecord {
                                 ts: done.finished_at,
                                 terminal_id: terminal_id.clone(),
@@ -1443,6 +1451,7 @@ fn spawn_pty_reader(
                                 command: done.command,
                                 exit_code: done.exit_code,
                                 duration_ms: done.duration_ms,
+                                git_head,
                             });
                         }
                         if update.changed {

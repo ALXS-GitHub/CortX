@@ -760,9 +760,79 @@ export async function getTerminalStates(): Promise<TerminalShellState[]> {
   return invoke('get_terminal_states');
 }
 
-/** Most recent finished commands across all terminals, newest first. */
+/**
+ * One line of `runtime/command-history.jsonl`, with the git ref the command
+ * ran on (`cortx_core::terminal::history::CommandRecord`). Older lines, and
+ * commands run outside a repository, simply have no `gitHead`.
+ *
+ * Declared here rather than in `types/index.ts` so the history view (#39) can
+ * read the field the backend now writes; the base shape stays the shared
+ * `CommandRecord`.
+ */
+export interface HistoryRecord extends CommandRecord {
+  /** Branch name, or the short commit id when HEAD was detached. */
+  gitHead?: string;
+}
+
+/** One value of a history filter dropdown, with how many records carry it. */
+export interface HistoryFacet {
+  value: string;
+  count: number;
+}
+
+/**
+ * Filters of the history view. Everything is optional; `{}` means "the whole
+ * file, newest first". Mirrors `cortx_core::terminal::history::HistoryQuery`.
+ */
+export interface HistoryQuery {
+  /** Words that must all appear in the command, in any order, any case. */
+  search?: string;
+  projectId?: string;
+  /** Exact working directory (compared case-insensitively on Windows). */
+  cwd?: string;
+  terminalId?: string;
+  /** Only commands that exited non-zero (an unknown code is not a failure). */
+  failuresOnly?: boolean;
+  /** Only commands that ran at least this long. */
+  minDurationMs?: number;
+  /** Only commands that finished at or after this instant. */
+  sinceMs?: number;
+  offset?: number;
+  limit?: number;
+}
+
+/** One page of `getCommandHistoryPage`. */
+export interface HistoryPage {
+  records: HistoryRecord[];
+  /** Records matching the whole query, not just this page. */
+  total: number;
+  hasMore: boolean;
+  /** Lines the file held, matched or not. */
+  scanned: number;
+  /** Projects present, ignoring the `projectId` filter. */
+  projects: HistoryFacet[];
+  /** Directories present, ignoring the `cwd` filter. */
+  cwds: HistoryFacet[];
+}
+
+/**
+ * Most recent finished commands across all terminals, newest first.
+ * Unfiltered — the history view uses `getCommandHistoryPage` instead.
+ */
 export async function getCommandHistory(limit = 200): Promise<CommandRecord[]> {
-  return invoke('get_command_history', { limit });
+  const page = await invoke<HistoryPage>('get_command_history', { limit });
+  return page.records;
+}
+
+/**
+ * One filtered, paged slice of the command history (#39).
+ *
+ * The filtering runs in Rust: the file is capped at 10 MB, and a single
+ * streamed pass returns the page, the match count and the values the filter
+ * dropdowns offer — so the view never holds the history it is searching.
+ */
+export async function getCommandHistoryPage(query: HistoryQuery): Promise<HistoryPage> {
+  return invoke('get_command_history', { query });
 }
 
 /**

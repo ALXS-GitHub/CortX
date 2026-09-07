@@ -2877,13 +2877,30 @@ pub fn get_terminal_states(state: State<AppState>) -> Vec<cortx_core::terminal::
     state.process_manager.all_terminal_states()
 }
 
-/// Most recent finished commands across all CortX terminals (newest first).
+/// Finished commands across all CortX terminals, newest first — the whole
+/// history view (#39) and the input editor's history both come through here.
+///
+/// `query` carries the filters (text, project, directory, failures only,
+/// minimum duration, paging); without one this is just "the last `limit`
+/// records", which is what the older callers ask for. The filtering happens in
+/// Rust on purpose: `command-history.jsonl` is capped at 10 MB, which is more
+/// than a webview should ever hold, and one streamed pass answers the page,
+/// the match count and the filter dropdowns at once. Runs off the UI thread —
+/// a full pass over a large file is tens of milliseconds.
 #[tauri::command]
-pub fn get_command_history(
-    state: State<AppState>,
+pub async fn get_command_history(
+    state: State<'_, AppState>,
     limit: Option<usize>,
-) -> Vec<cortx_core::terminal::CommandRecord> {
-    state.process_manager.command_history().recent(limit.unwrap_or(200))
+    query: Option<cortx_core::terminal::history::HistoryQuery>,
+) -> Result<cortx_core::terminal::history::HistoryPage, String> {
+    let history = state.process_manager.command_history().clone();
+    let mut query = query.unwrap_or_default();
+    if query.limit == 0 {
+        query.limit = limit.unwrap_or(200);
+    }
+    tauri::async_runtime::spawn_blocking(move || history.query(&query))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------

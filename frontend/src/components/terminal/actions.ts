@@ -27,6 +27,7 @@ import {
   type TerminalTab,
 } from '@/lib/terminalLayout';
 import { openTerminalWindow } from './terminalWindows';
+import { openCommandHistory } from './history/openHistory';
 
 /**
  * Imperative actions of the Terminal window. They read the stores at call
@@ -913,6 +914,10 @@ export function runAction(id: KeybindingActionId): boolean {
     }
     case 'window.palette':
       return togglePalette();
+    // The history view (#39) owns its own state; like the palette, it is
+    // asked to open by a DOM event so nothing here has to know about it.
+    case 'window.history':
+      return openCommandHistory();
     case 'window.rail':
       useTerminalWindowPrefsStore.getState().toggleRail();
       return true;

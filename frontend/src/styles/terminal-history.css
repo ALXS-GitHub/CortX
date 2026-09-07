@@ -1,0 +1,117 @@
+/*
+ * Command history view (#39) — the grid, and only the grid.
+ *
+ * Everything that can be a Halcyon utility is one (see `DESIGN.md`); what is
+ * here is the column layout, which Tailwind cannot express without repeating
+ * the same seven track sizes on the header and on every row, and the container
+ * queries that drop columns when the dialog is narrow.
+ *
+ * Colours: this view is a modal dialog — its own opaque chrome surface, laid
+ * over the terminal rather than drawn among its cells — so it uses the app's
+ * tokens like the theme picker and the terminal settings dialog do. The
+ * wallpaper of a terminal theme never shows through it, which is what makes
+ * that safe here and unsafe in the block overlay. Nothing below derives a
+ * colour from `--accent` / `--primary`, and no rule mixes `--foreground` at a
+ * high percentage: the two things that turned pink on `aespa_wda`.
+ */
+
+/*
+ * The container is the dialog itself, so the header row and the rows below it
+ * shed the same columns at the same moment. A media query would measure the
+ * window instead, and the two would drift apart.
+ */
+.cortx-history-dialog {
+  container-type: inline-size;
+  container-name: history;
+}
+
+.cortx-history-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) /* command */
+    minmax(0, 14rem) /* directory */
+    minmax(0, 8rem) /* project */
+    minmax(0, 7rem) /* branch */
+    4.5rem /* duration */
+    4.5rem /* exit code */
+    5.5rem; /* age */
+  align-items: center;
+  column-gap: 0.75rem;
+}
+
+/* Right-aligned, tabular numbers: durations and ages must line up. */
+.cortx-history-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Narrow dialog: shed the columns that repeat information the row already
+ * carries elsewhere, widest first. The command and the age never go.
+ */
+@container history (max-width: 52rem) {
+  .cortx-history-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 12rem) minmax(0, 8rem) 4.5rem 4.5rem 5.5rem;
+  }
+  .cortx-history-branch {
+    display: none;
+  }
+}
+
+@container history (max-width: 40rem) {
+  .cortx-history-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 10rem) 4.5rem 4.5rem 5.5rem;
+  }
+  .cortx-history-project {
+    display: none;
+  }
+}
+
+@container history (max-width: 30rem) {
+  .cortx-history-grid {
+    grid-template-columns: minmax(0, 1fr) 4.5rem 4.5rem 5.5rem;
+  }
+  .cortx-history-dir {
+    display: none;
+  }
+}
+
+/*
+ * The row's action bar sits over the three right-hand columns, which are the
+ * ones you stop reading the moment you reach for an action. It only appears on
+ * hover or on the selected row, so a still list stays a list of commands.
+ */
+.cortx-history-row {
+  position: relative;
+}
+
+.cortx-history-actions {
+  position: absolute;
+  top: 50%;
+  right: 0.25rem;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.5);
+  background: var(--card);
+  box-shadow: var(--shadow-soft, 0 1px 2px rgb(0 0 0 / 0.12));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 90ms ease-out;
+}
+
+.cortx-history-row:hover .cortx-history-actions,
+.cortx-history-row:focus-within .cortx-history-actions,
+.cortx-history-row[data-selected='true'] .cortx-history-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cortx-history-actions {
+    transition: none;
+  }
+}
