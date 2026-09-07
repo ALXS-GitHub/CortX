@@ -1,12 +1,11 @@
 /**
- * Tab **colour** (ticket #22) and tab **groups** — a split shown as one nested
- * card (DEV-13).
+ * Tab **colour** (ticket #22) and tab **groups** — a split shown as a couple
+ * of ordinary tabs held in one tinted box (DEV-13, revised by ticket #22).
  *
- * Why a stylesheet rather than utilities: the group is drawn with one set of
- * tints that every part of it shares (the card, the guide line, the hover, the
- * mark on the current pane). Naming them once, on the card, means the header
- * and the rows cannot drift apart — and a child only ever reads
- * `var(--tt-…)`, never a colour of its own.
+ * Why a stylesheet rather than utilities: a group is drawn with one set of
+ * tints that every part of it shares (the box, the hover, the plate under the
+ * current pane). Naming them once means the label and the rows cannot drift
+ * apart — and a child only ever reads `var(--tt-…)`, never a colour of its own.
  *
  * Two rules the tints follow:
  *
@@ -16,28 +15,28 @@
  *    that is exactly what made the old pane chips look olive over a red
  *    photo. A group tints from `--card` (the theme's own surface) so it stays
  *    the same colour family as everything else in the window.
- * 2. **Marks come from `--foreground`.** A theme's accent can be near-black
- *    (`aespa_wda` uses `#0c161f`), so an accent underline or tick would
- *    vanish. The foreground is the one colour a theme guarantees is readable
- *    against its own background.
+ * 2. **Marks come from `--foreground`, at a low percentage.** A theme's accent
+ *    can be near-black (`aespa_wda` uses `#0c161f`), so an accent plate would
+ *    vanish; and white at 34 % over a brown-red photo comes out pink. The
+ *    foreground below 25 % is the one thing that reads on every theme.
  */
 
-/* One set of tints, on the root, so the rail's vertical card, the tab strip's
-   horizontal one and the collapsed rail's pane badge all read the same
-   values — and a theme change moves all three at once. */
+/* One set of tints, on the root, so the rail's box, the tab strip's and the
+   collapsed rail's pane badge all read the same values — and a theme change
+   moves all three at once. */
 :root {
-  --tt-surface: color-mix(in srgb, var(--card) 58%, transparent);
-  --tt-surface-active: color-mix(in srgb, var(--card) 84%, transparent);
   --tt-edge: color-mix(in srgb, var(--foreground) 12%, transparent);
-  --tt-edge-active: color-mix(in srgb, var(--foreground) 22%, transparent);
-  /* The tree guide, and the tint of the framed pane icons. */
-  --tt-rule: color-mix(in srgb, var(--foreground) 18%, transparent);
-  --tt-icon: color-mix(in srgb, var(--foreground) 10%, transparent);
   --tt-hover: color-mix(in srgb, var(--foreground) 8%, transparent);
+  /* The pane pips `DetachDropHint` draws under the cursor while a tab is being
+     torn out of the window: the same surface family, never the accent. */
+  --tt-surface-active: color-mix(in srgb, var(--card) 84%, transparent);
   /* Carries text (the pane count of a collapsed row), so nearly opaque. */
   --tt-badge: color-mix(in srgb, var(--card) 92%, transparent);
-  /* What says "this is the pane you are looking at". */
-  --tt-mark: color-mix(in srgb, var(--foreground) 70%, transparent);
+  /* The plate under the pane you are looking at, in the tab you are looking
+     at — and the fainter one it keeps while you are in another tab, so the
+     group still says where you will land when you come back. */
+  --tt-pane-current: color-mix(in srgb, var(--foreground) 13%, transparent);
+  --tt-pane-idle: color-mix(in srgb, var(--foreground) 6%, transparent);
 }
 
 /* ---------------------------------------------------------------------------
@@ -83,7 +82,7 @@
    single-class Tailwind utilities the same element carries for its uncoloured
    states (`bg-terminal`, `bg-accent`, `hover:bg-accent/40`), whatever order
    the two stylesheets end up in. Setting `border-color` is free where there is
-   no border, and picks up the group card's, which does have one. */
+   no border, and picks up the one the strip's cells carry. */
 .tt-tint[data-current='false'] {
   background-color: color-mix(in srgb, var(--tt-plate) 74%, transparent);
   border-color: color-mix(in srgb, var(--tt-color) 24%, transparent);
@@ -100,9 +99,8 @@
 }
 
 /* An edge, for a tinted box that has no border of its own to colour: the
-   rail's plain rows. The group cards have one (`groupCardClass`) and the tab
-   strip's cells are fenced by `border-r`, so neither asks for this — two edges
-   a pixel apart is a seam, not a frame. */
+   rail's plain rows. The tab strip's cells are fenced by `border-r`, so they
+   do not ask for this — two edges a pixel apart is a seam, not a frame. */
 .tt-tint-ring[data-current='false'] {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tt-color) 18%, transparent);
 }
@@ -130,14 +128,165 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tt-group-color, var(--foreground)) 14%, transparent);
 }
 
-/* The card itself. Its colours are Tailwind arbitrary values on the element
-   (see `groupCardClass`); what it owns here is the fade between them, which
-   the vertical variant would otherwise not have. */
+/* ---------------------------------------------------------------------------
+   Pane groups: a split is a couple of tabs held together, nothing more.
+
+   The box below is the *same recipe* as `.tt-cluster` one level down — a
+   weak mix of a colour into `--card`, a 14 % hairline — because it says the
+   same thing one level down: "these belong together". Where a cluster is
+   tinted by the project's dot, a pane box is tinted by the tab's own colour
+   (`--tt-color`, handed down by `tintStyle`), and falls back to a plain
+   `--card` box when the tab has no colour, which is the usual case.
+
+   What it deliberately is *not*: a card with a header, a second border, a
+   guide line, or chips with a fill of their own. All of that came back as
+   "notre gros bloc moche" — a 540 px object in a strip whose tabs are 240.
+   --------------------------------------------------------------------------- */
+
 .tt-group {
   transition:
     background-color 140ms ease,
     border-color 140ms ease,
     color 140ms ease;
+}
+
+/* A hair of inset around the box, so a *coloured* tab — whose plate covers the
+   whole group, label included — frames it instead of running into it. */
+.tt-group-v {
+  padding: 2px;
+}
+
+.tt-panebox {
+  --tt-box: color-mix(in srgb, var(--tt-color, var(--card)) 12%, var(--card));
+  border-radius: var(--rad-md);
+  background-color: color-mix(in srgb, var(--tt-box) 60%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tt-color, var(--foreground)) 14%, transparent);
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+/* The rail has the room to breathe around its rows; a 36 px strip cell does
+   not, so its box hugs them. */
+.tt-panebox-v {
+  padding: 3px;
+}
+
+.tt-panebox-h {
+  padding: 2px;
+}
+
+/* The box of the tab you are in is the one that is lit — same step the
+   cluster and the tint take between "there" and "here". */
+.tt-group-current .tt-panebox {
+  background-color: color-mix(in srgb, var(--tt-box) 80%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tt-color, var(--foreground)) 22%, transparent);
+}
+
+/* One pane = one tab row. The current one wears a plate, exactly as the
+   current tab does in the rail and in the strip — a tick on a guide line was
+   a mark only this component knew how to read. The `[data-current]` rules come
+   last on purpose: hovering the current row must not wash its plate away. */
+.tt-leaf:hover {
+  background-color: var(--tt-hover);
+}
+
+.tt-leaf[data-current='true'] {
+  background-color: var(--tt-pane-idle);
+}
+
+.tt-group-current .tt-leaf[data-current='true'] {
+  background-color: var(--tt-pane-current);
+}
+
+/* The tab's own row, above the box: a label, not a header. Everything it can
+   do stays (select, rename on F2 / double-click, right-click menu, close, and
+   it is the drag handle of the whole group), it just stops being the loudest
+   thing in the rail.
+
+   The three rules below overrule utilities set in `SessionRail.tsx`
+   (`h-9 gap-2 px-2`, and the `flex-col` of the text block). They are written
+   `.tt-group-v > …` — two classes, so they win over a single-class utility
+   whatever order the sheets land in. **This is a seam, not a design**: when
+   `SessionRail.tsx` can be touched again, the grouped branch there should
+   carry these values itself and this block should go. */
+.tt-group-v > .tt-head {
+  height: 24px;
+  gap: 5px;
+  padding-inline: 5px;
+  margin-bottom: 2px;
+  border-radius: var(--rad-xs);
+}
+
+.tt-group-v > .tt-head > svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Name and pane count on one line: two stacked lines above two-line rows is
+   the block we are getting rid of. `:not([aria-hidden])` is the text block —
+   the colour bar, the Ctrl+N number and the menu anchor are all hidden. */
+.tt-group-v > .tt-head > span:not([aria-hidden]) {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* The name gives way first: what follows it is a count, or the command that
+   is running — both short, and both meaningless once they are cut. */
+.tt-group-v > .tt-head > span:not([aria-hidden]) > span {
+  min-width: 0;
+  flex: 0 4 auto;
+  font-size: 11px;
+}
+
+.tt-group-v > .tt-head > span:not([aria-hidden]) > span + span {
+  flex: 0 1 auto;
+  font-size: 10px;
+}
+
+/* A hover cue still helps — clicking the label selects the tab. */
+.tt-head:hover {
+  background-color: var(--tt-hover);
+}
+
+/* ---------------------------------------------------------------------------
+   Tab strip: a grouped tab is a tab.
+
+   Same overruling as above, on utilities set in `WindowTabStrip.tsx`: the
+   grouped branch there insets the cell (`my-1 ml-1 h-7 self-center`) and lets
+   it grow to 540 px, which is how a tab became a floating card twice the size
+   of its neighbours. A grouped cell is a full-height cell fenced like any
+   other, and it stops at 400 px — a tab and a half, not two and a quarter.
+   `div.…` is one element + one class, so it wins over the utilities.
+   --------------------------------------------------------------------------- */
+
+div.tt-group-h {
+  height: 36px;
+  align-self: stretch;
+  margin: 0;
+  max-width: 400px;
+  gap: 8px;
+  padding-inline: 10px;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+}
+
+/* The "this tab is on screen" rule, edge to edge like every other tab's. */
+div.tt-group-h > span.bg-primary {
+  left: 0;
+  right: 0;
+  top: 0;
+  border-radius: 0 0 999px 999px;
+}
+
+/* Between the tab's name and the box of panes. It used to be a hairline; with
+   a box right after it, that is a fence in front of a fence. The element is
+   rendered by `WindowTabStrip.tsx`, so it stays — as the gap it now is. */
+.tt-divider {
+  width: 2px;
+  flex: none;
+  background-color: transparent;
 }
 
 /* The pane count on a collapsed rail icon: the same family, not the accent. */
@@ -146,109 +295,10 @@
   box-shadow: 0 0 0 1px var(--tt-edge);
 }
 
-/* The tab's own row inside the card: no fill of its own, the card is the
-   surface. A hover cue still helps — clicking it selects the tab. */
-.tt-head:hover {
-  background-color: var(--tt-hover);
-}
-
-/* ---------------------------------------------------------------------------
-   Rail: children indented under the header, held by a guide line.
-   The two offsets below belong together — the guide sits at the left edge of
-   the padding, and each row's mark sits back on top of it.
-   --------------------------------------------------------------------------- */
-
-.tt-branch {
-  position: relative;
-  margin-left: 10px;
-  padding-left: 11px;
-}
-
-.tt-branch::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 3px;
-  bottom: 3px;
-  width: 1.5px;
-  border-radius: 999px;
-  background-color: var(--tt-rule);
-}
-
-.tt-leaf {
-  position: relative;
-}
-
-.tt-leaf:hover {
-  background-color: var(--tt-hover);
-}
-
-/* The current pane lights its segment of the guide. A filled row would fight
-   the card it sits in; the text weight plus this tick is enough. */
-.tt-leaf::before {
-  content: '';
-  position: absolute;
-  left: -11px;
-  top: 5px;
-  bottom: 5px;
-  width: 1.5px;
-  border-radius: 999px;
-  background-color: transparent;
-  transition: background-color 120ms ease;
-}
-
-.tt-leaf[data-current='true']::before {
-  background-color: var(--tt-mark);
-}
-
-/* ---------------------------------------------------------------------------
-   Tab strip: the same group laid on its side. No room to indent, so the
-   children sit after a hairline and the current one is underlined.
-   --------------------------------------------------------------------------- */
-
-.tt-divider {
-  align-self: stretch;
-  width: 1px;
-  flex: none;
-  margin: 4px 0;
-  border-radius: 999px;
-  background-color: var(--tt-rule);
-}
-
-.tt-chip {
-  position: relative;
-}
-
-.tt-chip:hover {
-  background-color: var(--tt-hover);
-}
-
-.tt-chip::after {
-  content: '';
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: 1px;
-  height: 1.5px;
-  border-radius: 999px;
-  background-color: transparent;
-  transition: background-color 120ms ease;
-}
-
-.tt-chip[data-current='true']::after {
-  background-color: var(--tt-mark);
-}
-
-/* The little framed square each pane row and chip carries. */
-.tt-icon {
-  background-color: var(--tt-icon);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .tt-group,
-  .tt-tint,
-  .tt-leaf::before,
-  .tt-chip::after {
+  .tt-panebox,
+  .tt-tint {
     transition: none;
   }
 }
