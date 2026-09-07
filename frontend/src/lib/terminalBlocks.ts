@@ -1074,7 +1074,7 @@ class BlockController {
     bar.style.top = `${Math.round(slot.top)}px`;
     bar.style.height = `${Math.round(slot.height)}px`;
 
-    const signature = specs.map((spec) => `${spec.id} ${spec.label} ${spec.disabled}`).join('');
+    const signature = specs.map((spec) => `${spec.id}\u0000${spec.label}\u0000${spec.disabled}`).join('\u0001');
     if (bar.dataset.signature === signature) return;
     bar.dataset.signature = signature;
     bar.textContent = '';
