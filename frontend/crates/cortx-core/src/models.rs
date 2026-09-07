@@ -774,6 +774,10 @@ pub struct TerminalTabDisplay {
     #[serde(default)]
     #[serde(deserialize_with = "lenient_enum")]
     pub index: TabIndexDisplay,
+    /// Also draw the tab colour as a bar down the left edge, on top of the
+    /// tint. Off by default: the tint alone carries the colour, as Warp does.
+    #[serde(default)]
+    pub color_bar: bool,
 }
 
 impl Default for TerminalTabDisplay {
@@ -784,6 +788,7 @@ impl Default for TerminalTabDisplay {
             status: true,
             agent: true,
             index: TabIndexDisplay::default(),
+            color_bar: false,
         }
     }
 }

@@ -32,6 +32,7 @@ import {
   tabItem,
   tabLiveState,
   tabTitle,
+  tintStyle,
   useItemMap,
   useScopedTabs,
   useTabDisplay,
@@ -81,9 +82,14 @@ function RailIconButton({
 
 /**
  * One session row (expanded rail): sortable within its group, renamable on
- * double-click, with the tab's colour as a left accent bar (and a faint tint
- * when active) and a right-click menu. What it shows — second line, status,
- * agent, Ctrl+N number — follows `terminal.tabDisplay`.
+ * double-click, tinted with the tab's colour, with a right-click menu. What it
+ * shows — second line, status, agent, Ctrl+N number — follows
+ * `terminal.tabDisplay`.
+ *
+ * Ticket #22: the colour used to be a 3 px bar at the left edge plus a wash
+ * you only saw once the row was current. It now tints the whole row, at rest,
+ * exactly as in the strip (`.tt-tint`); the bar survives behind
+ * `tabDisplay.colorBar`, off by default.
  *
  * A tab holding a split becomes a **card**: its own row, then its panes
  * indented under a guide line (`PaneGroupBranch`), all on one surface so the
@@ -142,24 +148,23 @@ function SessionRow({
         : cwd;
 
   const color = tab.color;
+  const tinted = Boolean(color);
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
-  // Active + coloured: a tint of the tab colour instead of the neutral accent.
-  // A group carries the highlight on its card, so its header takes none.
-  const rowStyle: CSSProperties | undefined =
-    active && color && !grouped ? { backgroundColor: `color-mix(in srgb, ${color} 8%, transparent)` } : undefined;
-  const cardStyle: CSSProperties | undefined =
-    active && color && grouped
-      ? {
-          backgroundColor: `color-mix(in srgb, ${color} 10%, var(--tt-surface-active))`,
-          borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
-        }
-      : undefined;
+  // The colour travels as a custom property; every mix is in the stylesheet,
+  // over the window's own surface. Whichever box is the tab's own surface
+  // wears it: the card when the tab holds a split, the row otherwise.
+  const tint = tintStyle(color);
 
   return (
     <div ref={setNodeRef} style={style} className={cn(isDragging && 'z-10 opacity-60')}>
-      <div className={cn(grouped && groupCardClass(active, 'vertical'))} style={cardStyle}>
+      <div
+        className={cn(grouped && cn(groupCardClass(active, 'vertical'), tinted && 'tt-tint'))}
+        style={grouped ? tint : undefined}
+        data-current={grouped ? (active ? 'true' : 'false') : undefined}
+      >
         <div
-          style={rowStyle}
+          style={grouped ? undefined : tint}
+          data-current={grouped ? undefined : active ? 'true' : 'false'}
           onClick={onSelect}
           onDoubleClick={(e) => {
             e.stopPropagation();
@@ -187,12 +192,16 @@ function SessionRow({
             active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
             // Standalone row: it is its own surface. Group header: the card is,
             // so the header only gets a hover cue from the group's own tint.
-            grouped ? 'tt-head h-9' : cn(!active && 'hover:bg-accent/60', active && !color && 'bg-accent')
+            grouped
+              ? 'tt-head h-9'
+              : tinted
+                ? 'tt-tint tt-tint-ring'
+                : cn(!active && 'hover:bg-accent/60', active && 'bg-accent')
           )}
           {...attributes}
           {...listeners}
         >
-          {color && (
+          {display.colorBar && color && (
             <span
               className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-full"
               style={{ backgroundColor: color }}
@@ -283,6 +292,12 @@ function SessionRow({
  * The rows of one workspace group, reorderable by drag within the group.
  * Each group is its own drag context so a row cannot land in another
  * workspace.
+ *
+ * Ticket #22, the Warp screenshot: the rows of a project sit inside one
+ * tinted box with the project's name above it — plain rows held together,
+ * rather than a block of their own with a header inside it. A project with a
+ * single tab gets no box: one row is not a group, and a box around every row
+ * would turn the rail into a stack of plates.
  */
 function SessionGroupRows({
   group,
@@ -349,7 +364,10 @@ function SessionGroupRows({
       onDragEnd={onDragEnd}
     >
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-        <div className="flex flex-col gap-0.5">
+        <div
+          className={cn('flex flex-col gap-0.5', group.tabs.length > 1 && 'tt-cluster')}
+          style={group.color ? ({ '--tt-group-color': group.color } as CSSProperties) : undefined}
+        >
           {group.tabs.map((tab, i) => (
             <SessionRow
               key={tab.id}

@@ -17,6 +17,7 @@ import {
   tabsInScope,
   tabInScope,
   tabIsLocal,
+  insertTabAfter,
   nextTabOrder,
   setLocalTerminalWindowId,
   setTabWindow,
@@ -103,6 +104,14 @@ interface TerminalLayoutState {
   loaded: boolean;
   /** Most recent first; in memory only (this window). */
   closedTabs: ClosedTab[];
+  /**
+   * Recently-active tabs of each Terminal window, most recent first
+   * (ticket #29). Rebuilt from the document on every change, never written to
+   * `sessions.json`: "the tab I was on before this one" is a fact about the
+   * session you are in, and restoring one from the previous run would send the
+   * first close of the day to a tab you have not looked at since yesterday.
+   */
+  tabMru: Record<string, string[]>;
 
   /** Read the shared document from the backend (on boot). */
   load: () => Promise<void>;
@@ -156,6 +165,13 @@ interface TerminalLayoutState {
   scopedTabs: () => TerminalTab[];
   activeTab: () => TerminalTab | null;
   terminalsInWindow: () => string[];
+  /**
+   * The tabs of this window in most-recently-used order: the ones you have
+   * been on (current first), then the ones you never visited in list order, so
+   * the list always holds every tab of the scope exactly once. This is what a
+   * "Ctrl+Tab cycles by recent use" would walk (issue 45b).
+   */
+  recentTabs: () => TerminalTab[];
 }
 
 /** Live cwd of a shell (shell integration, else where it opened), for the closed-tab memory. */
@@ -179,10 +195,74 @@ function snapshotClosedTab(tab: TerminalTab): ClosedTab | null {
   };
 }
 
-function pickActiveTab(doc: TerminalLayoutDoc, preferred?: string | null): string | null {
+// ---------------------------------------------------------------------------
+// Recently used tabs (ticket #29)
+// ---------------------------------------------------------------------------
+
+/**
+ * How many tabs back the "last one I was on" memory goes. It only ever holds
+ * ids of tabs that still exist, so this is a ceiling, not a size.
+ */
+const MRU_MAX = 32;
+
+/**
+ * Recompute the recently-used stacks from the document.
+ *
+ * Deriving them from `doc.windows[*].activeTabId` rather than from the
+ * `setActiveTab` call site means every way a tab becomes current is recorded —
+ * a click, Ctrl+N, the palette, a tab arriving from another window, and the
+ * `terminal-layout` broadcast that tells us another window switched *our*
+ * window's tab. Ids of tabs that no longer exist are dropped here, so the
+ * stack can never resurrect a closed tab.
+ *
+ * The stacks are **per window** and live in memory only: see `recentTabs`.
+ */
+function nextTabMru(current: Record<string, string[]>, doc: TerminalLayoutDoc): Record<string, string[]> {
+  // A tab that moved to another window (ticket #20) is still alive, but it is
+  // no longer *this* window's business: the stacks are keyed by window.
+  const live = new Map(doc.window.tabs.map((t) => [t.id, terminalWindowIdOf(t)]));
+  const out: Record<string, string[]> = {};
+  let changed = false;
+  for (const id of new Set([...Object.keys(current), ...Object.keys(doc.windows)])) {
+    const previous = current[id] ?? [];
+    const active = doc.windows[id]?.activeTabId ?? null;
+    const has = (tabId: string): boolean => live.get(tabId) === id;
+    const kept = previous.filter((tabId) => has(tabId) && tabId !== active);
+    const stack = (active && has(active) ? [active, ...kept] : kept).slice(0, MRU_MAX);
+    if (stack.length !== previous.length || stack.some((tabId, i) => tabId !== previous[i])) changed = true;
+    if (stack.length > 0) out[id] = stack;
+  }
+  return changed ? out : current;
+}
+
+/** The tabs either side of `tabId`, in the window's own order (last-resort fallback). */
+function neighbourTabIds(doc: TerminalLayoutDoc, tabId: string | null | undefined): string[] {
+  if (!tabId) return [];
   const tabs = tabsInScope(doc.window, doc.window.scope);
-  if (preferred && tabs.some((t) => t.id === preferred)) return preferred;
-  if (doc.window.activeTabId && tabs.some((t) => t.id === doc.window.activeTabId)) return doc.window.activeTabId;
+  const at = tabs.findIndex((t) => t.id === tabId);
+  if (at === -1) return [];
+  return [tabs[at + 1]?.id, tabs[at - 1]?.id].filter((id): id is string => Boolean(id));
+}
+
+/**
+ * Which tab the window shows now. In order: an explicitly preferred one, the
+ * one already current if it survived, then — ticket #29 — the tab you were on
+ * **before** it (`recent`, most recent first), and only as a last resort a
+ * neighbour in the list, then its first tab.
+ *
+ * Falling back to `tabs[0]` alone is what made closing a tab jump to the top
+ * of the list: after three closes you were somewhere you had never been.
+ */
+function pickActiveTab(
+  doc: TerminalLayoutDoc,
+  opts: { preferred?: string | null; recent?: string[]; near?: string[] } = {}
+): string | null {
+  const tabs = tabsInScope(doc.window, doc.window.scope);
+  const has = (id: string | null | undefined): boolean => Boolean(id) && tabs.some((t) => t.id === id);
+  if (has(opts.preferred)) return opts.preferred!;
+  if (has(doc.window.activeTabId)) return doc.window.activeTabId;
+  for (const id of opts.recent ?? []) if (has(id)) return id;
+  for (const id of opts.near ?? []) if (has(id)) return id;
   return tabs[0]?.id ?? null;
 }
 
@@ -253,12 +333,13 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
   revision: 0,
   loaded: false,
   closedTabs: [],
+  tabMru: {},
 
   load: async () => {
     try {
       const env = await api.getTerminalLayout();
       const doc = normaliseLayoutDoc(env.layout);
-      set({ doc, revision: env.revision, loaded: true });
+      set({ doc, revision: env.revision, loaded: true, tabMru: nextTabMru(get().tabMru, doc) });
       reconcileDock(doc);
     } catch (e) {
       console.warn('Failed to load the terminal layout', e);
@@ -274,7 +355,7 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     }
     if (event.revision <= get().revision) return;
     const doc = normaliseLayoutDoc(event.layout);
-    set({ doc, revision: event.revision });
+    set({ doc, revision: event.revision, tabMru: nextTabMru(get().tabMru, doc) });
     reconcileDock(doc);
   },
 
@@ -283,7 +364,9 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     // shared `windows` map, so every mutator can keep working on `doc.window`
     // as if there were a single Terminal window.
     const next = withLocalWindow(mutate(get().doc));
-    set({ doc: next });
+    // The recently-used stacks are read *by* the mutators (`pickActiveTab`),
+    // so they are refreshed from the result, never before it.
+    set({ doc: next, tabMru: nextTabMru(get().tabMru, next) });
     reconcileDock(next);
     api.setTerminalLayout(next, WINDOW_LABEL)
       .then((revision) => {
@@ -296,7 +379,10 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     get().commit((doc) => {
       const window = { ...doc.window, scope };
       const next = { ...doc, window };
-      return { ...next, window: { ...window, activeTabId: pickActiveTab(next) } };
+      // Switching scope: the tab you were on last *in that scope* beats its
+      // first tab, exactly as on a close.
+      const recent = get().tabMru[TERMINAL_WINDOW_ID];
+      return { ...next, window: { ...window, activeTabId: pickActiveTab(next, { recent }) } };
     }),
 
   setActiveTab: (tabId) =>
@@ -422,8 +508,12 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
           window: { ...doc.window, tabs, activeTabId: activate ? tabId : doc.window.activeTabId },
         };
       }
-      const tab = makeTab(terminalId, workspaceIdForProject(options.projectId), nextTabOrder(doc.window));
-      const window = { ...doc.window, tabs: [...doc.window.tabs, tab] };
+      // Ticket #25: a new tab opens next to the one you were on, the way a
+      // browser does it, not at the far end of the list. `insertTabAfter`
+      // gives it its order (and renumbers its siblings), so the 0 here is only
+      // a placeholder.
+      const tab = makeTab(terminalId, workspaceIdForProject(options.projectId), 0);
+      const window = { ...doc.window, tabs: insertTabAfter(doc.window, tab, doc.window.activeTabId) };
       // A tab outside the current scope would be invisible: widen to global.
       const scope: TerminalScope = activate && !tabInScope(tab, window.scope) ? 'global' : window.scope;
       return {
@@ -435,6 +525,9 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
 
   removeTerminalFromWindow: (terminalId, surface) =>
     get().commit((doc) => {
+      // Read before the tab list changes: if this empties the tab, these are
+      // the rows either side of it (ticket #29's last resort).
+      const near = neighbourTabIds(doc, tabContainingTerminal(doc.window, terminalId)?.id);
       const surfaces = { ...doc.surfaces };
       if (surface === 'dock') surfaces[terminalId] = 'dock';
       else delete surfaces[terminalId];
@@ -460,7 +553,8 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
       }
       const window = { ...doc.window, tabs };
       const next = { ...doc, surfaces, window };
-      return { ...next, window: { ...window, activeTabId: pickActiveTab(next) } };
+      const recent = get().tabMru[TERMINAL_WINDOW_ID];
+      return { ...next, window: { ...window, activeTabId: pickActiveTab(next, { recent, near }) } };
     }),
 
   sendToWindow: (terminalId, projectId) => {
@@ -478,11 +572,16 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     const snapshot = snapshotClosedTab(tab);
     if (snapshot) set({ closedTabs: [snapshot, ...get().closedTabs].slice(0, CLOSED_TABS_MAX) });
     get().commit((doc) => {
+      // Ticket #29: closing the tab you are on lands on the tab you were on
+      // before it (`recent`), not on the top of the list. `near` only speaks
+      // for a tab that was never current — a freshly restored session, say.
+      const near = neighbourTabIds(doc, tabId);
+      const recent = get().tabMru[TERMINAL_WINDOW_ID];
       const surfaces = { ...doc.surfaces };
       for (const id of ids) delete surfaces[id];
       const window = { ...doc.window, tabs: doc.window.tabs.filter((t) => t.id !== tabId) };
       const next = { ...doc, surfaces, window };
-      return { ...next, window: { ...window, activeTabId: pickActiveTab(next) } };
+      return { ...next, window: { ...window, activeTabId: pickActiveTab(next, { recent, near }) } };
     });
     return ids;
   },
@@ -502,7 +601,9 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
         windows[windowId] = { ...windows[windowId], scope: 'global' };
       }
       const next = { ...doc, windows, window: { ...doc.window, tabs } };
-      return { ...next, window: { ...next.window, activeTabId: pickActiveTab(next) } };
+      const recent = get().tabMru[TERMINAL_WINDOW_ID];
+      const near = neighbourTabIds(doc, tabId);
+      return { ...next, window: { ...next.window, activeTabId: pickActiveTab(next, { recent, near }) } };
     }),
 
   moveLeafToWindow: (terminalId, windowId) =>
@@ -519,7 +620,9 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
         const target = doc.windows[windowId] ?? { scope: 'global' as TerminalScope, activeTabId: null };
         const windows = { ...doc.windows, [windowId]: { ...target, activeTabId: from.id, scope: 'global' as TerminalScope } };
         const next = { ...doc, windows, window: { ...doc.window, tabs } };
-        return { ...next, window: { ...next.window, activeTabId: pickActiveTab(next) } };
+        const recent = get().tabMru[TERMINAL_WINDOW_ID];
+        const near = neighbourTabIds(doc, from.id);
+        return { ...next, window: { ...next.window, activeTabId: pickActiveTab(next, { recent, near }) } };
       }
       const trimmed = removeLeaf(from.layout, leaf.id)!;
       const moved = setTabWindow(
@@ -640,6 +743,22 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     return window.tabs.find((t) => t.id === window.activeTabId) ?? null;
   },
   terminalsInWindow: () => get().doc.window.tabs.flatMap((t) => collectLeaves(t.layout).map((l) => l.terminalId)),
+  recentTabs: () => {
+    const tabs = get().scopedTabs();
+    const byId = new Map(tabs.map((t) => [t.id, t]));
+    const out: TerminalTab[] = [];
+    for (const id of get().tabMru[TERMINAL_WINDOW_ID] ?? []) {
+      const tab = byId.get(id);
+      if (tab) {
+        out.push(tab);
+        byId.delete(id);
+      }
+    }
+    // Never activated (a restored session, a tab opened in the background):
+    // they still belong to the cycle, after everything you have been on.
+    for (const tab of tabs) if (byId.has(tab.id)) out.push(tab);
+    return out;
+  },
 }));
 
 // Dev-only escape hatch for CDP-driven checks (see terminalSessions.ts).

@@ -31,6 +31,7 @@ import {
   tabLiveState,
   tabProject,
   tabTitle,
+  tintStyle,
   useItemMap,
   useScopedTabs,
   useTabDisplay,
@@ -70,10 +71,14 @@ interface WindowTabProps {
  * card *is* the tab element, so the group stays a single sortable unit —
  * reorder and detach still act on the tab, which is what the layout document
  * knows.
+ *
+ * A tab with a colour is tinted **whole** and at rest (ticket #22): the tab
+ * hands its colour to `.tt-tint` and the stylesheet does the rest, so the
+ * strip and the rail cannot drift apart.
  */
 function WindowTab({ tab, items, projects, isActive, index, total, showProject, display, onSelect, onClose }: WindowTabProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
-  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
+  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, ...tintStyle(tab.color) };
 
   const item = tabItem(tab, items);
   const live = tabLiveState(tab, items);
@@ -90,6 +95,7 @@ function WindowTab({ tab, items, projects, isActive, index, total, showProject, 
   const headline = grouped ? groupHeadline(title) : title;
 
   const accent = tab.color ?? undefined;
+  const tinted = Boolean(accent);
   // Only the tabs a Ctrl+N actually reaches get a number (ticket #34): 1…8,
   // then 9 on the last one, which is where Ctrl+9 goes.
   const shortcutNumber = tabShortcutNumber(index, total);
@@ -99,19 +105,24 @@ function WindowTab({ tab, items, projects, isActive, index, total, showProject, 
     <div
       ref={setNodeRef}
       style={style}
+      data-current={isActive ? 'true' : 'false'}
       className={cn(
         'group/tab relative flex min-w-0 cursor-grab select-none items-center text-xs transition-colors',
+        isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
         grouped
           ? cn(
               // Inset so the card reads as one object floating in the strip,
               // rather than a stretch of it fenced off by dividers.
               'my-1 ml-1 h-7 max-w-[540px] gap-1.5 self-center px-1.5',
               groupCardClass(isActive, 'horizontal'),
-              isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+              tinted && 'tt-tint'
             )
           : cn(
               'h-9 max-w-[240px] gap-2 border-r border-border px-3',
-              isActive ? 'bg-terminal text-foreground' : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'
+              // Coloured: the wash *is* the surface, at rest and on hover.
+              // Uncoloured: the current tab keeps merging with the pane below
+              // it, which is what `bg-terminal` (transparent here) buys.
+              tinted ? 'tt-tint' : isActive ? 'bg-terminal' : 'hover:bg-accent/40'
             ),
         isDragging && 'z-10 opacity-50'
       )}
@@ -163,8 +174,10 @@ function WindowTab({ tab, items, projects, isActive, index, total, showProject, 
         <TabRenameInput value={rename.draft} onChange={rename.setDraft} onCommit={rename.commit} onCancel={rename.cancel} className="w-32" />
       ) : (
         <span
+          // The title used to be written in the tab colour when the tab was
+          // not current; on a tinted box that is a colour on itself. The box
+          // says the colour now, the text goes back to saying the state.
           className={cn('pointer-events-none truncate', grouped && 'max-w-[128px] shrink-0 font-medium')}
-          style={accent && !isActive ? { color: accent } : undefined}
           title={item ? describeItem(item) : title}
         >
           {headline}

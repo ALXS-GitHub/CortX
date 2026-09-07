@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { ACCENT_PRESETS } from '@/lib/theme';
 import { basename, formatDuration } from '@/lib/terminalNames';
 import {
@@ -117,6 +117,7 @@ export const DEFAULT_TAB_DISPLAY: ResolvedTabDisplay = {
   status: true,
   agent: true,
   index: 'ctrl',
+  colorBar: false,
 };
 
 export function resolveTabDisplay(config?: TerminalTabDisplay | null): ResolvedTabDisplay {
@@ -195,6 +196,38 @@ export function projectColor(projectId: string): string {
   for (let i = 0; i < projectId.length; i++) h = (h * 31 + projectId.charCodeAt(i)) >>> 0;
   return ACCENT_PRESETS[h % ACCENT_PRESETS.length].value;
 }
+
+// ---------------------------------------------------------------------------
+// Tab colour (ticket #22)
+// ---------------------------------------------------------------------------
+
+/**
+ * Hand a colour to the stylesheet. Everything the colour is *used* for — the
+ * wash at rest, the stronger one on hover, the plate of the current tab, the
+ * hairline — is mixed in `styles/terminal-tabs.css`, on top of `--card` (the
+ * window's own surface, which follows the terminal theme). The colour itself
+ * is the only thing that has to travel through React, because it is a value
+ * the user picked, not a token.
+ *
+ * Note what does *not* happen here: no mixing with `--accent` or `--primary`.
+ * A terminal theme is free to make its accent a near-black, and a wallpaper
+ * theme puts a photograph behind the window; a tint derived from either goes
+ * muddy (see `plans/warp_reference.md`).
+ */
+export function tintStyle(color: string | null | undefined): CSSProperties | undefined {
+  return color ? ({ '--tt-color': color } as CSSProperties) : undefined;
+}
+
+/**
+ * Ticket #22: the tab colour used to show up as a 3 px bar down the left edge
+ * of a rail row, which you could only really see once you hovered it. It is
+ * now a wash over the whole tab, as in Warp, and the bar is off by default.
+ *
+ * It is kept — behind `tabDisplay.colorBar` — because the two say different
+ * things: the wash says "this tab is green", the bar says "this tab is green"
+ * *while leaving the surface alone*, which is what someone running a very busy
+ * wallpaper theme may prefer.
+ */
 
 /** `cwd` shortened to its last segment, or nothing. */
 export function cwdLabel(item: TerminalItem | undefined): string | undefined {

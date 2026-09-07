@@ -315,6 +315,11 @@ export interface TerminalTabDisplay {
   agent?: boolean;
   /** When the Ctrl+N number shows up. Default `ctrl` (only while Ctrl is held). */
   index?: TabIndexDisplay;
+  /** Also draw the tab colour as a bar down the left edge, on top of the tint.
+   *  Off by default: the tint alone carries the colour, which is what Warp
+   *  does. The bar says the same thing without repainting the surface, which
+   *  a busy wallpaper theme may prefer. */
+  colorBar?: boolean;
 }
 
 /** What the terminal sends when Shift+Enter is pressed (see `lib/terminalKeys`). */

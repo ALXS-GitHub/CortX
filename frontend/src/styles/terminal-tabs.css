@@ -1,5 +1,6 @@
 /**
- * Tab **groups** — a split shown as one nested card (DEV-13).
+ * Tab **colour** (ticket #22) and tab **groups** — a split shown as one nested
+ * card (DEV-13).
  *
  * Why a stylesheet rather than utilities: the group is drawn with one set of
  * tints that every part of it shares (the card, the guide line, the hover, the
@@ -37,6 +38,96 @@
   --tt-badge: color-mix(in srgb, var(--card) 92%, transparent);
   /* What says "this is the pane you are looking at". */
   --tt-mark: color-mix(in srgb, var(--foreground) 70%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   The tab's own colour: the whole box, visible at rest (ticket #22).
+
+   Warp tints the entire tab; we used to draw a 3 px bar down its left edge and
+   a wash that only really appeared on hover, so a colour you had deliberately
+   set was invisible until you went looking for it.
+
+   The mixes below follow the same rule as everything else in this file: the
+   *colour* is the user's (an explicit hex from the colour row of the tab
+   menu), the *surface it lands on* is the window's own `--card`, never
+   `--accent` and never a heavy dose of `--foreground`. Over a wallpaper theme
+   that is what keeps a tinted tab in the same colour family as the rail and
+   the title bar instead of turning into a stain on a photograph.
+
+   Three steps, so the state is legible without hovering anything:
+
+   | state    | mix into --card | opacity | who it is                 |
+   |----------|-----------------|---------|---------------------------|
+   | rest     | 22 %            | 74 %    | a tab you can see is blue |
+   | hover    | 32 %            | 90 %    | the same tab, lit         |
+   | current  | 46 %            | 100 %   | the tab you are in        |
+
+   The current tab is a solid plate at twice the tint, which is what keeps it
+   apart from its neighbours **even when they share its colour** — the
+   difference is the plate, not the hue. In the strip it also keeps the 2 px
+   rule at the top, drawn in the raw colour rather than in a mix, so it reads
+   against its own wash.
+   --------------------------------------------------------------------------- */
+
+.tt-tint {
+  --tt-plate: color-mix(in srgb, var(--tt-color) 22%, var(--card));
+  --tt-plate-hover: color-mix(in srgb, var(--tt-color) 32%, var(--card));
+  --tt-plate-current: color-mix(in srgb, var(--tt-color) 46%, var(--card));
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+/* The attribute is not decoration: `.tt-tint[data-current]` outranks the
+   single-class Tailwind utilities the same element carries for its uncoloured
+   states (`bg-terminal`, `bg-accent`, `hover:bg-accent/40`), whatever order
+   the two stylesheets end up in. Setting `border-color` is free where there is
+   no border, and picks up the group card's, which does have one. */
+.tt-tint[data-current='false'] {
+  background-color: color-mix(in srgb, var(--tt-plate) 74%, transparent);
+  border-color: color-mix(in srgb, var(--tt-color) 24%, transparent);
+}
+
+.tt-tint[data-current='false']:hover {
+  background-color: color-mix(in srgb, var(--tt-plate-hover) 90%, transparent);
+  border-color: color-mix(in srgb, var(--tt-color) 34%, transparent);
+}
+
+.tt-tint[data-current='true'] {
+  background-color: var(--tt-plate-current);
+  border-color: color-mix(in srgb, var(--tt-color) 55%, transparent);
+}
+
+/* An edge, for a tinted box that has no border of its own to colour: the
+   rail's plain rows. The group cards have one (`groupCardClass`) and the tab
+   strip's cells are fenced by `border-r`, so neither asks for this — two edges
+   a pixel apart is a seam, not a frame. */
+.tt-tint-ring[data-current='false'] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tt-color) 18%, transparent);
+}
+
+.tt-tint-ring[data-current='true'] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tt-color) 50%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   Workspace clusters: the rail's tabs of one project, held in one box, with
+   the project's name above it (ticket #22, the Warp screenshot).
+
+   Only a project with **two or more** tabs gets a box — a group of one is not
+   a group, and boxing every row would turn the rail into a stack of plates.
+   The tint is the project's own dot colour, kept faint: it says "these belong
+   together", and a tab that carries a colour of its own has to stay louder
+   than the box it sits in.
+   --------------------------------------------------------------------------- */
+
+.tt-cluster {
+  --tt-cluster-plate: color-mix(in srgb, var(--tt-group-color, var(--card)) 12%, var(--card));
+  border-radius: var(--rad-md);
+  padding: 3px;
+  background-color: color-mix(in srgb, var(--tt-cluster-plate) 60%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tt-group-color, var(--foreground)) 14%, transparent);
 }
 
 /* The card itself. Its colours are Tailwind arbitrary values on the element
@@ -155,6 +246,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .tt-group,
+  .tt-tint,
   .tt-leaf::before,
   .tt-chip::after {
     transition: none;

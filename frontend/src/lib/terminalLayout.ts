@@ -498,6 +498,66 @@ export function makeTab(
   );
 }
 
+/**
+ * Where a brand-new tab goes (ticket #25).
+ *
+ * Browsers open a new tab **next to the one you were on**, not at the far end
+ * of the strip, and that is what this answers: the id the newcomer follows.
+ *
+ * The rail does not show `tabs` in raw order — it groups by workspace — so
+ * "after the active tab" would put a tab of another project at the *top* of
+ * its own group, which is not next to anything the user was looking at. Hence
+ * two cases:
+ *
+ * - same workspace as the tab you were on → right after it (the browser rule,
+ *   and it reads the same in the strip and in the rail);
+ * - another workspace → after the last tab of **its own** group, which is
+ *   where the rail is going to draw it anyway; the strip then shows it next to
+ *   its siblings rather than stranded mid-list.
+ *
+ * A workspace with no tab yet has no group to join: it follows the active tab.
+ */
+function anchorTabId(siblings: TerminalTab[], tab: TerminalTab, afterTabId: string | null | undefined): string | null {
+  const active = siblings.find((t) => t.id === afterTabId) ?? null;
+  if (active && active.workspaceId === tab.workspaceId) return active.id;
+  const own = siblings.filter((t) => t.workspaceId === tab.workspaceId);
+  if (own.length > 0) return own[own.length - 1].id;
+  return active?.id ?? null;
+}
+
+/**
+ * Add `tab` to the window, ordered right after `afterTabId` (see
+ * `anchorTabId`) instead of at the end. Only the tabs of the same Terminal
+ * window are renumbered — `order` never competes across windows, since every
+ * list that reads it (`tabsInScope`, `tabsOfWindow`) is already filtered to
+ * one window.
+ *
+ * Pinned tabs are hoisted at display time (`sortTabs`), not here: a tab
+ * inserted after a pinned one keeps that raw order and simply shows up first
+ * among the unpinned, which is the closest "next to the one I was on" a
+ * pinned-first list can offer.
+ */
+export function insertTabAfter(
+  layout: TerminalWindowLayout,
+  tab: TerminalTab,
+  afterTabId: string | null | undefined
+): TerminalTab[] {
+  const windowId = terminalWindowIdOf(tab);
+  const siblings = layout.tabs
+    .filter((t) => terminalWindowIdOf(t) === windowId)
+    .sort((a, b) => a.order - b.order);
+  const anchor = anchorTabId(siblings, tab, afterTabId);
+  const at = anchor ? siblings.findIndex((t) => t.id === anchor) + 1 : siblings.length;
+  const sequence = [...siblings.slice(0, at), tab, ...siblings.slice(at)];
+  const order = new Map(sequence.map((t, i) => [t.id, i + 1]));
+  const placed = { ...tab, order: order.get(tab.id)! };
+  const kept = layout.tabs.map((t) => {
+    const next = order.get(t.id);
+    return next === undefined || next === t.order ? t : { ...t, order: next };
+  });
+  return [...kept, placed];
+}
+
 /** Apply `fn` to every leaf, returning a new tree (unchanged leaves keep identity). */
 export function mapLeaves(node: LayoutNode, fn: (leaf: LeafNode) => LeafNode): LayoutNode {
   if (node.kind === 'leaf') return fn(node);
