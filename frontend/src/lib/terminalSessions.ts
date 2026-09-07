@@ -29,7 +29,14 @@ import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { getXtermThemeOverride, isWindowThemeActive, themeToXterm } from '@/lib/terminalTheme';
-import { copyOnSelectEnabled, overrideKeySequence, smoothScrollDuration } from '@/lib/terminalKeys';
+import { IS_MAC } from '@/lib/keybindings';
+import {
+  copyOnSelectEnabled,
+  macOptionIsMetaOption,
+  macOptionMetaSequence,
+  overrideKeySequence,
+  smoothScrollDuration,
+} from '@/lib/terminalKeys';
 import { TerminalImageFilter, type ImagePart } from '@/lib/terminalImages';
 import { attachInputPosition, inputPositionSetting, refreshInputPositions } from '@/lib/terminalInputPosition';
 import { attachInputEditor, inputEditorEnabled, refreshInputEditors } from '@/lib/terminalInputEditor';
@@ -307,6 +314,39 @@ function glyphAdvance(fontFamily: string, fontSize: number): number {
 }
 
 /**
+ * A family CSS could not resolve renders in the fallback stack, silently: the
+ * terminal simply looks like the default and nothing says why. `Hack NF` is
+ * a real Nerd Fonts family name — on Windows, where family names were once
+ * capped at 31 characters — and it exists nowhere else, so a settings file
+ * carried from a Windows machine to a Mac falls back without a word (issue 34).
+ *
+ * There is no API that answers "is this family installed" in every webview
+ * (`queryLocalFonts` is Chromium-only, so it exists in WebView2 and in
+ * neither WKWebView nor WebKitGTK), so this measures instead: the advance of
+ * the requested family, against the advance of a family that certainly does
+ * not exist. Equal advances mean both fell through to `monospace`.
+ *
+ * Imperfect on purpose — a font whose metrics match the fallback exactly
+ * reads as missing — but it catches the case that actually happens, which is
+ * a typo or a name from the wrong platform.
+ */
+const ABSENT_FAMILY_STACK = '"__cortx_absent__", monospace';
+
+export function fontFamilyResolves(family: string): boolean {
+  const name = family.trim();
+  if (!name) return true;
+  // No 2D context (a test environment, a webview without canvas): nothing can
+  // be measured, and an unverifiable font is never accused.
+  if (advanceCanvas === undefined) advanceCanvas = document.createElement('canvas').getContext('2d');
+  if (!advanceCanvas) return true;
+  // A big size makes the two advances differ by whole pixels when they differ
+  // at all; the measurement is cached, so it costs nothing to repeat.
+  const size = 64;
+  const requested = glyphAdvance(`"${name.replace(/"/g, '')}", monospace`, size);
+  return Math.abs(requested - glyphAdvance(ABSENT_FAMILY_STACK, size)) > 0.01;
+}
+
+/**
  * Font size that makes one cell an exact number of CSS pixels.
  *
  * A monospace advance is a fraction of the em (Hack is 0.602 em), so at most
@@ -396,6 +436,7 @@ function ensureSettingsSubscription() {
   let lastInputPosition = inputPositionSetting();
   let lastInputEditor = inputEditorEnabled();
   let lastBlocks = blockSettingsKey();
+  let lastMacOption = macOptionIsMetaOption();
   useAppStore.subscribe(() => {
     const font = terminalFontOptions();
     const fontKey = JSON.stringify(font);
@@ -446,6 +487,13 @@ function ensureSettingsSubscription() {
     if (blocks !== lastBlocks) {
       lastBlocks = blocks;
       refreshBlocks();
+    }
+    // ⌥ on macOS: xterm takes the flag live, and `wordKeys` / `never` only
+    // differ in the key handler, which reads the setting on every keystroke.
+    const macOption = macOptionIsMetaOption();
+    if (macOption !== lastMacOption) {
+      lastMacOption = macOption;
+      for (const s of sessions.values()) s.term.options.macOptionIsMeta = macOption;
     }
   });
 }
@@ -553,7 +601,11 @@ function createSession(id: string): TerminalSession {
     fontWeightBold: font.fontWeightBold,
     scrollback: 10000,
     theme: buildTerminalTheme(),
-    macOptionIsMeta: true,
+    // ⌥ on macOS: off by default so the ordinary ⌥ layer of a French,
+    // Swiss or AZERTY keyboard ([ ] { } | @) still types characters. The
+    // word-motion chords come back through the key handler below; the
+    // `always` mode is what turns this flag on. Ignored off macOS.
+    macOptionIsMeta: macOptionIsMetaOption(),
     scrollOnUserInput: true,
     // Wheel scrolling glides instead of jumping a line at a time. Typing
     // still snaps to the bottom instantly (xterm disables the animation for
@@ -639,6 +691,12 @@ function createSession(id: string): TerminalSession {
   // Copy / paste conventions (Windows Terminal style): Ctrl+C with a selection
   // copies instead of interrupting (unless copy on select already did it);
   // Ctrl+V and Ctrl+Shift+V paste; Ctrl+Shift+C always copies.
+  //
+  // On macOS those chords are on ⌘, and Ctrl belongs to the terminal: Ctrl+C
+  // is the interrupt whatever is selected, and Ctrl+V is how Claude Code and
+  // Codex read an *image* off the clipboard (zorg #28) — CortX used to swallow
+  // it and paste the clipboard's text instead, so an image could not be
+  // pasted at all there.
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
 
@@ -651,7 +709,21 @@ function createSession(id: string): TerminalSession {
       return false;
     }
 
-    const mod = e.ctrlKey || e.metaKey;
+    // macOS, `macOptionAsMeta: wordKeys` (the default): ⌥B / ⌥F / ⌥D / ⌥V
+    // and ⌥⌫ are sent as ESC + key, everything else is left to macOS to
+    // compose. See `lib/terminalKeys` for why the list is closed.
+    const meta = macOptionMetaSequence(e);
+    if (meta !== null) {
+      e.preventDefault();
+      term.input(meta, true);
+      return false;
+    }
+
+    // AltGr is Ctrl+Alt on Windows and Linux, and it is how a French, Swiss
+    // or AZERTY keyboard types `@ # { } [ ] \ |`. It must never be read as
+    // one of the copy / paste chords below, or `AltGr+V` would paste instead
+    // of typing its character.
+    const mod = (IS_MAC ? e.metaKey : e.ctrlKey || e.metaKey) && !e.altKey;
     if (!mod) return true;
     if (e.code === 'KeyC') {
       // Ctrl/Cmd+Shift+C always copies. With nothing selected it used to copy

@@ -597,15 +597,59 @@ pub struct TerminalConfig {
     /// for the rest. Off leaves the gutter bar's right-click menu.
     #[serde(default = "default_true")]
     pub block_actions: bool,
-    /// Vertical air between two blocks — Warp's `appearance.spacing`, and
-    /// like it `normal` by default. Read by
+    /// A 10 % wash of the palette's own red over a block whose command
+    /// failed, plus the full-height flag pole in the gutter beside it. It is
+    /// what makes an `exit 1` findable in a pane full of output; the gutter
+    /// bar alone is three pixels in the margin. Off leaves the gutter bar.
+    #[serde(default = "default_true")]
+    pub block_failed_wash: bool,
+    /// Vertical air between two blocks — Warp's `appearance.spacing`.
+    /// `Comfortable` by default, because that is what Warp's own `normal`
+    /// amounts to (see [`TerminalBlockSpacing`]). Read by
     /// [`crate::shell_init::resolve_block_spacing`] when the shell
-    /// integration is generated: `Normal` makes the shell print one blank
-    /// line before a prompt that follows a command, which is the only way to
-    /// get real space in an xterm grid where every row is the same height.
+    /// integration is generated: the shell prints that many blank lines
+    /// before a prompt that follows a command, which is the only way to get
+    /// real space in an xterm grid where every row is the same height.
     #[serde(default)]
     #[serde(deserialize_with = "lenient_enum")]
     pub block_spacing: TerminalBlockSpacing,
+    /// How ⌥ (Option) behaves on macOS. Ignored everywhere else — Windows and
+    /// Linux always send `ESC` + key for Alt, which is what the shells expect
+    /// and what CortX has always done there.
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub mac_option_as_meta: MacOptionAsMeta,
+    /// Show a link's target in a tooltip while the pointer is on it, before
+    /// the click.
+    #[serde(default = "default_true")]
+    pub link_tooltip: bool,
+}
+
+/// What ⌥ (Option) sends on macOS.
+///
+/// xterm.js has a single boolean, `macOptionIsMeta`: on it turns every ⌥ +
+/// key into `ESC` + key, off it lets macOS compose the character. Neither end
+/// of that is usable on its own. Off, `Alt+B` / `Alt+F` — word-by-word motion
+/// in bash, zsh and every readline program — stop working. On, `[ ] { } | @ #
+/// \ ~` become **untypable** on the French, Swiss and AZERTY layouts, where
+/// all of them live on the ⌥ layer.
+///
+/// So the default is neither: xterm composes as macOS intends, and CortX
+/// intercepts a closed list of five keys itself. See `lib/terminalKeys.ts`
+/// for that list and why it is safe to fix it in code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum MacOptionAsMeta {
+    /// ⌥ is left entirely to macOS: every character composes, no chord is
+    /// reserved. `Alt+B` / `Alt+F` do not reach the shell.
+    Never,
+    /// The default. macOS composes everything except ⌥B, ⌥F, ⌥D, ⌥V and ⌥⌫,
+    /// which CortX sends to the PTY as `ESC` + key.
+    #[default]
+    WordKeys,
+    /// `macOptionIsMeta: true` — every ⌥ chord becomes `ESC` + key. Meta
+    /// everywhere, at the price of the ⌥ layer of the keyboard.
+    Always,
 }
 
 /// How much room a command block gets above it (DEV-13 #7).
@@ -619,16 +663,17 @@ pub struct TerminalConfig {
 #[serde(rename_all = "camelCase")]
 pub enum TerminalBlockSpacing {
     /// One blank line between a command's output and the next prompt.
-    #[default]
     Normal,
     /// Nothing is added: the prompt follows the output immediately, which is
     /// what CortX did before this setting existed.
     Compact,
-    /// Two blank lines — what Warp actually leaves. Its own spacing is given
-    /// in *grid cells* (1.1 above a block, 1.0 below), so ~2.1 cells of air;
-    /// a grid can only be spaced in whole rows, and two is the nearest we can
-    /// express. One row, `Normal`, is a quarter of that and reads as a plain
-    /// line break rather than a boundary.
+    /// Two blank lines, and the default — what Warp actually leaves. Its own
+    /// spacing is given in *grid cells* (1.1 above a block, 1.0 below), so
+    /// ~2.1 cells of air; a grid can only be spaced in whole rows, and two is
+    /// the nearest we can express. One row, `Normal`, is a quarter of that
+    /// and reads as a plain line break rather than a boundary — which is why
+    /// it is no longer the default.
+    #[default]
     Comfortable,
 }
 
@@ -931,7 +976,10 @@ impl Default for TerminalConfig {
             block_gutter: true,
             block_dividers: true,
             block_actions: true,
+            block_failed_wash: true,
             block_spacing: TerminalBlockSpacing::default(),
+            mac_option_as_meta: MacOptionAsMeta::default(),
+            link_tooltip: true,
         }
     }
 }

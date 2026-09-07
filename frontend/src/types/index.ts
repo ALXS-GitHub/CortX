@@ -240,18 +240,43 @@ export interface TerminalConfig {
    *  command, the output or both, run it again, fold it, and `⋯` for the rest.
    *  Off leaves the gutter's right-click menu. Default true. */
   blockActions?: boolean;
-  /** Air between two blocks — Warp's `appearance.spacing`, and like it
-   *  `normal` by default. `normal` makes the shell integration print one real
-   *  blank line before a prompt that follows a command: an overlay cannot
-   *  space out two rows of an xterm grid, so the room has to exist in the
-   *  buffer. `compact` adds nothing. Applies to newly opened terminals. */
+  /** A 10 % wash of the palette's own red over a block whose command failed,
+   *  plus the full-height flag pole in the gutter beside it — what makes an
+   *  `exit 1` findable in a pane full of output. Off leaves the gutter bar.
+   *  Default true. */
+  blockFailedWash?: boolean;
+  /** Air between two blocks — Warp's `appearance.spacing`. `comfortable` by
+   *  default, because that is what Warp's own `normal` amounts to. The shell
+   *  integration prints that many real blank lines before a prompt that
+   *  follows a command: an overlay cannot space out two rows of an xterm
+   *  grid, so the room has to exist in the buffer. `compact` adds nothing.
+   *  Applies to newly opened terminals. */
   blockSpacing?: TerminalBlockSpacing;
+  /** Show a link's target in a tooltip while the pointer is on it, before the
+   *  click. Default true. */
+  linkTooltip?: boolean;
+  /** What ⌥ (Option) sends on macOS. Ignored on Windows and Linux, where Alt
+   *  has always been Meta. Default `wordKeys`. See `lib/terminalKeys.ts`. */
+  macOptionAsMeta?: MacOptionAsMeta;
 }
 
-/** How much room a block gets above it (ticket #7). Default `normal`.
- *  `comfortable` leaves two blank lines — Warp's own spacing is ~2.1 grid
- *  cells, and two whole rows is the nearest a grid can express. */
+/** How much room a block gets above it (ticket #7). Default `comfortable`,
+ *  which leaves two blank lines — Warp's own spacing is ~2.1 grid cells, and
+ *  two whole rows is the nearest a grid can express. `normal` is one row, a
+ *  quarter of that. */
 export type TerminalBlockSpacing = 'normal' | 'compact' | 'comfortable';
+
+/**
+ * What ⌥ (Option) sends on macOS (issue 35, zorg #28).
+ *
+ * - `never` — macOS composes everything; no chord is reserved. `Alt+B` /
+ *   `Alt+F` never reach the shell.
+ * - `wordKeys` (default) — macOS composes everything *except* ⌥B, ⌥F, ⌥D, ⌥V
+ *   and ⌥⌫, which CortX sends as `ESC` + key.
+ * - `always` — xterm's `macOptionIsMeta`: every ⌥ chord becomes `ESC` + key,
+ *   and the ⌥ layer of the keyboard (`[ ] { } | @` on FR/CH/AZERTY) is gone.
+ */
+export type MacOptionAsMeta = 'never' | 'wordKeys' | 'always';
 
 /** Where the input line sits in a terminal pane (ticket #15, U0). */
 export type TerminalInputPosition = 'flow' | 'bottom';

@@ -30,9 +30,41 @@
  * two combinations are the same key here, encoded by the same `shiftEnter`
  * setting. Ctrl+**Shift**+Enter is deliberately left alone — it is the
  * `pane.maximize` shortcut (see `lib/keybindings.ts`).
+ *
+ * ## ⌥ (Option) on macOS — `macOptionAsMeta`
+ *
+ * xterm.js offers one boolean, `macOptionIsMeta`, and neither end of it is
+ * usable on its own:
+ *
+ * - **on** — every ⌥ chord becomes `ESC` + key. `Alt+B` / `Alt+F` (word by
+ *   word in bash, zsh and every readline program) work, but ⌥ stops being a
+ *   third-level shift. On the Swiss German, Swiss French, ABC-AZERTY and
+ *   French-PC layouts `[ ] { } | @ # \ ~` all live on the ⌥ layer, so `⌥5`
+ *   sends `ESC 5` instead of `[` and **no command containing a pipe, a brace
+ *   or an e-mail address can be typed at all**.
+ * - **off** (xterm's own default, and Terminal.app's) — the characters come
+ *   back and every word-motion chord is lost.
+ *
+ * So CortX does neither by default: `macOptionIsMeta` stays off, macOS
+ * composes as it intends, and this module reserves a **closed list of five
+ * keys** — ⌥B, ⌥F, ⌥D, ⌥V and ⌥⌫ — which it sends to the PTY as `ESC` +
+ * key itself.
+ *
+ * Why a fixed list is defensible here, when Warp gave up on the same problem:
+ * Warp's `meta_shortcuts.rs` notes that macOS does not expose which chords
+ * are dead keys, so a per-layout table is unmaintainable — and that is right.
+ * This is not that table. It is five entries that do not vary by layout: `b`,
+ * `f`, `d` and `v` are not dead keys on Apple's Latin layouts (those are
+ * ⌥E, ⌥U, ⌥I, ⌥N and ⌥`), and their ⌥ layer holds only typographic
+ * symbols (`∫ ƒ ∂ √`) that no command line needs. Anyone who disagrees
+ * has `never` and `always`.
+ *
+ * The list matches on `event.code`, never `event.key`: with composition left
+ * to macOS, `key` is already the composed glyph by the time we see it.
  */
 import { useAppStore } from '@/stores/appStore';
-import type { ShiftEnterKey } from '@/types';
+import { IS_MAC } from '@/lib/keybindings';
+import type { MacOptionAsMeta, ShiftEnterKey } from '@/types';
 
 /** ESC + CR: "new line, do not submit" for Claude Code, zsh and fish. */
 export const ESC_CR = String.fromCharCode(0x1b, 0x0d);
@@ -67,6 +99,60 @@ export function smoothScrollDuration(): number {
   const raw = useAppStore.getState().settings?.terminal.smoothScrollDuration;
   if (raw === undefined || !Number.isFinite(raw)) return DEFAULT_SMOOTH_SCROLL_DURATION;
   return Math.min(MAX_SMOOTH_SCROLL_DURATION, Math.max(0, Math.round(raw)));
+}
+
+export const DEFAULT_MAC_OPTION_AS_META: MacOptionAsMeta = 'wordKeys';
+
+/** How ⌥ behaves on macOS (`wordKeys` by default; ignored elsewhere). */
+export function macOptionAsMetaMode(): MacOptionAsMeta {
+  const raw = useAppStore.getState().settings?.terminal.macOptionAsMeta;
+  return raw === 'never' || raw === 'always' ? raw : DEFAULT_MAC_OPTION_AS_META;
+}
+
+/** True when xterm's own `macOptionIsMeta` should be on (mode `always`). */
+export function macOptionIsMetaOption(): boolean {
+  return macOptionAsMetaMode() === 'always';
+}
+
+/**
+ * The five chords `wordKeys` reserves, by `KeyboardEvent.code`, and what each
+ * one sends. Fixed on purpose — see the module header for why this is not a
+ * per-layout dead-key table.
+ *
+ * `⌥⌫` is readline's `backward-kill-word`, which is `ESC` + DEL (0x7f), not
+ * `ESC` + BS. ⌥B / ⌥F are `backward-word` / `forward-word`, ⌥D is
+ * `kill-word`; ⌥V is what Claude Code reads for "paste the image on the
+ * clipboard" (zorg #28), and in a plain shell it is `yank-nth-arg`.
+ */
+export const MAC_OPTION_WORD_KEYS: Readonly<Record<string, string>> = {
+  KeyB: 'b',
+  KeyD: 'd',
+  KeyF: 'f',
+  KeyV: 'v',
+  Backspace: '\x7f',
+};
+
+/**
+ * What a ⌥ chord should send on macOS, or null to leave the event alone —
+ * which means macOS composes the character, so `⌥5` stays `[`.
+ *
+ * Only ever answers on macOS, only in `wordKeys` mode, and only for a plain
+ * ⌥ chord (no Ctrl, no Cmd) whose physical key is one of
+ * [`MAC_OPTION_WORD_KEYS`]. `mode` and `isMac` are parameters so the rule can
+ * be tested off a Mac.
+ */
+export function macOptionMetaSequence(
+  e: KeyboardEvent,
+  mode: MacOptionAsMeta = macOptionAsMetaMode(),
+  isMac: boolean = IS_MAC
+): string | null {
+  if (!isMac || mode !== 'wordKeys') return null;
+  if (e.type !== 'keydown') return null;
+  if (!e.altKey || e.ctrlKey || e.metaKey) return null;
+  const key = MAC_OPTION_WORD_KEYS[e.code];
+  if (key === undefined) return null;
+  // ⌥⇧B is readline's `M-B`, uppercase; ⌥⇧⌫ stays DEL.
+  return '\x1b' + (e.shiftKey && key.length === 1 && key >= 'a' && key <= 'z' ? key.toUpperCase() : key);
 }
 
 /**

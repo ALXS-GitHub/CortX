@@ -14,6 +14,28 @@ export function getPlatform(): Platform {
   return 'linux';
 }
 
+/**
+ * Monospace families worth suggesting for `terminal.fontFamily`, per platform
+ * (issue 34).
+ *
+ * The list used to be the same everywhere and it was a Windows list: `Hack
+ * NF`, `Hack NFM`, `Cascadia Code`, `Cascadia Mono`, `Consolas`. Not one of
+ * those exists on a stock macOS or Linux machine, and CortX ships a `.dmg`,
+ * a `.deb`, an `.rpm` and an `.AppImage` at every release — so on two of the
+ * three platforms the suggestions were all invalid.
+ *
+ * `Hack NF` / `Hack NFM` are Nerd Fonts' *Windows Compatible* builds, whose
+ * family names were shortened for the old 31-character limit; everywhere else
+ * the same font installs as `Hack Nerd Font Mono`. The **Mono** variant is
+ * the one to suggest: in the plain `Nerd Font` build the added glyphs are
+ * double width and push a terminal's columns out of line.
+ */
+export const TERMINAL_FONT_SUGGESTIONS: Record<Platform, readonly string[]> = {
+  windows: ['Cascadia Mono', 'Cascadia Code', 'Consolas', 'Hack NFM', 'Hack NF', 'JetBrains Mono'],
+  macos: ['SF Mono', 'Menlo', 'Monaco', 'Hack Nerd Font Mono', 'JetBrains Mono'],
+  linux: ['DejaVu Sans Mono', 'Liberation Mono', 'Hack Nerd Font Mono', 'JetBrains Mono'],
+};
+
 export const TERMINAL_PRESETS: {
   value: TerminalPreset;
   label: string;
@@ -75,7 +97,7 @@ export const TERMINAL_SECTION_KEYWORDS = {
   external:
     'terminal application external windows terminal powershell cmd warp custom path arguments cortx terminal preset',
   integrated:
-    'integrated terminal shell integration inline suggestions ghost font size line height weight letter spacing selection renderer tabs placement rail restore sessions scrollback close busy open in dock window processes dev sessions dock theme file path links clickable paths kitty graphics images tab display number cwd agent completion menu flags subcommands git branches npm scripts input line position bottom pinned universal input editor blocks dividers gutter fold prompt navigation suggestions from output confidence ghost text smooth scrolling',
+    'integrated terminal shell integration inline suggestions ghost font size line height weight letter spacing selection renderer tabs placement rail restore sessions scrollback close busy open in dock window processes dev sessions dock theme file path links clickable paths kitty graphics images tab display number cwd agent completion menu flags subcommands git branches npm scripts input line position bottom pinned universal input editor blocks dividers gutter fold prompt navigation suggestions from output confidence ghost text smooth scrolling block spacing comfortable failed tint wash link tooltip hover target option meta alt key macos word keys dead keys azerty swiss font family missing not installed nerd font mono',
   notifications:
     'terminal notifications notify toast system desktop long command failed exit code muted commands claude codex vim ssh hidden background password prompt',
   appearance:

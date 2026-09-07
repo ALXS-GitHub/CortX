@@ -8,6 +8,23 @@ import { Input } from '@/components/ui/input';
 import { Field } from '@/components/settings/SettingsPrimitives';
 import { cn } from '@/lib/utils';
 
+/**
+ * A named group of settings inside one card.
+ *
+ * The integrated terminal card holds thirty-odd controls; without a heading
+ * every couple of them the list reads as one undifferentiated stack and
+ * nobody finds the block settings among the completion settings (ticket #26).
+ * Purely a heading and its own vertical rhythm — no state, no collapsing.
+ */
+export function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-4 border-t border-border pt-5 first:border-t-0 first:pt-0">
+      <h4 className="eyebrow">{title}</h4>
+      {children}
+    </section>
+  );
+}
+
 interface NumberFieldProps {
   id: string;
   label: ReactNode;

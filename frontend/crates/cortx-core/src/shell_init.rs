@@ -416,9 +416,9 @@ pub fn subshell_injection(shell: &Shell, terminal_id: &str, opts: InitOptions) -
 /// command boundaries, with `C;cmd=<base64 utf-8>` carrying the command line.
 /// Parsed by `terminal::osc`.
 ///
-/// The block also carries the *spacing* between two blocks: with
-/// `terminal.blockSpacing = normal` (the default, as in Warp) the shell prints
-/// one blank line before a prompt that follows a command. It has to come from
+/// The block also carries the *spacing* between two blocks: the shell prints
+/// `terminal.blockSpacing` blank lines before a prompt that follows a command
+/// — two by default, which is the air Warp leaves. It has to come from
 /// the shell — CortX draws its blocks over xterm's grid, where every row is
 /// exactly one row tall and no overlay can push two of them apart — and that
 /// blank line is also what gives the divider and the action bar a row nobody
@@ -666,7 +666,11 @@ mod tests {
     #[test]
     fn powershell_block_is_one_base64_line_that_decodes_to_the_snippet() {
         use base64::Engine;
-        for spacing in [TerminalBlockSpacing::Normal, TerminalBlockSpacing::Compact] {
+        for spacing in [
+            TerminalBlockSpacing::Normal,
+            TerminalBlockSpacing::Compact,
+            TerminalBlockSpacing::Comfortable,
+        ] {
             let block = shell_integration_block_for(&Shell::PowerShell, spacing);
             let code_lines: Vec<&str> = block.lines().filter(|l| !l.starts_with('#')).collect();
             assert_eq!(code_lines.len(), 1, "{spacing:?}: {block}");
@@ -755,7 +759,11 @@ mod tests {
     /// takes the whole session down.
     #[test]
     fn the_generated_snippets_stay_structurally_sound() {
-        for spacing in [TerminalBlockSpacing::Normal, TerminalBlockSpacing::Compact] {
+        for spacing in [
+            TerminalBlockSpacing::Normal,
+            TerminalBlockSpacing::Compact,
+            TerminalBlockSpacing::Comfortable,
+        ] {
             let pwsh = shell_integration_snippet_for(&Shell::PowerShell, spacing);
             assert_eq!(
                 pwsh.matches('{').count(),
