@@ -13,9 +13,20 @@
    An earlier pass framed the strip, on the reasoning that the eye needs to be
    told where it types. It does not: the shell's prompt is on that row and the
    caret is in it, so the frame only announced that a widget had been dropped
-   on the terminal. Warp's *universal* input is framed because it is a
-   separate surface with its own affordances; its **classic** input — which is
-   what this is — is not, and CortX ships the classic behaviour.
+   on the terminal. Commit `d70beb0` took it off — *it is the prompt, not a
+   widget* — and that is the whole argument.
+
+   **What it is not an argument about is which of Warp's two inputs this
+   matches.** An earlier version of this comment said CortX ships Warp's
+   *classic* input, and had it exactly backwards. CortX's editor owns the
+   line: nothing reaches the PTY while you type and the whole line goes out at
+   once on Enter, which is functionally Warp's **universal** input. Warp's
+   `Classic` is the shell's own line editor — PSReadLine, ZLE — kept under
+   `honor_ps1`, and *that* is what CortX does with the editor switched off.
+   The difference that matters here is placement, not lineage: Warp's
+   universal input is a separate surface with its own affordances, so a frame
+   belongs to it; this one is laid over the row the prompt is already on, so a
+   frame would draw a box around the prompt.
 
    So the chrome tokens below are all `transparent` and the strip is
    invisible. Everything else is unchanged: this file still owns the caret,
@@ -30,9 +41,9 @@
    ## Geometry
 
    The block is laid over the row the shell's prompt is on and spans the grid,
-   so the shell's own PS1 shows *inside* it (Warp's classic input does exactly
-   this) and no glyph is hidden: the fill is a translucent wash, never opaque.
-   `lib/terminalInputEditor.ts` positions it; the rules here only paint.
+   so the shell's own PS1 shows *inside* it and no glyph is hidden: the fill
+   is a translucent wash, never opaque. `lib/terminalInputEditor.ts` positions
+   it; the rules here only paint.
 
    ## The caret
 
@@ -72,10 +83,12 @@
   /* No chrome. The input sits on the shell's own prompt row, and a framed
      strip there reads as a foreign widget dropped on the terminal rather than
      as the prompt itself — the pane already says where you type, because the
-     prompt is right there and the caret is in it. Warp's *universal* input is
-     framed because it is a separate surface with its own affordances; its
-     classic input, which is what this is, is not. The tokens stay so the
-     frame can be brought back in one place. */
+     prompt is right there and the caret is in it. (Not, as this comment used
+     to claim, because CortX ships Warp's "classic" input: it ships the
+     equivalent of Warp's *universal* one, which is framed. Warp frames it
+     because it is a separate surface; this one is laid over the prompt row.
+     See the header.) The tokens stay so the frame can be brought back in one
+     place — derived from the terminal palette, never the app's chrome. */
   --cortx-uinput-border: transparent;
   --cortx-uinput-fill: transparent;
   --cortx-uinput-glow: transparent;

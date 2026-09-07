@@ -1,13 +1,24 @@
 /**
  * Universal input editor — the surface (ticket #15, phase U1).
  *
- * A **block** laid over the row the shell's prompt is on: a framed, full-width
- * strip (see `styles/terminal-input.css`) holding a `<textarea>`, driven by
- * the pure state machine in `terminalInputState.ts`. The editor owns the text:
- * nothing reaches the PTY while the user types, and the whole line goes out at
- * once on Enter, so the shell's own line editor (PSReadLine, ZLE) does all its
- * usual work — history, alias expansion, the `133;C` marker — on a line it
- * reads in one go.
+ * A **block** laid over the row the shell's prompt is on: a full-width,
+ * *unframed* strip (see `styles/terminal-input.css`) holding a `<textarea>`,
+ * driven by the pure state machine in `terminalInputState.ts`. The editor owns
+ * the text: nothing reaches the PTY while the user types, and the whole line
+ * goes out at once on Enter, so the shell's own line editor (PSReadLine, ZLE)
+ * does all its usual work — history, alias expansion, the `133;C` marker — on
+ * a line it reads in one go.
+ *
+ * Owning the line is what makes this the equivalent of **Warp's universal
+ * input**, not its classic one. (An earlier version of this header, and of
+ * the stylesheet's, said the opposite and used it to justify the missing
+ * frame.) Warp's `Classic` is the shell's own line editor left in charge
+ * under `honor_ps1` — which is what CortX does when `terminal.inputEditor` is
+ * off. The frame is absent for its own reason, unrelated to either: the strip
+ * sits on the prompt's row, so it *is* the prompt and a border around it
+ * would read as a widget dropped on the terminal (commit `d70beb0`). Warp
+ * frames its universal input because that one is a separate surface below the
+ * output, with affordances of its own.
  *
  * It only ever appears between an `OSC 133;B` the shell really emitted and the
  * submission. Without shell integration, over `ssh`, inside a REPL, in the
