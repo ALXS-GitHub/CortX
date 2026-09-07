@@ -846,7 +846,7 @@ impl ProcessManager {
         let mut cmd = CommandBuilder::new(&program);
         cmd.args(&args);
         cmd.cwd(&working_dir);
-        apply_pty_env(&mut cmd, &tid, env_vars.as_ref());
+        apply_pty_env(&mut cmd, &tid, Some(working_dir.as_str()), env_vars.as_ref());
         let log_path = self.runtime_store.log_path(&script_id);
         let line_emitter = emitter.clone();
         let line_id = script_id.clone();
@@ -1023,7 +1023,7 @@ impl ProcessManager {
         let mut cmd = CommandBuilder::new(&program);
         cmd.args(&args);
         cmd.cwd(&cwd);
-        apply_pty_env(&mut cmd, &tid, None);
+        apply_pty_env(&mut cmd, &tid, None, None);
         for (key, value) in extra_env {
             cmd.env(key, value);
         }
@@ -1491,7 +1491,7 @@ fn build_shell_command(
     let mut cmd = CommandBuilder::new(program);
     cmd.args(args);
     cmd.cwd(working_dir);
-    apply_pty_env(&mut cmd, terminal_id, env_vars);
+    apply_pty_env(&mut cmd, terminal_id, Some(working_dir), env_vars);
     cmd
 }
 
@@ -1608,9 +1608,18 @@ fn inject_shell_integration(
 
 /// Environment every PTY child gets: terminal identification so programs
 /// enable colours / truecolor, UTF-8 on Windows, plus the caller's own vars.
+/// Environment every PTY child gets.
+///
+/// `run_dir` is `Some` for the things CortX *runs* (a service, a project
+/// script, a global script) and `None` for an interactive shell. Only the
+/// former gets its PATH widened (ticket #33): a shell reads the user's own
+/// profile and must keep behaving exactly like a terminal, while a service
+/// is spawned by `cmd /C` / `sh -c`, which reads nothing — see
+/// [`crate::command_builder::run_path`].
 fn apply_pty_env(
     cmd: &mut CommandBuilder,
     terminal_id: &str,
+    run_dir: Option<&str>,
     env_vars: Option<&HashMap<String, String>>,
 ) {
     cmd.env("TERM", "xterm-256color");
@@ -1631,6 +1640,17 @@ fn apply_pty_env(
         cmd.env("PYTHONUTF8", "1");
         cmd.env("PYTHONIOENCODING", "utf-8");
     }
+    // Built on top of the PATH the PTY layer already computed (on Windows it
+    // rebuilds it from the registry, which is fresher than ours), so this
+    // only ever *adds* directories — and only inside this one child.
+    if let Some(dir) = run_dir.map(str::trim).filter(|d| !d.is_empty()) {
+        let base = cmd
+            .get_env("PATH")
+            .map(|v| v.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        cmd.env("PATH", crate::command_builder::run_path(dir, &base));
+    }
+    // Last, so a service that sets PATH itself still wins.
     if let Some(env) = env_vars {
         for (key, value) in env {
             cmd.env(key, value);
@@ -1873,6 +1893,45 @@ mod tests {
         assert_eq!(cmd.get_env("TERM").unwrap(), "xterm-256color");
         assert_eq!(cmd.get_env("FOO").unwrap(), "bar");
         assert_eq!(cmd.get_cwd().unwrap(), ".");
+    }
+
+    /// Ticket #33: a service must be able to find the project's own binaries.
+    #[test]
+    fn a_service_gets_the_project_local_bins_on_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let workdir = dir.path().to_string_lossy().to_string();
+
+        let cmd = build_shell_command("vite", &workdir, "service:test", None);
+        let path = cmd.get_env("PATH").unwrap().to_string_lossy().into_owned();
+        let first = path.split(crate::command_builder::PATH_SEP).next().unwrap();
+        assert_eq!(
+            std::path::Path::new(first),
+            bin.as_path(),
+            "local .bin must come first, got {path}"
+        );
+        // Nothing was taken away: whatever the PTY layer had stays behind it.
+        assert!(path.split(crate::command_builder::PATH_SEP).count() > 1, "{path}");
+    }
+
+    /// An interactive shell runs the user's profile: it must be left alone.
+    #[test]
+    fn an_interactive_shell_keeps_its_own_path() {
+        let mut cmd = CommandBuilder::new("pwsh");
+        let before = cmd.get_env("PATH").map(|v| v.to_string_lossy().into_owned());
+        apply_pty_env(&mut cmd, "shell:x", None, None);
+        let after = cmd.get_env("PATH").map(|v| v.to_string_lossy().into_owned());
+        assert_eq!(before, after);
+    }
+
+    /// A service that sets PATH itself is still the one in charge.
+    #[test]
+    fn an_explicit_path_env_var_wins() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/only/this".to_string());
+        let cmd = build_shell_command("x", ".", "service:test", Some(&env));
+        assert_eq!(cmd.get_env("PATH").unwrap(), "/only/this");
     }
 }
 

@@ -170,6 +170,152 @@ pub fn resolve_working_dir(script: &GlobalScript, override_dir: Option<&str>) ->
         .unwrap_or_else(|| ".".to_string())
 }
 
+// ===========================================================================
+// PATH for a command run *in a project* (ticket #33)
+// ===========================================================================
+//
+// A service, a project script and a global script are not typed at a prompt:
+// CortX spawns them with `cmd /C <line>` (Windows) or `sh -c <line>` (Unix).
+// That shell reads no profile and, unlike `npm run` / `bun run` / `yarn run`,
+// puts nothing project-local on PATH. So a command that names a dependency of
+// the project — `vite`, `nodemon`, `next`, `tsx` — cannot be found, while the
+// exact same word works in the integrated terminal or under `bun run`.
+//
+// The two halves of the answer, both of them *inside the process we are about
+// to start* — CortX never writes to the machine's PATH, nor to any shell
+// startup file:
+//
+// 1. every `node_modules/.bin` from the working directory up to the root,
+//    nearest first — precisely what a package manager prepends when it runs a
+//    script, so `vite` resolves the way the user's own `bun run dev` resolves
+//    it (workspaces included, since the walk goes up);
+// 2. on macOS and Linux, the PATH of the user's *login* shell, merged in
+//    behind. This is where `~/.bun/bin`, fnm / volta / mise shims and
+//    Homebrew live: a rc file builds them, and a GUI app started from the
+//    Dock never read that rc. Windows needs none of it — the PTY layer
+//    rebuilds the child's PATH from the `HKLM` + `HKCU` `Environment` keys,
+//    which is the same PATH a fresh terminal gets.
+
+/// PATH separator of the platform.
+pub const PATH_SEP: char = if cfg!(windows) { ';' } else { ':' };
+
+/// How far up the tree we look for `node_modules/.bin`. A workspace root is
+/// two or three levels above a package; the cap only stops a pathological
+/// path from turning into a long PATH.
+const MAX_LOCAL_BIN_DEPTH: usize = 12;
+
+/// Are these two PATH entries the same directory? Compared as text, the way
+/// a shell does, plus Windows's case- and slash-insensitivity.
+fn same_path_entry(a: &str, b: &str) -> bool {
+    let norm = |s: &str| {
+        let t = s.trim().trim_end_matches(['/', '\\']);
+        if cfg!(windows) {
+            t.replace('/', "\\").to_ascii_lowercase()
+        } else {
+            t.to_string()
+        }
+    };
+    !a.trim().is_empty() && norm(a) == norm(b)
+}
+
+/// The `node_modules/.bin` directories that apply to `working_dir`, nearest
+/// first. Only directories that exist are returned.
+pub fn local_bin_dirs(working_dir: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut dir = std::path::Path::new(working_dir.trim());
+    if dir.as_os_str().is_empty() {
+        return out;
+    }
+    for _ in 0..MAX_LOCAL_BIN_DEPTH {
+        let candidate = dir.join("node_modules").join(".bin");
+        if candidate.is_dir() {
+            out.push(candidate.to_string_lossy().into_owned());
+        }
+        match dir.parent() {
+            Some(parent) if parent != dir && !parent.as_os_str().is_empty() => dir = parent,
+            _ => break,
+        }
+    }
+    out
+}
+
+/// The PATH of the user's login shell, asked once and remembered.
+///
+/// `$SHELL -lc 'printf %s "$PATH"'` is the same question a terminal answers
+/// by existing. It is only ever *read*: nothing is written, anywhere.
+/// Windows has no such thing (and no `$SHELL` worth trusting), so the answer
+/// there is simply "no opinion".
+pub fn login_shell_path() -> Option<&'static str> {
+    static CACHE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(probe_login_shell_path).as_deref()
+}
+
+fn probe_login_shell_path() -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
+    let shell = std::env::var("SHELL").ok()?;
+    let shell = shell.trim();
+    if shell.is_empty() || !std::path::Path::new(shell).is_absolute() {
+        return None;
+    }
+    let mut command = std::process::Command::new(shell);
+    command
+        .args(["-lc", r#"printf %s "$PATH""#])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    // A login shell can hang (a prompt in an rc file, a slow version
+    // manager). Give it a few seconds on a thread of its own and forget it
+    // otherwise — a missing answer only means "no extra directories".
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("cortx-login-path".into())
+        .spawn(move || {
+            let _ = tx.send(command.output().ok());
+        })
+        .ok()?;
+    let output = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .ok()
+        .flatten()?;
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path)
+    }
+}
+
+/// The PATH a command launched by CortX in `working_dir` should see, built on
+/// top of `base` (the PATH the child would have had otherwise).
+///
+/// Project-local bins go first — they are the most specific answer and the
+/// one a package manager would give. The login shell's entries go last and
+/// only when `base` does not already have them, so nothing is ever reordered
+/// or dropped.
+pub fn run_path(working_dir: &str, base: &str) -> String {
+    let mut entries: Vec<String> = Vec::new();
+    let push = |entry: String, entries: &mut Vec<String>| {
+        if entry.trim().is_empty() || entries.iter().any(|e| same_path_entry(e, &entry)) {
+            return;
+        }
+        entries.push(entry);
+    };
+    for dir in local_bin_dirs(working_dir) {
+        push(dir, &mut entries);
+    }
+    for entry in base.split(PATH_SEP) {
+        push(entry.to_string(), &mut entries);
+    }
+    if let Some(extra) = login_shell_path() {
+        for entry in extra.split(PATH_SEP) {
+            push(entry.to_string(), &mut entries);
+        }
+    }
+    entries.join(&PATH_SEP.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,5 +564,73 @@ mod tests {
         let script = make_script("myapp", None, vec![]);
         let resolved = resolve_working_dir(&script, None);
         assert!(!resolved.trim().is_empty());
+    }
+
+    // -- ticket #33: PATH for a command run in a project --------------------
+
+    fn sep(parts: &[&str]) -> String {
+        parts.join(&PATH_SEP.to_string())
+    }
+
+    #[test]
+    fn local_bins_are_collected_from_the_nearest_up() {
+        let root = tempfile::tempdir().unwrap();
+        let outer = root.path().join("node_modules").join(".bin");
+        let inner_dir = root.path().join("packages").join("web");
+        let inner = inner_dir.join("node_modules").join(".bin");
+        std::fs::create_dir_all(&outer).unwrap();
+        std::fs::create_dir_all(&inner).unwrap();
+
+        let dirs = local_bin_dirs(&inner_dir.to_string_lossy());
+        assert_eq!(dirs.len(), 2, "{dirs:?}");
+        assert_eq!(std::path::Path::new(&dirs[0]), inner.as_path());
+        assert_eq!(std::path::Path::new(&dirs[1]), outer.as_path());
+    }
+
+    #[test]
+    fn a_directory_without_node_modules_adds_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(local_bin_dirs(&root.path().to_string_lossy()).is_empty());
+        assert!(local_bin_dirs("   ").is_empty());
+    }
+
+    #[test]
+    fn run_path_prepends_local_bins_and_keeps_the_rest_in_order() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let base = sep(&["/usr/bin", "/bin"]);
+
+        let path = run_path(&root.path().to_string_lossy(), &base);
+        let parts: Vec<&str> = path.split(PATH_SEP).collect();
+        assert_eq!(std::path::Path::new(parts[0]), bin.as_path());
+        assert_eq!(parts[1], "/usr/bin");
+        assert_eq!(parts[2], "/bin");
+    }
+
+    #[test]
+    fn run_path_never_duplicates_or_drops_an_entry() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let bin_str = bin.to_string_lossy().into_owned();
+        // The directory is already on PATH, plus an empty entry to skip.
+        let base = sep(&[&bin_str, "/usr/bin", "", "/usr/bin"]);
+
+        let path = run_path(&root.path().to_string_lossy(), &base);
+        let parts: Vec<&str> = path.split(PATH_SEP).collect();
+        assert_eq!(parts.len(), 2, "{path}");
+        assert_eq!(std::path::Path::new(parts[0]), bin.as_path());
+        assert_eq!(parts[1], "/usr/bin");
+    }
+
+    #[test]
+    fn same_path_entry_is_forgiving_where_the_platform_is() {
+        assert!(same_path_entry("/usr/bin", "/usr/bin/"));
+        assert!(!same_path_entry("", ""));
+        assert!(!same_path_entry("/usr/bin", "/usr/local/bin"));
+        if cfg!(windows) {
+            assert!(same_path_entry(r"C:\Tools\Bin", "c:/tools/bin"));
+        }
     }
 }
