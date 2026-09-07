@@ -223,14 +223,24 @@ function DropdownMenuSubTrigger({
 
 function DropdownMenuSubContent({
   className,
+  collisionPadding = 8,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
   return (
-    <DropdownMenuPrimitive.SubContent
-      data-slot="dropdown-menu-sub-content"
-      className={cn("glass-strong z-50 min-w-[120px] origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden rounded-[var(--rad-menu)] border border-[var(--panel-border)] p-1.5 text-popover-foreground shadow-pop duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2", className )}
-      {...props}
-    />
+    // Portaled, like `DropdownMenuContent`. Left where it sits in the tree, a
+    // sub-menu renders *inside* its parent menu, whose `overflow-x-hidden
+    // overflow-y-auto` then clips it away: Radix positions popper content
+    // `fixed`, but the parent's `[data-radix-popper-content-wrapper]` carries a
+    // `transform`, which makes that scroll box the containing block. Radix's
+    // own docs wrap `SubContent` in a Portal for exactly this reason.
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.SubContent
+        data-slot="dropdown-menu-sub-content"
+        collisionPadding={collisionPadding}
+        className={cn("glass-strong z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[120px] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-[var(--rad-menu)] border border-[var(--panel-border)] p-1.5 text-popover-foreground shadow-pop duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2", className )}
+        {...props}
+      />
+    </DropdownMenuPrimitive.Portal>
   )
 }
 
