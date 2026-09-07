@@ -31,6 +31,7 @@ import type {
   CompletionMenuKey,
   TerminalBlockSpacing,
   TerminalInputPosition,
+  TerminalOsc52Access,
   TerminalTargetSurface,
 } from '@/types';
 
@@ -596,6 +597,38 @@ export function IntegratedTerminalSection() {
             disabled={!terminal}
           />
         </ToggleField>
+
+        <Field
+          label="Clipboard access from programs (OSC 52)"
+          htmlFor="terminal-osc52"
+          hint={
+            <>
+              What a program running in the terminal may do with your system clipboard: writing replaces what you
+              copied, reading hands it whatever you last copied anywhere — a password, a token. <Code>OSC 52</Code> is
+              an escape sequence like any other, so <strong>anything that writes to the terminal can send one</strong>:
+              a program behind <Code>ssh</Code>, a process in a container, a <Code>cat</Code> on a file you never read.
+              That is why it is <strong>denied by default</strong>, as it is in Warp. <Code>Write only</Code> is the
+              level to pick if you use tmux or neovim over ssh — their yank is exactly this sequence, and it leaves the
+              read path shut. A refused attempt raises one notice per terminal, naming the command that made it.
+              Applies immediately, to the terminals already open.
+            </>
+          }
+        >
+          <Select
+            value={terminal?.osc52 ?? 'deny'}
+            onValueChange={(v: TerminalOsc52Access) => patch({ osc52: v })}
+            disabled={!terminal}
+          >
+            <SelectTrigger id="terminal-osc52" className="w-[320px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="deny">Denied (default)</SelectItem>
+              <SelectItem value="writeOnly">Write only — for tmux and neovim</SelectItem>
+              <SelectItem value="readWrite">Read and write</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
       </Group>
 
       <Group title="Tabs and windows">

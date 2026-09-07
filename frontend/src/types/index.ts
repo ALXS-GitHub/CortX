@@ -258,7 +258,22 @@ export interface TerminalConfig {
   /** What ⌥ (Option) sends on macOS. Ignored on Windows and Linux, where Alt
    *  has always been Meta. Default `wordKeys`. See `lib/terminalKeys.ts`. */
   macOptionAsMeta?: MacOptionAsMeta;
+  /** What a program running in the terminal may do with the system clipboard
+   *  through the OSC 52 escape sequence. Default `deny` (issue 36). */
+  osc52?: TerminalOsc52Access;
 }
+
+/**
+ * What OSC 52 is allowed to do (issue 36) — Warp's
+ * `terminal.osc52_clipboard_access`, with the same three levels and the same
+ * `deny` default.
+ *
+ * OSC 52 is an escape sequence like any other: anything that writes to the
+ * PTY can emit one — a program behind `ssh`, a process in a container, a
+ * `cat` on a file nobody read. Writing replaces what you copied; reading
+ * hands the program whatever you last copied anywhere.
+ */
+export type TerminalOsc52Access = 'deny' | 'writeOnly' | 'readWrite';
 
 /** How much room a block gets above it (ticket #7). Default `comfortable`,
  *  which leaves two blank lines — Warp's own spacing is ~2.1 grid cells, and

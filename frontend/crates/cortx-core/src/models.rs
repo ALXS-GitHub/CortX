@@ -623,6 +623,40 @@ pub struct TerminalConfig {
     /// the click.
     #[serde(default = "default_true")]
     pub link_tooltip: bool,
+    /// What a program running in the terminal may do with the system
+    /// clipboard through the OSC 52 escape sequence. `Deny` by default — see
+    /// [`Osc52Access`].
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub osc52: Osc52Access,
+}
+
+/// What OSC 52 is allowed to do (issue 36).
+///
+/// Warp calls this `terminal.osc52_clipboard_access` and denies it by
+/// default; CortX does the same. OSC 52 is an escape sequence like any
+/// other, so **anything that writes to the PTY can emit one**: a program
+/// behind `ssh`, a process in a container, a script nobody read, a `cat` on
+/// a crafted file. The write path replaces what the user copied — the
+/// classic trick swaps the command they believe they copied from a doc — and
+/// the read path hands the program whatever they last copied anywhere, a
+/// password or a token included.
+///
+/// Only the frontend reads this (`lib/terminalSessions.ts`): the sequence is
+/// handled in the terminal emulator, never in the backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Osc52Access {
+    /// The default: the clipboard addon is not loaded at all, and an OSC 52
+    /// sequence is swallowed. The first attempt of a session raises one
+    /// notice naming the command that made it.
+    #[default]
+    Deny,
+    /// A program may *set* the clipboard, never read it. This is the level
+    /// for tmux and neovim over `ssh`, whose yank is exactly this.
+    WriteOnly,
+    /// Both directions, including reading the clipboard back into the PTY.
+    ReadWrite,
 }
 
 /// What ⌥ (Option) sends on macOS.
@@ -980,6 +1014,7 @@ impl Default for TerminalConfig {
             block_spacing: TerminalBlockSpacing::default(),
             mac_option_as_meta: MacOptionAsMeta::default(),
             link_tooltip: true,
+            osc52: Osc52Access::default(),
         }
     }
 }

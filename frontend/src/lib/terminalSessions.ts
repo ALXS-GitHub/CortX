@@ -19,12 +19,14 @@ import { SearchAddon } from '@xterm/addon-search';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { ImageAddon } from '@xterm/addon-image';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
-import { ClipboardAddon } from '@xterm/addon-clipboard';
+import { ClipboardAddon, type IClipboardProvider } from '@xterm/addon-clipboard';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { toast } from 'sonner';
+import type { TerminalOsc52Access } from '@/types';
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
@@ -51,6 +53,7 @@ import {
   openSelectedBlockMenu,
   refreshBlocks,
 } from '@/lib/terminalBlocks';
+import { openTerminalSettingsPanel } from '@/components/terminal/settings/meta';
 
 /** One queued piece of output, plus the callback owed to whoever wrote it. */
 interface QueuedPart extends ImagePart {
@@ -81,6 +84,11 @@ export interface TerminalSession {
   draining: boolean;
   /** Size last accepted by the backend PTY, so a lost resize can be retried. */
   sentSize: { cols: number; rows: number } | null;
+  /** Whatever currently answers OSC 52 for this session: the `ClipboardAddon`
+   *  when access is granted, the handler that swallows and reports the
+   *  sequence when it is denied. Swapped in place when the setting changes
+   *  (see `attachOsc52`). */
+  osc52: IDisposable | null;
 }
 
 const sessions = new Map<string, TerminalSession>();
@@ -437,6 +445,7 @@ function ensureSettingsSubscription() {
   let lastInputEditor = inputEditorEnabled();
   let lastBlocks = blockSettingsKey();
   let lastMacOption = macOptionIsMetaOption();
+  let lastOsc52 = osc52Access();
   useAppStore.subscribe(() => {
     const font = terminalFontOptions();
     const fontKey = JSON.stringify(font);
@@ -494,6 +503,14 @@ function ensureSettingsSubscription() {
     if (macOption !== lastMacOption) {
       lastMacOption = macOption;
       for (const s of sessions.values()) s.term.options.macOptionIsMeta = macOption;
+    }
+    // Issue 36: OSC 52 takes effect on the terminals already open — the
+    // addon (or the handler that stands in for it) is swapped per session,
+    // so nobody has to restart a shell to grant or revoke this.
+    const osc52 = osc52Access();
+    if (osc52 !== lastOsc52) {
+      lastOsc52 = osc52;
+      for (const s of sessions.values()) attachOsc52(s);
     }
   });
 }
@@ -573,6 +590,125 @@ function probeWebviewPaste(term: Terminal) {
 }
 
 // ---------------------------------------------------------------------------
+// OSC 52 — clipboard access from the programs running in the terminal
+// ---------------------------------------------------------------------------
+
+/**
+ * What a program may do with the system clipboard through OSC 52 (issue 36).
+ *
+ * `ESC ] 52 ; c ; <base64> BEL` sets the clipboard, and `ESC ] 52 ; c ; ? BEL`
+ * asks for its contents, which the emulator writes back **into the PTY**.
+ * It is an escape sequence like any other, so anything that reaches the PTY
+ * can emit one: a program behind `ssh`, a process in a container, a script
+ * nobody read, a `cat` on a crafted file. Writing lets it replace what the
+ * user copied (the classic trick swaps the command they believe they copied
+ * from a doc); reading hands it whatever they last copied anywhere.
+ *
+ * `@xterm/addon-clipboard@0.2.0` really does implement both directions: its
+ * `BrowserClipboardProvider.readText` calls `navigator.clipboard.readText()`
+ * for the `c` selection and the addon echoes the answer back with
+ * `terminal.input()`. So until this setting existed, both paths were open.
+ *
+ * Warp (`terminal.osc52_clipboard_access`) denies it by default; so do we.
+ */
+export function osc52Access(): TerminalOsc52Access {
+  return useAppStore.getState().settings?.terminal.osc52 ?? 'deny';
+}
+
+/** Sessions that have already told the user something was refused. */
+const osc52Notified = new Set<string>();
+
+/**
+ * One notice per session, the first time an access is refused — otherwise a
+ * denial is completely silent and the tmux user whose yank stopped working
+ * has nothing at all to go on. The command that asked is the one the shell
+ * integration reports as running, which is exactly the current block.
+ */
+function noteOsc52Refusal(terminalId: string, what: 'read' | 'write') {
+  if (osc52Notified.has(terminalId)) return;
+  osc52Notified.add(terminalId);
+  const command = useAppStore.getState().terminalStates.get(terminalId)?.command?.trim();
+  const who = command ? `"${command}"` : 'A program';
+  const verb = what === 'read' ? 'read the clipboard' : 'change the clipboard';
+  toast.warning('Clipboard access blocked', {
+    description:
+      `${who} tried to ${verb} through an OSC 52 escape sequence. ` +
+      'Terminal settings → Integrated terminal → Clipboard access from programs (OSC 52). ' +
+      'Write only is the level for tmux and neovim.',
+    // The panel only exists in the Terminal window; from the dock the path
+    // above is all we can honestly offer.
+    action: IS_TERMINAL_WINDOW
+      ? { label: 'Settings', onClick: () => openTerminalSettingsPanel() }
+      : undefined,
+  });
+}
+
+/**
+ * The clipboard the addon talks to. Deliberately not its default provider:
+ * that one goes through `navigator.clipboard`, which needs the webview's
+ * permission and focus, while the rest of CortX copies and pastes through
+ * Tauri's clipboard plugin (see `copySelection` / `pasteFromClipboard`).
+ *
+ * `allowRead` false is the `writeOnly` level: the read answer is an empty
+ * string, so a program that asks is told the clipboard is empty rather than
+ * left hanging.
+ */
+function osc52Provider(terminalId: string, allowRead: boolean): IClipboardProvider {
+  return {
+    async readText(selection): Promise<string> {
+      if (!allowRead) {
+        noteOsc52Refusal(terminalId, 'read');
+        return '';
+      }
+      // `p` is the X11 primary selection; there is no such thing here.
+      if ((selection as string) !== 'c') return '';
+      try {
+        return (await readText()) ?? '';
+      } catch (err) {
+        console.error('OSC 52 clipboard read failed:', err);
+        return '';
+      }
+    },
+    async writeText(selection, text): Promise<void> {
+      if ((selection as string) !== 'c') return;
+      try {
+        await writeText(text);
+      } catch (err) {
+        console.error('OSC 52 clipboard write failed:', err);
+      }
+    },
+  };
+}
+
+/**
+ * Install the OSC 52 handling the current setting calls for, replacing
+ * whatever was installed before. Applies to a live session: xterm's addon
+ * manager wraps `dispose()` so an addon can be unloaded, and the addon's own
+ * `dispose` unregisters its OSC handler.
+ */
+function attachOsc52(session: TerminalSession) {
+  session.osc52?.dispose();
+  session.osc52 = null;
+  // The user just moved the setting: a refusal after that is news again.
+  // Still one notice at a time — never one per attempt.
+  osc52Notified.delete(session.id);
+  const access = osc52Access();
+  if (access === 'deny') {
+    // The addon is not loaded at all — nothing can reach a clipboard API.
+    // A handler of our own still claims the sequence (xterm would drop an
+    // unhandled OSC in silence) so the attempt can be reported once.
+    session.osc52 = session.term.parser.registerOscHandler(52, (data) => {
+      noteOsc52Refusal(session.id, data.split(';')[1] === '?' ? 'read' : 'write');
+      return true;
+    });
+    return;
+  }
+  const addon = new ClipboardAddon(undefined, osc52Provider(session.id, access === 'readWrite'));
+  session.term.loadAddon(addon);
+  session.osc52 = addon;
+}
+
+// ---------------------------------------------------------------------------
 // Session lifecycle
 // ---------------------------------------------------------------------------
 
@@ -639,8 +775,6 @@ function createSession(id: string): TerminalSession {
     showPlaceholder: true,
   });
   term.loadAddon(image);
-  // OSC 52: lets programs like tmux / neovim write to the system clipboard.
-  term.loadAddon(new ClipboardAddon());
 
   const container = document.createElement('div');
   container.className = 'cortx-xterm h-full w-full';
@@ -669,7 +803,13 @@ function createSession(id: string): TerminalSession {
     pending: [],
     draining: false,
     sentSize: null,
+    osc52: null,
   };
+
+  // OSC 52 — what programs like tmux / neovim use to reach the system
+  // clipboard, and what anything else on the PTY can use just as easily.
+  // Denied by default; see `attachOsc52`.
+  attachOsc52(session);
 
   // Clickable file paths (and `file:line:col`) next to the URL detection the
   // WebLinksAddon already does. Registered second, so URLs still win.
@@ -1161,6 +1301,9 @@ export function disposeTerminal(id: string) {
     api.detachTerminal(id, session.attachToken).catch(() => {});
   }
   for (const d of session.disposables) d.dispose();
+  session.osc52?.dispose();
+  session.osc52 = null;
+  osc52Notified.delete(id);
   session.webgl?.dispose();
   session.canvas?.dispose();
   session.term.dispose();
