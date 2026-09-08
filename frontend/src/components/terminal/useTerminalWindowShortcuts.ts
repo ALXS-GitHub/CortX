@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { useAppStore } from '@/stores/appStore';
 import { IS_MAC, comboFromEvent, resolveKeybindings, type KeybindingActionId } from '@/lib/keybindings';
-import { pasteDroppedPaths, runAction } from './actions';
+import { endTabCycle, pasteDroppedPaths, runAction } from './actions';
 import { adjustTerminalZoom } from '@/lib/terminalSessions';
 
 /** Actions that must also work while a text field (palette, find, rename) has focus. */
@@ -18,11 +18,26 @@ function isTextFieldOutsideXterm(target: EventTarget | null): boolean {
 /** While Control is held, the rail / strip show their tab numbers (`html[data-ctrl-held]`). */
 let ctrlHeld = false;
 
+/**
+ * The single place that knows whether Ctrl (⌘) is down — the tab numbers hang
+ * off it, and so does the Ctrl+Tab cycle (issue 45b).
+ *
+ * Giving the cycle its own keyup listener was the obvious thing to do and the
+ * wrong one: it is precisely the detector that ticket #34 had to make
+ * self-healing, because the keyup is simply never delivered when the window
+ * loses the keyboard mid-press. A second, naive one would strand a snapshot
+ * the same way the attribute used to be stranded. So the release edge is
+ * published from here instead, once, and every consequence of it hangs off
+ * this transition.
+ */
 function setCtrlHeld(held: boolean) {
   if (held === ctrlHeld) return;
   ctrlHeld = held;
   if (held) document.documentElement.setAttribute('data-ctrl-held', '');
   else document.documentElement.removeAttribute('data-ctrl-held');
+  // Ctrl came up (or the window can no longer tell that it did): a Ctrl+Tab
+  // gesture in flight ends here, and the recently-used stack is committed.
+  if (!held) endTabCycle();
 }
 
 /**

@@ -36,6 +36,7 @@ import type {
   TabIndexDisplay,
   CompletionMenuKey,
   TerminalBlockSpacing,
+  TerminalCtrlTabBehavior,
   TerminalInputPosition,
   TerminalOsc52Access,
   TerminalTargetSurface,
@@ -706,6 +707,26 @@ export function IntegratedTerminalSection() {
             <SelectContent>
               <SelectItem value="sidebar">Sessions rail (left)</SelectItem>
               <SelectItem value="top">Tab strip (top)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+
+        <Field
+          label="Ctrl+Tab goes to"
+          htmlFor="ctrl-tab-behavior"
+          hint="Recently used works like Alt+Tab between windows: keep Ctrl held and each Tab walks one tab further back through the ones you have actually been on, and the order only settles when you let Ctrl go."
+        >
+          <Select
+            value={terminal?.ctrlTabBehavior ?? 'sequential'}
+            onValueChange={(v: TerminalCtrlTabBehavior) => patch({ ctrlTabBehavior: v })}
+            disabled={!terminal}
+          >
+            <SelectTrigger id="ctrl-tab-behavior" className="w-[220px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sequential">Next tab</SelectItem>
+              <SelectItem value="recentlyUsed">Recently used</SelectItem>
             </SelectContent>
           </Select>
         </Field>

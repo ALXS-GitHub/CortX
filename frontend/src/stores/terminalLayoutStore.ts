@@ -160,6 +160,19 @@ interface TerminalLayoutState {
   updateLeafSize: (terminalId: string, cols: number, rows: number) => void;
   /** Append ready-made tabs (launch configuration) and show the first one. */
   addLaunchTabs: (tabs: TerminalTab[], projectId: string | null) => void;
+  /**
+   * Put this window's recently-used stack back in a given order (issue 45b).
+   *
+   * The only caller is the end of a Ctrl+Tab cycle. Walking a frozen snapshot
+   * switches tab several times, and each switch pushes the tab it passed
+   * through to the front of the stack — so a cycle A → C → B would leave
+   * `[B, C, A]` and send the next Ctrl+Tab to C, a tab that was only flashed
+   * past. This restores the order the snapshot had, with the tab actually
+   * landed on at its head. Ids the window no longer holds are dropped, and
+   * ids not mentioned (other scopes, tabs opened during the cycle) keep their
+   * places behind the ones given.
+   */
+  setTabMruOrder: (orderedTabIds: string[]) => void;
 
   // Selectors
   scopedTabs: () => TerminalTab[];
@@ -168,8 +181,10 @@ interface TerminalLayoutState {
   /**
    * The tabs of this window in most-recently-used order: the ones you have
    * been on (current first), then the ones you never visited in list order, so
-   * the list always holds every tab of the scope exactly once. This is what a
-   * "Ctrl+Tab cycles by recent use" would walk (issue 45b).
+   * the list always holds every tab of the scope exactly once. This is what
+   * `terminal.ctrlTabBehavior = 'recentlyUsed'` snapshots when a Ctrl+Tab
+   * cycle begins (issue 45b) — it is read once, at the first press, never
+   * again while the modifier is held.
    */
   recentTabs: () => TerminalTab[];
 }
@@ -736,6 +751,20 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
         window: { ...window, scope: tabInScope(first, scope) ? scope : 'global', activeTabId: first.id },
       };
     }),
+
+  setTabMruOrder: (orderedTabIds) => {
+    const { doc, tabMru } = get();
+    // Same rules as `nextTabMru`, applied to a hand-written order: only tabs
+    // this window still holds, the current one first, capped at `MRU_MAX`.
+    const mine = new Set(doc.window.tabs.filter((t) => tabIsLocal(t)).map((t) => t.id));
+    const previous = tabMru[TERMINAL_WINDOW_ID] ?? [];
+    const merged = [...orderedTabIds, ...previous.filter((id) => !orderedTabIds.includes(id))];
+    const active = doc.window.activeTabId;
+    const kept = merged.filter((id) => mine.has(id) && id !== active);
+    const stack = (active && mine.has(active) ? [active, ...kept] : kept).slice(0, MRU_MAX);
+    if (stack.length === previous.length && stack.every((id, i) => id === previous[i])) return;
+    set({ tabMru: { ...tabMru, [TERMINAL_WINDOW_ID]: stack } });
+  },
 
   scopedTabs: () => tabsInScope(get().doc.window, get().doc.window.scope),
   activeTab: () => {

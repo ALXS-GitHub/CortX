@@ -400,6 +400,11 @@ pub struct TerminalConfig {
     #[serde(default)]
     #[serde(deserialize_with = "lenient_enum")]
     pub tabs_placement: TabsPlacement,
+    /// What Ctrl+Tab walks: the tab list, or the order the tabs were last
+    /// used in. See [`CtrlTabBehavior`]. Only the frontend reads this.
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub ctrl_tab_behavior: CtrlTabBehavior,
     /// Font of every terminal (dock and window). None = bundled default stack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
@@ -1006,6 +1011,24 @@ pub enum TabsPlacement {
     Top,
 }
 
+/// What Ctrl+Tab does (issue 45b) — Warp's `keys.ctrl_tab_behavior_setting`.
+///
+/// Only the frontend reads it (`lib/tabCycle.ts` and
+/// `components/terminal/actions.ts`): switching tabs never reaches the
+/// backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum CtrlTabBehavior {
+    /// The next tab in the list, then the one after it — what CortX has
+    /// always done, and the default: a key pressed a hundred times a day does
+    /// not change meaning unless it is asked to.
+    #[default]
+    Sequential,
+    /// Alt+Tab between tabs: the first press goes to the tab used before this
+    /// one, and holding Ctrl walks further back through the ones before that.
+    RecentlyUsed,
+}
+
 impl Default for TerminalConfig {
     fn default() -> Self {
         Self {
@@ -1021,6 +1044,7 @@ impl Default for TerminalConfig {
             notify_only_when_hidden: true,
             notify_muted_commands: None,
             tabs_placement: TabsPlacement::default(),
+            ctrl_tab_behavior: CtrlTabBehavior::default(),
             font_family: None,
             font_size: None,
             line_height: None,

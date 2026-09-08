@@ -10,6 +10,8 @@ import { jumpToBlock } from '@/lib/terminalBlocks';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
 import { basename } from '@/lib/terminalNames';
 import type { KeybindingActionId } from '@/lib/keybindings';
+import { finishTabCycle, stepTabCycle, tabCycleTarget, type TabCycleState } from '@/lib/tabCycle';
+import type { TerminalCtrlTabBehavior } from '@/types';
 import { activeLeafOf, splitPathTo, visibleTabOrder } from './model';
 import {
   collectLeaves,
@@ -429,14 +431,86 @@ export function splitActiveLeaf(direction: SplitDirection): Promise<void> {
   return splitLeaf(tab.id, activeLeafOf(tab).id, direction);
 }
 
-/** Jump to the next / previous tab of the current scope (Ctrl+Tab). */
-export function cycleTab(delta: 1 | -1): void {
+/**
+ * The cycle Ctrl+Tab is walking right now, or null when no modifier is down.
+ *
+ * Module-level, like every other piece of state in this file, because the
+ * gesture spans several events in several components: the presses come through
+ * `runAction`, the release through `endTabCycle` (called by the Ctrl-held
+ * detector in `useTerminalWindowShortcuts`). Only ever non-null between a
+ * first Ctrl+Tab and the moment Ctrl comes up.
+ */
+let tabCycle: TabCycleState | null = null;
+
+/** What Ctrl+Tab does, as configured. The default has never moved. */
+function ctrlTabBehavior(): TerminalCtrlTabBehavior {
+  return useAppStore.getState().settings?.terminal.ctrlTabBehavior ?? 'sequential';
+}
+
+/** Jump to the next / previous tab **in the tab list** (the default Ctrl+Tab). */
+function cycleTabSequential(delta: 1 | -1): void {
   const layout = useTerminalLayoutStore.getState();
   const tabs = layout.scopedTabs();
   if (tabs.length < 2) return;
   const current = tabs.findIndex((t) => t.id === layout.doc.window.activeTabId);
   const next = tabs[(current + delta + tabs.length) % tabs.length];
   layout.setActiveTab(next.id);
+}
+
+/**
+ * Ctrl+Tab as Alt+Tab (`ctrlTabBehavior = 'recentlyUsed'`, issue 45b): walk
+ * the recently-used order, snapshotted at the first press and **not read
+ * again** until Ctrl comes up. Re-reading it would be the ping-pong bug — the
+ * store moves the tab we just switched to in front of the one we came from, so
+ * the second press would walk right back. `stepTabCycle` owns that rule;
+ * everything here does is read the store and hand it the result.
+ */
+function cycleTabRecentlyUsed(delta: 1 | -1): void {
+  const layout = useTerminalLayoutStore.getState();
+  const next = stepTabCycle({
+    state: tabCycle,
+    order: layout.recentTabs().map((t) => t.id),
+    currentId: layout.doc.window.activeTabId,
+    alive: new Set(layout.scopedTabs().map((t) => t.id)),
+    delta,
+  });
+  tabCycle = next;
+  if (next) layout.setActiveTab(tabCycleTarget(next));
+  // A binding without Ctrl in it (the user is free to rebind "Next tab") gets
+  // no release edge, so the gesture is over the moment it began: commit now
+  // rather than leave a snapshot behind for the next press to walk. Reading
+  // the attribute is reading the window's one Ctrl-held detector — see
+  // `setCtrlHeld` in `useTerminalWindowShortcuts`.
+  if (!document.documentElement.hasAttribute('data-ctrl-held')) endTabCycle();
+}
+
+/** Jump to the next / previous tab of the current scope (Ctrl+Tab). */
+export function cycleTab(delta: 1 | -1): void {
+  if (ctrlTabBehavior() === 'recentlyUsed') cycleTabRecentlyUsed(delta);
+  else cycleTabSequential(delta);
+}
+
+/**
+ * Ctrl came up (or the window stopped being able to see that it did): commit
+ * the cycle and forget the snapshot.
+ *
+ * Called from the one Ctrl-held detector the window has
+ * (`useTerminalWindowShortcuts`), which re-derives the modifier from every
+ * keyboard and pointer event and clears it on blur — so this also runs when
+ * the window loses the keyboard mid-gesture, which is exactly what must
+ * happen: an abandoned cycle is validated where it stands rather than left
+ * holding a snapshot of a screen the user has walked away from.
+ *
+ * Committing means putting the recently-used stack back the way the snapshot
+ * had it, with the tab we landed on at its head — the tabs merely flashed past
+ * keep their old places, so the next Ctrl+Tab goes where the last gesture
+ * started from. Harmless and cheap when no cycle is running.
+ */
+export function endTabCycle(): void {
+  const state = tabCycle;
+  if (!state) return;
+  tabCycle = null;
+  useTerminalLayoutStore.getState().setTabMruOrder(finishTabCycle(state));
 }
 
 /** The tabs in the order the user sees them (rail groups, or strip order). */

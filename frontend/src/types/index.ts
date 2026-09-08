@@ -123,6 +123,9 @@ export interface TerminalConfig {
   notifyMutedCommands?: string[];
   /** Terminal window: sessions rail on the left (default) or a tab strip on top — never both. */
   tabsPlacement?: 'sidebar' | 'top';
+  /** What Ctrl+Tab walks: the tab list, or the order you last used the tabs in
+   *  (issue 45b). Default `sequential`. */
+  ctrlTabBehavior?: TerminalCtrlTabBehavior;
   /** Ask before closing a terminal — or quitting CortX — while a command is
    *  running in it (nothing running = closes straight away). Default true. */
   confirmCloseRunning?: boolean;
@@ -302,6 +305,19 @@ export type TerminalOsc52Access = 'deny' | 'writeOnly' | 'readWrite';
  *  two whole rows is the nearest a grid can express. `normal` is one row, a
  *  quarter of that. */
 export type TerminalBlockSpacing = 'normal' | 'compact' | 'comfortable';
+
+/**
+ * What Ctrl+Tab does (issue 45b) — Warp's `keys.ctrl_tab_behavior_setting`.
+ *
+ * `sequential` is the default and is what CortX has always done: the next tab
+ * in the list, then the one after it. `recentlyUsed` makes it Alt+Tab: the
+ * first press goes to the tab you were on before this one, and holding Ctrl
+ * while pressing again walks further back through the tabs you have used.
+ *
+ * The default deliberately does not move: switching a key someone presses a
+ * hundred times a day is not a change to make on their behalf.
+ */
+export type TerminalCtrlTabBehavior = 'sequential' | 'recentlyUsed';
 
 /**
  * What ⌥ (Option) sends on macOS (issue 35, zorg #28).
