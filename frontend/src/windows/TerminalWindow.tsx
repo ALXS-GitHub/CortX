@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AppWindow, Loader2, Plus, Search, SlidersHorizontal, SquareTerminal } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -15,8 +15,9 @@ import { FindBar } from '@/components/terminal/FindBar';
 import { TerminalThemeRoot } from '@/components/terminal/theme/TerminalThemeLayer';
 import { BetaBadge } from '@/components/ui/BetaBadge';
 import { ThemePicker } from '@/components/terminal/theme/ThemePicker';
-import { TerminalSettingsDialog } from '@/components/terminal/settings/TerminalSettingsDialog';
-import { openTerminalSettingsPanel } from '@/components/terminal/settings/meta';
+import { TerminalSettingsView } from '@/components/terminal/settings/TerminalSettingsView';
+import { OPEN_TERMINAL_SETTINGS_EVENT, openTerminalSettingsPanel } from '@/components/terminal/settings/meta';
+import { flushTerminalSettings } from '@/components/terminal/settings/useTerminalSettings';
 import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { TERMINAL_EVENTS, openNewTerminal } from '@/components/terminal/actions';
 import { useItemMap } from '@/components/terminal/model';
@@ -24,7 +25,9 @@ import { useTerminalFileDrop, useTerminalWheelZoom, useTerminalWindowShortcuts }
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import { useTerminalLayoutStore, TERMINAL_WINDOW_ID } from '@/stores/terminalLayoutStore';
 import { useAppStore } from '@/stores/appStore';
-import { PRIMARY_TERMINAL_WINDOW, tabIsLocal, tabsInScope, terminalWindowName } from '@/lib/terminalLayout';
+import { collectLeaves, findLeaf, PRIMARY_TERMINAL_WINDOW, tabIsLocal, tabsInScope, terminalWindowName } from '@/lib/terminalLayout';
+import { fitTerminal, focusTerminal, listTerminalSessionIds } from '@/lib/terminalSessions';
+import { cn } from '@/lib/utils';
 import { openTerminalWindow } from '@/components/terminal/terminalWindows';
 import { DetachDropHint } from '@/components/terminal/DetachDropHint';
 import { SubshellBanner } from '@/components/terminal/SubshellBanner';
@@ -72,6 +75,14 @@ export function TerminalWindow() {
   const win = useTerminalLayoutStore((s) => s.doc.window);
   const items = useItemMap();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Terminal settings, full space (ticket #27): a panel that takes the content
+  // area over, not a tab and no longer a dialog. See `TerminalSettingsView`.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const closeSettings = useCallback(() => {
+    // The controls save on a short debounce; closing must not drop the last one.
+    flushTerminalSettings();
+    setSettingsOpen(false);
+  }, []);
 
   // Terminal theme drives the whole window (title bar, rail, panes,
   // wallpaper, opacity), like Warp. Returns its disposer.
@@ -141,19 +152,61 @@ export function TerminalWindow() {
     }
   }, [loaded]);
 
-  // Ctrl+, opens the settings panel. Not part of the rebindable registry yet
-  // (`lib/keybindings.ts` has no `window.settings` action); the palette entry
-  // is the discoverable way in.
+  // Everything that asks for the settings — the palette entry, the title bar
+  // button, the OSC 52 toast — goes through this one event, so none of them
+  // has to know where the panel lives.
+  useEffect(() => {
+    const onOpen = () => setSettingsOpen(true);
+    window.addEventListener(OPEN_TERMINAL_SETTINGS_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_TERMINAL_SETTINGS_EVENT, onOpen);
+  }, []);
+
+  // Ctrl+, toggles the settings panel — the shortcut that opens it closes it
+  // again, like Ctrl+K on the palette. Not part of the rebindable registry
+  // yet (`lib/keybindings.ts` has no `window.settings` action); the palette
+  // entry is the discoverable way in.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || !e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
       if (e.key !== ',') return;
       e.preventDefault();
-      openTerminalSettingsPanel();
+      if (settingsOpen) closeSettings();
+      else setSettingsOpen(true);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [settingsOpen, closeSettings]);
+
+  // Coming back from the panel. The tree of terminals was only hidden, never
+  // unmounted (see the render below), and `fit()` is a no-op on a box with no
+  // size — so every pane still holds the size it had, and the PTYs were never
+  // resized. Re-fitting anyway is what covers the window being resized while
+  // the panel was up; two frames so the layout has settled first. Focus goes
+  // back to the pane the user left, which `XtermView`'s `autoFocus` effect
+  // cannot do on its own (it never re-ran: nothing about it changed).
+  const settingsWasOpen = useRef(false);
+  useEffect(() => {
+    if (settingsOpen) {
+      settingsWasOpen.current = true;
+      return;
+    }
+    if (!settingsWasOpen.current) return;
+    settingsWasOpen.current = false;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        for (const id of listTerminalSessionIds()) fitTerminal(id);
+        if (!activeTab) return;
+        const leaf =
+          (activeTab.activeLeafId ? findLeaf(activeTab.layout, activeTab.activeLeafId) : null) ??
+          collectLeaves(activeTab.layout)[0];
+        if (leaf) focusTerminal(leaf.terminalId);
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+    // `activeTab` is read, not watched: it only matters on the frame the
+    // panel closes on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsOpen]);
 
   // Scope requested at creation (`cortx terminal --project`, or a project's
   // "open terminal"), applied once the shared layout is in.
@@ -297,31 +350,42 @@ export function TerminalWindow() {
             <div className="flex min-w-0 flex-1 flex-col">
               {tabsPlacement === 'top' && <WindowTabStrip />}
               <div className="terminal-dock relative flex min-h-0 flex-1">
-                {/* "A sub-shell is running here without shell integration"
-                    (ticket #16) — an offer, never an automatic injection. */}
-                <SubshellBanner />
-                {activeTab ? (
-                  <SplitTree key={activeTab.id} tab={activeTab} items={items} isActiveTab />
-                ) : (
-                  <div className="flex flex-1 items-center justify-center">
-                    <EmptyState
-                      compact
-                      icon={SquareTerminal}
-                      title="No terminal here yet"
-                      description={
-                        win.scope === 'global'
-                          ? 'Open a shell (Ctrl+Shift+T), or send a terminal here from the main window.'
-                          : 'Open a shell in this project (Ctrl+Shift+T), or widen the scope to Global.'
-                      }
-                      action={
-                        <Button onClick={() => void openNewTerminal()}>
-                          <Plus />
-                          New terminal
-                        </Button>
-                      }
-                    />
-                  </div>
-                )}
+                {/* Settings take the content area over (ticket #27), but the
+                    terminals are only *hidden*: unmounting the tree would take
+                    every xterm instance with it and a running agent would lose
+                    its output. A hidden box has no size, so nothing is resized
+                    and no PTY is told the window shrank. */}
+                <div className={cn('flex min-h-0 min-w-0 flex-1', settingsOpen && 'hidden')}>
+                  {/* "A sub-shell is running here without shell integration"
+                      (ticket #16) — an offer, never an automatic injection. */}
+                  <SubshellBanner />
+                  {activeTab ? (
+                    <SplitTree key={activeTab.id} tab={activeTab} items={items} isActiveTab />
+                  ) : (
+                    <div className="flex flex-1 items-center justify-center">
+                      <EmptyState
+                        compact
+                        icon={SquareTerminal}
+                        title="No terminal here yet"
+                        description={
+                          win.scope === 'global'
+                            ? 'Open a shell (Ctrl+Shift+T), or send a terminal here from the main window.'
+                            : 'Open a shell in this project (Ctrl+Shift+T), or widen the scope to Global.'
+                        }
+                        action={
+                          <Button onClick={() => void openNewTerminal()}>
+                            <Plus />
+                            New terminal
+                          </Button>
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
+                {/* Rendered after the tree so it wins the stacking order, and
+                    only while open: the cards subscribe to the settings store,
+                    and a closed panel should not be listening. */}
+                {settingsOpen && <TerminalSettingsView onClose={closeSettings} />}
               </div>
             </div>
           </div>
@@ -330,7 +394,6 @@ export function TerminalWindow() {
       </TerminalThemeRoot>
       <TerminalPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <ThemePicker />
-      <TerminalSettingsDialog />
       <FindBar />
       <DetachDropHint />
       <Toaster position="bottom-right" />
