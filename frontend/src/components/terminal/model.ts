@@ -235,6 +235,54 @@ export function cwdLabel(item: TerminalItem | undefined): string | undefined {
   return cwd ? basename(cwd) : undefined;
 }
 
+// ---------------------------------------------------------------------------
+// The second line of a tab row
+// ---------------------------------------------------------------------------
+
+/** The second line of a tab row, and what it is saying. */
+export interface TabSecondary {
+  text: string;
+  /**
+   * `waiting` an agent wants you, `command` something runs, `path` the working
+   * directory, `count` how many panes a group holds.
+   */
+  tone: 'waiting' | 'command' | 'path' | 'count';
+}
+
+/**
+ * What a tab row writes under its name.
+ *
+ * One function for the two things that ask: a tab (its active leaf's item and
+ * the state folded over all its leaves) and a single pane (that leaf's item and
+ * its own state). They used to be `SessionRow`'s inline chain and
+ * `paneModel.paneSecondary`, written twice because the rail could not be
+ * touched when the pane rows were added.
+ *
+ * The rule: an agent waiting on you is worth a word, a running command replaces
+ * the directory, otherwise the directory. `claude` is never shown as "the
+ * running command" — it runs for the whole session and would hide the path
+ * forever.
+ *
+ * `count` is what a **group label** writes where a lone tab writes its
+ * directory: under a group header the active pane's directory only repeats the
+ * row right below it, so how many panes there are is what the header can add.
+ */
+export function tabSecondary(
+  item: TerminalItem | undefined,
+  live: TabLiveState,
+  display: ResolvedTabDisplay,
+  count?: string
+): TabSecondary | undefined {
+  const agent = display.agent ? live.agent : undefined;
+  if (agent?.state === 'waiting') return { text: STATE_LABEL.waiting, tone: 'waiting' };
+  if (!agent && display.command && item?.shell?.phase === 'running') {
+    return { text: item.shell.command ?? '(command)', tone: 'command' };
+  }
+  if (count !== undefined) return { text: count, tone: 'count' };
+  const cwd = display.cwd ? cwdLabel(item) : undefined;
+  return cwd ? { text: cwd, tone: 'path' } : undefined;
+}
+
 /** Pinned tabs first, then the user's order. */
 export function sortTabs(tabs: TerminalTab[]): TerminalTab[] {
   return tabs.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.order - b.order);

@@ -15,7 +15,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeIcon';
 import { AgentProviderIcon } from '@/components/agents/AgentProviderIcon';
-import { STATE_LABEL } from '@/components/agents/agentUtils';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { RAIL_WIDTH_COLLAPSED, useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
@@ -26,9 +25,9 @@ import { TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { closeTabAndRelease, closeWorkspaceTabs, openNewTerminal } from './actions';
 import { CloseConfirmDialog } from './CloseConfirmDialog';
 import {
-  cwdLabel,
   describeItem,
   groupTabsByWorkspace,
+  tabSecondary,
   tabItem,
   tabLiveState,
   tabTitle,
@@ -119,14 +118,9 @@ function SessionRow({
 }) {
   const item = tabItem(tab, items);
   const live = tabLiveState(tab, items);
+  // Also decides the row's icon, below.
   const agent = display.agent ? live.agent : undefined;
   const title = tabTitle(tab, items, display.agent);
-  const cwd = display.cwd ? cwdLabel(item) : undefined;
-  // `claude` runs from the moment the agent starts: showing it as "the
-  // running command" would hide the directory for the whole session.
-  const running = !agent && display.command && item?.shell?.phase === 'running';
-  // An agent waiting on you is the one thing worth a word rather than a dot.
-  const waiting = agent?.state === 'waiting';
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
   const rename = useTabRename(tab, title);
@@ -139,13 +133,7 @@ function SessionRow({
   const headline = grouped ? groupHeadline(title) : title;
   // Under a group header, the active pane's directory only repeats a row
   // right below it — how many panes there are is what the header can add.
-  const secondary = waiting
-    ? STATE_LABEL.waiting
-    : running
-      ? (item?.shell?.command ?? '(command)')
-      : grouped
-        ? paneCountLabel(panes.length)
-        : cwd;
+  const secondary = tabSecondary(item, live, display, grouped ? paneCountLabel(panes.length) : undefined);
 
   const color = tab.color;
   const tinted = Boolean(color);
@@ -231,11 +219,17 @@ function SessionRow({
                 <span
                   className={cn(
                     'truncate text-[10.5px]',
-                    waiting ? 'text-st-progress' : !grouped || running ? 'font-mono' : undefined,
-                    running ? 'text-primary' : !waiting && 'text-faint'
+                    // A path and a command are typed text; "Waiting" and
+                    // "3 panes" are prose, and reading them in mono is worse.
+                    (secondary.tone === 'command' || secondary.tone === 'path') && 'font-mono',
+                    secondary.tone === 'waiting'
+                      ? 'text-st-progress'
+                      : secondary.tone === 'command'
+                        ? 'text-primary'
+                        : 'text-faint'
                   )}
                 >
-                  {secondary}
+                  {secondary.text}
                 </span>
               )}
             </span>

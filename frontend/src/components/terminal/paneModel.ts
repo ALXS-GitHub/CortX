@@ -12,12 +12,11 @@
  * shows, computed for one leaf instead of for the whole tab.
  */
 import { useMemo } from 'react';
-import { STATE_LABEL } from '@/components/agents/agentUtils';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { collectLeaves, type LeafNode, type TerminalTab } from '@/lib/terminalLayout';
 import { basename } from '@/lib/terminalNames';
 import { cn } from '@/lib/utils';
-import { cwdLabel, type ItemMap, type ResolvedTabDisplay, type TabLiveState } from './model';
+import { cwdLabel, tabSecondary, type ItemMap, type ResolvedTabDisplay, type TabLiveState, type TabSecondary } from './model';
 import type { TerminalItem } from '@/components/layout/terminal-dnd/types';
 
 /** One pane of a tab, with everything the two renderings need. */
@@ -78,12 +77,12 @@ export function leafName(item: TerminalItem | undefined, number: number, useAgen
   return item?.name ?? `Pane ${number}`;
 }
 
-/** The second line of a pane row, and what it is saying. */
-export interface PaneSecondary {
-  text: string;
-  /** `waiting` an agent wants you, `command` something runs, `path` the cwd. */
-  tone: 'waiting' | 'command' | 'path';
-}
+/**
+ * The second line of a pane row. A pane row and a tab row write the same
+ * thing by the same rules, so this is `TabSecondary` under the name the pane
+ * code already used.
+ */
+export type PaneSecondary = TabSecondary;
 
 /**
  * The second line of a pane row, decided exactly as `SessionRow` decides its
@@ -92,13 +91,10 @@ export interface PaneSecondary {
  * command" — it runs for the whole session and would hide the path forever.
  */
 export function paneSecondary(pane: PaneEntry, display: ResolvedTabDisplay): PaneSecondary | undefined {
-  const agent = display.agent ? pane.live.agent : undefined;
-  if (agent?.state === 'waiting') return { text: STATE_LABEL.waiting, tone: 'waiting' };
-  if (!agent && display.command && pane.item?.shell?.phase === 'running') {
-    return { text: pane.item.shell.command ?? '(command)', tone: 'command' };
-  }
-  if (display.cwd && pane.cwd) return { text: pane.cwd, tone: 'path' };
-  return undefined;
+  // `pane.cwd` is `cwdLabel(pane.item)`, which is what `tabSecondary` reads,
+  // so this is the same answer the rail's own rows get — by construction now,
+  // rather than by two copies of the rule agreeing.
+  return tabSecondary(pane.item, pane.live, display);
 }
 
 /**
