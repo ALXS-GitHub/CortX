@@ -110,33 +110,17 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Workspace clusters: the rail's tabs of one project, held in one box, with
-   the project's name above it (ticket #22, the Warp screenshot).
-
-   Only a project with **two or more** tabs gets a box — a group of one is not
-   a group, and boxing every row would turn the rail into a stack of plates.
-   The tint is the project's own dot colour, kept faint: it says "these belong
-   together", and a tab that carries a colour of its own has to stay louder
-   than the box it sits in.
-   --------------------------------------------------------------------------- */
-
-.tt-cluster {
-  --tt-cluster-plate: color-mix(in srgb, var(--tt-group-color, var(--card)) 12%, var(--card));
-  border-radius: var(--rad-md);
-  padding: 3px;
-  background-color: color-mix(in srgb, var(--tt-cluster-plate) 60%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tt-group-color, var(--foreground)) 14%, transparent);
-}
-
-/* ---------------------------------------------------------------------------
    Pane groups: a split is a couple of tabs held together, nothing more.
 
-   The box below is the *same recipe* as `.tt-cluster` one level down — a
-   weak mix of a colour into `--card`, a 14 % hairline — because it says the
-   same thing one level down: "these belong together". Where a cluster is
-   tinted by the project's dot, a pane box is tinted by the tab's own colour
-   (`--tt-color`, handed down by `tintStyle`), and falls back to a plain
-   `--card` box when the tab has no colour, which is the usual case.
+   **The only box in the rail.** A project's tabs briefly shared one too
+   (`.tt-cluster`, since removed): sharing a project is not sharing a tab, and
+   a box says the second thing. A split is the one case where several rows
+   really are one object, so it is the one case that gets a box — and the
+   tab's own label is the first row *inside* it, not a title floating above.
+
+   A weak mix of a colour into `--card` with a 14 % hairline: the tab's own
+   colour (`--tt-color`, handed down by `tintStyle`) when it has one, a plain
+   `--card` box otherwise, which is the usual case.
 
    What it deliberately is *not*: a card with a header, a second border, a
    guide line, or chips with a fill of their own. All of that came back as
@@ -199,53 +183,15 @@
   background-color: var(--tt-pane-current);
 }
 
-/* The tab's own row, above the box: a label, not a header. Everything it can
-   do stays (select, rename on F2 / double-click, right-click menu, close, and
-   it is the drag handle of the whole group), it just stops being the loudest
-   thing in the rail.
+/* The tab's own row, now the **first row inside the box**: a label, not a
+   header. Everything it can do stays (select, rename on F2 / double-click,
+   right-click menu, close the whole tab, and it is the drag handle of the
+   group), it just stops being the loudest thing in the rail.
 
-   The three rules below overrule utilities set in `SessionRail.tsx`
-   (`h-9 gap-2 px-2`, and the `flex-col` of the text block). They are written
-   `.tt-group-v > …` — two classes, so they win over a single-class utility
-   whatever order the sheets land in. **This is a seam, not a design**: when
-   `SessionRail.tsx` can be touched again, the grouped branch there should
-   carry these values itself and this block should go. */
-.tt-group-v > .tt-head {
-  height: 24px;
-  gap: 5px;
-  padding-inline: 5px;
-  margin-bottom: 2px;
-  border-radius: var(--rad-xs);
-}
-
-.tt-group-v > .tt-head > svg {
-  width: 12px;
-  height: 12px;
-}
-
-/* Name and pane count on one line: two stacked lines above two-line rows is
-   the block we are getting rid of. `:not([aria-hidden])` is the text block —
-   the colour bar, the Ctrl+N number and the menu anchor are all hidden. */
-.tt-group-v > .tt-head > span:not([aria-hidden]) {
-  flex-direction: row;
-  align-items: baseline;
-  gap: 6px;
-}
-
-/* The name gives way first: what follows it is a count, or the command that
-   is running — both short, and both meaningless once they are cut. */
-.tt-group-v > .tt-head > span:not([aria-hidden]) > span {
-  min-width: 0;
-  flex: 0 4 auto;
-  font-size: 11px;
-}
-
-.tt-group-v > .tt-head > span:not([aria-hidden]) > span + span {
-  flex: 0 1 auto;
-  font-size: 10px;
-}
-
-/* A hover cue still helps — clicking the label selects the tab. */
+   Its geometry — 24 px, 5 px gap, name and count on one line — used to be
+   overruled from here, a seam left while `SessionRail.tsx` was off-limits.
+   It is written on the element itself now; only the hover cue is left, since
+   clicking the label selects the tab. */
 .tt-head:hover {
   background-color: var(--tt-hover);
 }

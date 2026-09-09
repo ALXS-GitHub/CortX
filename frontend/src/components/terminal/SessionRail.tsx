@@ -90,10 +90,15 @@ function RailIconButton({
  * exactly as in the strip (`.tt-tint`); the bar survives behind
  * `tabDisplay.colorBar`, off by default.
  *
- * A tab holding a split becomes a **card**: its own row, then its panes
- * indented under a guide line (`PaneGroupBranch`), all on one surface so the
- * three read as a single object. The sortable node is the wrapper *outside*
- * the card, so the whole group travels with its tab while it is dragged.
+ * A tab holding a split becomes a **group**: one box (`PaneGroupBranch`) whose
+ * first row is the tab's own label and whose other rows are its panes — the
+ * label inside the box it names, not floating above it. Each pane row is a
+ * session in its own right: its own X, its own menu, its own status. The box
+ * only says that they share a tab.
+ *
+ * The sortable node is the wrapper *outside* the box, so the whole group
+ * travels with its tab while it is dragged — the layout document reorders and
+ * detaches tabs, not leaves.
  */
 function SessionRow({
   tab,
@@ -137,147 +142,192 @@ function SessionRow({
 
   const color = tab.color;
   const tinted = Boolean(color);
-  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
+  // `CSS.Translate`, **not** `CSS.Transform`: a sorting strategy also hands
+  // back a scale — the ratio between the dragged row and the one it is over —
+  // and the rail's rows are not the same height (a tab holding a split is
+  // ~117 px, a plain one 40). Rendering that scale is what stretched a tab
+  // out of shape mid-drag ("des fois certains tabs s'étendent visuellement").
+  // Only the translation is wanted; the row keeps its own size.
+  const style: CSSProperties = { transform: CSS.Translate.toString(transform), transition };
   // The colour travels as a custom property; every mix is in the stylesheet,
   // over the window's own surface. Whichever box is the tab's own surface
   // wears it: the card when the tab holds a split, the row otherwise.
   const tint = tintStyle(color);
 
-  return (
-    <div ref={setNodeRef} style={style} className={cn(isDragging && 'z-10 opacity-60')}>
-      <div
-        className={cn(grouped && cn(groupCardClass(active, 'vertical'), tinted && 'tt-tint'))}
-        style={grouped ? tint : undefined}
-        data-current={grouped ? (active ? 'true' : 'false') : undefined}
-      >
-        <div
-          style={grouped ? undefined : tint}
-          data-current={grouped ? undefined : active ? 'true' : 'false'}
-          onClick={onSelect}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            rename.start();
-          }}
-          onKeyDown={(e) => {
-            if (rename.editing) return;
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              onSelect();
-            } else if (e.key === 'F2') {
-              e.preventDefault();
-              rename.start();
-            }
-          }}
-          onContextMenu={menu.onContextMenu}
-          title={
-            rename.editing
-              ? undefined
-              : // The headline is shortened; the tooltip keeps the whole name.
-                [grouped ? title : null, item ? describeItem(item) : null].filter(Boolean).join('\n') || undefined
-          }
+  // The tab's own row. Standalone it *is* the tab; inside a group it is the
+  // group's label — the first row of the box, so the title sits in the thing
+  // it names (Alexis, 2026-09-09), and still the drag handle of the whole tab.
+  const row = (
+    <div
+      style={grouped ? undefined : tint}
+      data-current={grouped ? undefined : active ? 'true' : 'false'}
+      onClick={onSelect}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        rename.start();
+      }}
+      onKeyDown={(e) => {
+        if (rename.editing) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        } else if (e.key === 'F2') {
+          e.preventDefault();
+          rename.start();
+        }
+      }}
+      onContextMenu={menu.onContextMenu}
+      title={
+        rename.editing
+          ? undefined
+          : // The headline is shortened; the tooltip keeps the whole name.
+            [grouped ? title : null, item ? describeItem(item) : null].filter(Boolean).join('\n') || undefined
+      }
+      className={cn(
+        'group relative flex h-10 w-full cursor-default select-none items-center gap-2 rounded-[var(--rad-nav)] px-2 text-left transition-colors',
+        active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+        // Standalone row: it is its own surface. Group label: the box it
+        // now lives in is, so it only gets a hover cue of its own. The
+        // geometry below used to be a `.tt-group-v > .tt-head` block in
+        // `terminal-tabs.css` — a seam left there when this file was
+        // off-limits; it belongs on the element it describes.
+        grouped
+          ? 'tt-head mb-0.5 h-6 gap-[5px] rounded-[var(--rad-xs)] px-[5px] [&>svg]:size-3'
+          : tinted
+            ? 'tt-tint tt-tint-ring'
+            : cn(!active && 'hover:bg-accent/60', active && 'bg-accent')
+      )}
+      {...attributes}
+      {...listeners}
+    >
+      {display.colorBar && color && (
+        <span
+          className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-full"
+          style={{ backgroundColor: color }}
+          aria-hidden
+        />
+      )}
+      {agent ? (
+        <AgentProviderIcon provider={agent.provider} plain className="pointer-events-none size-3.5 shrink-0" />
+      ) : (
+        <TerminalTypeIcon
+          type={item?.type ?? 'shell'}
+          className="pointer-events-none size-3.5 shrink-0 text-faint"
+        />
+      )}
+      {rename.editing ? (
+        <TabRenameInput
+          value={rename.draft}
+          onChange={rename.setDraft}
+          onCommit={rename.commit}
+          onCancel={rename.cancel}
+          className="min-w-0 flex-1"
+        />
+      ) : (
+        <span
           className={cn(
-            'group relative flex h-10 w-full cursor-default select-none items-center gap-2 rounded-[var(--rad-nav)] px-2 text-left transition-colors',
-            active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
-            // Standalone row: it is its own surface. Group header: the card is,
-            // so the header only gets a hover cue from the group's own tint.
-            grouped
-              ? 'tt-head h-9'
-              : tinted
-                ? 'tt-tint tt-tint-ring'
-                : cn(!active && 'hover:bg-accent/60', active && 'bg-accent')
+            'pointer-events-none flex min-w-0 flex-1 flex-col leading-tight',
+            // A label: the name and the pane count on one line. Two
+            // stacked lines above two-line rows is the block we got rid of.
+            grouped && 'flex-row items-baseline gap-1.5'
           )}
-          {...attributes}
-          {...listeners}
         >
-          {display.colorBar && color && (
-            <span
-              className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-full"
-              style={{ backgroundColor: color }}
-              aria-hidden
-            />
-          )}
-          {agent ? (
-            <AgentProviderIcon provider={agent.provider} plain className="pointer-events-none size-3.5 shrink-0" />
-          ) : (
-            <TerminalTypeIcon
-              type={item?.type ?? 'shell'}
-              className="pointer-events-none size-3.5 shrink-0 text-faint"
-            />
-          )}
-          {rename.editing ? (
-            <TabRenameInput
-              value={rename.draft}
-              onChange={rename.setDraft}
-              onCommit={rename.commit}
-              onCancel={rename.cancel}
-              className="min-w-0 flex-1"
-            />
-          ) : (
-            <span className="pointer-events-none flex min-w-0 flex-1 flex-col leading-tight">
-              <span className={cn('truncate text-[12.5px]', grouped && 'font-medium')}>{headline}</span>
-              {secondary && (
-                <span
-                  className={cn(
-                    'truncate text-[10.5px]',
-                    // A path and a command are typed text; "Waiting" and
-                    // "3 panes" are prose, and reading them in mono is worse.
-                    (secondary.tone === 'command' || secondary.tone === 'path') && 'font-mono',
-                    secondary.tone === 'waiting'
-                      ? 'text-st-progress'
-                      : secondary.tone === 'command'
-                        ? 'text-primary'
-                        : 'text-faint'
-                  )}
-                >
-                  {secondary.text}
-                </span>
-              )}
-            </span>
-          )}
-          {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
-          {/* Only the rows a Ctrl+N actually reaches get a number (ticket
-              #34): 1…8, then 9 on the last one, where Ctrl+9 goes. */}
-          {display.index !== 'never' && shortcutNumber !== null && !rename.editing && (
+          <span
+            className={cn(
+              'truncate text-[12.5px]',
+              // The name gives way first: what follows it is a count, or
+              // the command running — both short, both useless once cut.
+              grouped && 'min-w-0 text-[11px] font-medium [flex:0_4_auto]'
+            )}
+          >
+            {headline}
+          </span>
+          {secondary && (
             <span
               className={cn(
-                'pointer-events-none shrink-0 font-mono text-[10px] tabular-nums text-faint transition-opacity',
-                display.index === 'always' ? 'opacity-100' : 'opacity-0 [html[data-ctrl-held]_&]:opacity-100'
+                'truncate text-[10.5px]',
+                grouped && 'text-[10px] [flex:0_1_auto]',
+                // A path and a command are typed text; "Waiting" and
+                // "3 panes" are prose, and reading them in mono is worse.
+                (secondary.tone === 'command' || secondary.tone === 'path') && 'font-mono',
+                secondary.tone === 'waiting'
+                  ? 'text-st-progress'
+                  : secondary.tone === 'command'
+                    ? 'text-primary'
+                    : 'text-faint'
               )}
-              aria-hidden
             >
-              {shortcutNumber}
+              {secondary.text}
             </span>
           )}
-          {/* Grouped: every pane row carries its own status; the tab-wide one
-              here would only repeat whichever pane happened to be loudest. */}
-          {display.status && !grouped && <TerminalStatusGlyph live={live} className="pointer-events-none" />}
-          <button
-            type="button"
-            className="grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => e.stopPropagation()}
-            title="Close tab"
-            aria-label="Close tab"
-          >
-            <X className="pointer-events-none size-3" />
-          </button>
+        </span>
+      )}
+      {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
+      {/* Only the rows a Ctrl+N actually reaches get a number (ticket
+          #34): 1…8, then 9 on the last one, where Ctrl+9 goes. */}
+      {display.index !== 'never' && shortcutNumber !== null && !rename.editing && (
+        <span
+          className={cn(
+            'pointer-events-none shrink-0 font-mono text-[10px] tabular-nums text-faint transition-opacity',
+            display.index === 'always' ? 'opacity-100' : 'opacity-0 [html[data-ctrl-held]_&]:opacity-100'
+          )}
+          aria-hidden
+        >
+          {shortcutNumber}
+        </span>
+      )}
+      {/* Grouped: every pane row carries its own status; the tab-wide one
+          here would only repeat whichever pane happened to be loudest. */}
+      {display.status && !grouped && <TerminalStatusGlyph live={live} className="pointer-events-none" />}
+      {/* Grouped, this X closes the **whole tab** — every pane in the box
+          — so it must not look like the X of a pane. It keeps a ring
+          (`XCircle`, the same glyph "Close all" wears in the project
+          header) and says how many panes it takes with it; the plain X on
+          each pane row closes that pane alone. */}
+      <button
+        type="button"
+        className="grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+        title={grouped ? `Close tab and its ${panes.length} panes` : 'Close tab'}
+        aria-label={grouped ? `Close tab and its ${panes.length} panes` : 'Close tab'}
+      >
+        {grouped ? (
+          <XCircle className="pointer-events-none size-3" />
+        ) : (
+          <X className="pointer-events-none size-3" />
+        )}
+      </button>
 
-          <TabContextMenu tab={tab} open={menu.open} onOpenChange={menu.setOpen} pos={menu.pos} onRename={rename.start} onClose={onClose} />
-        </div>
-        {grouped && (
+      <TabContextMenu tab={tab} open={menu.open} onOpenChange={menu.setOpen} pos={menu.pos} onRename={rename.start} onClose={onClose} />
+    </div>
+  );
+
+  return (
+    <div ref={setNodeRef} style={style} className={cn(isDragging && 'z-10 opacity-60')}>
+      {grouped ? (
+        <div
+          className={cn(groupCardClass(active, 'vertical'), tinted && 'tt-tint')}
+          style={tint}
+          data-current={active ? 'true' : 'false'}
+        >
           <PaneGroupBranch
             tab={tab}
             panes={panes}
             tabActive={active}
             display={display}
             onSelect={(leafId) => selectPane(tab, leafId)}
-          />
-        )}
-      </div>
+          >
+            {row}
+          </PaneGroupBranch>
+        </div>
+      ) : (
+        row
+      )}
     </div>
   );
 }
@@ -287,11 +337,11 @@ function SessionRow({
  * Each group is its own drag context so a row cannot land in another
  * workspace.
  *
- * Ticket #22, the Warp screenshot: the rows of a project sit inside one
- * tinted box with the project's name above it — plain rows held together,
- * rather than a block of their own with a header inside it. A project with a
- * single tab gets no box: one row is not a group, and a box around every row
- * would turn the rail into a stack of plates.
+ * A project's rows are **individual rows under the project's name**, and
+ * nothing else. They briefly shared one tinted box (an over-reading of ticket
+ * #22): sharing a project is not sharing a tab, and the box said the second
+ * thing. The only box left in the rail is the one around a real split, which
+ * is the one thing that *is* one object — see `PaneGroupBranch`.
  */
 function SessionGroupRows({
   group,
@@ -358,10 +408,7 @@ function SessionGroupRows({
       onDragEnd={onDragEnd}
     >
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-        <div
-          className={cn('flex flex-col gap-0.5', group.tabs.length > 1 && 'tt-cluster')}
-          style={group.color ? ({ '--tt-group-color': group.color } as CSSProperties) : undefined}
-        >
+        <div className="flex flex-col gap-0.5">
           {group.tabs.map((tab, i) => (
             <SessionRow
               key={tab.id}

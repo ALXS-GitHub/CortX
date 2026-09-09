@@ -78,7 +78,12 @@ interface WindowTabProps {
  */
 function WindowTab({ tab, items, projects, isActive, index, total, showProject, display, onSelect, onClose }: WindowTabProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
-  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, ...tintStyle(tab.color) };
+  // `CSS.Translate`, **not** `CSS.Transform`: a sorting strategy also hands
+  // back a scale — the ratio between the dragged cell and the one it is over —
+  // and the strip's cells are not the same width (a tab holding a split runs
+  // to 400 px, a plain one to 240). Rendering that scale stretched a tab out
+  // of shape mid-drag. Only the translation is wanted.
+  const style: CSSProperties = { transform: CSS.Translate.toString(transform), transition, ...tintStyle(tab.color) };
 
   const item = tabItem(tab, items);
   const live = tabLiveState(tab, items);
