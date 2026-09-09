@@ -541,7 +541,13 @@ export function TerminalPanel() {
   // "Close all" kills every shell in the dock: ask first when commands are
   // still running (same prompt as the Terminal window, see CloseConfirmDialog).
   const handleCloseAll = useCallback(() => {
-    const ids = allTerminals.filter((t) => terminals.get(t.id)?.visibility !== 'closed').map((t) => t.id);
+    // Only what this dock actually shows — `terminalSurfaces` says which ids
+    // live in a Terminal window (ticket #37), and those are not ours to count
+    // in the prompt any more than they are ours to close.
+    const surfaces = useAppStore.getState().terminalSurfaces;
+    const ids = allTerminals
+      .filter((t) => terminals.get(t.id)?.visibility !== 'closed' && surfaces[t.id] !== 'window')
+      .map((t) => t.id);
     void confirmCloseTerminals(ids, 'Close all terminals?').then((ok) => {
       if (ok) closeAllTerminals();
     });

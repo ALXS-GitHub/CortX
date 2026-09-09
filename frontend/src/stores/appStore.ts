@@ -964,12 +964,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   closeAllTerminals: () => {
-    // "Close all" = move every visible terminal to hidden state.
-    // The user can still find them in the hidden tray.
+    // "Close all" = move every visible terminal of **this dock** to hidden
+    // state. The user can still find them in the hidden tray.
+    //
+    // The surface check is the point (ticket #37): a terminal shown in a
+    // Terminal window is also `visible`, so without it the dock's button
+    // reached across and closed windows the user was not even looking at.
+    // The dock and the Terminal windows are separate surfaces, and a bulk
+    // action belongs to the one it was pressed in.
     set((state) => {
       const terminals = new Map(state.terminals);
       for (const [id, t] of terminals) {
-        if (t.visibility === 'visible') {
+        if (t.visibility === 'visible' && state.terminalSurfaces[id] !== 'window') {
           terminals.set(id, { ...t, visibility: 'hidden', paneId: null });
         }
       }

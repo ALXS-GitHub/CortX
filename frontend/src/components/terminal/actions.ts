@@ -339,7 +339,15 @@ export function sendLeafToDock(terminalId: string): void {
  * — the very path a tab already takes when it comes back from being hidden.
  */
 
-/** The other Terminal windows a tab could be moved to, in menu order. */
+/**
+ * The other Terminal windows a tab could be moved to, in menu order.
+ *
+ * Only windows that actually hold something. `terminalWindowIds` is the wider
+ * list — it also carries every window the document still has *state* for, so a
+ * window you detached a tab into and later emptied kept being offered as a
+ * destination, with a `0` beside its name (ticket #37). Moving a tab to
+ * nothing is not a destination; "Move to new window" is how you make one.
+ */
 export function otherTerminalWindows(): Array<{ id: string; name: string; tabs: number }> {
   const { doc } = useTerminalLayoutStore.getState();
   return terminalWindowIds(doc)
@@ -348,7 +356,8 @@ export function otherTerminalWindows(): Array<{ id: string; name: string; tabs: 
       id,
       name: terminalWindowName(id),
       tabs: doc.window.tabs.filter((t) => terminalWindowIdOf(t) === id).length,
-    }));
+    }))
+    .filter((w) => w.tabs > 0);
 }
 
 /** Where a detached window should appear, from a drop point in screen pixels. */

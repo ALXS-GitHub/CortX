@@ -25,7 +25,7 @@ import { useTerminalFileDrop, useTerminalWheelZoom, useTerminalWindowShortcuts }
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import { useTerminalLayoutStore, TERMINAL_WINDOW_ID } from '@/stores/terminalLayoutStore';
 import { useAppStore } from '@/stores/appStore';
-import { collectLeaves, findLeaf, PRIMARY_TERMINAL_WINDOW, tabIsLocal, tabsInScope, terminalWindowName } from '@/lib/terminalLayout';
+import { collectLeaves, findLeaf, PRIMARY_TERMINAL_WINDOW, tabIsLocal, tabsInScope, terminalWindowIdOf, terminalWindowName } from '@/lib/terminalLayout';
 import { fitTerminal, focusTerminal, listTerminalSessionIds } from '@/lib/terminalSessions';
 import { cn } from '@/lib/utils';
 import { openTerminalWindow } from '@/components/terminal/terminalWindows';
@@ -141,6 +141,13 @@ export function TerminalWindow() {
   // The first window brings its detached siblings back with it. It boots
   // after session restore has respawned the shells (restore is what opens
   // it), so the siblings never attach to terminals that are already gone.
+  //
+  // Only the siblings that still hold a tab (ticket #37). `openWindows`
+  // remembers a window that was up, not a window that has anything in it, so
+  // one you detached a tab into and later emptied came back at every start —
+  // blank, and offered as a destination for the rest of the session. An empty
+  // detached window closes itself a moment later anyway (see `hasOwnTabs`
+  // below); not opening it is the same answer without the flicker.
   const reopenedSiblings = useRef(false);
   useEffect(() => {
     if (!loaded || !IS_PRIMARY_WINDOW || reopenedSiblings.current) return;
@@ -148,6 +155,7 @@ export function TerminalWindow() {
     const { doc } = useTerminalLayoutStore.getState();
     for (const label of doc.openWindows ?? []) {
       if (label === PRIMARY_TERMINAL_WINDOW) continue;
+      if (!doc.window.tabs.some((t) => terminalWindowIdOf(t) === label)) continue;
       openTerminalWindow(label).catch((e) => console.warn(`Could not reopen ${label}`, e));
     }
   }, [loaded]);
