@@ -45,9 +45,11 @@ import {
   openTerminalCwd,
   otherClosableTabs,
   otherTerminalWindows,
+  tabsElsewhere,
   tabsOfWorkspace,
   terminalCwd,
 } from './actions';
+import { describeCloseReach } from '@/lib/closeReach';
 import { NO_PROJECT_GROUP_NAME, activeLeafOf, tabAgent, useItemMap } from './model';
 import { detectSubshell, warpifySubshell, type SubshellShell } from './subshell';
 import { revealAgentSession } from '@/lib/tauri';
@@ -148,6 +150,16 @@ const SUBSHELL_CHOICES: Array<{ id: SubshellShell; label: string }> = [
   { id: 'powershell', label: 'PowerShell' },
 ];
 
+/**
+ * The line under a bulk close saying which other Terminal windows it reaches
+ * into (ticket #37). It sits outside the entry rather than inside it so the
+ * row keeps its single-line shape and the note is not swallowed by the item's
+ * hover highlight — the same treatment the cwd line already gets.
+ */
+function ReachNote({ reach }: { reach: string }) {
+  return <p className="truncate px-2 pb-1 pl-8 text-[10.5px] leading-snug text-faint">including {reach}</p>;
+}
+
 /** The one pane a menu acts on, when it is not the whole tab's menu. */
 export interface PaneMenuTarget {
   leaf: LeafNode;
@@ -201,9 +213,18 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
   const tabWideAgent = tabAgent(tab, items);
   const agent = pane ? items.get(terminalId)?.agent : tabWideAgent;
   // Bulk closes (ticket "close a whole section of tabs"), counted at open time.
+  //
+  // Counted on the very list the action will close — every Terminal window,
+  // never the dock (ticket #37). The count and the deed come from one call, so
+  // a menu that says 7 cannot close 3, and the line under each entry names the
+  // windows those tabs are in when they are not all here.
   const wholeTab = open && !pane;
-  const otherCount = wholeTab ? otherClosableTabs(tab.id).length : 0;
-  const groupCount = wholeTab ? tabsOfWorkspace(tab.workspaceId).length : 0;
+  const otherTabs = wholeTab ? otherClosableTabs(tab.id) : [];
+  const groupTabs = wholeTab ? tabsOfWorkspace(tab.workspaceId) : [];
+  const otherCount = otherTabs.length;
+  const groupCount = groupTabs.length;
+  const otherReach = describeCloseReach(tabsElsewhere(otherTabs));
+  const groupReach = describeCloseReach(tabsElsewhere(groupTabs));
   // Terminal windows this tab could move to (ticket #20), read at open time.
   const otherWindows = useMemo(() => (wholeTab ? otherTerminalWindows() : []), [wholeTab]);
   // A sub-shell running in this pane, for "Enable shell integration here"
@@ -367,6 +388,7 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
               Close others
               {otherCount > 0 && <span className="ml-auto text-xs tabular-nums opacity-70">{otherCount}</span>}
             </DropdownMenuItem>
+            {otherCount > 0 && otherReach && <ReachNote reach={otherReach} />}
             <DropdownMenuItem
               variant="destructive"
               disabled={groupCount < 2}
@@ -376,6 +398,7 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
               <span className="truncate">Close all in {groupName}</span>
               {groupCount > 1 && <span className="ml-auto text-xs tabular-nums opacity-70">{groupCount}</span>}
             </DropdownMenuItem>
+            {groupCount > 1 && groupReach && <ReachNote reach={groupReach} />}
           </>
         )}
       </DropdownMenuContent>

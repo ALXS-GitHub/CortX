@@ -286,7 +286,7 @@ function pickActiveTab(
  * into its dock; the Terminal window fetches the runtime of shells it has
  * never heard of (a shell spawned in the other window sends no event).
  */
-function reconcileDock(doc: TerminalLayoutDoc) {
+function reconcileDock(doc: TerminalLayoutDoc, previous: TerminalLayoutDoc) {
   const app = useAppStore.getState();
   if (IS_TERMINAL_WINDOW) {
     const unknownShell = Object.entries(doc.surfaces).some(
@@ -296,7 +296,7 @@ function reconcileDock(doc: TerminalLayoutDoc) {
       app.loadShells();
       app.loadTerminalStates();
     }
-    releaseMovedSessions(doc);
+    releaseMovedSessions(doc, previous);
     return;
   }
   app.syncTerminalSurfaces(doc.surfaces);
@@ -311,9 +311,15 @@ function reconcileDock(doc: TerminalLayoutDoc) {
  * `TerminalHub`, which is the same path a hidden tab already takes.
  *
  * Only terminals the document still knows about are touched — a session for a
- * shell this window has just spawned is not in the document yet.
+ * shell this window has just spawned is not in the document yet. That is what
+ * `previous` is for: a tab closed from *another* Terminal window (ticket #37
+ * makes that an everyday gesture) does not move anywhere, it leaves the
+ * document altogether, so "still in the document" cannot find it. What was
+ * ours a moment ago and is ours no longer, on the other hand, names it exactly
+ * — and never names a shell we have only just spawned, which was in neither
+ * document.
  */
-function releaseMovedSessions(doc: TerminalLayoutDoc) {
+function releaseMovedSessions(doc: TerminalLayoutDoc, previous: TerminalLayoutDoc) {
   const mine = new Set<string>();
   const elsewhere = new Set<string>();
   for (const tab of doc.window.tabs) {
@@ -326,6 +332,13 @@ function releaseMovedSessions(doc: TerminalLayoutDoc) {
   // Terminals handed back to the dock are rendered by the main window now.
   for (const [id, surface] of Object.entries(doc.surfaces)) {
     if (surface === 'dock' && !mine.has(id) && hasTerminalSession(id)) disposeTerminal(id);
+  }
+  // Gone from the document entirely: closed, here or in another window.
+  for (const tab of previous.window.tabs) {
+    if (!tabIsLocal(tab)) continue;
+    for (const leaf of collectLeaves(tab.layout)) {
+      if (!mine.has(leaf.terminalId) && hasTerminalSession(leaf.terminalId)) disposeTerminal(leaf.terminalId);
+    }
   }
 }
 
@@ -354,8 +367,9 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     try {
       const env = await api.getTerminalLayout();
       const doc = normaliseLayoutDoc(env.layout);
+      const previous = get().doc;
       set({ doc, revision: env.revision, loaded: true, tabMru: nextTabMru(get().tabMru, doc) });
-      reconcileDock(doc);
+      reconcileDock(doc, previous);
     } catch (e) {
       console.warn('Failed to load the terminal layout', e);
       set({ loaded: true });
@@ -370,19 +384,21 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     }
     if (event.revision <= get().revision) return;
     const doc = normaliseLayoutDoc(event.layout);
+    const previous = get().doc;
     set({ doc, revision: event.revision, tabMru: nextTabMru(get().tabMru, doc) });
-    reconcileDock(doc);
+    reconcileDock(doc, previous);
   },
 
   commit: (mutate) => {
     // `withLocalWindow` folds this window's scope / active tab back into the
     // shared `windows` map, so every mutator can keep working on `doc.window`
     // as if there were a single Terminal window.
-    const next = withLocalWindow(mutate(get().doc));
+    const previous = get().doc;
+    const next = withLocalWindow(mutate(previous));
     // The recently-used stacks are read *by* the mutators (`pickActiveTab`),
     // so they are refreshed from the result, never before it.
     set({ doc: next, tabMru: nextTabMru(get().tabMru, next) });
-    reconcileDock(next);
+    reconcileDock(next, previous);
     api.setTerminalLayout(next, WINDOW_LABEL)
       .then((revision) => {
         if (revision > get().revision) set({ revision });

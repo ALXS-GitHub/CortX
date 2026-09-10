@@ -362,20 +362,45 @@ export function tabHasAgent(tab: TerminalTab): boolean {
 }
 
 /**
- * Is this tab on screen here? A tab shown by another Terminal window is never
- * in scope — that is what keeps every existing caller of `tabsInScope` (the
- * rail, the strip, the palette, "which panes are visible") meaning "of this
- * window" now that `window.tabs` holds them all.
+ * How wide a tab query reaches (ticket #37).
+ *
+ * `'window'` — this webview's window and nothing else. Everything the user
+ * *sees* here is asked this way: the rail, the tab strip, the palette, the
+ * tab numbering behind Ctrl+1…9, the Ctrl+Tab cycle, "which panes are
+ * visible". It is the default, so a caller that does not think about windows
+ * keeps meaning "mine", exactly as it did when `tabInScope` began with
+ * `tabIsLocal`.
+ *
+ * `'all-windows'` — every Terminal window. The Terminal windows are one
+ * surface between them (the dock is the other, and is not made of tabs at
+ * all), so a *bulk close* pressed in one of them speaks for all: that is the
+ * rule the ticket settles. Nothing else uses this reach — widening what is on
+ * screen would put another window's tabs in this window's rail.
  */
-export function tabInScope(tab: TerminalTab, scope: TerminalScope): boolean {
-  if (!tabIsLocal(tab)) return false;
+export type TabReach = 'window' | 'all-windows';
+
+/**
+ * Is this tab in scope, at the given reach? Within one window the scope is
+ * what it always was: Global takes everything, a project scope its workspace,
+ * the Agents scope the tabs an agent is running in.
+ *
+ * At `'all-windows'` the *scope* still applies — it is the current window's
+ * scope, so "Close all in CortX" means CortX's tabs wherever they are, not
+ * every tab in every window.
+ */
+export function tabInScope(tab: TerminalTab, scope: TerminalScope, reach: TabReach = 'window'): boolean {
+  if (reach === 'window' && !tabIsLocal(tab)) return false;
   if (scope === 'global') return true;
   if (isAgentsScope(scope)) return tabHasAgent(tab);
   return tab.workspaceId === workspaceIdForProject(scope.projectId);
 }
 
-export function tabsInScope(layout: TerminalWindowLayout, scope: TerminalScope): TerminalTab[] {
-  return layout.tabs.filter((t) => tabInScope(t, scope)).sort((a, b) => a.order - b.order);
+export function tabsInScope(
+  layout: TerminalWindowLayout,
+  scope: TerminalScope,
+  reach: TabReach = 'window'
+): TerminalTab[] {
+  return layout.tabs.filter((t) => tabInScope(t, scope, reach)).sort((a, b) => a.order - b.order);
 }
 
 // ---------------------------------------------------------------------------

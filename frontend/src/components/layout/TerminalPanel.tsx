@@ -545,12 +545,17 @@ export function TerminalPanel() {
     // live in a Terminal window (ticket #37), and those are not ours to count
     // in the prompt any more than they are ours to close.
     const surfaces = useAppStore.getState().terminalSurfaces;
-    const ids = allTerminals
-      .filter((t) => terminals.get(t.id)?.visibility !== 'closed' && surfaces[t.id] !== 'window')
-      .map((t) => t.id);
-    void confirmCloseTerminals(ids, 'Close all terminals?').then((ok) => {
-      if (ok) closeAllTerminals();
-    });
+    const alive = allTerminals.filter((t) => terminals.get(t.id)?.visibility !== 'closed');
+    const ids = alive.filter((t) => surfaces[t.id] !== 'window').map((t) => t.id);
+    // Say which "all" this is, but only when there is another one to confuse
+    // it with: with no Terminal window holding anything, "in the dock" is
+    // noise. With one, it is the whole point of the ticket.
+    const inWindows = alive.length - ids.length;
+    void confirmCloseTerminals(ids, inWindows > 0 ? 'Close all terminals in the dock?' : 'Close all terminals?').then(
+      (ok) => {
+        if (ok) closeAllTerminals();
+      }
+    );
   }, [allTerminals, terminals, closeAllTerminals]);
 
   // ---- Collapsed strip ----

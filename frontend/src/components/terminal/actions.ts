@@ -15,19 +15,24 @@ import type { TerminalCtrlTabBehavior } from '@/types';
 import { activeLeafOf, splitPathTo, visibleTabOrder } from './model';
 import {
   collectLeaves,
+  localTerminalWindowId,
   mapLeaves,
   newLayoutId,
   nextTerminalWindowLabel,
   projectIdOfWorkspace,
   removeLeaf,
   tabContainingTerminal,
+  tabIsLocal,
+  tabsInScope,
   terminalWindowIdOf,
   terminalWindowIds,
   terminalWindowName,
+  terminalWindowNumber,
   type LayoutNode,
   type SplitDirection,
   type TerminalTab,
 } from '@/lib/terminalLayout';
+import { closeQuestion, describeCloseReach, type WindowShare } from '@/lib/closeReach';
 import { openTerminalWindow } from './terminalWindows';
 import { openCommandHistory } from './history/openHistory';
 
@@ -179,13 +184,20 @@ export const useCloseConfirmStore = create<CloseConfirmState>((set, get) => ({
   },
 }));
 
-/** Where a terminal lives, for the confirmation list: tab title, else its cwd. */
+/**
+ * Where a terminal lives, for the confirmation list: tab title, else its cwd.
+ *
+ * A tab shown by *another* Terminal window carries that window's name too
+ * (ticket #37). A bulk close reaches every Terminal window now, so the dialog
+ * can list a command the user cannot see from where they are standing; "build"
+ * and "build · Terminal 2" are not the same warning.
+ */
 export function describeTerminalLocation(terminalId: string): string {
   const tab = tabContainingTerminal(useTerminalLayoutStore.getState().doc.window, terminalId);
-  if (tab?.title) return tab.title;
-  const cwd = terminalCwd(terminalId);
-  if (cwd) return basename(cwd);
-  return 'Terminal';
+  const cwd = tab?.title ? null : terminalCwd(terminalId);
+  const where = tab?.title ?? (cwd ? basename(cwd) : 'Terminal');
+  if (!tab || tabIsLocal(tab)) return where;
+  return `${where} · ${terminalWindowName(terminalWindowIdOf(tab))}`;
 }
 
 /** The terminals of `terminalIds` whose shell says a command is running. */
@@ -271,28 +283,86 @@ export function closeTabAndRelease(tabId: string): void {
   void closeTabs([tabId]);
 }
 
+// ---------------------------------------------------------------------------
+// Bulk closes and how far they reach (ticket #37)
+// ---------------------------------------------------------------------------
+
+/**
+ * The tabs a bulk close reaches: the current scope in **every** Terminal
+ * window, not just this one.
+ *
+ * The rule the ticket settles has two halves. The integrated dock is airtight
+ * — its "Close all terminals" only ever touches what the dock shows, and it is
+ * not made of tabs at all, so nothing here can reach it. The Terminal windows,
+ * on the other hand, are one surface between them: "close all terminals"
+ * pressed in any of them means all of them, because a detached window is a
+ * second view of the same session list, not a second application.
+ *
+ * The *scope* still filters (it is this window's scope): "Close all in CortX"
+ * means CortX's tabs wherever they are, never every tab everywhere. And this
+ * list is deliberately **not** what the screen is built from — see
+ * `orderedTabs`, which stays local, and everything that counts on it (Ctrl+1…9,
+ * Ctrl+Tab, the numbering in the rail).
+ */
+export function bulkCloseTabs(): TerminalTab[] {
+  const { doc } = useTerminalLayoutStore.getState();
+  return tabsInScope(doc.window, doc.window.scope, 'all-windows');
+}
+
+/**
+ * How a set of tabs is spread over the Terminal windows *other* than this one,
+ * in window order — the tally the menus and the confirmation phrase their
+ * warning from (see `lib/closeReach.ts`). Empty when the close stays here.
+ */
+export function tabsElsewhere(tabs: TerminalTab[]): WindowShare[] {
+  const here = localTerminalWindowId();
+  const counts = new Map<string, number>();
+  for (const tab of tabs) {
+    const windowId = terminalWindowIdOf(tab);
+    if (windowId === here) continue;
+    counts.set(windowId, (counts.get(windowId) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => terminalWindowNumber(a[0]) - terminalWindowNumber(b[0]))
+    .map(([windowId, count]) => ({ name: terminalWindowName(windowId), count }));
+}
+
 /**
  * Close several tabs at once behind a single confirmation listing every
  * command that is about to be killed — closing a project's whole group must
  * not ask once per tab.
+ *
+ * `subject` is the question without its mark ("Close the 4 other terminals");
+ * the windows the close reaches into are appended to it here, so no caller can
+ * forget to mention them. When the close does cross windows and nothing was
+ * running — the one case that never opens a dialog — a toast says afterwards
+ * what it took and from where.
  */
-export async function closeTabs(tabIds: string[], question?: string): Promise<boolean> {
+export async function closeTabs(tabIds: string[], subject?: string): Promise<boolean> {
   if (tabIds.length === 0) return true;
   const win = useTerminalLayoutStore.getState().doc.window;
-  const terminalIds = win.tabs
-    .filter((t) => tabIds.includes(t.id))
-    .flatMap((t) => collectLeaves(t.layout).map((l) => l.terminalId));
-  const ok = await confirmCloseTerminals(
-    terminalIds,
-    question ?? (tabIds.length === 1 ? 'Close this terminal?' : `Close these ${tabIds.length} terminals?`)
-  );
-  if (ok) closeTabsNow(tabIds);
-  return ok;
+  const tabs = win.tabs.filter((t) => tabIds.includes(t.id));
+  const terminalIds = tabs.flatMap((t) => collectLeaves(t.layout).map((l) => l.terminalId));
+  const elsewhere = tabsElsewhere(tabs);
+  const reach = describeCloseReach(elsewhere);
+  const plain = tabIds.length === 1 ? 'Close this terminal' : `Close these ${tabIds.length} terminals`;
+  const ok = await confirmCloseTerminals(terminalIds, closeQuestion(subject ?? plain, elsewhere));
+  if (!ok) return false;
+  closeTabsNow(tabIds);
+  if (reach) {
+    toast.message(tabIds.length === 1 ? 'Closed 1 terminal' : `Closed ${tabIds.length} terminals`, {
+      description: `Including ${reach}.`,
+    });
+  }
+  return true;
 }
 
-/** The scoped tabs of one workspace, in the order the rail shows them. */
+/**
+ * The scoped tabs of one workspace, in every Terminal window (ticket #37).
+ * Sorted by tab order, which is all a count and a close need.
+ */
 export function tabsOfWorkspace(workspaceId: string): TerminalTab[] {
-  return orderedTabs().filter((t) => t.workspaceId === workspaceId);
+  return bulkCloseTabs().filter((t) => t.workspaceId === workspaceId);
 }
 
 /** Close every tab of one workspace group (rail group header / tab menu). */
@@ -300,25 +370,26 @@ export function closeWorkspaceTabs(workspaceId: string, groupName?: string): Pro
   const tabs = tabsOfWorkspace(workspaceId);
   return closeTabs(
     tabs.map((t) => t.id),
-    groupName ? `Close the ${tabs.length} terminals of ${groupName}?` : undefined
+    groupName ? `Close the ${tabs.length} terminals of ${groupName}` : undefined
   );
 }
 
 /**
  * Close every tab of the current scope except `tabId`. Pinned tabs stay:
- * pinning is exactly the "keep this one around" gesture.
+ * pinning is exactly the "keep this one around" gesture — and it says so in
+ * whichever Terminal window the tab was pinned in.
  */
 export function closeOtherTabs(tabId: string): Promise<boolean> {
   const others = otherClosableTabs(tabId);
   return closeTabs(
     others.map((t) => t.id),
-    `Close the ${others.length} other terminals?`
+    `Close the ${others.length} other terminals`
   );
 }
 
 /** What "Close others" would actually close (used for the menu's count too). */
 export function otherClosableTabs(tabId: string): TerminalTab[] {
-  return orderedTabs().filter((t) => t.id !== tabId && !t.pinned);
+  return bulkCloseTabs().filter((t) => t.id !== tabId && !t.pinned);
 }
 
 /** Hand a terminal back to the main window's dock. */
@@ -522,7 +593,14 @@ export function endTabCycle(): void {
   useTerminalLayoutStore.getState().setTabMruOrder(finishTabCycle(state));
 }
 
-/** The tabs in the order the user sees them (rail groups, or strip order). */
+/**
+ * The tabs in the order the user sees them (rail groups, or strip order).
+ *
+ * **This window's** tabs, and it must stay that way: this is the list Ctrl+1…9
+ * counts through, and the same order the rail and the strip number. A tab in
+ * another Terminal window has a number *there*. The bulk closes have their own
+ * list — `bulkCloseTabs` — precisely so this one never had to widen.
+ */
 export function orderedTabs(): TerminalTab[] {
   const { doc } = useTerminalLayoutStore.getState();
   const app = useAppStore.getState();
