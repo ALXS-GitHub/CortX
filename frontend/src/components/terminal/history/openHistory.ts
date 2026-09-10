@@ -9,8 +9,14 @@
  * The `pick` field is what makes this view re-usable as the Ctrl+R palette of
  * the input editor (epic U2.d): opened with a callback, choosing a row hands
  * the command back to the caller instead of running it, and nothing is written
- * to any PTY. Nothing binds Ctrl+R to it yet — see the module header of
- * `CommandHistoryView.tsx` for what is left to wire.
+ * to any PTY. `lib/terminalInputEditor.ts` opens it that way on Ctrl+R and
+ * replaces its buffer with what comes back.
+ *
+ * The return value matters to that caller: `false` means no view is mounted in
+ * this window — which is the case in the **main** window today, where nothing
+ * renders `CommandHistoryView` (it hangs off `TerminalPalette`, and only
+ * `windows/TerminalWindow.tsx` mounts that). The editor then falls back to the
+ * shell's own reverse search, so Ctrl+R is never a dead key.
  */
 
 /** Custom event the mounted view listens to. */

@@ -14,6 +14,12 @@
  * What is pinned down here is exactly what §5 of `plans/universal_input.md`
  * says must never regress: the activation contract, the two Ctrl+D behaviours,
  * closing on submission and not on `133;C`, and the hand-off.
+ *
+ * Since U2 it also pins down the other half of the bargain — that switching
+ * the editor on costs the user nothing: Ctrl+R asks for CortX's history
+ * palette and Ctrl+Space (or Tab) for its completion menu, both *without*
+ * leaving the editor, and both falling back to what U1 did when the caller
+ * has nothing to show.
  */
 import {
   ERASE_BYTE,
@@ -321,8 +327,7 @@ test('Shift+Tab hands over the back-tab sequence', () => {
   });
 });
 
-test('Ctrl+R and the arrows hand over until U2 owns history', () => {
-  assert.deepEqual(type(editing('gi'), 'r', { ctrl: true }), { type: 'handoff', flush: 'gi', data: '\x12' });
+test('the arrows still hand over — ↑/↓ history in the editor is not done', () => {
   assert.deepEqual(type(editing(''), 'ArrowUp'), { type: 'handoff', flush: '', data: '\x1b[A' });
   assert.deepEqual(type(editing(''), 'ArrowDown'), { type: 'handoff', flush: '', data: '\x1b[B' });
 });
@@ -332,11 +337,71 @@ test('an unbound Ctrl combination hands over its control byte', () => {
   assert.deepEqual(type(editing('x'), 'g', { ctrl: true }), { type: 'handoff', flush: 'x', data: '\x07' });
 });
 
-test('Ctrl+Space is swallowed, never handed over as a NUL', () => {
-  // It is CortX's completion key (`terminal.completionMenu`). Handing it off
-  // would close the editor and lose the draft to send the shell a byte no
-  // line editor acts on.
-  assert.deepEqual(type(editing('git che'), ' ', { ctrl: true }), { type: 'none' });
+// ---------------------------------------------------------------------------
+// U2 — the four keys the editor used to give away (epic #7 of the parity doc)
+// ---------------------------------------------------------------------------
+
+test('Ctrl+R asks for the history palette and keeps the line exactly where it is', () => {
+  const m = editing('git ch');
+  assert.deepEqual(type(m, 'r', { ctrl: true }), { type: 'history' });
+  // Nothing left, nothing was written: the palette opens *over* the editor,
+  // and the caller falls back to a hand-off only if none is mounted.
+  assert.equal(m.phase, 'editing');
+  assert.equal(m.text, 'git ch');
+  assert.equal(m.caret, 6);
+});
+
+test('Ctrl+R is a request, so switching the hand-off off changes nothing about it', () => {
+  const m = editing('gi');
+  m.handoffEnabled = false;
+  assert.deepEqual(type(m, 'r', { ctrl: true }), { type: 'history' });
+  assert.equal(m.phase, 'editing');
+});
+
+test('the caller can still fall back to the shell’s reverse search by hand', () => {
+  // What `terminalInputEditor` does when no history view is mounted: U1's
+  // behaviour, byte for byte.
+  const m = editing('gi');
+  type(m, 'r', { ctrl: true });
+  assert.deepEqual(m.handoff('\x12'), { type: 'handoff', flush: 'gi', data: '\x12' });
+  assert.equal(m.phase, 'classic');
+});
+
+test('Ctrl+Space opens CortX’s completion menu instead of being swallowed', () => {
+  const m = editing('git che');
+  assert.deepEqual(type(m, ' ', { ctrl: true }), { type: 'complete' });
+  assert.equal(m.phase, 'editing');
+  assert.equal(m.text, 'git che');
+});
+
+test('Ctrl+Space is never handed over as a NUL, whatever the menu is bound to', () => {
+  // Handing it off would close the editor and lose the draft to send the
+  // shell a byte no line editor acts on. When the menu lives on Tab, or
+  // nowhere, the key is simply swallowed — U1's behaviour.
+  for (const mode of ['tab', 'off'] as const) {
+    const m = editing('git che');
+    m.completionMenu = mode;
+    assert.deepEqual(type(m, ' ', { ctrl: true }), { type: 'none' }, mode);
+    assert.equal(m.phase, 'editing', mode);
+  }
+});
+
+test('completionMenu: tab moves the menu onto Tab and off Ctrl+Space', () => {
+  const m = editing('cd src/comp');
+  m.completionMenu = 'tab';
+  assert.deepEqual(type(m, 'Tab'), { type: 'complete' });
+  assert.equal(m.phase, 'editing', 'the line is ours until there is nothing to offer');
+  assert.equal(m.text, 'cd src/comp');
+  // Shift+Tab is the shell's back-tab in every mode.
+  assert.deepEqual(type(m, 'Tab', { shift: true }), { type: 'handoff', flush: 'cd src/comp', data: '\x1b[Z' });
+});
+
+test('completionMenu: off leaves Tab to the shell, as does the default', () => {
+  for (const mode of ['off', 'ctrlSpace'] as const) {
+    const m = editing('cd sr');
+    m.completionMenu = mode;
+    assert.deepEqual(type(m, 'Tab'), { type: 'handoff', flush: 'cd sr', data: '\t' }, mode);
+  }
 });
 
 test('a function key hands over its VT sequence', () => {

@@ -64,6 +64,12 @@ export interface InputAnchor {
  *   send `data` so the shell's line editor handles the key on the full line.
  * - `paste` — read the clipboard into the editor.
  * - `scroll` — scroll the grid by `pages` screens.
+ * - `complete` — open CortX's completion menu on the current line (U2.b).
+ * - `history` — open the command-history palette on it (U2.d).
+ *
+ * The last two are *requests*, not commitments: the machine stays exactly
+ * where it is, and a caller with nothing to show (no engine, no palette
+ * mounted) is free to fall back to {@link TerminalInputMachine.handoff}.
  */
 export type InputAction =
   | { type: 'none' }
@@ -72,7 +78,12 @@ export type InputAction =
   | { type: 'submit'; data: string; text: string }
   | { type: 'handoff'; flush: string; data: string }
   | { type: 'paste' }
-  | { type: 'scroll'; pages: number };
+  | { type: 'scroll'; pages: number }
+  | { type: 'complete' }
+  | { type: 'history' };
+
+/** Which key opens CortX's completion menu (`terminal.completionMenu`). */
+export type CompletionMenuKey = 'ctrlSpace' | 'tab' | 'off';
 
 /** ESC + CR — "new line, do not submit" (see `terminalKeys.ts`). */
 export const ESC_CR_SEQUENCE = '\x1b\r';
@@ -162,11 +173,27 @@ export class TerminalInputMachine {
   /** The shell has emitted at least one OSC 133 marker on this terminal. */
   integrationSeen = false;
   /**
-   * Unhandled keys give the line back to the shell (`Tab`, `Ctrl+R`, ↑/↓…).
-   * Off, they are swallowed and the editor stays — the "the editor is only
-   * for lines you type in one go" fallback of the plan (§6.8).
+   * Unhandled keys give the line back to the shell (`Tab`, ↑/↓, a function
+   * key…). Off, they are swallowed and the editor stays — the "the editor is
+   * only for lines you type in one go" fallback of the plan (§6.8).
+   *
+   * Since U2 this is the escape hatch it was meant to be rather than the
+   * nominal path of the most-used keys: Ctrl+R opens CortX's history palette,
+   * Ctrl+Space (or Tab) CortX's completion menu, and the ghost text follows
+   * the line the editor holds.
    */
   handoffEnabled = true;
+
+  /**
+   * Which key asks for CortX's own completion menu, mirroring the
+   * `terminal.completionMenu` setting. Kept as a field rather than read from a
+   * store so the machine stays pure: the caller refreshes it before each key,
+   * exactly as it does for {@link handoffEnabled}.
+   *
+   * `tab` moves Tab from a hand-off to the menu; `off` puts Ctrl+Space back to
+   * being swallowed and leaves Tab to the shell.
+   */
+  completionMenu: CompletionMenuKey = 'ctrlSpace';
 
   /**
    * Text parked across a prompt redraw. `133;A` fires far more often than one
@@ -347,15 +374,18 @@ export class TerminalInputMachine {
         // The webview pastes into the textarea by itself.
         return { type: 'none' };
       case 'r':
-        // Reverse history search belongs to the shell until U2's palette.
-        return this.handoff('\x12');
+        // Reverse history search, CortX's own (U2.d): the history palette
+        // opens on the line so far and hands a command back. Nothing leaves
+        // the editor — if no palette is mounted the caller hands off to the
+        // shell's `\x12` itself, which is U1's behaviour to the byte.
+        return { type: 'history' };
       case ' ':
         // CortX's own completion key (`terminal.completionMenu`, default
         // `ctrlSpace`). Handing it off would close the editor to send the
         // shell a NUL, which no line editor does anything with — so the user
-        // would lose what they typed for nothing. Swallowed until the menu is
-        // wired into the editor (U2).
-        return { type: 'none' };
+        // would lose what they typed for nothing: swallowed when the menu is
+        // bound elsewhere, and the menu itself when it is bound here (U2.b).
+        return this.completionMenu === 'ctrlSpace' ? { type: 'complete' } : { type: 'none' };
       default: {
         const bytes = controlByte(k.key);
         return bytes ? this.handoff(bytes) : { type: 'none' };
@@ -397,8 +427,11 @@ export class TerminalInputMachine {
         }
         return this.handoff('\x1b');
       case 'Tab':
-        // The whole point of the hand-off: PSReadLine / zsh complete the real
-        // line, exactly as they do today. No completion engine of our own.
+        // With `completionMenu: 'tab'` the key belongs to CortX's own menu,
+        // here as much as in the grid. Otherwise the hand-off does what it has
+        // always done: PSReadLine / zsh complete the real line. Shift+Tab is
+        // never ours — it is the shell's back-tab.
+        if (!k.shift && this.completionMenu === 'tab') return { type: 'complete' };
         return this.handoff(k.shift ? '\x1b[Z' : '\t');
       case 'ArrowUp':
         return this.handoff('\x1b[A');

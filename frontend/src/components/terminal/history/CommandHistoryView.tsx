@@ -11,15 +11,24 @@
  * **Opened** by `openCommandHistory` — the palette entry, the `window.history`
  * keybinding (Ctrl+Shift+H), and later the input editor.
  *
- * **Ctrl+R (epic U2.d) — what is left to wire.** The view already takes a
- * `pick` callback (`OpenHistoryDetail.pick`): given one, rows stop writing to
- * any PTY and simply hand the chosen command back, Enter picks, and the footer
- * says so. To make this the input editor's Ctrl+R palette, three things
- * remain, none of them in this file: bind Ctrl+R inside the editor (it
- * currently reaches the shell's own reverse search), call
- * `openCommandHistory({ search: <the line so far>, cwd, projectId, pick })`
- * from there, and have the editor replace its buffer with what comes back.
- * Nothing about this view has to change for that.
+ * **Ctrl+R (epic U2.d) — wired.** The view takes a `pick` callback
+ * (`OpenHistoryDetail.pick`): given one, rows stop writing to any PTY and
+ * simply hand the chosen command back, Enter picks, and the footer says so.
+ * That is what the universal input editor's Ctrl+R opens — it calls
+ * `openCommandHistory({ search: <the line so far>, projectId, pick })` and
+ * replaces its buffer with what comes back. Nothing in this file had to
+ * change for it.
+ *
+ * The editor passes no `cwd`: that filter is an exact directory match
+ * (`terminal::history`), so a terminal sitting in any subdirectory of a
+ * project would open on an empty list. The facets in the filter bar are how a
+ * directory gets picked.
+ *
+ * **Where it is mounted still limits it.** Only `TerminalPalette` renders this
+ * view, and only `windows/TerminalWindow.tsx` renders that — so in the main
+ * window (the dock) `openCommandHistory` returns false and the editor falls
+ * back to the shell's own reverse search. The same gap makes the
+ * `window.history` keybinding (Ctrl+Shift+H) a no-op there.
  *
  * **Colours.** This is a modal dialog — an opaque chrome surface over the
  * terminal, not a layer among its cells — so it uses the app's tokens, exactly

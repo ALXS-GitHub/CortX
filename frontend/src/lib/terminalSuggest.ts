@@ -32,13 +32,27 @@
  *
  * Off in the alternate screen (TUIs), while a command runs, or when the
  * cursor is not at the end of the input.
+ *
+ * ## The universal input editor (U2)
+ *
+ * When the editor of ticket #15 holds the line, the grid this module reads is
+ * empty — so drawing from it would be drawing from nothing. It steps aside for
+ * exactly that case (`inputEditorOwnsLine`) and **publishes its engine**
+ * instead, through `terminalCompletionMenu.ts`: the editor asks it about the
+ * text in its `<textarea>` and draws the ghost in its own block, and the
+ * floating menu below is the same store, the same rows, anchored on the
+ * editor's caret.
+ *
+ * The distinction matters: the test is per prompt, not per setting. With the
+ * editor switched on but not up — `ssh`, a REPL, a shell with no integration —
+ * the line is back in the grid and everything here works as it always did.
  */
 import type { IDecoration, IDisposable, Terminal } from '@xterm/xterm';
 import '@/styles/terminal-suggest.css';
 import * as api from '@/lib/tauri';
 import { getTerminalSession } from '@/lib/terminalSessions';
 import { useAppStore } from '@/stores/appStore';
-import { inputEditorEnabled } from '@/lib/terminalInputEditor';
+import { inputEditorOwnsLine } from '@/lib/terminalInputEditor';
 import { boundaryLine } from '@/lib/terminalBlockModel';
 import {
   acceptanceFor,
@@ -66,7 +80,9 @@ import {
   forgetMenu,
   getMenuState,
   registerAccept,
+  registerEngine,
   setMenuState,
+  type EngineScope,
 } from '@/lib/terminalCompletionMenu';
 
 const MIN_PREFIX = 2;
@@ -167,6 +183,29 @@ class SuggestionController {
     this.disposables.push({ dispose: offData });
     const offAccept = registerAccept(terminalId, (index) => this.acceptMenu(index));
     this.disposables.push({ dispose: offAccept });
+    // U2: the universal input editor holds its line in a `<textarea>`, so it
+    // cannot read it back out of the grid — but every ranked source lives
+    // here. Publish the engine and let it ask (see `terminalCompletionMenu`).
+    const offEngine = registerEngine(terminalId, {
+      ghost: (line) => this.ghostText(line),
+      items: (line, limit) => this.itemsFor(line, limit),
+      scope: () => this.scope(),
+    });
+    this.disposables.push({ dispose: offEngine });
+  }
+
+  // -- The engine, for a surface that owns its own line (U2) ----------------
+
+  /** The remainder to draw after `line`, whoever holds it. */
+  ghostText(line: string): string | null {
+    const typed = line.trimStart();
+    if (!typed) return null;
+    return ghostFor(typed, this.dataFor(typed), { minPrefix: MIN_PREFIX, threshold: threshold() })?.text ?? null;
+  }
+
+  /** Every candidate for `line`, best first. Indices are relative to `line`. */
+  itemsFor(line: string, limit = MENU_LIMIT): CompletionItem[] {
+    return completeLine(line, this.dataFor(line), limit);
   }
 
   dispose() {
@@ -193,11 +232,17 @@ class SuggestionController {
   handleKey(e: KeyboardEvent): boolean {
     if (e.type !== 'keydown') return false;
     // This listener is on the session container and therefore also sees keys
-    // typed into the universal input editor's textarea. That editor owns the
-    // line — the grid this engine reads is empty while it is up — so anything
-    // we did here would fight it, and with `completionMenu: 'tab'` a Tab would
-    // open our menu before the editor's hand-off ever ran.
-    if (inputEditorEnabled()) return false;
+    // typed into the universal input editor's textarea — and, being in the
+    // capture phase, it sees them *first*. While that editor holds the line,
+    // the grid this engine reads is empty and everything we did here would
+    // fight it: it drives the ghost and the menu itself, through the engine
+    // published in `terminalCompletionMenu`.
+    //
+    // The test is "does the editor own *this* line", not "is the setting on"
+    // (which is what U1 asked, and what switched the whole feature off for
+    // everyone who enabled the editor): over `ssh`, in a REPL, while a command
+    // runs, the editor is not up and the grid is where the line is.
+    if (inputEditorOwnsLine(this.terminalId)) return false;
     const menu = getMenuState(this.terminalId);
 
     if (menu.open) {
@@ -255,7 +300,7 @@ class SuggestionController {
     return e.ctrlKey && !e.altKey && !e.metaKey && (e.key === ' ' || e.code === 'Space');
   }
 
-  private scope(): CompletionScope {
+  private scope(): CompletionScope & EngineScope {
     const cwd = useAppStore.getState().terminalStates.get(this.terminalId)?.cwd ?? null;
     return { cwd, projectId: projectIdFor(cwd) };
   }
@@ -414,6 +459,13 @@ class SuggestionController {
     if (this.phase !== 'input') {
       this.hide();
       closeMenu(this.terminalId);
+      return;
+    }
+    // The editor owns the line: its ghost is drawn in the block and its menu
+    // is in this very store. Redrawing from the grid — which is empty — would
+    // hide one and close the other on the next byte of output.
+    if (inputEditorOwnsLine(this.terminalId)) {
+      this.hide();
       return;
     }
     const input = this.currentInput();

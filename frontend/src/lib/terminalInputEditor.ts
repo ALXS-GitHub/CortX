@@ -26,12 +26,40 @@
  * and the terminal behaves byte for byte as it does today. The setting itself
  * (`terminal.inputEditor`) is off by default.
  *
- * Anything the editor cannot honour — Tab, Ctrl+R, ↑/↓, a function key —
- * triggers a **hand-off**: the current text is written to the PTY *without* a
- * CR, the editor closes, and the key follows in the same write. PSReadLine
- * then completes (or searches) the real line exactly as it does now. That is
- * what makes U1 shippable without a completion engine of our own; the real one
- * is ticket #17.
+ * Anything the editor cannot honour — Tab, ↑/↓, a function key — triggers a
+ * **hand-off**: the current text is written to the PTY *without* a CR, the
+ * editor closes, and the key follows in the same write. PSReadLine then
+ * completes (or searches) the real line exactly as it does now. That is what
+ * made U1 shippable without a completion engine of our own.
+ *
+ * ## U2 — the editor stopped costing you the features it was meant to carry
+ *
+ * U1 shipped with the hand-off as the *nominal* path of the most-used keys,
+ * which meant switching `terminal.inputEditor` on switched CortX's own
+ * completions and suggestions off. Three of the four are back where Warp puts
+ * them — in the input, not in the shell:
+ *
+ * - **Ghost text (U2.a).** The ranked engine of `terminalSuggest.ts` (history,
+ *   what the last command's output told you to run, specs, paths) is published
+ *   through `terminalCompletionMenu.ts` and read here against `machine.text`
+ *   instead of the grid. → accepts it, Ctrl+→ one word.
+ * - **Completion menu (U2.b).** Ctrl+Space — or Tab with
+ *   `terminal.completionMenu: 'tab'` — opens the very same floating list the
+ *   grid opens, anchored on *our* caret. ↑/↓ move, Enter/Tab accept, Esc
+ *   closes. Nothing to offer → the key falls back to what it did before.
+ * - **History palette (U2.d).** Ctrl+R opens the command-history view
+ *   (`components/terminal/history/`) in its `pick` mode: nothing is written to
+ *   any PTY, and the command chosen simply replaces the buffer.
+ *
+ * Multi-line (U2.c) is **not** done: Shift+Enter still hands the line back
+ * with the ESC+CR of today.
+ *
+ * The one ordering trap, and the reason `terminalSuggest.ts` asks
+ * `inputEditorOwnsLine()` rather than "is the setting on": its key listener is
+ * a *capturing* one on the session container, so it sees the keys typed into
+ * our textarea before the textarea does. It steps aside for exactly as long as
+ * the machine is editing — and not one prompt longer, so a REPL or an `ssh`
+ * session, where the editor never opens, keeps the grid's ghost text.
  *
  * Everything is plain DOM: the editor is a child of the session container, so
  * it is re-parented with it between the dock and the Terminal window, it
@@ -83,12 +111,44 @@ import { toast } from 'sonner';
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import { copyOnSelectEnabled } from '@/lib/terminalKeys';
-import { TerminalInputMachine, type KeyDescriptor } from '@/lib/terminalInputState';
+import {
+  TerminalInputMachine,
+  type CompletionMenuKey,
+  type InputAction,
+  type KeyDescriptor,
+} from '@/lib/terminalInputState';
 import { caretOffsetAt } from '@/lib/terminalInputHit';
+import { acceptanceFor, type CompletionItem } from '@/lib/terminalCompletion';
+import { onCompletionData } from '@/lib/terminalCompletionData';
+import {
+  closeMenu,
+  getEngine,
+  getMenuState,
+  registerAccept,
+  setMenuState,
+} from '@/lib/terminalCompletionMenu';
+import { openCommandHistory } from '@/components/terminal/history/openHistory';
 
 /** The editor is beta: off unless the user asks for it. */
 export function inputEditorEnabled(): boolean {
   return useAppStore.getState().settings?.terminal.inputEditor === true;
+}
+
+/**
+ * Does the universal input editor hold the line of this terminal right now?
+ *
+ * The question `terminalSuggest.ts` has to ask before it touches the ghost,
+ * the menu or a keystroke. Not "is the setting on": the editor only exists
+ * between a real `OSC 133;B` and the submission, and everywhere it is *not*
+ * up — a REPL, `ssh`, a TUI, a running command — the grid is still where the
+ * line is and the grid engine must go on working exactly as before.
+ */
+export function inputEditorOwnsLine(terminalId: string): boolean {
+  return controllers.get(terminalId)?.machine.isEditing === true;
+}
+
+function completionMenuKey(): CompletionMenuKey {
+  return useAppStore.getState().settings?.terminal.completionMenu ?? 'ctrlSpace';
 }
 
 function handoffEnabled(): boolean {
@@ -109,6 +169,8 @@ const ADOPT_WINDOW_MS = 600;
 
 const MIN_GHOST_PREFIX = 2;
 const HISTORY_LIMIT = 400;
+/** Rows the completion menu may hold at once, as in the grid. */
+const MENU_LIMIT = 40;
 
 /**
  * Breathing room around the prompt row, in px. Asymmetric on purpose: above
@@ -129,12 +191,19 @@ const TEXT_INSET_RIGHT = 6;
 const MIN_TEXT_COLS = 4;
 
 // ---------------------------------------------------------------------------
-// History for the in-editor ghost text
+// Ghost text (U2.a)
 //
 // `terminalSuggest.ts` draws its ghost by reading the grid, which is empty
-// while the editor owns the text — so it simply goes quiet and there is never
-// a second ghost in the wrong place (plan §6.9). The editor keeps the feature
-// alive with its own copy of the same history.
+// while the editor owns the text — so it goes quiet and there is never a
+// second ghost in the wrong place (plan §6.9). What it does *not* do any more
+// is take the feature down with it: it publishes its ranked engine (history of
+// this window, the previous command's output, specs, git refs, paths) and the
+// block asks it about `machine.text`.
+//
+// The flat list below stays as the fallback for the one case where there is no
+// engine to ask — the editor is attached on `mountTerminal`, the suggestion
+// controller a frame later from `XtermView` — so the very first prompt of a
+// pane still gets a ghost instead of nothing.
 // ---------------------------------------------------------------------------
 
 let history: string[] = [];
@@ -175,10 +244,22 @@ function findSuggestion(prefix: string): string | null {
   return null;
 }
 
+/** The real engine when it is attached, the flat history until then. */
+function suggestFor(terminalId: string, line: string): string | null {
+  const engine = getEngine(terminalId);
+  if (engine) return engine.ghost(line);
+  return findSuggestion(line);
+}
+
 // ---------------------------------------------------------------------------
 
 function describe(e: KeyboardEvent): KeyDescriptor {
   return { key: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
+}
+
+/** The part of a suggestion Ctrl+→ accepts: one word, separator included. */
+function nextWord(remainder: string): string {
+  return remainder.match(/^\s*\S+\s?/)?.[0] ?? remainder;
 }
 
 /** First line of a paste; U1 refuses the rest rather than run it by accident. */
@@ -222,6 +303,10 @@ class InputEditorController {
 
   /** Remainder currently offered as ghost text (→ accepts it). */
   suggestion = '';
+  /** True while *this* block owns the floating completion menu (U2.b). */
+  menuOpen = false;
+  /** Undo of the accepter pushed for the duration of that menu. */
+  offAccept: (() => void) | null = null;
   /** Grid text seen before this deadline is treated as typeahead. */
   adoptUntil = 0;
   /** `cursorInactiveStyle` to put back when the editor closes. */
@@ -322,6 +407,13 @@ class InputEditorController {
     this.disposables.push(term.onWriteParsed(() => this.schedule()));
     this.disposables.push(term.onResize(() => this.schedule()));
     this.disposables.push(term.onScroll(() => this.schedule()));
+    // A source that finished loading in the background (the ranked history, a
+    // `--help` spec, git refs) has to reach the block too, or a ghost that was
+    // one fetch away would never appear on the line being typed.
+    const offData = onCompletionData(() => {
+      if (this.machine.isEditing && !this.root.hidden) this.render();
+    });
+    this.cleanup.push(offData);
 
     const on = <K extends keyof HTMLElementEventMap>(
       target: HTMLElement,
@@ -425,6 +517,7 @@ class InputEditorController {
     this.disposables = [];
     for (const off of this.cleanup) off();
     this.cleanup = [];
+    this.dismissMenu();
     this.hide();
     this.machine.reset();
     this.root.remove();
@@ -491,6 +584,7 @@ class InputEditorController {
   }
 
   hide() {
+    this.dismissMenu();
     if (this.root.hidden) return;
     this.root.hidden = true;
     this.root.dataset.focus = 'false';
@@ -761,13 +855,194 @@ class InputEditorController {
     }
   }
 
+  // -- completion menu (U2.b) -----------------------------------------------
+
+  /**
+   * The cursor cell, in viewport coordinates, for the `position: fixed` list.
+   *
+   * Read off the caret element itself rather than computed from the anchor
+   * column: the caret is already placed by the text that precedes it, so this
+   * is right for tabs, accents and double-width glyphs by construction — the
+   * same argument as `terminalInputHit.ts`.
+   */
+  menuAnchor() {
+    const rect = this.caret.getBoundingClientRect();
+    const cellHeight = rect.height || this.root.getBoundingClientRect().height || 16;
+    return { left: rect.left, top: rect.top, bottom: rect.top + cellHeight, cellHeight };
+  }
+
+  /** Candidates for the line as it stands, or an empty list. */
+  menuItems(): CompletionItem[] {
+    const engine = getEngine(this.id);
+    if (!engine) return [];
+    // Mid-line completion would have to decide what "the word under the
+    // caret" means for a line the engine analyses from its start; the ghost
+    // makes the same call. Anywhere but the end, the key falls back.
+    if (this.machine.caret !== this.machine.text.length) return [];
+    return engine.items(this.machine.text, MENU_LIMIT);
+  }
+
+  /**
+   * Open the list on the current line. Returns false when there is nothing to
+   * offer — the caller then does whatever the key did before (hand Tab to
+   * PSReadLine, swallow Ctrl+Space), so CortX having nothing to say never
+   * costs the user the shell's own completion.
+   */
+  openMenu(): boolean {
+    const items = this.menuItems();
+    if (items.length === 0) {
+      this.dismissMenu();
+      return false;
+    }
+    if (!this.offAccept) this.offAccept = registerAccept(this.id, (i) => this.acceptMenu(i));
+    this.menuOpen = true;
+    setMenuState(this.id, { open: true, items, index: 0, anchor: this.menuAnchor() });
+    // The ghost would sit on top of the list's first row.
+    this.setGhost('');
+    return true;
+  }
+
+  /** The line changed under an open list: re-filter it, or close it. */
+  refreshMenu() {
+    if (!this.menuOpen) return;
+    // Someone else closed it in the store (a stray `133;A` on the grid side):
+    // let go of the accepter rather than hold a stale one.
+    if (!getMenuState(this.id).open) {
+      this.dismissMenu();
+      return;
+    }
+    const items = this.menuItems();
+    if (items.length === 0) {
+      this.dismissMenu();
+      return;
+    }
+    const previous = getMenuState(this.id);
+    setMenuState(this.id, {
+      open: true,
+      items,
+      index: Math.min(previous.index, items.length - 1),
+      anchor: this.menuAnchor(),
+    });
+  }
+
+  dismissMenu() {
+    if (!this.menuOpen) return;
+    this.menuOpen = false;
+    closeMenu(this.id);
+    this.offAccept?.();
+    this.offAccept = null;
+  }
+
+  /**
+   * Accept a row. Unlike the grid — which types backspaces and characters into
+   * the PTY because the shell owns the line there — the editor owns it, so the
+   * replacement is done in the buffer and nothing is written to the terminal.
+   */
+  acceptMenu(index: number) {
+    const item = getMenuState(this.id).items[index];
+    this.dismissMenu();
+    if (!item || !this.machine.isEditing) return;
+    const line = this.machine.text;
+    const acceptance = acceptanceFor(line, item);
+    if (!acceptance) return;
+    const caret = Math.max(0, Math.min(this.machine.caret, line.length));
+    const from = Math.max(0, caret - acceptance.backspaces);
+    const next = line.slice(0, from) + acceptance.text + line.slice(caret);
+    this.machine.setText(next, from + acceptance.text.length);
+    this.syncOut();
+    this.focusField();
+  }
+
+  /**
+   * Keys the open list claims. Everything else falls through to the machine
+   * and re-filters the list on the next `render()`, exactly like the grid's.
+   */
+  handleMenuKey(e: KeyboardEvent): boolean {
+    if (!this.menuOpen) return false;
+    if (!getMenuState(this.id).open) {
+      this.dismissMenu();
+      return false;
+    }
+    if (e.altKey || e.metaKey) return false;
+    const menu = getMenuState(this.id);
+    switch (e.key) {
+      case 'ArrowDown':
+      case 'ArrowUp': {
+        if (e.ctrlKey) return false;
+        const delta = e.key === 'ArrowDown' ? 1 : -1;
+        const n = menu.items.length;
+        setMenuState(this.id, { ...menu, index: (menu.index + delta + n) % n });
+        e.preventDefault();
+        return true;
+      }
+      case 'Enter':
+      case 'Tab':
+        if (e.ctrlKey || e.shiftKey) return false;
+        e.preventDefault();
+        this.acceptMenu(menu.index);
+        return true;
+      case 'Escape':
+        e.preventDefault();
+        this.dismissMenu();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  // -- history palette (U2.d) -----------------------------------------------
+
+  /**
+   * Ctrl+R: the command-history view, opened in its `pick` mode — rows write
+   * to no PTY and Enter hands the command back here. Returns false when no
+   * view is mounted in this window, so the caller can fall back to the shell's
+   * own reverse search.
+   *
+   * Only `projectId` narrows the list. The view's `cwd` filter is an exact
+   * directory match (`terminal::history`), so passing the terminal's cwd would
+   * show an empty palette from any subdirectory of the project — the filter is
+   * there in the view for the user to pick from its facets.
+   */
+  openHistory(): boolean {
+    const line = this.machine.text.trim();
+    const projectId = getEngine(this.id)?.scope().projectId ?? null;
+    this.dismissMenu();
+    return openCommandHistory({
+      search: line || undefined,
+      projectId: projectId ?? undefined,
+      pick: (command) => this.adoptPicked(command),
+    });
+  }
+
+  /** A row was chosen: it becomes the line, ready to be edited or run. */
+  adoptPicked(command: string) {
+    const line = command.split('\n')[0]?.trim() ?? '';
+    if (!line || !this.machine.isEditing) return;
+    this.machine.setText(line, line.length);
+    this.syncOut();
+    // The dialog restores the focus itself, asynchronously and after this
+    // callback: claim it back once its own restoration has run, then once
+    // more in case that restoration was the later of the two.
+    const refocus = () => {
+      if (!this.machine.isEditing || this.root.hidden) return;
+      this.field.focus({ preventScroll: true });
+      this.root.dataset.focus = document.activeElement === this.field ? 'true' : 'false';
+    };
+    setTimeout(refocus, 0);
+    setTimeout(refocus, 80);
+  }
+
   // -- drawing --------------------------------------------------------------
 
-  /** Everything that depends on the text: the ghost and the caret. */
+  /** Everything that depends on the text: the ghost, the caret, the list. */
   render() {
     this.updateGhost();
     this.renderCaret();
     this.syncScroll();
+    // Last, and on purpose: the list is anchored on the caret's own box, so
+    // it has to be re-anchored *after* `renderCaret` has moved it, or it
+    // trails the text by one keystroke.
+    this.refreshMenu();
   }
 
   setGhost(rest: string) {
@@ -777,7 +1052,9 @@ class InputEditorController {
   }
 
   updateGhost() {
-    if (!ghostEnabled() || !this.machine.isEditing) {
+    // The list already says everything the ghost would, in more detail, and
+    // it is drawn over the row the ghost lives on.
+    if (!ghostEnabled() || !this.machine.isEditing || this.menuOpen) {
       this.setGhost('');
       return;
     }
@@ -786,7 +1063,7 @@ class InputEditorController {
       this.setGhost('');
       return;
     }
-    this.setGhost(findSuggestion(text) ?? '');
+    this.setGhost(suggestFor(this.id, text) ?? '');
   }
 
   /**
@@ -846,22 +1123,27 @@ class InputEditorController {
         return;
       }
     }
-    // → accepts the ghost, exactly like in the grid today.
+    // The open list gets first refusal: ↑/↓ walk it, Enter/Tab accept, Esc
+    // closes — and none of those may reach the machine while it is up.
+    if (this.handleMenuKey(e)) return;
+    // → accepts the ghost, exactly like in the grid today; Ctrl+→ takes one
+    // word, like PSReadLine's `AcceptNextSuggestionWord`.
     if (
       e.key === 'ArrowRight' &&
-      !e.ctrlKey &&
       !e.altKey &&
       !e.metaKey &&
       this.suggestion &&
       this.machine.caret === this.machine.text.length
     ) {
       e.preventDefault();
-      const full = this.machine.text + this.suggestion;
+      const taken = e.ctrlKey ? nextWord(this.suggestion) : this.suggestion;
+      const full = this.machine.text + taken;
       this.machine.setText(full, full.length);
       this.syncOut();
       return;
     }
     this.machine.handoffEnabled = handoffEnabled();
+    this.machine.completionMenu = completionMenuKey();
     const action = this.machine.key(describe(e));
     switch (action.type) {
       case 'none':
@@ -905,7 +1187,42 @@ class InputEditorController {
         e.preventDefault();
         this.term.scrollPages(action.pages);
         return;
+      case 'complete':
+        // Nothing to offer: give the key back to whoever had it before U2 —
+        // the shell for Tab, nobody for Ctrl+Space.
+        if (this.openMenu()) {
+          e.preventDefault();
+          return;
+        }
+        if (e.key === 'Tab') {
+          // Only a plain Tab ever reaches here (Shift+Tab is handed off by
+          // the machine), so the shell gets the very byte it got before U2.
+          e.preventDefault();
+          this.fallback(this.machine.handoff('\t'));
+        }
+        return;
+      case 'history':
+        e.preventDefault();
+        // No history view mounted in this window: U1's behaviour, byte for
+        // byte — the line goes out without a CR and PSReadLine searches it.
+        if (!this.openHistory()) this.fallback(this.machine.handoff('\x12'));
+        return;
     }
+  }
+
+  /**
+   * Carry out an action the machine produced outside `onKeyDown`'s switch —
+   * the hand-off a `complete` or a `history` falls back to. Only the two
+   * shapes `handoff()` can return are possible.
+   */
+  fallback(action: InputAction) {
+    if (action.type === 'handoff') {
+      this.hide();
+      this.write(action.flush + action.data);
+      return;
+    }
+    // Hand-off switched off: the key is swallowed and the line stays.
+    this.syncOut();
   }
 
   // -- typeahead ------------------------------------------------------------

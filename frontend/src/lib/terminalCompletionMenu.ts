@@ -1,5 +1,6 @@
 /**
- * State of the floating completion menu, one entry per terminal (#17).
+ * State of the floating completion menu, one entry per terminal (#17), and the
+ * small broker that lets **two** surfaces drive it (U2.a / U2.b).
  *
  * Deliberately a plain external store rather than zustand: the menu is driven
  * from the xterm side (`terminalSuggest.ts`), which lives outside React and
@@ -7,6 +8,19 @@
  * `useSyncExternalStore`. Keeping the two apart is also what guarantees the
  * menu can never take the keyboard focus away from the terminal — no input,
  * no focusable node, nothing to focus.
+ *
+ * ## Why the engine registry is here
+ *
+ * Since U2 the completions and the ghost text have two consumers: the grid
+ * (`terminalSuggest.ts`, which reads the line out of xterm's buffer) and the
+ * universal input editor (`terminalInputEditor.ts`, which owns the line in a
+ * `<textarea>`). Only the first one holds the ranked sources — the history of
+ * this window, what the last command's output suggested, the cached specs —
+ * so the second has to ask it. Having the editor import `terminalSuggest`
+ * directly would close an import cycle (`terminalSuggest` already asks the
+ * editor whether it owns the line), so the engine is *published* here instead,
+ * in the module both already depend on. `terminalSuggest` registers, the
+ * editor looks up, neither knows about the other.
  */
 import type { CompletionItem } from '@/lib/terminalCompletion';
 
@@ -74,19 +88,73 @@ export function forgetMenu(terminalId: string) {
 }
 
 /**
- * Accepting a row is done by the controller, not the view; the view only
- * tells it which row was clicked.
+ * Accepting a row is done by whoever opened the menu, not by the view; the
+ * view only tells it which row was clicked.
+ *
+ * A **stack**, not a single slot: the grid's engine registers once for the
+ * life of the session, and the input editor pushes its own accepter for as
+ * long as *its* menu is open. The top of the stack wins, and unregistering
+ * restores whoever was there before — so neither surface can silently steal
+ * the other's rows.
  */
 type AcceptFn = (index: number) => void;
-const accepters = new Map<string, AcceptFn>();
+const accepters = new Map<string, AcceptFn[]>();
 
 export function registerAccept(terminalId: string, fn: AcceptFn): () => void {
-  accepters.set(terminalId, fn);
+  const stack = accepters.get(terminalId) ?? [];
+  stack.push(fn);
+  accepters.set(terminalId, stack);
   return () => {
-    if (accepters.get(terminalId) === fn) accepters.delete(terminalId);
+    const current = accepters.get(terminalId);
+    if (!current) return;
+    const i = current.lastIndexOf(fn);
+    if (i >= 0) current.splice(i, 1);
+    if (current.length === 0) accepters.delete(terminalId);
   };
 }
 
 export function acceptMenuItem(terminalId: string, index: number) {
-  accepters.get(terminalId)?.(index);
+  const stack = accepters.get(terminalId);
+  stack?.[stack.length - 1]?.(index);
+}
+
+// ---------------------------------------------------------------------------
+// The completion engine, published for whoever needs it (U2)
+// ---------------------------------------------------------------------------
+
+/** Where a terminal is, for the sources that are filtered by directory. */
+export interface EngineScope {
+  cwd: string | null;
+  projectId: string | null;
+}
+
+/**
+ * Everything a surface needs to offer completions on a line it holds itself.
+ *
+ * Implemented by `terminalSuggest.ts`'s controller — it is the only thing that
+ * knows the merged, ranked sources — and consumed by the input editor. Both
+ * calls are synchronous and read from an in-memory cache; a miss schedules a
+ * background fetch and `onCompletionData` fires when it lands.
+ */
+export interface CompletionEngine {
+  /** The remainder to draw after `line`, or null for "say nothing". */
+  ghost(line: string): string | null;
+  /** Every candidate for `line`, best first. */
+  items(line: string, limit?: number): CompletionItem[];
+  /** The terminal's directory and project, for the history palette. */
+  scope(): EngineScope;
+}
+
+const engines = new Map<string, CompletionEngine>();
+
+export function registerEngine(terminalId: string, engine: CompletionEngine): () => void {
+  engines.set(terminalId, engine);
+  return () => {
+    if (engines.get(terminalId) === engine) engines.delete(terminalId);
+  };
+}
+
+/** Null when suggestions are switched off entirely (no controller attached). */
+export function getEngine(terminalId: string): CompletionEngine | null {
+  return engines.get(terminalId) ?? null;
 }
