@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode, type Ref } from 'react';
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers';
-import { MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Plus, X, XCircle } from 'lucide-react';
+import { ChevronRight, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Plus, X, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -16,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { TerminalTypeIcon } from '@/components/layout/terminal-dnd/TerminalTypeIcon';
 import { AgentProviderIcon } from '@/components/agents/AgentProviderIcon';
 import { useAppStore } from '@/stores/appStore';
-import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
+import { TERMINAL_WINDOW_ID, useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { RAIL_WIDTH_COLLAPSED, useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
 import { collectLeaves, type TerminalTab } from '@/lib/terminalLayout';
 import { comboLabelFor, tabShortcutNumber } from '@/lib/keybindings';
@@ -38,14 +40,67 @@ import {
   useTabDisplay,
   type ItemMap,
   type ResolvedTabDisplay,
+  type TabLiveState,
   type WorkspaceGroup,
 } from './model';
+import {
+  groupToReveal,
+  isFolded,
+  loudestLive,
+  toggleSection,
+  unfoldSection,
+  type ActiveTabRef,
+} from './sectionFold';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
 import { TabRowBody } from './TabRow';
 import { PaneGroupBranch } from './PaneTabs';
 import { groupCardClass, groupHeadline, paneCountLabel, usePaneEntries, useSelectPane } from './paneModel';
 import { useTabContextMenu, useTabRename } from './useTabMenu';
 import { useDetachDrag } from './useDetachDrag';
+
+/**
+ * Which project sections this rail keeps folded (ticket #40).
+ *
+ * **Why not the layout document.** `terminalLayoutStore` is the one place a
+ * Terminal window can write something and have it survive a restart — but it
+ * is also broadcast to every other window and to the main window's dock, and
+ * that is exactly what a fold must not do. Folding "CortX" in the window on
+ * the left is a statement about *that rail's* viewport: the window on the
+ * right may be working in CortX and would find its sections shut for reasons
+ * it cannot see. Layout is shared; what a viewport shows of it is not, which
+ * is the same line `railCollapsed` and `railWidth` already sit on.
+ *
+ * **Why persist it anyway.** A fold is a disposition, not a session state: the
+ * user hides the three projects they are not on today and expects them still
+ * hidden tomorrow. Re-folding six sections at every launch is the whole reason
+ * the ticket exists.
+ *
+ * **Per window, by key.** Every Terminal webview shares one origin, so one
+ * `localStorage` — hence a key per window id rather than one document holding
+ * every window's set: two windows then never write over each other's entry,
+ * and a fold in one is invisible to the other until each is asked itself.
+ *
+ * The value is a set of **workspace ids** (`project:<id>`, or the free
+ * workspace), never indices: a fold follows its project through a reorder, a
+ * close and a rename, and an id whose project is gone simply never matches
+ * again.
+ */
+interface RailFoldState {
+  folded: string[];
+  toggle: (workspaceId: string) => void;
+  reveal: (workspaceId: string) => void;
+}
+
+const useRailFoldStore = create<RailFoldState>()(
+  persist(
+    (set) => ({
+      folded: [],
+      toggle: (workspaceId) => set((s) => ({ folded: toggleSection(s.folded, workspaceId) })),
+      reveal: (workspaceId) => set((s) => ({ folded: unfoldSection(s.folded, workspaceId) })),
+    }),
+    { name: `cortx-terminal-rail-folds:${TERMINAL_WINDOW_ID}` }
+  )
+);
 
 /**
  * Icon button with a tooltip. Extra props (and the ref) land on the button so
@@ -403,8 +458,49 @@ function SessionGroupRows({
  * Header of a workspace group (expanded rail): the project's dot and name,
  * the tab count, and a menu that acts on the whole section — right-click
  * anywhere on the row, or the "…" button that appears on hover.
+ *
+ * Since ticket #40 it is also the section's **fold control**, which is why the
+ * name, the dot, the chevron and the count live inside a real `<button>`: a
+ * thing you click to open and shut is a button, it must be reachable by Tab,
+ * and it owes a screen reader an `aria-expanded` and the rows it controls
+ * (`aria-controls`, matched by a `role="group"` box carrying the section's
+ * name around the rows).
+ *
+ * Three things already lived on this row and none of them may be stolen:
+ *
+ * - the **right-click menu** stays on the wrapper, so right-clicking anywhere
+ *   — the button included — still opens it and never folds;
+ * - the **"…" button** is a *sibling* of the fold button, not a child: a
+ *   button inside a button is invalid HTML and, in practice, one click doing
+ *   two things;
+ * - `onContextMenu` calls `preventDefault`, so the fold button's own
+ *   activation (click, Enter, Space) is the only thing that folds.
+ *
+ * Folded, the header is all that is left of the section, so it says more:
+ * the count it always carried, the glyph of whatever inside is asking for you
+ * (`loudestLive` — an agent waiting, a command that failed), and, when the
+ * current tab is one of the rows it hides, the same plate the current row
+ * wears. That last one is the answer to "where did my tab go": it did not
+ * move, it is in here.
  */
-function SessionGroupHeader({ group }: { group: WorkspaceGroup }) {
+function SessionGroupHeader({
+  group,
+  folded,
+  onToggle,
+  contentId,
+  holdsActive,
+  signal,
+}: {
+  group: WorkspaceGroup;
+  folded: boolean;
+  onToggle: () => void;
+  /** The rows this header opens and shuts. */
+  contentId: string;
+  /** The tab the window is on is one of this section's — worth saying once folded. */
+  holdsActive: boolean;
+  /** Live state of the loudest tab inside, when folding would hide it. */
+  signal: TabLiveState | null;
+}) {
   const [open, setOpen] = useState(false);
   // What "Close all" is really about to take. Since ticket #37 it reaches
   // every Terminal window, so the rail's own list is no longer the answer: a
@@ -415,17 +511,59 @@ function SessionGroupHeader({ group }: { group: WorkspaceGroup }) {
   // which is not ours to export from).
   const closing = open ? tabsOfWorkspace(group.workspaceId) : [];
   const reach = open ? describeCloseReach(tabsElsewhere(closing)) : null;
+  const tabs = group.tabs.length;
+  // The count says tabs, because that is what the rows below it are — a split
+  // is one row. Folded, how many *sessions* went away is the other honest
+  // number, so it goes in the tooltip rather than swapping the badge: a
+  // number that changes value when you fold the thing it describes is worse
+  // than no number.
+  const panes = group.tabs.reduce((n, tab) => n + collectLeaves(tab.layout).length, 0);
+  const summary = [
+    `${tabs} tab${tabs > 1 ? 's' : ''}`,
+    panes > tabs ? `${panes} panes` : null,
+    folded && holdsActive ? 'holds the current session' : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <div
-      className="eyebrow group/gh flex items-center gap-1.5 px-2 pb-1 pt-1.5"
+      className="group/gh flex items-center gap-1 pb-1 pl-1 pr-2 pt-1.5"
       onContextMenu={(e) => {
         e.preventDefault();
         setOpen(true);
       }}
     >
-      {group.color && <span className="size-1.5 rounded-full" style={{ backgroundColor: group.color }} aria-hidden />}
-      <span className="truncate">{group.name}</span>
-      <span className="ml-auto tabular-nums">{group.tabs.length}</span>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!folded}
+        aria-controls={contentId}
+        aria-label={`${group.name} — ${summary}`}
+        title={`${group.name}\n${summary}`}
+        className={cn(
+          'eyebrow flex min-w-0 flex-1 items-center gap-1.5 rounded-[var(--rad-xs)] px-1 py-0.5 text-left transition-colors hover:text-foreground',
+          // Folded over the tab you are on, the header stands in for the row
+          // it is hiding, so it borrows the row's plate rather than inventing
+          // a second dot beside the project's own.
+          folded && holdsActive ? 'bg-accent text-foreground' : 'hover:bg-accent/60'
+        )}
+      >
+        <ChevronRight
+          className={cn('tt-caret size-3 shrink-0 text-faint', !folded && 'rotate-90')}
+          aria-hidden
+        />
+        {group.color && (
+          <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: group.color }} aria-hidden />
+        )}
+        <span className="truncate">{group.name}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          {/* Folded, the rows that were shouting are gone; the loudest one
+              lends the header its glyph so a waiting agent or a failed
+              command is not hidden by a fold. */}
+          {folded && signal && <TerminalStatusGlyph live={signal} className="pointer-events-none" />}
+          <span className="tabular-nums">{tabs}</span>
+        </span>
+      </button>
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button
@@ -534,6 +672,11 @@ export function SessionRail() {
   const setActiveTab = useTerminalLayoutStore((s) => s.setActiveTab);
   const reorderTabs = useTerminalLayoutStore((s) => s.reorderTabs);
   const { railCollapsed, toggleRail, railWidth, setRailWidth } = useTerminalWindowPrefsStore();
+  const folded = useRailFoldStore((s) => s.folded);
+  const toggleFold = useRailFoldStore((s) => s.toggle);
+  const revealFold = useRailFoldStore((s) => s.reveal);
+  // One id per rail, so a header can name the list of rows it opens.
+  const railId = useId();
 
   const groups = useMemo(() => groupTabsByWorkspace(scopedTabs, projects), [scopedTabs, projects]);
   // Where each group's numbering starts (Ctrl+N counts across groups).
@@ -557,6 +700,29 @@ export function SessionRail() {
     },
     [groups, reorderTabs]
   );
+
+  // A folded section must never be able to hide the tab you are on *because
+  // you navigated to it*: Ctrl+N, the palette, Ctrl+Tab, a new terminal and
+  // `cortx terminal --project` all end in `setActiveTab`, so watching the
+  // current tab covers every one of them without any of them knowing the rail
+  // exists. Folding the section you are already in is left alone — see
+  // `groupToReveal`, and the plate the header wears for it.
+  const activeWorkspaceId = useMemo(
+    () => (activeTabId ? scopedTabs.find((t) => t.id === activeTabId)?.workspaceId ?? null : null),
+    [scopedTabs, activeTabId]
+  );
+  // `undefined` until the first pass: what the rail boots into is what the
+  // user left folded, and revealing there would undo it.
+  const seenActive = useRef<ActiveTabRef | null | undefined>(undefined);
+  useEffect(() => {
+    const current: ActiveTabRef | null =
+      activeTabId && activeWorkspaceId ? { tabId: activeTabId, workspaceId: activeWorkspaceId } : null;
+    // Read the set at call time: this effect answers "the current tab moved",
+    // and folding a section must not re-run it.
+    const target = groupToReveal(seenActive.current, current, useRailFoldStore.getState().folded);
+    seenActive.current = current;
+    if (target) revealFold(target);
+  }, [activeTabId, activeWorkspaceId, revealFold]);
 
   // "3 running" used to count agent tabs too — `claude` keeps a command
   // running from start to finish, so every agent inflated the number.
@@ -641,40 +807,66 @@ export function SessionRail() {
         {groups.length === 0 && !collapsed && (
           <p className="px-2 py-3 text-xs text-faint">No terminal in this scope.</p>
         )}
-        {groups.map((g, gi) => (
-          <div key={g.workspaceId} className="mb-2">
-            {collapsed ? (
-              <div className="mx-auto mb-1.5 h-px w-5 bg-border first:hidden" />
-            ) : (
-              <SessionGroupHeader group={g} />
-            )}
-            {collapsed ? (
-              <div className="flex flex-col items-center gap-1">
-                {g.tabs.map((tab) => (
-                  <SessionIcon
-                    key={tab.id}
-                    tab={tab}
-                    items={items}
-                    active={tab.id === activeTabId}
-                    display={display}
-                    onSelect={() => setActiveTab(tab.id)}
-                  />
-                ))}
-              </div>
-            ) : (
-              <SessionGroupRows
-                group={g}
-                items={items}
-                activeTabId={activeTabId}
-                firstIndex={groupOffsets[gi] ?? 1}
-                total={scopedTabs.length}
-                display={display}
-                onSelect={setActiveTab}
-                onReorder={reorderGroup}
-              />
-            )}
-          </div>
-        ))}
+        {groups.map((g, gi) => {
+          // Folding is an expanded-rail affair: the icon strip has no header
+          // to click, and a hairline between two runs of icons is already all
+          // the section it can show.
+          const shut = !collapsed && isFolded(folded, g.workspaceId);
+          const contentId = `${railId}-${gi}`;
+          return (
+            <div key={g.workspaceId} className="mb-2">
+              {collapsed ? (
+                <div className="mx-auto mb-1.5 h-px w-5 bg-border first:hidden" />
+              ) : (
+                <SessionGroupHeader
+                  group={g}
+                  folded={shut}
+                  onToggle={() => toggleFold(g.workspaceId)}
+                  contentId={contentId}
+                  holdsActive={g.tabs.some((t) => t.id === activeTabId)}
+                  signal={
+                    shut && display.status ? loudestLive(g.tabs.map((t) => tabLiveState(t, items))) : null
+                  }
+                />
+              )}
+              {collapsed ? (
+                <div className="flex flex-col items-center gap-1">
+                  {g.tabs.map((tab) => (
+                    <SessionIcon
+                      key={tab.id}
+                      tab={tab}
+                      items={items}
+                      active={tab.id === activeTabId}
+                      display={display}
+                      onSelect={() => setActiveTab(tab.id)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                // The rows are unmounted while folded rather than hidden: a
+                // fold is meant to buy back the space *and* the work — a
+                // hidden `DndContext` still measures, and dnd-kit measuring a
+                // `display:none` list is how a drop lands in the wrong place.
+                // The box itself stays, so `aria-controls` always points at
+                // something and the group keeps its name.
+                <div id={contentId} role="group" aria-label={g.name} hidden={shut}>
+                  {!shut && (
+                    <SessionGroupRows
+                      group={g}
+                      items={items}
+                      activeTabId={activeTabId}
+                      firstIndex={groupOffsets[gi] ?? 1}
+                      total={scopedTabs.length}
+                      display={display}
+                      onSelect={setActiveTab}
+                      onReorder={reorderGroup}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </nav>
 
       {/* Footer */}

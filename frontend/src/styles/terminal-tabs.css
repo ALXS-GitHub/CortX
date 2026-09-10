@@ -205,6 +205,15 @@
   background-color: transparent;
 }
 
+/* The chevron of a foldable project section (ticket #40). The rotation is the
+   only thing that says "this opens", so it is worth animating — and the only
+   thing that has to stop when the user asks for less motion, below. The angle
+   itself is a utility on the element (`rotate-90` when open), because that is
+   the bit React knows. */
+.tt-caret {
+  transition: transform 140ms ease;
+}
+
 /* The pane count on a collapsed rail icon: the same family, not the accent. */
 .tt-badge {
   background-color: var(--tt-badge);
@@ -214,7 +223,8 @@
 @media (prefers-reduced-motion: reduce) {
   .tt-group,
   .tt-panebox,
-  .tt-tint {
+  .tt-tint,
+  .tt-caret {
     transition: none;
   }
 }
