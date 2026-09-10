@@ -1,0 +1,43 @@
+/* ============================================================
+   Terminal dock — the panel at the bottom of the *main* window (ticket #38).
+
+   The dock can wear the terminal theme (Settings → "Colour the dock
+   terminals with the terminal theme"). Before this file it wore it only on
+   the xterm canvas: a slab of the theme's background dropped into the app,
+   with the header, the tab rows and the buttons still in the app's colours.
+   Now the whole panel follows, the way the Terminal window does — one answer
+   to one question in both places.
+
+   That makes the *edge* the real work: the dock is embedded in a window whose
+   other half will never follow the theme, so the boundary has to read as a
+   panel that owns its colours, not as a stain. Hence a line of its own, a lit
+   inner top edge and a shadow cast up onto the app.
+
+   Imported from `components/terminal/theme/DockThemeLayer.tsx`, deliberately
+   outside `index.css` (the design system regenerates that file and has eaten
+   appended blocks before — see the header of `terminal-window.css`).
+   ============================================================ */
+
+/* Header and tab rows. Unthemed this is exactly the `bg-background/70` they
+   used to hard-code; themed, `dockChromeTokens` sets it inline on the dock
+   root to the theme's card colour, so the rows keep reading as chrome once
+   the canvas underneath is no longer the app's. */
+.terminal-dock {
+  --dock-chrome: color-mix(in oklab, var(--background) 70%, transparent);
+}
+
+.terminal-dock.terminal-dock-themed {
+  background: var(--dock-bg, var(--bg-terminal));
+  /* Not `--border`: inside a themed dock that is the theme's foreground at
+     12 %, invisible against the app's light canvas above. */
+  border-top-color: var(--dock-edge, var(--border-strong));
+  box-shadow:
+    /* the panel's own lit top edge … */
+    inset 0 1px 0 var(--dock-edge-inner, transparent),
+    /* … and the app's floor giving way to it */
+    0 -10px 26px -18px hsl(var(--shadow-color) / 0.55);
+}
+
+/* The collapsed strip stays the app's: 32 px of theme colour at the bottom of
+   a light window is a stain with nothing to justify it — there is no terminal
+   on screen for the theme to frame. The theme paints where the terminal is. */

@@ -383,3 +383,91 @@ export function applyWindowTheme(
   root.classList.toggle('dark', theme.details !== 'lighter');
   windowThemeActive = true;
 }
+
+// ---------------------------------------------------------------------------
+// Dock chrome (main window)
+// ---------------------------------------------------------------------------
+
+/**
+ * How much of the terminal theme the dock of the main window takes.
+ *
+ * - `app` — nothing: the dock keeps the app skin, panes included.
+ * - `canvas` — the panes only. The xterm palette follows the theme, the
+ *   header and the tab rows stay the app's. This is what "on" used to mean,
+ *   and it is what ticket #38 is about: a slab of the theme colour dropped
+ *   into a light interface with white chrome around it.
+ * - `chrome` — the whole dock, the way the Terminal window does it. One
+ *   answer to one question in both places.
+ */
+export type DockThemeMode = 'app' | 'canvas' | 'chrome';
+
+/**
+ * Read defensively (see `blockFailedWashEnabled`): `dockTheme` is the field
+ * this wants and it does not exist in `TerminalConfig` yet, so the boolean
+ * `dockUsesTerminalTheme` is the fallback and `app` the hard-coded default.
+ * The day the enum lands, it simply wins.
+ */
+export function dockThemeMode(terminal: TerminalConfig | null | undefined): DockThemeMode {
+  const raw = (terminal as Record<string, unknown> | null | undefined)?.dockTheme;
+  if (raw === 'app' || raw === 'canvas' || raw === 'chrome') return raw;
+  return terminal?.dockUsesTerminalTheme ? 'chrome' : 'app';
+}
+
+/**
+ * The design tokens of a *docked* panel: `chromeTokens` with the handful of
+ * values that only make sense in a transparent, full-screen window put back
+ * on their feet.
+ *
+ * The dock is embedded in the main window — nothing shows through it, there
+ * is no wallpaper layer and no window opacity — so every surface the Terminal
+ * window leaves see-through (`--background`, `--bg-terminal`) is opaque here,
+ * and the flat colour is used even for a gradient theme, because the xterm
+ * canvas below can only hold one colour (see `themeToXterm`).
+ *
+ * Everything else is deliberately *not* re-derived: the same theme must read
+ * the same in the dock and in the window, and `chromeTokens` is where that
+ * derivation lives — including the two traps it already avoids (surfaces are
+ * lifted from the theme's own background, never from `--foreground` at a high
+ * percentage; the saturation boost of the app skin is off).
+ */
+export function dockChromeTokens(theme: TerminalTheme, look: ChromeLook = {}): Record<string, string> {
+  const base = chromeTokens(theme, 100, look);
+  const dark = theme.details !== 'lighter';
+  const bg = theme.background;
+  const card = dark ? mix(bg, '#ffffff', 0.06) : mix(bg, '#ffffff', 0.45);
+  const chrome = Math.max(0, Math.min(100, look.chromeOpacity ?? DEFAULT_CHROME_OPACITY)) / 100;
+  const tokens: Record<string, string> = {
+    ...base,
+    '--background': bg,
+    '--bg-terminal': bg,
+    // No window alpha to fold in: the dock never lets the desktop through.
+    '--bg-sidebar': rgba(card, chrome * 0.8),
+    '--bg-glass': rgba(card, chrome),
+    // What the panel itself is painted with.
+    '--dock-bg': bg,
+    // The header and the tab rows, lifted further than `--card`: the Terminal
+    // window separates its title bar from its panes with a blur and a
+    // wallpaper behind both, and the dock has neither. Flat on flat, 6 % is
+    // invisible — the rows have to step forward on colour alone or they stop
+    // reading as chrome, which is exactly the half of the job the dock was
+    // already doing badly.
+    '--dock-chrome': mix(bg, '#ffffff', dark ? 0.12 : 0.5),
+    // The edge between two worlds. `--border` inside the dock is the theme's
+    // foreground at 12 %, which vanishes against the app's light canvas above
+    // it, so the top line gets its own colour: the theme's background pushed
+    // towards black. Dark enough to draw a line on a white app, and still a
+    // colour belonging to the panel it closes.
+    '--dock-edge': mix(bg, '#000000', dark ? 0.4 : 0.22),
+    // A lit top edge inside the panel, the way a card catches the light.
+    // Always white, never the foreground: on a light theme the foreground is
+    // dark and this would double the edge line into a 2 px band instead of
+    // fading out of the way, which is what it should do there.
+    '--dock-edge-inner': rgba('#ffffff', dark ? 0.12 : 0.6),
+  };
+  // Window-only knobs: they mean nothing on a subtree of the main window and
+  // would only confuse anything reading them there.
+  for (const key of ['--terminal-window-bg', '--terminal-window-solid', '--terminal-window-alpha', '--canvas-wash']) {
+    delete tokens[key];
+  }
+  return tokens;
+}

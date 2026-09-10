@@ -38,6 +38,7 @@ import { TerminalDndContext, type TerminalItem } from './terminal-dnd';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableTerminalTab } from './terminal-dnd/SortableTerminalTab';
+import { useDockTheme } from '@/components/terminal/theme/DockThemeLayer';
 import { TerminalTypeIcon } from './terminal-dnd/TerminalTypeIcon';
 
 /** Height of the collapsed dock strip. */
@@ -203,7 +204,7 @@ function DroppablePaneContent({
       )}
 
       {/* Tabs bar */}
-      <div className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-border bg-background/70 text-xs no-scrollbar">
+      <div className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-border bg-[var(--dock-chrome)] text-xs no-scrollbar">
         <SortableContext
           items={paneTerminals.map((t) => t.id)}
           strategy={horizontalListSortingStrategy}
@@ -293,6 +294,10 @@ export function TerminalPanel() {
     focusPane,
     resizePanes,
   } = useAppStore();
+
+  // Terminal theme of the dock (ticket #38): `themed` also gates the edge
+  // treatment, `style` carries the tokens for the whole panel.
+  const dockTheme = useDockTheme();
 
   // The "current" terminal = the active tab of the focused pane.
   const activeTerminalId = useMemo(() => {
@@ -614,9 +619,12 @@ export function TerminalPanel() {
         ref={containerRef}
         className={cn(
           'terminal-dock relative flex shrink-0 flex-col border-t border-border shadow-[0_-8px_24px_-16px_hsl(var(--shadow-color)/0.4)]',
+          // Wears the terminal theme: the tokens come in as an inline style
+          // (see DockThemeLayer), the edge treatment from the class.
+          dockTheme.themed && 'terminal-dock-themed',
           isResizing && 'select-none'
         )}
-        style={{ height: terminalHeight }}
+        style={{ ...dockTheme.style, height: terminalHeight }}
       >
         {/* Resize handle (top edge) */}
         <div
@@ -627,7 +635,7 @@ export function TerminalPanel() {
         </div>
 
         {/* Toolbar */}
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-background/70 px-3">
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-[var(--dock-chrome)] px-3">
           <Terminal className="size-3.5 text-faint" />
           <span className="text-xs font-medium">Terminal</span>
           <span className="text-xs tabular-nums text-faint">
