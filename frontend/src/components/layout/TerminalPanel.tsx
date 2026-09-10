@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { XtermView } from './XtermView';
 import { CloseConfirmDialog } from '@/components/terminal/CloseConfirmDialog';
+import { CommandHistoryView } from '@/components/terminal/history/CommandHistoryView';
 import { confirmCloseTerminals } from '@/components/terminal/actions';
 import { clearTerminal } from '@/lib/terminalSessions';
 import { useTerminalItems } from '@/hooks/useTerminalItems';
@@ -596,6 +597,12 @@ export function TerminalPanel() {
         </DockButton>
         {/* Main window: also answers the backend's quit confirmation. */}
         <CloseConfirmDialog handleAppQuit />
+        {/* Ctrl+R in the universal input editor opens this. It used to live
+            only in the Terminal window, so in the dock that key fell back to
+            the shell — with the editor on, that closed the editor. Mounted
+            here for the same reason CloseConfirmDialog is: the two returns
+            below are alternatives, so only one instance is ever live. */}
+        <CommandHistoryView />
       </div>
     );
   }
@@ -766,6 +773,12 @@ export function TerminalPanel() {
 
         {/* Main window: also answers the backend's quit confirmation. */}
         <CloseConfirmDialog handleAppQuit />
+        {/* Ctrl+R in the universal input editor opens this. It used to live
+            only in the Terminal window, so in the dock that key fell back to
+            the shell — with the editor on, that closed the editor. Mounted
+            here for the same reason CloseConfirmDialog is: the two returns
+            below are alternatives, so only one instance is ever live. */}
+        <CommandHistoryView />
       </div>
     </TerminalDndContext>
   );
