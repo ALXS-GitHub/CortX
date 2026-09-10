@@ -79,8 +79,26 @@ const CACHE_MAX = 500;
 
 /** Rest on a link this long before the panel appears. */
 const HOVER_DELAY_MS = 110;
-/** Grace period before the panel closes, so the pointer can travel into it. */
+/**
+ * Safety net, not the mechanism. Reaching the panel does not depend on being
+ * quick: it is flush against the token (`PANEL_OVERLAP_PX`) and the pointer
+ * entering it disarms every grid timer. This only covers a pointer that leaves
+ * the link sideways and comes back, or the diagonal shortcut into a panel the
+ * clamp pushed off the token's own column.
+ */
 const HOVER_CLOSE_MS = 140;
+/**
+ * How far the panel laps over the token's first pixel row (ticket #42).
+ *
+ * The panel used to sit 2px above the token, and those 2px belonged to neither
+ * of them: crossing them fired one more `mousemove` on the grid, which armed a
+ * `present()` for a cell holding no link — and that timer then fired *after*
+ * the pointer had already reached the panel and killed it under the cursor.
+ * Zero would be enough in exact arithmetic, but `offsetHeight` is an integer
+ * rounded off a fractional box, so one pixel of overlap absorbs the remainder.
+ * It costs the top pixel of the link's own row, which carries no glyph.
+ */
+const PANEL_OVERLAP_PX = 1;
 /** A click is ignored when the provider just opened the very same target. */
 const ACTIVATION_DEDUP_MS = 600;
 
@@ -346,6 +364,8 @@ interface PanelOptions {
   palette: { fg: string; bg: string };
   /** Screen rectangle of the token, in client coordinates. */
   anchor: { left: number; top: number; bottom: number };
+  /** The pointer reached the panel; nothing armed on the grid may close it. */
+  onEnter: () => void;
   /** The pointer left the panel and did not go back to the link. */
   onLeave: () => void;
 }
@@ -362,6 +382,7 @@ class LinkPanel {
   /** Whoever is showing it now; `hide` from anyone else is ignored. */
   private owner: object | null = null;
   private pointerInside = false;
+  private onEnter: (() => void) | null = null;
   private onLeave: (() => void) | null = null;
 
   constructor() {
@@ -375,6 +396,7 @@ class LinkPanel {
     root.append(target, actions);
     root.addEventListener('mouseenter', () => {
       this.pointerInside = true;
+      this.onEnter?.();
     });
     root.addEventListener('mouseleave', () => {
       this.pointerInside = false;
@@ -404,6 +426,7 @@ class LinkPanel {
 
   show(owner: object, options: PanelOptions): void {
     this.owner = owner;
+    this.onEnter = options.onEnter;
     this.onLeave = options.onLeave;
     this.root.style.setProperty('--cortx-link-fg', options.palette.fg);
     this.root.style.setProperty('--cortx-link-bg', options.palette.bg);
@@ -440,11 +463,16 @@ class LinkPanel {
     this.root.hidden = false;
     const width = this.root.offsetWidth;
     const height = this.root.offsetHeight;
+    // The clamp only ever pushes the panel *left*, and it stops at
+    // `innerWidth - width - 8`, so its right edge never lands short of the
+    // token's first column: straight up from where the link starts is always
+    // into the panel.
     const left = Math.max(8, Math.min(options.anchor.left, window.innerWidth - width - 8));
-    // Above the link, flush against it so the pointer can reach the panel
-    // without crossing a gap; below it when there is no room up there.
-    let top = options.anchor.top - height - 2;
-    if (top < 8) top = options.anchor.bottom + 2;
+    // Above the link and lapping over its first pixel row, so the pointer
+    // crosses no strip that belongs to neither of them (ticket #42); below it,
+    // just as flush, when there is no room up there.
+    let top = options.anchor.top - height + PANEL_OVERLAP_PX;
+    if (top < 8) top = options.anchor.bottom - PANEL_OVERLAP_PX;
     this.root.style.left = `${Math.round(left)}px`;
     this.root.style.top = `${Math.round(top)}px`;
     this.root.style.visibility = '';
@@ -453,6 +481,7 @@ class LinkPanel {
   hide(owner: object): void {
     if (this.owner !== owner) return;
     this.owner = null;
+    this.onEnter = null;
     this.onLeave = null;
     this.pointerInside = false;
     this.root.hidden = true;
@@ -722,15 +751,23 @@ class LinkHover {
 
   private async present(col: number, row: number, cellW: number, cellH: number, generation: number): Promise<void> {
     if (generation !== this.generation) return;
+    // The pointer is on the panel: it owns the surface until it leaves it, and
+    // a cell the pointer merely passed over on the way there does not get to
+    // move it or take it away.
+    if (this.pointerOnPanel()) return;
     const token = this.findToken(col, row, filePathLinksEnabled());
+    // A cell with no link is not a reason to tear the panel down on the spot —
+    // that is what made the buttons unreachable. Arm the grace period instead
+    // and let it re-check where the pointer actually ended up.
     if (!token) {
-      this.close();
+      this.scheduleClose();
       return;
     }
     const resolved = await this.resolveToken(token);
     if (generation !== this.generation) return;
+    if (this.pointerOnPanel()) return;
     if (!resolved) {
-      this.close();
+      this.scheduleClose();
       return;
     }
     const position =
@@ -756,6 +793,15 @@ class LinkHover {
         left: rect.left + resolved.startX * cellW,
         top,
         bottom: top + cellH,
+      },
+      onEnter: () => {
+        // The pointer made it across. Whatever the grid still has armed — a
+        // `present` for the cell it left, a grace period from the `mouseleave`
+        // that firing this very handler implies — must not outlive the arrival.
+        window.clearTimeout(this.hoverTimer);
+        window.clearTimeout(this.closeTimer);
+        this.lastCol = -1;
+        this.lastRow = -1;
       },
       onLeave: () => this.scheduleClose(),
     });
@@ -806,7 +852,13 @@ class LinkHover {
     };
   }
 
+  /** The panel we put up is the one under the pointer right now. */
+  private pointerOnPanel(): boolean {
+    return panelInstance !== null && panelInstance.isOwnedBy(this) && panelInstance.isPointerInside;
+  }
+
   private scheduleClose(): void {
+    window.clearTimeout(this.hoverTimer);
     window.clearTimeout(this.closeTimer);
     this.closeTimer = window.setTimeout(() => {
       if (panelInstance?.isPointerInside) return;

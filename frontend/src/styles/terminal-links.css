@@ -57,6 +57,13 @@
   display: none !important;
 }
 
+/* The panel is laid out flush against the token (ticket #42), so the pop-in may
+   only ever move it *toward* the link — a `translateY` the other way would open
+   a strip belonging to neither for the 90 ms the animation lasts, which is
+   exactly long enough for the pointer to fall through it. Down is toward the
+   link when the panel is above it, which is where it sits unless the row is too
+   near the top of the window; there it flips below and the overlap
+   (`PANEL_OVERLAP_PX`) covers the two pixels this borrows. */
 @keyframes cortx-link-pop-in {
   from {
     opacity: 0;
