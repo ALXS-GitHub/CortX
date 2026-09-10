@@ -22,7 +22,7 @@ import { cn } from '@/lib/utils';
 import type { ShellAlias, Tool, TagDefinition, StatusDefinition, AliasType, CreateShellAliasInput, UpdateShellAliasInput } from '@/types';
 
 // Valid alias name: alphanumeric, hyphens, underscores, dots
-const ALIAS_NAME_REGEX = /^[a-zA-Z_][a-zA-Z0-9_\-\.]*$/;
+const ALIAS_NAME_REGEX = /^[a-zA-Z_][a-zA-Z0-9_.-]*$/;
 
 const SHELLS = ['powershell', 'bash', 'zsh', 'fish'] as const;
 const SHELL_LABELS: Record<string, string> = {

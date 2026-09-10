@@ -53,6 +53,21 @@ export function PresetEditor({ script }: PresetEditorProps) {
   const [presetEnabled, setPresetEnabled] = useState<Record<string, boolean>>({});
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
+  // Every edit goes through these two. An edit restarts the autosave clock, so
+  // it also takes the "Saved" badge down — and it says so **here**, in the
+  // event that caused it, rather than from the autosave effect below: an
+  // effect saying it one render later is a cascading render, and one the lint
+  // rule is right to refuse. Nothing else may write `presets` or
+  // `defaultPresetId`, or the badge will lie again.
+  const editPresets = (next: ParameterPreset[]) => {
+    setPresets(next);
+    setSaveStatus('idle');
+  };
+  const editDefaultPresetId = (next: string) => {
+    setDefaultPresetId(next);
+    setSaveStatus('idle');
+  };
+
   const params = script.parameters;
 
   const hasMountedRef = useRef(false);
@@ -85,7 +100,6 @@ export function PresetEditor({ script }: PresetEditorProps) {
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
-    setSaveStatus('idle');
 
     debounceRef.current = setTimeout(() => {
       doSave(presets, defaultPresetId);
@@ -134,8 +148,8 @@ export function PresetEditor({ script }: PresetEditorProps) {
   };
 
   const handleDeletePreset = (presetId: string) => {
-    setPresets(presets.filter((p) => p.id !== presetId));
-    if (defaultPresetId === presetId) setDefaultPresetId('');
+    editPresets(presets.filter((p) => p.id !== presetId));
+    if (defaultPresetId === presetId) editDefaultPresetId('');
   };
 
   const handleSavePreset = () => {
@@ -145,7 +159,7 @@ export function PresetEditor({ script }: PresetEditorProps) {
     }
 
     if (editingPreset) {
-      setPresets(
+      editPresets(
         presets.map((p) =>
           p.id === editingPreset.id
             ? { ...p, name: presetName.trim(), values: { ...presetValues }, enabled: { ...presetEnabled } }
@@ -159,7 +173,7 @@ export function PresetEditor({ script }: PresetEditorProps) {
         values: { ...presetValues },
         enabled: { ...presetEnabled },
       };
-      setPresets([...presets, newPreset]);
+      editPresets([...presets, newPreset]);
     }
     setShowPresetForm(false);
   };
@@ -255,7 +269,7 @@ export function PresetEditor({ script }: PresetEditorProps) {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setDefaultPresetId(isDefault ? '' : preset.id)}>
+                      <DropdownMenuItem onClick={() => editDefaultPresetId(isDefault ? '' : preset.id)}>
                         {isDefault ? <StarOff /> : <Star />}
                         {isDefault ? 'Unset default' : 'Set as default'}
                       </DropdownMenuItem>

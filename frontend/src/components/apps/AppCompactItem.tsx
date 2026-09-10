@@ -4,7 +4,8 @@ import { TagBadge } from '@/components/ui/TagBadge';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
-import { AppMenu, useLaunchApp } from './AppCard';
+import { AppMenu } from './AppCard';
+import { useLaunchApp } from './useLaunchApp';
 import type { App, TagDefinition } from '@/types';
 
 interface AppCompactItemProps {

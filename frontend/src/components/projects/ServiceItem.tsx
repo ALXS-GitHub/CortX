@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -76,11 +76,24 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
   const [selectedPreset, setSelectedPreset] = useState<string | null | undefined>(service.defaultArgPreset);
   const [popoverOpen, setPopoverOpen] = useState(false);
 
-  // Reset selections when service changes
-  useEffect(() => {
+  // Reset the selections when the service — or the defaults it offers —
+  // changes. Adjusted **during the render** rather than from an effect: an
+  // effect paints the previous service's choice first and corrects it on a
+  // second pass, which is one cascading render per row of the list.
+  const [defaults, setDefaults] = useState({
+    id: service.id,
+    mode: service.defaultMode,
+    preset: service.defaultArgPreset,
+  });
+  if (
+    defaults.id !== service.id ||
+    defaults.mode !== service.defaultMode ||
+    defaults.preset !== service.defaultArgPreset
+  ) {
+    setDefaults({ id: service.id, mode: service.defaultMode, preset: service.defaultArgPreset });
     setSelectedMode(service.defaultMode);
     setSelectedPreset(service.defaultArgPreset);
-  }, [service.id, service.defaultMode, service.defaultArgPreset]);
+  }
 
   const handleStart = async (mode?: string, argPreset?: string) => {
     try {

@@ -26,6 +26,8 @@ function Tabs({
  * `default` = segmented control (accent-tinted active pill on a muted track),
  * `line` = underlined text tabs (for dense toolbars).
  */
+/* Private to this file: a component module that also exports something
+   else stops fast-refreshing, and nothing outside ever used it. */
 const tabsListVariants = cva(
   "group/tabs-list inline-flex w-fit items-center justify-center text-muted-foreground group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col",
   {
@@ -99,4 +101,4 @@ function TabsCount({ children, className }: { children: React.ReactNode; classNa
   )
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent, TabsCount, tabsListVariants }
+export { Tabs, TabsList, TabsTrigger, TabsContent, TabsCount }

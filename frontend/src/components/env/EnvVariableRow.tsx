@@ -18,7 +18,7 @@ export function EnvVariableRow({ variable }: EnvVariableRowProps) {
     try {
       await writeText(variable.key);
       toast.success('Key copied');
-    } catch (error) {
+    } catch {
       toast.error('Failed to copy key');
     }
   };
@@ -27,7 +27,7 @@ export function EnvVariableRow({ variable }: EnvVariableRowProps) {
     try {
       await writeText(variable.value);
       toast.success('Value copied');
-    } catch (error) {
+    } catch {
       toast.error('Failed to copy value');
     }
   };

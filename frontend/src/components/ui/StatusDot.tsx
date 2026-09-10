@@ -20,8 +20,12 @@ const TONE_COLOR: Record<DotTone, string> = {
   warning: 'var(--st-progress)',
 };
 
-/** Map the app's runtime statuses onto a dot tone. */
-export function toneForStatus(status?: string | null): DotTone {
+/**
+ * Map the app's runtime statuses onto a dot tone. Private to this file — the
+ * `status` shortcut below is how a caller reaches it, and a component module
+ * that also exports a function stops fast-refreshing.
+ */
+function toneForStatus(status?: string | null): DotTone {
   switch (status) {
     case 'running':
       return 'running';

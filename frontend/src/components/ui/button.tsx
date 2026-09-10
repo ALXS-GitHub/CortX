@@ -4,6 +4,8 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/* Private to this file: a component module that also exports something
+   else stops fast-refreshing, and nothing outside ever used it. */
 const buttonVariants = cva(
   "inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-sm border border-transparent text-sm font-medium transition-[color,background-color,border-color,box-shadow,filter] outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 group/button",
   {
@@ -64,4 +66,4 @@ function Button({
   )
 }
 
-export { Button, buttonVariants }
+export { Button }

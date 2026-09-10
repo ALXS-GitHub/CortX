@@ -34,11 +34,16 @@ export function EnvironmentTab({ project }: EnvironmentTabProps) {
     }
   };
 
-  // Group env files by directory
+  // Group env files by directory. The list is named here rather than read as
+  // `project.envFiles` inside the callback: `typeof project.envFiles` is a
+  // *type*, but exhaustive-deps reads it as a use of `project` and asks for
+  // the whole project as a dependency — which would regroup the files on any
+  // change to it. One name keeps the type and the dependency the same thing.
+  const envFiles = project.envFiles;
   const groupedFiles = useMemo(() => {
-    const groups: Record<string, typeof project.envFiles> = {};
+    const groups: Record<string, typeof envFiles> = {};
 
-    for (const file of project.envFiles) {
+    for (const file of envFiles) {
       // Get directory from relative path
       const lastSlash = file.relativePath.lastIndexOf('/');
       const lastBackslash = file.relativePath.lastIndexOf('\\');
@@ -64,7 +69,7 @@ export function EnvironmentTab({ project }: EnvironmentTabProps) {
     }
 
     return groups;
-  }, [project.envFiles]);
+  }, [envFiles]);
 
   // Find .env.example files for comparison
   const getExampleFile = (dir: string) => {

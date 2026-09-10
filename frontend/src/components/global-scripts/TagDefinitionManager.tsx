@@ -46,13 +46,20 @@ export function TagDefinitionManager({ open, onOpenChange, editingTag }: TagDefi
   const [formTag, setFormTag] = useState<TagDefinition | null>(null);
   const [deletingTag, setDeletingTag] = useState<TagDefinition | null>(null);
 
-  // If editingTag is provided when opening, go straight to the form
-  useEffect(() => {
+  // If editingTag is provided when opening, go straight to the form. Read
+  // during the render, not from an effect: the effect painted the tag list for
+  // one frame before replacing it with the form, and the correction was a
+  // second render every time. `seen` is what makes it fire on the *change* of
+  // the pair only — the form can still be closed on its own while the manager
+  // stays open (`onOpenChange` below), and it must not spring back.
+  const [seen, setSeen] = useState<{ open: boolean; tag: TagDefinition | null | undefined } | null>(null);
+  if (!seen || seen.open !== open || seen.tag !== editingTag) {
+    setSeen({ open, tag: editingTag });
     if (open && editingTag) {
       setFormTag(editingTag);
       setShowForm(true);
     }
-  }, [open, editingTag]);
+  }
 
   const handleClose = () => {
     setShowForm(false);

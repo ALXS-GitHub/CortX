@@ -1,4 +1,3 @@
-import type { ComponentType } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -9,11 +8,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { SquareTerminal, FileCode, Zap, MoreVertical, Pencil, Trash2, Globe } from 'lucide-react';
+import { MoreVertical, Pencil, Trash2, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
+import { ALIAS_TYPE_GLYPH } from './aliasGlyphs';
 import type { ShellAlias, TagDefinition, AliasType } from '@/types';
 
 interface AliasCardProps {
@@ -25,18 +25,9 @@ interface AliasCardProps {
   onToggleFavorite: () => void;
 }
 
-/** Lucide glyph for an alias type. */
-export function aliasTypeGlyph(type: AliasType | undefined): ComponentType<{ className?: string }> {
-  switch (type) {
-    case 'script': return FileCode;
-    case 'init': return Zap;
-    default: return SquareTerminal;
-  }
-}
-
 /** Muted tile with the alias type glyph. Shared by the list shapes and the detail header. */
 export function AliasTypeIcon({ type, size = 'md', className }: { type: AliasType | undefined; size?: 'sm' | 'md' | 'lg'; className?: string }) {
-  const Glyph = aliasTypeGlyph(type);
+  const Glyph = ALIAS_TYPE_GLYPH[type ?? 'function'];
   const box = size === 'sm' ? 'size-6 rounded-[var(--rad-xs)]' : size === 'lg' ? 'size-10 rounded-[var(--rad-sm)]' : 'size-9 rounded-[var(--rad-sm)]';
   const icon = size === 'sm' ? 'size-3.5' : size === 'lg' ? 'size-5' : 'size-4';
   return (

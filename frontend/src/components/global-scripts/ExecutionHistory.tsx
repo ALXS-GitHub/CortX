@@ -31,28 +31,39 @@ interface ExecutionHistoryProps {
 }
 
 export function ExecutionHistory({ scriptId }: ExecutionHistoryProps) {
-  const [records, setRecords] = useState<ExecutionRecord[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  const loadHistory = async () => {
-    setIsLoading(true);
-    try {
-      const history = await getExecutionHistory(scriptId, 50);
-      setRecords(history);
-    } catch (e) {
-      console.error('Failed to load execution history:', e);
-    }
-    setIsLoading(false);
-  };
+  // The records **and the script they belong to**, in one piece of state: what
+  // we hold is either this script's history or it is not, and "not" is exactly
+  // what "loading" means. Two separate flags meant the effect had to raise one
+  // of them the instant it started — a setState in the body of an effect, and
+  // a cascading render for it — and then lower it again. Nothing to reset
+  // here: a new `scriptId` is a mismatch, which reads as loading on the spot.
+  const [loaded, setLoaded] = useState<{ scriptId: string; records: ExecutionRecord[] } | null>(null);
+  const current = loaded?.scriptId === scriptId ? loaded : null;
+  const records = current?.records ?? [];
+  const isLoading = current === null;
 
   useEffect(() => {
-    loadHistory();
+    let cancelled = false;
+    void (async () => {
+      let history: ExecutionRecord[] = [];
+      try {
+        history = await getExecutionHistory(scriptId, 50);
+      } catch (e) {
+        console.error('Failed to load execution history:', e);
+      }
+      // Even a failure is an answer for this script: an empty list, and not
+      // "Loading…" for ever.
+      if (!cancelled) setLoaded({ scriptId, records: history });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [scriptId]);
 
   const handleClear = async () => {
     try {
       await clearExecutionHistory(scriptId);
-      setRecords([]);
+      setLoaded({ scriptId, records: [] });
       toast.success('History cleared');
     } catch (e) {
       toast.error('Failed to clear history', { description: String(e) });

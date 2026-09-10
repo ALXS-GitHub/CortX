@@ -136,12 +136,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     [closeAndReset],
   );
 
-  // Reset transient state every time the palette opens fresh.
-  useEffect(() => {
-    if (!open) {
-      setActionsPanelOpen(false);
-    }
-  }, [open]);
+  // Reset transient state every time the palette opens fresh. Closing it from
+  // the inside already goes through `closeAndReset`; this is what covers the
+  // parent flipping `open` on its own, so the palette cannot come back with
+  // the actions panel of the last entity still up. Adjusted during the render
+  // rather than from an effect — an effect would paint the stale panel once
+  // and take it down on a second pass.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    if (!open) setActionsPanelOpen(false);
+  }
 
   // Global keydown while palette is open: action shortcuts + Ctrl+K toggle +
   // Esc-out of the actions panel. Capture phase so we beat cmdk's own Enter.

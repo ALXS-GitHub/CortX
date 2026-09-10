@@ -4,7 +4,8 @@ import { FileText, Rocket } from 'lucide-react';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
-import { AppIcon, AppMenu, hoverMenuClass, useLaunchApp } from './AppCard';
+import { AppIcon, AppMenu, hoverMenuClass } from './AppCard';
+import { useLaunchApp } from './useLaunchApp';
 import type { App, TagDefinition } from '@/types';
 
 interface AppCardViewProps {

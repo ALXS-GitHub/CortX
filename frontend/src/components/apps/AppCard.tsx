@@ -14,8 +14,7 @@ import { cn } from '@/lib/utils';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
-import { useAppStore } from '@/stores/appStore';
-import { toast } from 'sonner';
+import { useLaunchApp } from './useLaunchApp';
 import type { App, TagDefinition } from '@/types';
 
 interface AppCardProps {
@@ -41,20 +40,6 @@ export function AppIcon({ color, size = 'md', className }: { color?: string | nu
       <AppWindow className={icon} />
     </span>
   );
-}
-
-/** Launch handler shared by the three app list shapes (never navigates to the row underneath). */
-export function useLaunchApp(app: App) {
-  const { launchApp } = useAppStore();
-  return async (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    try {
-      await launchApp(app.id);
-      toast.success(`Launched ${app.name}`);
-    } catch (err) {
-      toast.error('Failed to launch app', { description: String(err) });
-    }
-  };
 }
 
 /** The "…" menu shared by the three app list shapes. */

@@ -2,7 +2,8 @@ import { TagBadge } from '@/components/ui/TagBadge';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { TruncatedText } from '@/components/ui/TruncatedText';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
-import { AliasMenu, ShimMark, aliasTypeGlyph, hoverMenuClass } from './AliasCard';
+import { AliasMenu, ShimMark, hoverMenuClass } from './AliasCard';
+import { ALIAS_TYPE_GLYPH } from './aliasGlyphs';
 import type { ShellAlias, TagDefinition } from '@/types';
 
 interface AliasCompactItemProps {
@@ -16,7 +17,7 @@ interface AliasCompactItemProps {
 
 /** One-line row; rendered inside a bordered list container by AliasesView. */
 export function AliasCompactItem({ alias, tagDefinitions, onEdit, onDelete, onClick, onToggleFavorite }: AliasCompactItemProps) {
-  const Glyph = aliasTypeGlyph(alias.aliasType || 'function');
+  const Glyph = ALIAS_TYPE_GLYPH[alias.aliasType || 'function'];
 
   return (
     <div
