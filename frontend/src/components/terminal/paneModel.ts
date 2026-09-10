@@ -142,10 +142,14 @@ export function groupCardClass(active: boolean, orientation: 'vertical' | 'horiz
     active && 'tt-group-current',
     orientation === 'vertical'
       ? 'tt-group-v flex flex-col rounded-[var(--rad-md)]'
-      : // A grouped tab is a tab: same cell, same surface as any other. The
-        // tint of a coloured tab still wins over both (`.tt-tint[data-current]`
-        // outranks a single-class utility).
-        cn('tt-group-h', active ? 'bg-terminal' : 'hover:bg-accent/40')
+      : // A grouped tab is a tab: same cell, same surface as any other — its
+        // geometry is written with the strip's other cells, in
+        // `WindowTabStrip.tsx`, so there is nothing left here but the surface.
+        // The tint of a coloured tab still wins over it
+        // (`.tt-tint[data-current]` outranks a single-class utility).
+        active
+        ? 'bg-terminal'
+        : 'hover:bg-accent/40'
   );
 }
 

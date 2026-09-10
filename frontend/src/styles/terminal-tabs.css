@@ -196,36 +196,6 @@
   background-color: var(--tt-hover);
 }
 
-/* ---------------------------------------------------------------------------
-   Tab strip: a grouped tab is a tab.
-
-   Same overruling as above, on utilities set in `WindowTabStrip.tsx`: the
-   grouped branch there insets the cell (`my-1 ml-1 h-7 self-center`) and lets
-   it grow to 540 px, which is how a tab became a floating card twice the size
-   of its neighbours. A grouped cell is a full-height cell fenced like any
-   other, and it stops at 400 px — a tab and a half, not two and a quarter.
-   `div.…` is one element + one class, so it wins over the utilities.
-   --------------------------------------------------------------------------- */
-
-div.tt-group-h {
-  height: 36px;
-  align-self: stretch;
-  margin: 0;
-  max-width: 400px;
-  gap: 8px;
-  padding-inline: 10px;
-  border-right: 1px solid var(--border);
-  border-radius: 0;
-}
-
-/* The "this tab is on screen" rule, edge to edge like every other tab's. */
-div.tt-group-h > span.bg-primary {
-  left: 0;
-  right: 0;
-  top: 0;
-  border-radius: 0 0 999px 999px;
-}
-
 /* Between the tab's name and the box of panes. It used to be a hairline; with
    a box right after it, that is a fence in front of a fence. The element is
    rendered by `WindowTabStrip.tsx`, so it stays — as the gap it now is. */

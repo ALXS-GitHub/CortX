@@ -19,10 +19,11 @@
  *     └───────────────────────────┘
  *
  * The rows are the rail's rows: same 40 px height, same 3.5 icon, same
- * 12.5 px / 10.5 px pair, same rules for what the second line says
- * (`paneSecondary`) — and, since 2026-09-09, the same per-row X and the same
- * right-click menu, pointed at that pane's terminal. A pane behaves like a
- * tab; the box only says the two share one.
+ * 12.5 px / 10.5 px pair, same rules for what the second line says — since
+ * ticket #26 that is not a resemblance but the same code, `TabRowBody` — and,
+ * since 2026-09-09, the same per-row X and the same right-click menu, pointed
+ * at that pane's terminal. A pane behaves like a tab; the box only says the
+ * two share one.
  *
  * The two surfaces do not have the same room:
  *
@@ -49,6 +50,7 @@ import { TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { closeLeaf } from './actions';
 import { describeItem, type ResolvedTabDisplay } from './model';
 import { paneSecondary, type PaneEntry } from './paneModel';
+import { TabRowBody } from './TabRow';
 import { TabContextMenu } from './tabMenu';
 import { useTabContextMenu } from './useTabMenu';
 
@@ -171,26 +173,15 @@ function PaneRow({ tab, pane, current, tabActive, display, onSelect }: PaneItemP
         !tabActive && !current && 'opacity-90'
       )}
     >
-      <PaneIcon pane={pane} display={display} />
-      <span className="pointer-events-none flex min-w-0 flex-1 flex-col leading-tight">
-        <span className={cn('truncate text-[12.5px]', current && 'font-medium')}>{pane.name}</span>
-        {secondary && (
-          <span
-            className={cn(
-              'truncate text-[10.5px]',
-              secondary.tone !== 'waiting' && 'font-mono',
-              secondary.tone === 'waiting'
-                ? 'text-st-progress'
-                : secondary.tone === 'command'
-                  ? 'text-primary'
-                  : 'text-faint'
-            )}
-          >
-            {secondary.text}
-          </span>
-        )}
-      </span>
-      {display.status && <TerminalStatusGlyph live={pane.live} className="pointer-events-none shrink-0" />}
+      <TabRowBody
+        icon={<PaneIcon pane={pane} display={display} />}
+        title={pane.name}
+        secondary={secondary}
+        strong={current}
+        trailing={
+          display.status ? <TerminalStatusGlyph live={pane.live} className="pointer-events-none shrink-0" /> : null
+        }
+      />
       <PaneCloseButton pane={pane} />
       <TabContextMenu
         tab={tab}

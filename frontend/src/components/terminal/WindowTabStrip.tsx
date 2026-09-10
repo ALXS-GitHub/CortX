@@ -64,13 +64,12 @@ interface WindowTabProps {
  * One tab of the strip: sortable, renamable on double-click, closable with
  * the X or a middle click, with a right-click menu anchored at the pointer.
  *
- * A tab holding a split renders as a **group**: the tab itself becomes a
- * small inset card holding its own name, a hairline, then one chip per pane
- * (`PaneGroupChips`) — the rail's nested card laid on its side, since a 36 px
- * row has nowhere to indent. Clicking a chip makes that pane current. The
- * card *is* the tab element, so the group stays a single sortable unit —
- * reorder and detach still act on the tab, which is what the layout document
- * knows.
+ * A tab holding a split renders as a **group**: the same full-height cell,
+ * holding its own name, a gap, then one chip per pane (`PaneGroupChips`) —
+ * the rail's box laid on its side, since a 36 px row has nowhere to indent.
+ * Clicking a chip makes that pane current. The cell *is* the tab element, so
+ * the group stays a single sortable unit — reorder and detach still act on the
+ * tab, which is what the layout document knows.
  *
  * A tab with a colour is tinted **whole** and at rest (ticket #22): the tab
  * hands its colour to `.tt-tint` and the stylesheet does the rest, so the
@@ -116,9 +115,15 @@ function WindowTab({ tab, items, projects, isActive, index, total, showProject, 
         isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
         grouped
           ? cn(
-              // Inset so the card reads as one object floating in the strip,
-              // rather than a stretch of it fenced off by dividers.
-              'my-1 ml-1 h-7 max-w-[540px] gap-1.5 self-center px-1.5',
+              // A grouped tab is a tab: a full-height cell, fenced by the same
+              // border as its neighbours, stopping at 400 px — a tab and a
+              // half, not two and a quarter. It was briefly an inset card
+              // (`my-1 ml-1 h-7 max-w-[540px] self-center`), which is how a
+              // tab became a floating block twice the size of the others;
+              // `terminal-tabs.css` then overruled every one of those values
+              // from a `div.tt-group-h` block, a seam left there while this
+              // file was off-limits. The values live on the element now.
+              'h-9 max-w-[400px] gap-2 self-stretch border-r border-border px-2.5',
               groupCardClass(isActive, 'horizontal'),
               tinted && 'tt-tint'
             )
@@ -154,12 +159,13 @@ function WindowTab({ tab, items, projects, isActive, index, total, showProject, 
       {...listeners}
     >
       {isActive && (
+        // The "this tab is on screen" rule, edge to edge, whether or not the
+        // tab holds a split: a grouped cell is a cell like any other, so it
+        // wears the same 2 px rule at the same place. (It used to be inset for
+        // the rounded card that no longer exists, and `terminal-tabs.css` put
+        // it back on the edges from a `div.tt-group-h > span.bg-primary` rule.)
         <span
-          className={cn(
-            'pointer-events-none absolute bg-primary',
-            // Inside the rounded card the bar has to stay off the corners.
-            grouped ? 'inset-x-2 top-[2px] h-[2px] rounded-full' : 'inset-x-0 top-0 h-0.5 rounded-b-full'
-          )}
+          className="pointer-events-none absolute inset-x-0 top-0 h-0.5 rounded-b-full bg-primary"
           style={accent ? { backgroundColor: accent } : undefined}
         />
       )}

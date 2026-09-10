@@ -22,7 +22,8 @@ import { collectLeaves, type TerminalTab } from '@/lib/terminalLayout';
 import { comboLabelFor, tabShortcutNumber } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { TerminalStatusGlyph } from './TerminalStatusGlyph';
-import { closeTabAndRelease, closeWorkspaceTabs, openNewTerminal } from './actions';
+import { closeTabAndRelease, closeWorkspaceTabs, openNewTerminal, tabsElsewhere, tabsOfWorkspace } from './actions';
+import { describeCloseReach } from '@/lib/closeReach';
 import { CloseConfirmDialog } from './CloseConfirmDialog';
 import {
   describeItem,
@@ -40,6 +41,7 @@ import {
   type WorkspaceGroup,
 } from './model';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
+import { TabRowBody } from './TabRow';
 import { PaneGroupBranch } from './PaneTabs';
 import { groupCardClass, groupHeadline, paneCountLabel, usePaneEntries, useSelectPane } from './paneModel';
 import { useTabContextMenu, useTabRename } from './useTabMenu';
@@ -154,6 +156,14 @@ function SessionRow({
   // wears it: the card when the tab holds a split, the row otherwise.
   const tint = tintStyle(color);
 
+  // The glyph in front of the name. Held in a variable because the rename
+  // input replaces the text block beside it, never the icon itself.
+  const icon = agent ? (
+    <AgentProviderIcon provider={agent.provider} plain className="pointer-events-none size-3.5 shrink-0" />
+  ) : (
+    <TerminalTypeIcon type={item?.type ?? 'shell'} className="pointer-events-none size-3.5 shrink-0 text-faint" />
+  );
+
   // The tab's own row. Standalone it *is* the tab; inside a group it is the
   // group's label — the first row of the box, so the title sits in the thing
   // it names (Alexis, 2026-09-09), and still the drag handle of the whole tab.
@@ -207,60 +217,21 @@ function SessionRow({
           aria-hidden
         />
       )}
-      {agent ? (
-        <AgentProviderIcon provider={agent.provider} plain className="pointer-events-none size-3.5 shrink-0" />
-      ) : (
-        <TerminalTypeIcon
-          type={item?.type ?? 'shell'}
-          className="pointer-events-none size-3.5 shrink-0 text-faint"
-        />
-      )}
       {rename.editing ? (
-        <TabRenameInput
-          value={rename.draft}
-          onChange={rename.setDraft}
-          onCommit={rename.commit}
-          onCancel={rename.cancel}
-          className="min-w-0 flex-1"
-        />
+        <>
+          {icon}
+          <TabRenameInput
+            value={rename.draft}
+            onChange={rename.setDraft}
+            onCommit={rename.commit}
+            onCancel={rename.cancel}
+            className="min-w-0 flex-1"
+          />
+        </>
       ) : (
-        <span
-          className={cn(
-            'pointer-events-none flex min-w-0 flex-1 flex-col leading-tight',
-            // A label: the name and the pane count on one line. Two
-            // stacked lines above two-line rows is the block we got rid of.
-            grouped && 'flex-row items-baseline gap-1.5'
-          )}
-        >
-          <span
-            className={cn(
-              'truncate text-[12.5px]',
-              // The name gives way first: what follows it is a count, or
-              // the command running — both short, both useless once cut.
-              grouped && 'min-w-0 text-[11px] font-medium [flex:0_4_auto]'
-            )}
-          >
-            {headline}
-          </span>
-          {secondary && (
-            <span
-              className={cn(
-                'truncate text-[10.5px]',
-                grouped && 'text-[10px] [flex:0_1_auto]',
-                // A path and a command are typed text; "Waiting" and
-                // "3 panes" are prose, and reading them in mono is worse.
-                (secondary.tone === 'command' || secondary.tone === 'path') && 'font-mono',
-                secondary.tone === 'waiting'
-                  ? 'text-st-progress'
-                  : secondary.tone === 'command'
-                    ? 'text-primary'
-                    : 'text-faint'
-              )}
-            >
-              {secondary.text}
-            </span>
-          )}
-        </span>
+        // Grouped, this row is the group's label: one line, the name and the
+        // pane count sharing it (`dense`).
+        <TabRowBody icon={icon} title={headline} secondary={secondary} dense={grouped} />
       )}
       {tab.pinned && <Pin className="pointer-events-none size-2.5 shrink-0 text-faint" aria-label="Pinned" />}
       {/* Only the rows a Ctrl+N actually reaches get a number (ticket
@@ -435,6 +406,15 @@ function SessionGroupRows({
  */
 function SessionGroupHeader({ group }: { group: WorkspaceGroup }) {
   const [open, setOpen] = useState(false);
+  // What "Close all" is really about to take. Since ticket #37 it reaches
+  // every Terminal window, so the rail's own list is no longer the answer: a
+  // badge saying 3 over a click that closes 7 is worse than the bug it came
+  // from. Counted at the moment the menu opens, off the very list the action
+  // closes, and the line under the entry names the windows the rest are in —
+  // the same two sentences the tab menu shows (`ReachNote`, `tabMenu.tsx`,
+  // which is not ours to export from).
+  const closing = open ? tabsOfWorkspace(group.workspaceId) : [];
+  const reach = open ? describeCloseReach(tabsElsewhere(closing)) : null;
   return (
     <div
       className="eyebrow group/gh flex items-center gap-1.5 px-2 pb-1 pt-1.5"
@@ -462,8 +442,11 @@ function SessionGroupHeader({ group }: { group: WorkspaceGroup }) {
           <DropdownMenuItem variant="destructive" onClick={() => void closeWorkspaceTabs(group.workspaceId, group.name)}>
             <XCircle />
             Close all
-            <span className="ml-auto text-xs tabular-nums opacity-70">{group.tabs.length}</span>
+            <span className="ml-auto text-xs tabular-nums opacity-70">{closing.length}</span>
           </DropdownMenuItem>
+          {reach && (
+            <p className="truncate px-2 pb-1 pl-8 text-[10.5px] leading-snug text-faint">including {reach}</p>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
