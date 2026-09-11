@@ -21,6 +21,7 @@ pub mod history;
 pub mod launch;
 pub mod layout;
 pub mod osc;
+pub mod redact;
 pub mod snapshot;
 pub mod spec;
 pub mod themes;
@@ -32,6 +33,7 @@ pub use history::{
 pub use launch::{LaunchConfig, LaunchNode, LaunchStore, LaunchTab, LaunchTarget};
 pub use layout::{LayoutDoc, LayoutStore};
 pub use osc::{OscScanner, ShellEvent, ShellPhase, TerminalShellState, TerminalStateTracker};
+pub use redact::REDACTED;
 pub use spec::{CommandSpec, SpecItem, SpecStore};
 pub use themes::{TerminalTheme, ThemeStore, ThemeSummary};
 

@@ -5,13 +5,17 @@
 //! cross-session history the palette will search (DEV-13 P4). Lives under
 //! `runtime/`, i.e. outside the git backup, like the `<id>.log` files.
 
+use super::redact;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Compact past this size so the file can't grow forever: it is rewritten
 /// with only its most recent half (see [`CommandHistory::compact`]).
@@ -26,6 +30,20 @@ pub const MIN_MAX_HISTORY_BYTES: u64 = 4 * 1024;
 
 /// How much is read at a time when walking a history file backwards.
 const TAIL_CHUNK: usize = 64 * 1024;
+
+/// Default for `terminal.redactSecrets` — deliberately **on**.
+///
+/// The two failure modes are not symmetric. Masking a value nobody cared about
+/// costs one less useful line in the history view. *Not* masking one puts a
+/// live credential in a plain-text file, in the Ctrl+R view and in the
+/// suggestion ranking, and leaves it there for the life of the file.
+pub const DEFAULT_REDACT_SECRETS: bool = true;
+
+/// How long `terminal.redactSecrets` is trusted before `settings.json` is read
+/// again. Long enough that a busy terminal is not re-reading the file on every
+/// prompt, short enough that flipping the switch takes effect while the user is
+/// still looking at the Settings page.
+const REDACT_SETTING_TTL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -61,6 +79,19 @@ pub struct CommandHistory {
     /// setting. One cell behind an `Arc` means [`set_max_bytes`] reaches the
     /// clone that is actually appending.
     max_bytes: Arc<AtomicU64>,
+    /// `terminal.redactSecrets` — see [`redact_secrets`](Self::redact_secrets).
+    /// Shared for the same reason as `max_bytes`: the clone that appends has to
+    /// see the same answer as the one that was configured.
+    redact: Arc<Mutex<RedactSetting>>,
+}
+
+/// The cached answer to "is `terminal.redactSecrets` on?".
+#[derive(Debug, Default)]
+struct RedactSetting {
+    /// Set by [`CommandHistory::set_redact_secrets`]; wins over the file.
+    forced: Option<bool>,
+    /// The last value read from `settings.json`, and when it was read.
+    cached: Option<(Instant, bool)>,
 }
 
 impl CommandHistory {
@@ -68,6 +99,7 @@ impl CommandHistory {
         Self {
             path: runtime_dir.join("command-history.jsonl"),
             max_bytes: Arc::new(AtomicU64::new(DEFAULT_MAX_HISTORY_BYTES)),
+            redact: Arc::new(Mutex::new(RedactSetting::default())),
         }
     }
 
@@ -95,6 +127,71 @@ impl CommandHistory {
         &self.path
     }
 
+    // -----------------------------------------------------------------------
+    // `terminal.redactSecrets`
+    // -----------------------------------------------------------------------
+
+    /// Where `settings.json` lives, derived from the runtime directory this was
+    /// built with: `Storage` keeps `runtime/` inside the application data
+    /// directory and `settings.json` right beside it.
+    ///
+    /// Read straight off disk rather than through `Storage`, the way
+    /// `shell_init::resolve_block_spacing` does: appends happen on the PTY
+    /// reader thread, which holds no handle on the store.
+    fn settings_path(&self) -> Option<PathBuf> {
+        Some(self.path.parent()?.parent()?.join("settings.json"))
+    }
+
+    /// Pin the setting, ignoring `settings.json` — for tests, and for any
+    /// caller that already holds the parsed settings.
+    pub fn set_redact_secrets(&self, on: bool) {
+        self.redact.lock().forced = Some(on);
+    }
+
+    /// [`set_redact_secrets`](Self::set_redact_secrets) as a builder.
+    pub fn with_redact_secrets(self, on: bool) -> Self {
+        self.set_redact_secrets(on);
+        self
+    }
+
+    /// Is `terminal.redactSecrets` on? Cached for [`REDACT_SETTING_TTL`].
+    pub fn redact_secrets(&self) -> bool {
+        let mut state = self.redact.lock();
+        if let Some(forced) = state.forced {
+            return forced;
+        }
+        if let Some((at, value)) = state.cached {
+            if at.elapsed() < REDACT_SETTING_TTL {
+                return value;
+            }
+        }
+        let value = read_redact_setting(self.settings_path().as_deref());
+        state.cached = Some((Instant::now(), value));
+        value
+    }
+
+    /// The record as it should be written: same thing, with any secret in the
+    /// command line replaced (see [`redact`]).
+    ///
+    /// Borrowed whenever there was nothing to hide, which is almost always, so
+    /// the ordinary command costs no clone.
+    fn redacted<'a>(&self, record: &'a CommandRecord) -> Cow<'a, CommandRecord> {
+        let Some(command) = record.command.as_deref() else {
+            return Cow::Borrowed(record);
+        };
+        if !self.redact_secrets() {
+            return Cow::Borrowed(record);
+        }
+        match redact::redact(command) {
+            Cow::Borrowed(_) => Cow::Borrowed(record),
+            Cow::Owned(clean) => {
+                let mut copy = record.clone();
+                copy.command = Some(clean);
+                Cow::Owned(copy)
+            }
+        }
+    }
+
     /// The `.jsonl.1` archive older builds rotated to. Never written any
     /// more, but still read: it holds real commands, and until the next
     /// compaction folds it away it is the only copy of them.
@@ -104,11 +201,20 @@ impl CommandHistory {
 
     /// Append one record. Errors are swallowed on purpose: history must
     /// never break a terminal.
+    ///
+    /// This is the *only* place a command line is written down, which is why
+    /// the secret filter sits here: the history view, the Ctrl+R search and the
+    /// suggestion ranking all read this one file back, so masking on the way in
+    /// covers all three at once — and nothing has to be un-leaked afterwards.
     pub fn append(&self, record: &CommandRecord) {
         let _ = self.try_append(record);
     }
 
     fn try_append(&self, record: &CommandRecord) -> std::io::Result<()> {
+        // First, before any I/O: a secret that reaches the file once is in the
+        // history for good.
+        let redacted = self.redacted(record);
+        let record: &CommandRecord = &redacted;
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -262,6 +368,36 @@ impl CommandHistory {
         }
     }
 
+    /// Run the secret filter over the history **that is already on disk**.
+    ///
+    /// Nothing calls this. It is deliberately a lever rather than a reflex:
+    /// the file predates the filter and may hold credentials the user has
+    /// since rotated, or notes they would rather keep — rewriting it behind
+    /// their back at the next start would be a decision taken for them, and it
+    /// cannot be undone. Wire it to a button or a command and it cleans the
+    /// file in one pass; leave it alone and the old lines stay exactly as they
+    /// are, with every *new* line masked on the way in.
+    ///
+    /// Applies whatever `terminal.redactSecrets` says, because running this is
+    /// already an explicit answer to that question.
+    ///
+    /// Each line is rewritten only if its command actually changed; everything
+    /// else is copied byte for byte, so no field drifts and no line a future
+    /// build understands better than this one is flattened. The rewrite goes
+    /// through a temporary and a rename, like [`compact`](Self::compact), so an
+    /// interruption leaves the whole old file or the whole new one. There is no
+    /// backup on purpose: a `.bak` with the secrets still in it would defeat
+    /// the point.
+    pub fn redact_existing(&self) -> std::io::Result<RedactionReport> {
+        let mut report = RedactionReport::default();
+        for path in [self.path.clone(), self.archive_path()] {
+            if path.exists() {
+                report.add(redact_file(&path)?);
+            }
+        }
+        Ok(report)
+    }
+
     /// Rank the most recent `scan` records for `ctx` and keep the best
     /// `limit`. See [`rank_commands`].
     pub fn suggestions(
@@ -272,6 +408,103 @@ impl CommandHistory {
     ) -> Vec<CommandSuggestion> {
         rank_commands(&self.recent(scan), ctx, limit)
     }
+}
+
+/// What one pass of [`CommandHistory::redact_existing`] did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedactionReport {
+    /// Lines read.
+    pub scanned: usize,
+    /// Lines whose command held a secret and was masked.
+    pub redacted: usize,
+    /// Lines that are not readable records and were kept byte for byte. They
+    /// are copied rather than rewritten because their shape is unknown — a
+    /// count here is worth looking at rather than ignoring.
+    pub skipped: usize,
+}
+
+impl RedactionReport {
+    fn add(&mut self, other: RedactionReport) {
+        self.scanned += other.scanned;
+        self.redacted += other.redacted;
+        self.skipped += other.skipped;
+    }
+}
+
+/// One history file, rewritten with the secret filter applied.
+fn redact_file(path: &Path) -> std::io::Result<RedactionReport> {
+    let mut report = RedactionReport::default();
+    let tmp = path.with_extension("jsonl.redact.tmp");
+    {
+        let source = File::open(path)?;
+        // `create` truncates, so a temporary left by an interrupted pass is
+        // simply overwritten.
+        let mut out = File::create(&tmp)?;
+        for line in BufReader::new(source).lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            report.scanned += 1;
+            match serde_json::from_str::<CommandRecord>(&line) {
+                Ok(mut record) => {
+                    // Owned before the record is touched, so nothing is still
+                    // borrowing it when the command is put back.
+                    let cleaned = match record.command.as_deref() {
+                        Some(command) => match redact::redact(command) {
+                            Cow::Owned(clean) => Some(clean),
+                            Cow::Borrowed(_) => None,
+                        },
+                        None => None,
+                    };
+                    match cleaned {
+                        Some(clean) => {
+                            report.redacted += 1;
+                            record.command = Some(clean);
+                            let json =
+                                serde_json::to_string(&record).map_err(std::io::Error::other)?;
+                            writeln!(out, "{}", json)?;
+                        }
+                        // Nothing to hide: keep the original bytes, so no
+                        // field this build does not know about is lost.
+                        None => writeln!(out, "{}", line)?,
+                    }
+                }
+                Err(_) => {
+                    report.skipped += 1;
+                    writeln!(out, "{}", line)?;
+                }
+            }
+        }
+        out.sync_all()?;
+        // Close the source before renaming over it: Windows is the platform
+        // that minds.
+    }
+    match fs::rename(&tmp, path) {
+        Ok(()) => Ok(report),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
+/// `terminal.redactSecrets` out of `settings.json`, defaulting to
+/// [`DEFAULT_REDACT_SECRETS`].
+///
+/// Every way this can go wrong — no settings file yet, a file written by a
+/// build that has never heard of the key, a parse error, a permission problem
+/// — resolves to "redact". The only direction the failure can take is masking
+/// a little more than the user asked for; it can never be the one that writes a
+/// credential out.
+fn read_redact_setting(path: Option<&Path>) -> bool {
+    fn read(path: &Path) -> Option<bool> {
+        let bytes = fs::read(path).ok()?;
+        let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        json.get("terminal")?.get("redactSecrets")?.as_bool()
+    }
+    path.and_then(read).unwrap_or(DEFAULT_REDACT_SECRETS)
 }
 
 // ---------------------------------------------------------------------------
@@ -1258,6 +1491,163 @@ mod tests {
             "an unterminated last line, blank lines and junk are all handled"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // Redaction on the way in
+    //
+    // Every "secret" below is invented — only the shape is real.
+    // -----------------------------------------------------------------------
+
+    /// An application directory with `runtime/` inside it, the layout
+    /// `Storage` builds, so `settings.json` really does land where
+    /// `settings_path` looks for it.
+    fn app_dir(tag: &str) -> (PathBuf, CommandHistory) {
+        let root = std::env::temp_dir().join(format!("cortx-hist-{tag}-{}", uuid::Uuid::new_v4()));
+        let hist = CommandHistory::new(&root.join("runtime"));
+        fs::create_dir_all(root.join("runtime")).unwrap();
+        (root, hist)
+    }
+
+    #[test]
+    fn a_secret_never_reaches_the_file() {
+        let (root, hist) = app_dir("redact");
+        let hist = hist.with_redact_secrets(true);
+        let mut r = rec(1, "export GITHUB_TOKEN=abcdef123456", "/work", Some(0));
+        hist.append(&r);
+        r.ts = 2;
+        r.command =
+            Some(r#"curl -H "Authorization: Bearer abcdef123456" https://api.example.com"#.into());
+        hist.append(&r);
+        r.ts = 3;
+        r.command = Some("cargo test -p cortx-core".into());
+        hist.append(&r);
+
+        // The file itself — this is the thing the ticket is about.
+        let raw = fs::read_to_string(hist.path()).unwrap();
+        assert!(!raw.contains("abcdef123456"), "no secret on disk:\n{raw}");
+        assert!(raw.contains("export GITHUB_TOKEN="), "the shape of the command is kept");
+        assert!(raw.contains("Authorization: "), "so is how it authenticated");
+        assert!(raw.contains("cargo test -p cortx-core"), "ordinary commands are untouched");
+
+        // And therefore the history view, the Ctrl+R search and the ranking,
+        // because all three read this same file back.
+        let page = hist.query(&HistoryQuery::default());
+        assert_eq!(page.total, 3);
+        assert!(page
+            .records
+            .iter()
+            .all(|r| !r.command.as_deref().unwrap_or_default().contains("abcdef")));
+        let suggestions = hist.suggestions(&SuggestContext::default(), 100, 10);
+        assert!(suggestions.iter().all(|s| !s.command.contains("abcdef")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_setting_is_read_from_settings_json_and_fails_safe() {
+        let (root, hist) = app_dir("redact-setting");
+        let settings = root.join("settings.json");
+
+        // No settings file at all: redaction is on.
+        assert!(hist.redact_secrets(), "the default is to redact");
+
+        fs::write(&settings, r#"{"terminal":{"redactSecrets":false}}"#).unwrap();
+        assert!(!CommandHistory::new(&root.join("runtime")).redact_secrets());
+
+        fs::write(&settings, r#"{"terminal":{"redactSecrets":true}}"#).unwrap();
+        assert!(CommandHistory::new(&root.join("runtime")).redact_secrets());
+
+        // A settings file from a build that never heard of the key, and a
+        // corrupt one: both mean "redact", never "write the secret out".
+        fs::write(&settings, r#"{"terminal":{"blockSpacing":"normal"}}"#).unwrap();
+        assert!(CommandHistory::new(&root.join("runtime")).redact_secrets());
+        fs::write(&settings, "{ not json").unwrap();
+        assert!(CommandHistory::new(&root.join("runtime")).redact_secrets());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn turning_the_setting_off_writes_the_line_verbatim() {
+        let (root, hist) = app_dir("redact-off");
+        let hist = hist.with_redact_secrets(false);
+        hist.append(&rec(1, "export API_KEY=kept-on-purpose", "/w", Some(0)));
+        let raw = fs::read_to_string(hist.path()).unwrap();
+        assert!(raw.contains("export API_KEY=kept-on-purpose"), "{raw}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_existing_file_can_be_cleaned_on_demand_and_only_on_demand() {
+        let (root, hist) = app_dir("redact-existing");
+        // A history written before the filter existed: the setting is off, so
+        // these go in exactly as typed.
+        let hist = hist.with_redact_secrets(false);
+        hist.append(&rec(1, "export GITHUB_TOKEN=abcdef123456", "/w", Some(0)));
+        hist.append(&rec(2, "cargo build --release", "/w", Some(0)));
+        hist.append(&rec(3, "mysql -uroot -phunter2 cortx", "/w", Some(0)));
+        fs::write(
+            hist.path(),
+            format!("{}{{not json}}\n", fs::read_to_string(hist.path()).unwrap()),
+        )
+        .unwrap();
+        let before = fs::read_to_string(hist.path()).unwrap();
+        assert!(before.contains("abcdef123456"), "the old file really is in the clear");
+
+        // Nothing happens until it is asked for: appending again leaves the
+        // old lines exactly where they were.
+        hist.append(&rec(4, "ls", "/w", Some(0)));
+        assert!(fs::read_to_string(hist.path()).unwrap().contains("abcdef123456"));
+
+        let report = hist.redact_existing().unwrap();
+        assert_eq!(report.scanned, 5);
+        assert_eq!(report.redacted, 2);
+        assert_eq!(report.skipped, 1, "the unreadable line is counted, not silently dropped");
+
+        let after = fs::read_to_string(hist.path()).unwrap();
+        assert!(!after.contains("abcdef123456"), "the secret is gone:\n{after}");
+        assert!(!after.contains("hunter2"));
+        assert!(after.contains("cargo build --release"), "ordinary lines survive");
+        assert!(after.contains("{not json}"), "and so does what could not be parsed");
+        assert!(!hist.path().with_extension("jsonl.redact.tmp").exists());
+
+        // Still a readable history afterwards, minus the secrets.
+        let page = hist.query(&HistoryQuery::default());
+        assert_eq!(page.total, 4);
+        assert_eq!(page.records[0].command.as_deref(), Some("ls"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_ranking_and_the_search_cope_with_a_masked_line() {
+        let now = 100 * HOUR;
+        let masked = format!("export GITHUB_TOKEN={}", redact::REDACTED);
+        let records = vec![
+            rec(now - HOUR, &masked, "/work", Some(0)),
+            rec(now - HOUR, &masked, "/work", Some(0)),
+            rec(now - 2 * HOUR, "cargo build", "/work", Some(0)),
+        ];
+        let ranked = rank_commands(
+            &records,
+            &SuggestContext { cwd: Some("/work".into()), project_id: None, now_ms: now },
+            10,
+        );
+        // The marker is ordinary text to the ranking: two identical masked
+        // lines collapse into one suggestion with a count of two, exactly as
+        // two identical ordinary lines would.
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(ranked[0].command, masked);
+        assert_eq!(ranked[0].count, 2);
+        assert!(!ranked[0].failed);
+
+        // And the history search still finds it by the half that is left.
+        let (root, hist) = app_dir("redact-search");
+        hist.append(&rec(1, &masked, "/work", Some(0)));
+        let found = hist.query(&HistoryQuery {
+            search: Some("github_token".into()),
+            ..Default::default()
+        });
+        assert_eq!(found.total, 1, "searching the surviving half still works");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
