@@ -295,6 +295,25 @@ fn probe_login_shell_path() -> Option<String> {
 /// only when `base` does not already have them, so nothing is ever reordered
 /// or dropped.
 pub fn run_path(working_dir: &str, base: &str) -> String {
+    run_path_from(working_dir, base, login_shell_path())
+}
+
+/// The pure half of [`run_path`]: the third source spelled out instead of
+/// asked for.
+///
+/// [`run_path`] reads three things — the project's `node_modules/.bin`, the
+/// `base` it is handed, and the machine's own login shell PATH. The first two
+/// are arguments; the third used to be a call to [`login_shell_path`] made
+/// from inside, which made the function's result depend on the machine
+/// running it and left the tests with no way to say what the answer should be
+/// (`probe_login_shell_path` answers `None` on Windows and twenty-odd
+/// directories on a developer's macOS or Linux box, so the same assertion was
+/// true on one platform and false on the others).
+///
+/// Splitting it here changes nothing in production — [`run_path`] still
+/// passes [`login_shell_path`] — and lets a test state both cases: an outside
+/// source that brings entries, and one that brings none.
+pub fn run_path_from(working_dir: &str, base: &str, extra: Option<&str>) -> String {
     let mut entries: Vec<String> = Vec::new();
     let push = |entry: String, entries: &mut Vec<String>| {
         if entry.trim().is_empty() || entries.iter().any(|e| same_path_entry(e, &entry)) {
@@ -308,7 +327,7 @@ pub fn run_path(working_dir: &str, base: &str) -> String {
     for entry in base.split(PATH_SEP) {
         push(entry.to_string(), &mut entries);
     }
-    if let Some(extra) = login_shell_path() {
+    if let Some(extra) = extra {
         for entry in extra.split(PATH_SEP) {
             push(entry.to_string(), &mut entries);
         }
@@ -601,13 +620,22 @@ mod tests {
         std::fs::create_dir_all(&bin).unwrap();
         let base = sep(&["/usr/bin", "/bin"]);
 
-        let path = run_path(&root.path().to_string_lossy(), &base);
+        let path = run_path_from(&root.path().to_string_lossy(), &base, None);
         let parts: Vec<&str> = path.split(PATH_SEP).collect();
         assert_eq!(std::path::Path::new(parts[0]), bin.as_path());
         assert_eq!(parts[1], "/usr/bin");
         assert_eq!(parts[2], "/bin");
     }
 
+    /// The three sources are spelled out rather than read off the machine, so
+    /// the assertion is the same sentence on Windows, macOS and Linux.
+    ///
+    /// The version before this one called [`run_path`], which asks
+    /// [`login_shell_path`] for a third source. That answer is `None` on
+    /// Windows and the developer's real `$PATH` — twenty-odd directories —
+    /// everywhere else, so "the result has two entries" was a statement about
+    /// the machine, not about the function: it held on Windows and failed on
+    /// every other development box (issue #46).
     #[test]
     fn run_path_never_duplicates_or_drops_an_entry() {
         let root = tempfile::tempdir().unwrap();
@@ -616,12 +644,65 @@ mod tests {
         let bin_str = bin.to_string_lossy().into_owned();
         // The directory is already on PATH, plus an empty entry to skip.
         let base = sep(&[&bin_str, "/usr/bin", "", "/usr/bin"]);
+        let dir = root.path().to_string_lossy().into_owned();
 
-        let path = run_path(&root.path().to_string_lossy(), &base);
+        // (a) The outside source brings nothing at all.
+        let path = run_path_from(&dir, &base, None);
         let parts: Vec<&str> = path.split(PATH_SEP).collect();
         assert_eq!(parts.len(), 2, "{path}");
         assert_eq!(std::path::Path::new(parts[0]), bin.as_path());
         assert_eq!(parts[1], "/usr/bin");
+
+        // (b) It brings only what is already there — including the local bin,
+        // written the other way round on Windows to exercise the normalising
+        // comparison. Nothing may move or repeat.
+        let echo = sep(&["/usr/bin", &bin_str, "", "/usr/bin/"]);
+        let path = run_path_from(&dir, &base, Some(&echo));
+        let parts: Vec<&str> = path.split(PATH_SEP).collect();
+        assert_eq!(parts.len(), 2, "{path}");
+        assert_eq!(std::path::Path::new(parts[0]), bin.as_path());
+        assert_eq!(parts[1], "/usr/bin");
+
+        // (c) It brings entries of its own: they land last, in their order,
+        // and what `base` already had keeps its place.
+        let extra = sep(&["/usr/bin", "/opt/homebrew/bin", "/usr/local/bin", "/opt/homebrew/bin"]);
+        let path = run_path_from(&dir, &base, Some(&extra));
+        let parts: Vec<&str> = path.split(PATH_SEP).collect();
+        assert_eq!(parts.len(), 4, "{path}");
+        assert_eq!(std::path::Path::new(parts[0]), bin.as_path());
+        assert_eq!(parts[1], "/usr/bin");
+        assert_eq!(parts[2], "/opt/homebrew/bin");
+        assert_eq!(parts[3], "/usr/local/bin");
+    }
+
+    /// What [`run_path`] adds over [`run_path_from`] is one argument: the
+    /// machine's own login shell PATH. That is the whole of the production
+    /// behaviour, and it is checkable without knowing what the machine will
+    /// say — which is the point of the split.
+    #[test]
+    fn run_path_is_run_path_from_with_the_login_shell_as_the_third_source() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let dir = root.path().to_string_lossy().into_owned();
+        let base = sep(&["/usr/bin", "/bin"]);
+
+        let path = run_path(&dir, &base);
+        assert_eq!(path, run_path_from(&dir, &base, login_shell_path()));
+
+        // And the invariants hold whatever that source turned out to be: the
+        // local bin first, `base` right behind it in order, no entry twice
+        // and no empty entry.
+        let parts: Vec<&str> = path.split(PATH_SEP).collect();
+        assert_eq!(std::path::Path::new(parts[0]), bin.as_path());
+        assert_eq!(parts[1], "/usr/bin");
+        assert_eq!(parts[2], "/bin");
+        for (i, a) in parts.iter().enumerate() {
+            assert!(!a.trim().is_empty(), "empty entry at {i} in {path}");
+            for b in parts.iter().skip(i + 1) {
+                assert!(!same_path_entry(a, b), "{a} appears twice in {path}");
+            }
+        }
     }
 
     #[test]
