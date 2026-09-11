@@ -591,3 +591,23 @@
     opacity: 0;
   }
 }
+
+/* Reduced motion (lot 3, issue 53). A flash is a full-panel luminance sweep
+   that nobody asked for and that arrives whenever a program feels like it —
+   the exact thing this preference exists to stop. The bell still has to say
+   *which* pane rang, so the wash stays; it simply holds still for the same
+   260 ms the animation used to last (`bellTimer` in `terminalSessions.ts`
+   removes the class) and is toned down, since a steady tint reads much
+   stronger than one that fades in and out. */
+@media (prefers-reduced-motion: reduce) {
+  .cortx-xterm.cortx-bell::after {
+    animation: none;
+    opacity: 1;
+    background: color-mix(in srgb, var(--terminal-fg, var(--foreground)) 10%, transparent);
+  }
+  /* The other thing in this sheet that moves: the block toolbar slides down
+     3 px as it appears. It can simply be there. */
+  .cortx-blocks-actions {
+    animation: none;
+  }
+}

@@ -94,10 +94,49 @@ export function copyOnSelectEnabled(): boolean {
   return useAppStore.getState().settings?.terminal.copyOnSelect ?? true;
 }
 
-/** Wheel scrolling animation in ms, clamped to 0–500 (0 = instant). */
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+/**
+ * The OS "reduce motion" setting, **live**. The `MediaQueryList` is kept
+ * around and its `matches` read at each call, so the answer is always the
+ * current one — someone who turns the setting on in the middle of a session
+ * gets it straight away, exactly like the `@media (prefers-reduced-motion)`
+ * blocks in `index.css`, `terminal-history.css`, `terminal-tabs.css` and
+ * `terminal-input.css`.
+ *
+ * CSS re-evaluates itself; a number read once into `term.options` does not.
+ * The live terminals take their duration from the settings subscription in
+ * `terminalSessions.ts`, which only wakes on a store change — so a change of
+ * the media query nudges the store (nothing is written, the listeners just
+ * re-read) and the open panes follow within the same tick.
+ */
+let reducedMotionQuery: MediaQueryList | null = null;
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  if (!reducedMotionQuery) {
+    reducedMotionQuery = window.matchMedia(REDUCED_MOTION_QUERY);
+    reducedMotionQuery.addEventListener('change', () => useAppStore.setState({}));
+  }
+  return reducedMotionQuery.matches;
+}
+
+/**
+ * Wheel scrolling animation in ms, clamped to 0–500 (0 = instant).
+ *
+ * Reduced motion wins over the *default*, never over a choice (lot 3, issue
+ * 53): 100 ms of glide on every notch of the wheel is motion the user did not
+ * ask for, and "reduce motion" is precisely the request not to have it. A
+ * value the user actually picked is the more specific preference of the two
+ * and is honoured as written — and since the setting is stored as a plain
+ * `u16` with no "unset" state, "picked" can only mean "differs from the
+ * default we ship". See the report for the field that would make it exact.
+ */
 export function smoothScrollDuration(): number {
   const raw = useAppStore.getState().settings?.terminal.smoothScrollDuration;
-  if (raw === undefined || !Number.isFinite(raw)) return DEFAULT_SMOOTH_SCROLL_DURATION;
+  if (raw === undefined || !Number.isFinite(raw) || raw === DEFAULT_SMOOTH_SCROLL_DURATION) {
+    return prefersReducedMotion() ? 0 : DEFAULT_SMOOTH_SCROLL_DURATION;
+  }
   return Math.min(MAX_SMOOTH_SCROLL_DURATION, Math.max(0, Math.round(raw)));
 }
 
