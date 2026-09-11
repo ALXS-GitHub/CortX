@@ -186,7 +186,13 @@ export interface TerminalConfig {
   chromeOpacity?: number;
   /** Title bar + rail backdrop blur in px. Default 20. */
   chromeBlur?: number;
-  /** Colour the main window's dock terminals with the terminal theme too. Default false. */
+  /** How much of the terminal theme the main window's dock takes (ticket #38).
+   *  Default `app`. Supersedes `dockUsesTerminalTheme`, which is kept only so
+   *  an older settings file (and an older build) still reads right — see
+   *  `lib/terminalTheme.ts › dockThemeMode`. */
+  dockTheme?: TerminalDockTheme;
+  /** @deprecated Use `dockTheme`. `true` is read as `chrome`, `false` as `app`.
+   *  Still written alongside `dockTheme` so downgrading keeps the dock right. */
   dockUsesTerminalTheme?: boolean;
   /** A mouse selection is copied to the clipboard as soon as it ends (Warp / X11 style).
    *  While on, Ctrl+C keeps interrupting the program instead of copying. Default true. */
@@ -333,6 +339,20 @@ export type MacOptionAsMeta = 'never' | 'wordKeys' | 'always';
 
 /** Where the input line sits in a terminal pane (ticket #15, U0). */
 export type TerminalInputPosition = 'flow' | 'bottom';
+
+/**
+ * How much of the terminal theme the main window's dock takes (ticket #38).
+ *
+ * - `app` (default) — nothing: the dock keeps the app skin, panes included.
+ * - `canvas` — the panes only; the dock's header and tab rows stay the app's.
+ * - `chrome` — the whole dock, the way the Terminal window does it.
+ *
+ * `canvas` is what the old `dockUsesTerminalTheme: true` actually did, and
+ * what ticket #38 was about: a slab of terminal colour dropped into a light
+ * interface whose chrome stayed white. The boolean is now read as `chrome`
+ * instead, which is the coherent answer.
+ */
+export type TerminalDockTheme = 'app' | 'canvas' | 'chrome';
 
 /** When a tab shows its Ctrl+N number. Default `ctrl`. */
 export type TabIndexDisplay = 'never' | 'ctrl' | 'always';

@@ -22,13 +22,14 @@ import {
   DEFAULT_THEME_DARK,
   DEFAULT_THEME_LIGHT,
   clampOpacity,
+  dockThemeMode,
   isAppDark,
   mix,
   rgba,
   themeAccentCss,
   themeCanvasCss,
 } from '@/lib/terminalTheme';
-import type { TerminalConfig, TerminalThemeSummary } from '@/types';
+import type { TerminalConfig, TerminalDockTheme, TerminalThemeSummary } from '@/types';
 
 const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
 const IS_MAC = /Mac/i.test(navigator.userAgent);
@@ -329,6 +330,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
   const padding = value.padding ?? 8;
   const opacity = clampOpacity(value.windowOpacity);
   const effect: WindowEffect = value.windowEffect ?? 'none';
+  const dockTheme = dockThemeMode(value);
   const effectHint = EFFECT_OPTIONS.find((o) => o.value === effect)?.hint;
 
   const previewKey = follows && !dark ? value.themeLight?.trim() || DEFAULT_THEME_LIGHT : value.themeDark?.trim() || DEFAULT_THEME_DARK;
@@ -389,6 +391,23 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
           checked={follows}
           onCheckedChange={(v) => onChange({ themeFollowsApp: v })}
         />
+
+        <Row
+          label="In the dock, the theme colours"
+          htmlFor="terminal-dock-theme"
+          hint="The Terminal window always wears the theme whole. The dock is one panel inside the app, so it is a choice: nothing, the black of the panes only, or the panel's header and tab rows with them."
+        >
+          <Select value={dockTheme} onValueChange={(v: TerminalDockTheme) => onChange({ dockTheme: v, dockUsesTerminalTheme: v !== 'app' })}>
+            <SelectTrigger id="terminal-dock-theme" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="app">Nothing — the dock keeps the app skin (default)</SelectItem>
+              <SelectItem value="canvas">The terminals only</SelectItem>
+              <SelectItem value="chrome">The whole dock, like the Terminal window</SelectItem>
+            </SelectContent>
+          </Select>
+        </Row>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Row label="Cursor">

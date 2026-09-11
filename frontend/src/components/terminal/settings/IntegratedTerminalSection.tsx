@@ -10,8 +10,18 @@
  * The controls are grouped under headings (`Group`) rather than stacked in
  * the order they were written — thirty-odd of them in one card is otherwise
  * unreadable, and the block settings end up sitting among the completion
- * settings (ticket #26, first pass). Only the order changed; every control is
- * the one that was here before.
+ * settings (ticket #26, first pass).
+ *
+ * Ticket #39 kept the headings and changed what is under them. The groups now
+ * run roughly from the most often touched to the most rarely: shell, text,
+ * command blocks, completion, then the input line, scrolling, links, tabs and
+ * sessions. Two things moved: the keyboard / input-line group, which is
+ * mostly beta and macOS-only, now sits after the two groups that carry what
+ * CortX is for; and "Output, links and images" — which held three unrelated
+ * subjects — is split into "Scrolling and scrollback" and "Links, images and
+ * clipboard". The dock-theme toggle left for `TerminalAppearanceSection`,
+ * where the rest of the theme lives; it was under "Text", which it never had
+ * anything to do with.
  */
 import { useMemo } from 'react';
 import { Input } from '@/components/ui/input';
@@ -48,6 +58,11 @@ const TAB_DISPLAY_TOGGLES = [
   { key: 'command', label: 'Running command', hint: 'Replaces the directory while a command runs.' },
   { key: 'status', label: 'Status', hint: 'The spinner, the finished pill and the runtime dot.' },
   { key: 'agent', label: 'Agent', hint: 'A detected Claude Code / Codex session: its icon, its title, its own state.' },
+  {
+    key: 'colorBar',
+    label: 'Colour bar',
+    hint: "The tab colour as a bar down the left edge of the row, on top of the tint. Sessions rail only; off by default, because the tint already carries the colour.",
+  },
 ] as const;
 
 export function IntegratedTerminalSection() {
@@ -67,6 +82,12 @@ export function IntegratedTerminalSection() {
   // Issue 34: a family CSS cannot resolve falls back to the default stack in
   // silence — `Hack NF` is a real family on Windows and on no Mac at all.
   const fontFamily = terminal?.fontFamily ?? '';
+  // Mirrors `defaultLineHeight` in `lib/terminalSessions.ts`: with no value
+  // stored, the browser renderer runs at 1.0 so powerline separators stay
+  // joined. The field used to print 1.2 regardless, which is not what the
+  // terminal was doing (ticket #39).
+  const defaultLineHeight = renderer === 'dom' ? 1 : 1.2;
+
   const fontMissing = useMemo(() => fontFamily.trim() !== '' && !fontFamilyResolves(fontFamily), [fontFamily]);
 
   return (
@@ -156,11 +177,11 @@ export function IntegratedTerminalSection() {
             id="terminal-line-height"
             label="Line height"
             hint={renderer === 'dom' ? '1.0 keeps powerline separators joined with this renderer.' : undefined}
-            value={terminal?.lineHeight ?? 1.2}
+            value={terminal?.lineHeight ?? defaultLineHeight}
             min={1}
             max={2}
             step={0.05}
-            onCommit={(v) => patch({ lineHeight: v ?? 1.2 })}
+            onCommit={(v) => patch({ lineHeight: v ?? defaultLineHeight })}
             className="w-24"
             disabled={!terminal}
           />
@@ -270,105 +291,6 @@ export function IntegratedTerminalSection() {
           />
         </ToggleField>
 
-        <ToggleField
-          id="dock-terminal-theme"
-          label="Colour the dock terminals with the terminal theme"
-          hint="Off: the dock keeps the app skin's palette; the Terminal window always follows the terminal theme."
-        >
-          <Switch
-            id="dock-terminal-theme"
-            checked={terminal?.dockUsesTerminalTheme ?? false}
-            onCheckedChange={(v) => patch({ dockUsesTerminalTheme: v })}
-            disabled={!terminal}
-          />
-        </ToggleField>
-      </Group>
-
-      <Group title="Keyboard and input">
-        {platform === 'macos' && (
-          <Field
-            label="⌥ as the Meta key"
-            htmlFor="mac-option-as-meta"
-            hint={
-              <>
-                Meta is what <Code>Alt+B</Code> / <Code>Alt+F</Code> (word by word) and <Code>Alt+⌫</Code> mean in bash
-                and zsh. The default reserves only ⌥B, ⌥F, ⌥D, ⌥V and ⌥⌫, so <Code>[ ] {'{ }'} | @</Code> stay typable
-                on French, Swiss and AZERTY keyboards, where they live on the ⌥ layer. <Code>Always</Code> gives every ⌥
-                chord to the shell and takes that layer away, including the dead keys (⌥E, ⌥U, ⌥I, ⌥N) that put accents
-                on letters.
-              </>
-            }
-          >
-            <Select
-              value={terminal?.macOptionAsMeta ?? DEFAULT_MAC_OPTION_AS_META}
-              onValueChange={(v: MacOptionAsMeta) => patch({ macOptionAsMeta: v })}
-              disabled={!terminal}
-            >
-              <SelectTrigger id="mac-option-as-meta" className="w-[320px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="wordKeys">Word keys only — ⌥B ⌥F ⌥D ⌥V ⌥⌫ (default)</SelectItem>
-                <SelectItem value="never">Never — macOS composes every ⌥ character</SelectItem>
-                <SelectItem value="always">Always — every ⌥ chord is Meta</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-        )}
-
-        <Field
-          label="Input line position"
-          htmlFor="input-position"
-          hint="Where the line you type sits in the pane. Pinned to the bottom keeps it against the bottom edge and stacks the output above it, like Warp; the terminal itself is not resized, so nothing under the PTY can tell the difference."
-        >
-          <Select
-            value={terminal?.inputPosition ?? 'flow'}
-            onValueChange={(v: TerminalInputPosition) => patch({ inputPosition: v })}
-            disabled={!terminal}
-          >
-            <SelectTrigger id="input-position" className="w-[260px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="flow">Follow the output (default)</SelectItem>
-              <SelectItem value="bottom">Pinned to the bottom</SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
-
-        <ToggleField
-          id="input-editor"
-          label="Universal input editor (beta)"
-          hint={
-            <>
-              Type the command into a CortX editor at the prompt instead of the shell&apos;s own line editor: accents and
-              dead keys behave, a multi-line paste can never run by accident, and Ctrl+D stops being able to close the
-              shell while you are writing. It only ever appears once the shell has announced its prompt (OSC 133), so{' '}
-              <Code>ssh</Code>, a REPL, a full-screen program or a shell without <Code>cortx init</Code> keep today&apos;s
-              behaviour exactly.
-            </>
-          }
-        >
-          <Switch
-            id="input-editor"
-            checked={terminal?.inputEditor ?? false}
-            onCheckedChange={(v) => patch({ inputEditor: v })}
-            disabled={!terminal || !shellIntegration}
-          />
-        </ToggleField>
-
-        <ToggleField
-          id="input-editor-handoff"
-          label={<span className="text-xs text-muted-foreground">Hand unknown keys back to the shell</span>}
-          hint="Tab, Ctrl+R, ↑ and ↓ write what you have typed to the shell without running it, close the editor and let the shell take the key — so PSReadLine completes and searches exactly as it does today. Off, those keys do nothing while the editor is open."
-        >
-          <Switch
-            id="input-editor-handoff"
-            checked={terminal?.inputEditorHandoff ?? true}
-            onCheckedChange={(v) => patch({ inputEditorHandoff: v })}
-            disabled={!terminal || !(terminal?.inputEditor ?? false)}
-          />
-        </ToggleField>
       </Group>
 
       <Group title="Command blocks">
@@ -574,7 +496,94 @@ export function IntegratedTerminalSection() {
         </ToggleField>
       </Group>
 
-      <Group title="Output, links and images">
+      <Group title="Keyboard and input">
+        {platform === 'macos' && (
+          <Field
+            label="⌥ as the Meta key"
+            htmlFor="mac-option-as-meta"
+            hint={
+              <>
+                Meta is what <Code>Alt+B</Code> / <Code>Alt+F</Code> (word by word) and <Code>Alt+⌫</Code> mean in bash
+                and zsh. The default reserves only ⌥B, ⌥F, ⌥D, ⌥V and ⌥⌫, so <Code>[ ] {'{ }'} | @</Code> stay typable
+                on French, Swiss and AZERTY keyboards, where they live on the ⌥ layer. <Code>Always</Code> gives every ⌥
+                chord to the shell and takes that layer away, including the dead keys (⌥E, ⌥U, ⌥I, ⌥N) that put accents
+                on letters.
+              </>
+            }
+          >
+            <Select
+              value={terminal?.macOptionAsMeta ?? DEFAULT_MAC_OPTION_AS_META}
+              onValueChange={(v: MacOptionAsMeta) => patch({ macOptionAsMeta: v })}
+              disabled={!terminal}
+            >
+              <SelectTrigger id="mac-option-as-meta" className="w-[320px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="wordKeys">Word keys only — ⌥B ⌥F ⌥D ⌥V ⌥⌫ (default)</SelectItem>
+                <SelectItem value="never">Never — macOS composes every ⌥ character</SelectItem>
+                <SelectItem value="always">Always — every ⌥ chord is Meta</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
+
+        <Field
+          label="Input line position"
+          htmlFor="input-position"
+          hint="Where the line you type sits in the pane. Pinned to the bottom keeps it against the bottom edge and stacks the output above it, like Warp; the terminal itself is not resized, so nothing under the PTY can tell the difference."
+        >
+          <Select
+            value={terminal?.inputPosition ?? 'flow'}
+            onValueChange={(v: TerminalInputPosition) => patch({ inputPosition: v })}
+            disabled={!terminal}
+          >
+            <SelectTrigger id="input-position" className="w-[260px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="flow">Follow the output (default)</SelectItem>
+              <SelectItem value="bottom">Pinned to the bottom</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+
+        <ToggleField
+          id="input-editor"
+          label="Universal input editor (beta)"
+          hint={
+            <>
+              Type the command into a CortX editor at the prompt instead of the shell&apos;s own line editor: accents and
+              dead keys behave, a multi-line paste can never run by accident, and Ctrl+D stops being able to close the
+              shell while you are writing. It only ever appears once the shell has announced its prompt (OSC 133), so{' '}
+              <Code>ssh</Code>, a REPL, a full-screen program or a shell without <Code>cortx init</Code> keep today&apos;s
+              behaviour exactly.
+            </>
+          }
+        >
+          <Switch
+            id="input-editor"
+            checked={terminal?.inputEditor ?? false}
+            onCheckedChange={(v) => patch({ inputEditor: v })}
+            disabled={!terminal || !shellIntegration}
+          />
+        </ToggleField>
+
+        <ToggleField
+          id="input-editor-handoff"
+          label={<span className="text-xs text-muted-foreground">Hand unknown keys back to the shell</span>}
+          hint="Tab, Ctrl+R, ↑ and ↓ write what you have typed to the shell without running it, close the editor and let the shell take the key — so PSReadLine completes and searches exactly as it does today. Off, those keys do nothing while the editor is open."
+        >
+          <Switch
+            id="input-editor-handoff"
+            checked={terminal?.inputEditorHandoff ?? true}
+            onCheckedChange={(v) => patch({ inputEditorHandoff: v })}
+            disabled={!terminal || !(terminal?.inputEditor ?? false)}
+          />
+        </ToggleField>
+      </Group>
+
+      <Group title="Scrolling and scrollback">
         <NumberField
           id="terminal-scrollback-lines"
           label="Scrollback — lines kept per terminal"
@@ -618,6 +627,9 @@ export function IntegratedTerminalSection() {
           />
         </ToggleField>
 
+      </Group>
+
+      <Group title="Links, images and clipboard">
         <ToggleField
           id="file-path-links"
           label="Clickable file paths"
@@ -857,7 +869,7 @@ export function IntegratedTerminalSection() {
         <NumberField
           id="restore-scrollback-lines"
           label={<span className="text-xs text-muted-foreground">Lines replayed on start</span>}
-          hint="A one-off seed of the previous session, written into the tab as it reopens. Not the size of the live buffer — that is Scrollback, under “Output, links and images”."
+          hint="A one-off seed of the previous session, written into the tab as it reopens. Not the size of the live buffer — that is Scrollback, under “Scrolling and scrollback”."
           value={terminal?.restoreScrollbackLines ?? 200}
           min={20}
           max={2000}

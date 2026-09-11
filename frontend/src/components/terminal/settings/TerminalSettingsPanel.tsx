@@ -47,23 +47,27 @@ export function TerminalSettingsSections({
   const q = query.trim().toLowerCase();
   const k = TERMINAL_SECTION_KEYWORDS;
 
+  // Most often touched first (ticket #39). The external-terminal card used to
+  // open the list, and it is the rarest setting of the lot — which program a
+  // service opens in when it is *not* run inside CortX, a choice made once and
+  // never again. What the user came for is the terminal CortX runs itself.
   const shown = [
-    externalTerminal && matches(k.external, q),
     matches(k.integrated, q),
-    matches(k.notifications, q),
     matches(k.appearance, q),
+    matches(k.notifications, q),
     matches(k.shortcuts, q),
+    externalTerminal && matches(k.external, q),
     launchConfigs && matches(k.launch, q),
   ];
   if (!shown.some(Boolean)) return <>{empty}</>;
 
   return (
     <>
-      {shown[0] && <ExternalTerminalSection />}
-      {shown[1] && <IntegratedTerminalSection />}
+      {shown[0] && <IntegratedTerminalSection />}
+      {shown[1] && terminal && <TerminalAppearanceSection value={terminal} onChange={patch} />}
       {shown[2] && <TerminalNotificationsSection />}
-      {shown[3] && terminal && <TerminalAppearanceSection value={terminal} onChange={patch} />}
-      {shown[4] && <ShortcutsSection value={terminal?.keybindings} onChange={(next) => patch({ keybindings: next })} />}
+      {shown[3] && <ShortcutsSection value={terminal?.keybindings} onChange={(next) => patch({ keybindings: next })} />}
+      {shown[4] && <ExternalTerminalSection />}
       {shown[5] && <LaunchConfigsSection />}
     </>
   );

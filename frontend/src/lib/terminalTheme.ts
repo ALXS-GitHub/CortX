@@ -402,13 +402,14 @@ export function applyWindowTheme(
 export type DockThemeMode = 'app' | 'canvas' | 'chrome';
 
 /**
- * Read defensively (see `blockFailedWashEnabled`): `dockTheme` is the field
- * this wants and it does not exist in `TerminalConfig` yet, so the boolean
- * `dockUsesTerminalTheme` is the fallback and `app` the hard-coded default.
- * The day the enum lands, it simply wins.
+ * `dockTheme` wins whenever it is set. A settings file written before the
+ * enum landed has only the boolean, so `true` is read as `chrome` — the
+ * whole dock, which is the coherent version of "on" — and anything else as
+ * `app`. The value is still validated rather than trusted: `settings.json`
+ * is a file on disk a user can edit.
  */
 export function dockThemeMode(terminal: TerminalConfig | null | undefined): DockThemeMode {
-  const raw = (terminal as Record<string, unknown> | null | undefined)?.dockTheme;
+  const raw = terminal?.dockTheme;
   if (raw === 'app' || raw === 'canvas' || raw === 'chrome') return raw;
   return terminal?.dockUsesTerminalTheme ? 'chrome' : 'app';
 }

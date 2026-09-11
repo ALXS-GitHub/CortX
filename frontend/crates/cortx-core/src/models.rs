@@ -337,18 +337,22 @@ pub enum TerminalPreset {
 
 impl Default for TerminalPreset {
     fn default() -> Self {
-        #[cfg(target_os = "windows")]
-        {
-            Self::WindowsTerminal
-        }
-        #[cfg(target_os = "macos")]
-        {
-            Self::MacTerminal
-        }
-        #[cfg(target_os = "linux")]
-        {
-            Self::Custom
-        }
+        // CortX's own Terminal window, on every platform (ticket #39).
+        //
+        // This used to be `WindowsTerminal` / `MacTerminal` / `Custom` by
+        // target. Two things were wrong with that. On Linux the default was
+        // `Custom` with an empty `custom_path`, so "launch outside the app"
+        // did nothing at all on a fresh install. And on the other two it sent
+        // the user straight out of the app that ships a terminal window of its
+        // own — blocks, shell integration, themes and all — to a program that
+        // has none of it.
+        //
+        // It is also the only preset that behaves the same everywhere, which
+        // is why the frontend could hard-code `'cortxterminal'` as its own
+        // fallback without the two ends disagreeing (they used to: the
+        // Settings page assumed `windowsterminal` on macOS, where that preset
+        // is not even offered, and showed an empty select).
+        Self::CortxTerminal
     }
 }
 
@@ -515,8 +519,17 @@ pub struct TerminalConfig {
     /// Title bar + sessions rail backdrop blur, px.
     #[serde(default = "default_chrome_blur")]
     pub chrome_blur: u16,
-    /// Also colour the main window's dock terminals with the terminal theme
-    /// (off: the dock follows the app skin, as before).
+    /// How much of the terminal theme the main window's dock takes (ticket
+    /// #38). `None` = fall back to [`TerminalConfig::dock_uses_terminal_theme`],
+    /// which is how a settings file written before this existed is read.
+    /// Only the frontend reads it (`lib/terminalTheme.rs` has no equivalent —
+    /// see `lib/terminalTheme.ts › dockThemeMode`).
+    #[serde(default, deserialize_with = "lenient_opt_enum")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dock_theme: Option<DockThemeMode>,
+    /// Superseded by [`TerminalConfig::dock_theme`]: `true` reads as
+    /// `Chrome`, `false` as `App`. Still written by the UI alongside the new
+    /// field so a downgrade keeps the dock looking the same.
     #[serde(default)]
     pub dock_uses_terminal_theme: bool,
     /// A mouse selection lands in the clipboard as soon as it ends (Warp /
@@ -765,6 +778,29 @@ pub enum TerminalBlockSpacing {
     /// it is no longer the default.
     #[default]
     Comfortable,
+}
+
+/// How much of the terminal theme the main window's dock takes (ticket #38).
+///
+/// The dock is one panel of a window whose other half is the app, so the
+/// answer is not a yes/no: the panes can wear the theme while the header and
+/// the tab rows stay the app's — which is exactly what the old
+/// `dock_uses_terminal_theme: true` did, and exactly what read badly in a
+/// light interface. `Chrome` is the coherent version of "on", and what the
+/// boolean is now read as.
+///
+/// Only the frontend reads this (`lib/terminalTheme.ts`): the dock's tokens
+/// are CSS variables set on one element, never anything the backend touches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DockThemeMode {
+    /// The dock keeps the app skin, panes included.
+    #[default]
+    App,
+    /// The panes only: the xterm palette follows the theme, the chrome does not.
+    Canvas,
+    /// The whole dock, the way the Terminal window does it.
+    Chrome,
 }
 
 /// Where the input line sits in a terminal pane (ticket #15, U0).
@@ -1075,6 +1111,7 @@ impl Default for TerminalConfig {
             wallpaper_dim: 0,
             chrome_opacity: default_chrome_opacity(),
             chrome_blur: default_chrome_blur(),
+            dock_theme: None,
             dock_uses_terminal_theme: false,
             copy_on_select: true,
             shift_enter: ShiftEnterKey::default(),
@@ -2186,6 +2223,36 @@ mod tests {
         assert_eq!(settings.terminal.cursor_style, CursorStyle::default());
         assert!(matches!(settings.appearance.theme, Theme::System));
         assert!(matches!(settings.defaults.launch_method, LaunchMethod::Integrated));
+    }
+
+    /// Ticket #39. A fresh install opens "launch outside the app" in CortX's
+    /// own Terminal window, on every platform — not in Windows Terminal, not
+    /// in Terminal.app, and above all not in `Custom` with an empty path,
+    /// which is what Linux used to get and which did nothing at all.
+    #[test]
+    fn a_fresh_install_launches_into_cortxs_own_terminal() {
+        assert_eq!(TerminalConfig::default().preset, TerminalPreset::CortxTerminal);
+    }
+
+    /// Ticket #38/#39: the dock's three modes. A settings file written before
+    /// the enum existed carries only the boolean, and the frontend reads
+    /// `true` as `chrome` (`lib/terminalTheme.ts › dockThemeMode`), so the
+    /// field must survive a round trip and stay absent when it was never set.
+    #[test]
+    fn dock_theme_is_optional_and_falls_back_to_the_old_boolean() {
+        let legacy: TerminalConfig =
+            serde_json::from_str(r#"{ "dockUsesTerminalTheme": true }"#).unwrap();
+        assert_eq!(legacy.dock_theme, None);
+        assert!(legacy.dock_uses_terminal_theme);
+        // Absent, not `null`: the frontend tells "never set" from "set to app".
+        let json = serde_json::to_string(&legacy).unwrap();
+        assert!(!json.contains("dockTheme"), "{json}");
+
+        let modern: TerminalConfig = serde_json::from_str(r#"{ "dockTheme": "canvas" }"#).unwrap();
+        assert_eq!(modern.dock_theme, Some(DockThemeMode::Canvas));
+        // An unknown value must not take the settings file down with it.
+        let bogus: TerminalConfig = serde_json::from_str(r#"{ "dockTheme": "neon" }"#).unwrap();
+        assert_eq!(bogus.dock_theme, None);
     }
 
     /// Known values still parse exactly as before.

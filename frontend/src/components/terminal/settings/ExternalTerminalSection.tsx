@@ -20,7 +20,11 @@ export function ExternalTerminalSection() {
   const platform = getPlatform();
   const availablePresets = TERMINAL_PRESETS.filter((p) => p.platforms.includes(platform));
 
-  const preset = terminal?.preset ?? 'windowsterminal';
+  // Same default as `TerminalPreset::default()` on the Rust side (ticket
+  // #39). `windowsterminal` used to be hard-coded here, which showed a preset
+  // the platform list does not contain — so an empty select — on macOS and
+  // Linux.
+  const preset = terminal?.preset ?? 'cortxterminal';
   const customPath = terminal?.customPath ?? '';
   const customArgs = (terminal?.customArgs ?? []).join(' ');
   const selectedPresetInfo = TERMINAL_PRESETS.find((p) => p.value === preset);
@@ -50,9 +54,9 @@ export function ExternalTerminalSection() {
 
   return (
     <Section
-      title="Terminal"
+      title="External terminal"
       icon={TerminalSquare}
-      description="External terminal application used when launching services outside the app."
+      description="Which program a service opens in when it is launched outside CortX. Everything else on this page is about the terminal CortX runs itself."
     >
       <Field
         label="Terminal application"
