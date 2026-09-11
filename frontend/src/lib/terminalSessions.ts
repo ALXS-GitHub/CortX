@@ -42,6 +42,13 @@ import {
 } from '@/lib/terminalKeys';
 import { TerminalImageFilter, type ImagePart } from '@/lib/terminalImages';
 import { attachInputPosition, inputPositionSetting, refreshInputPositions } from '@/lib/terminalInputPosition';
+// Ticket #39: the defaults live in one table now (see the module header of
+// `terminalDefaults.ts`). These two used to be literals here, which is exactly
+// the second source the ticket exists to remove; they are re-exported so every
+// existing importer keeps working.
+import { DEFAULT_FONT_SIZE, DEFAULT_SCROLLBACK_LINES } from '@/components/terminal/settings/terminalDefaults';
+
+export { DEFAULT_SCROLLBACK_LINES };
 import { attachInputEditor, inputEditorEnabled, refreshInputEditors } from '@/lib/terminalInputEditor';
 import { isLinkOpenClick, registerFileLinkProvider } from '@/lib/terminalLinks';
 import {
@@ -272,7 +279,6 @@ function ensureThemeObserver() {
 
 const DEFAULT_FONT_STACK =
   'ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "JetBrains Mono", Menlo, Monaco, monospace';
-const DEFAULT_FONT_SIZE = 12;
 
 /** xterm font options from the user's settings, with the bundled stack as fallback. */
 function clampWeight(w: number | undefined): number | undefined {
@@ -310,8 +316,6 @@ export function terminalFontOptions(): {
 // ---------------------------------------------------------------------------
 // Scrollback (issue 42)
 // ---------------------------------------------------------------------------
-
-export const DEFAULT_SCROLLBACK_LINES = 10000;
 
 /** Default size cap of `command-history.jsonl`, in megabytes (see `historyMaxMb`). */
 export const DEFAULT_HISTORY_MAX_MB = 10;

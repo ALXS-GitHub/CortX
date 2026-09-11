@@ -27,11 +27,12 @@ import { useMemo } from 'react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Code, Field, Section, ToggleField } from '@/components/settings/SettingsPrimitives';
-import { Group, NumberField, TextField } from './controls';
+import { Code, Field, Section } from '@/components/settings/SettingsPrimitives';
+import { Group, MarkedLabel, NumberField, ResetCard, ResetSetting, SettingField, SettingToggle, TextField } from './controls';
 import { useTerminalSettings } from './useTerminalSettings';
 import { getPlatform, TERMINAL_FONT_SUGGESTIONS } from './meta';
 import { DEFAULT_MAC_OPTION_AS_META, DEFAULT_SMOOTH_SCROLL_DURATION } from '@/lib/terminalKeys';
+import { DEFAULT_FONT_SIZE, DEFAULT_INPUT_POSITION } from './terminalDefaults';
 import {
   DEFAULT_MINIMUM_CONTRAST,
   DEFAULT_HISTORY_MAX_MB,
@@ -97,9 +98,11 @@ export function IntegratedTerminalSection() {
     <Section
       title="Integrated terminal"
       description='The terminal panel runs every service, script and shell tab in a real PTY. Configure the shell used by the "New terminal" button.'
+      action={<ResetCard card="integrated" title="Integrated terminal" />}
     >
-      <Group title="Shell">
+      <Group title="Shell" group="shell">
         <TextField
+          k="integratedShell"
           id="integrated-shell"
           label="Shell"
           hint={
@@ -116,7 +119,8 @@ export function IntegratedTerminalSection() {
           disabled={!terminal}
         />
 
-        <ToggleField
+        <SettingToggle
+          k="shellIntegration"
           id="shell-integration"
           label="Shell integration"
           hint={
@@ -133,12 +137,13 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ shellIntegration: v })}
             disabled={!terminal}
           />
-        </ToggleField>
+        </SettingToggle>
       </Group>
 
-      <Group title="Text">
+      <Group title="Text" group="text">
         <div className="grid gap-4 sm:grid-cols-[1fr_auto_auto]">
           <TextField
+            k="fontFamily"
             id="terminal-font"
             label="Font"
             hint={
@@ -199,16 +204,18 @@ export function IntegratedTerminalSection() {
             )}
           </TextField>
           <NumberField
+            k="fontSize"
             id="terminal-font-size"
             label="Size"
-            value={terminal?.fontSize ?? 12}
+            value={terminal?.fontSize ?? DEFAULT_FONT_SIZE}
             min={8}
             max={32}
-            onCommit={(v) => patch({ fontSize: v ?? 12 })}
+            onCommit={(v) => patch({ fontSize: v ?? DEFAULT_FONT_SIZE })}
             className="w-24"
             disabled={!terminal}
           />
           <NumberField
+            k="lineHeight"
             id="terminal-line-height"
             label="Line height"
             hint={renderer === 'dom' ? '1.0 keeps powerline separators joined with this renderer.' : undefined}
@@ -224,6 +231,7 @@ export function IntegratedTerminalSection() {
 
         <div className="grid gap-4 sm:grid-cols-4">
           <NumberField
+            k="fontWeight"
             id="terminal-font-weight"
             label="Text weight"
             hint="400 is regular, 300 lighter."
@@ -236,6 +244,7 @@ export function IntegratedTerminalSection() {
             disabled={!terminal}
           />
           <NumberField
+            k="fontWeightBold"
             id="terminal-font-weight-bold"
             label="Bold weight"
             hint="700 by default; 600 is calmer."
@@ -248,6 +257,7 @@ export function IntegratedTerminalSection() {
             disabled={!terminal}
           />
           <NumberField
+            k="letterSpacing"
             id="terminal-letter-spacing"
             label="Letter spacing"
             hint="px; empty = automatic (compensates fonts whose advance is not a whole pixel)."
@@ -261,7 +271,8 @@ export function IntegratedTerminalSection() {
             className="w-24"
             disabled={!terminal}
           />
-          <Field
+          <SettingField
+            k="selectionColor"
             label="Selection colour"
             htmlFor="terminal-selection-color"
             hint="Any CSS colour; empty = the theme's."
@@ -281,10 +292,11 @@ export function IntegratedTerminalSection() {
                 style={{ background: selectionColor.trim() || 'var(--terminal-selection, transparent)' }}
               />
             </div>
-          </Field>
+          </SettingField>
         </div>
 
-        <Field
+        <SettingField
+          k="renderer"
           label="Renderer"
           htmlFor="terminal-renderer"
           hint="GPU and Canvas both draw box, block and powerline characters themselves, so they always line up; Canvas rasterises the text through the platform engine, which keeps the letters finer. The browser renderer draws everything as text and can leave hairlines between cells."
@@ -303,9 +315,10 @@ export function IntegratedTerminalSection() {
               <SelectItem value="dom">Browser (no acceleration)</SelectItem>
             </SelectContent>
           </Select>
-        </Field>
+        </SettingField>
 
-        <ToggleField
+        <SettingToggle
+          k="ligatures"
           id="terminal-ligatures"
           label="Font ligatures"
           hint={
@@ -324,12 +337,13 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ ligatures: v })}
             disabled={!terminal}
           />
-        </ToggleField>
+        </SettingToggle>
 
       </Group>
 
-      <Group title="Command blocks">
-        <ToggleField
+      <Group title="Command blocks" group="blocks">
+        <SettingToggle
+          k="blocks"
           id="terminal-blocks"
           label="Command blocks"
           hint={
@@ -348,9 +362,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ blocks: v })}
             disabled={!terminal || !shellIntegration}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <Field
+        <SettingField
+          k="blockSpacing"
           label={<span className="text-xs text-muted-foreground">Block spacing</span>}
           htmlFor="terminal-block-spacing"
           hint={
@@ -380,9 +395,10 @@ export function IntegratedTerminalSection() {
               <SelectItem value="compact">Compact</SelectItem>
             </SelectContent>
           </Select>
-        </Field>
+        </SettingField>
 
-        <ToggleField
+        <SettingToggle
+          k="blockDividers"
           id="terminal-block-dividers"
           label={<span className="text-xs text-muted-foreground">Block dividers</span>}
           hint="The 1 px rule across the pane at the top of every block — what makes the blocks visible. It is deliberately faint and colourless, white on a dark palette and black on a light one, so it stays a boundary you sense rather than a line you read, even on a theme with a background image. The rules above and below the block under the pointer come up a little; the exit code is the colour of the gutter bar, not of the rule."
@@ -393,9 +409,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ blockDividers: v })}
             disabled={!terminal || !shellIntegration || !blocks}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <ToggleField
+        <SettingToggle
+          k="blockActions"
           id="terminal-block-actions"
           label={<span className="text-xs text-muted-foreground">Block actions on hover</span>}
           hint="A small toolbar near the top-right of the block under the pointer: copy the command, copy the output, copy both, run it again, fold the output, and ⋯ for the rest (copy as Markdown, put the command back at the prompt, select the block, scroll to its top or bottom). It prefers a row whose right-hand end is empty, so a right-hand prompt — a clock, a git status — is left alone; when there is no such row it is drawn on an opaque plate over that end of the prompt rather than not at all. The same menu is also a right-click on the gutter bar away."
@@ -406,9 +423,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ blockActions: v })}
             disabled={!terminal || !shellIntegration || !blocks}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <ToggleField
+        <SettingToggle
+          k="blockGutter"
           id="terminal-block-gutter"
           label={<span className="text-xs text-muted-foreground">Block gutter</span>}
           hint="A thin bar in the pane's left padding for each block, green or red according to the exit code the shell reported. Click it to select the block, double-click to fold its output, right-click for the block menu. Off, the shortcuts and the menu still work."
@@ -419,9 +437,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ blockGutter: v })}
             disabled={!terminal || !shellIntegration || !blocks}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <ToggleField
+        <SettingToggle
+          k="blockFailedWash"
           id="terminal-block-failed-wash"
           label={<span className="text-xs text-muted-foreground">Tint failed blocks</span>}
           hint="Tints a block whose command failed at 10 % of the theme's own red, and turns its gutter bar to full strength for the whole height of the block. The colour comes from the terminal palette, so an imported theme washes in its own red. The tint is weak enough that the text underneath keeps its colours; the pole is dropped when the block is selected, so the two markings never double up."
@@ -432,11 +451,12 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ blockFailedWash: v })}
             disabled={!terminal || !shellIntegration || !blocks}
           />
-        </ToggleField>
+        </SettingToggle>
       </Group>
 
-      <Group title="Suggestions and completion">
-        <ToggleField
+      <Group title="Suggestions and completion" group="completion">
+        <SettingToggle
+          k="inlineSuggestions"
           id="inline-suggestions"
           label="Inline suggestions"
           hint="Ghost text from your command history while you type; → accepts it. Needs shell integration. PowerShell's own prediction is switched off inside CortX to avoid a double suggestion."
@@ -447,9 +467,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ inlineSuggestions: v })}
             disabled={!terminal || !shellIntegration}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <ToggleField
+        <SettingToggle
+          k="suggestionsFromOutput"
           id="suggestions-from-output"
           label={<span className="text-xs text-muted-foreground">Suggest from the last output</span>}
           hint="When a program tells you what to run next — a resume command, the git push that sets an upstream, a corrected typo — offer it. Only a command the program spelled out is ever suggested; anything merely sitting in the output stays in the Ctrl+Space menu."
@@ -460,9 +481,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ suggestionsFromOutput: v })}
             disabled={!terminal || !suggestions}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <Field
+        <SettingField
+          k="suggestionConfidence"
           label={<span className="text-xs text-muted-foreground">Suggest only when sure</span>}
           htmlFor="suggestion-confidence"
           hint="How certain the guess must be before any ghost text is drawn. A wrong suggestion costs more than none, so the default already stays quiet when two of your habits start the same way."
@@ -481,9 +503,10 @@ export function IntegratedTerminalSection() {
               <SelectItem value="loose">Guess more often</SelectItem>
             </SelectContent>
           </Select>
-        </Field>
+        </SettingField>
 
-        <Field
+        <SettingField
+          k="completionMenu"
           label={<span className="text-xs text-muted-foreground">Completion menu</span>}
           htmlFor="completion-menu"
           hint="A list of subcommands, flags, git branches and npm scripts, on top of the ghost text. Ctrl+Space by default rather than Tab, because Tab already reaches your shell's own completion — with Tab, CortX only takes the key when it has something to offer."
@@ -502,9 +525,10 @@ export function IntegratedTerminalSection() {
               <SelectItem value="off">Off</SelectItem>
             </SelectContent>
           </Select>
-        </Field>
+        </SettingField>
 
-        <ToggleField
+        <SettingToggle
+          k="completionSpecs"
           id="completion-specs"
           label={<span className="text-xs text-muted-foreground">Learn a command&apos;s flags</span>}
           hint="Runs a program's own --help once, in the background, to learn its subcommands and flags. Only for a program already found in your PATH, never with anything you typed as an argument, and never for one that reads input (ssh, sudo, python…)."
@@ -515,9 +539,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ completionSpecs: v })}
             disabled={!terminal || !suggestions}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <ToggleField
+        <SettingToggle
+          k="completionContext"
           id="completion-context"
           label={<span className="text-xs text-muted-foreground">Complete from the directory</span>}
           hint="Git branches, package.json scripts and file paths, read from the terminal's own working directory."
@@ -528,12 +553,13 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ completionContext: v })}
             disabled={!terminal || !suggestions}
           />
-        </ToggleField>
+        </SettingToggle>
       </Group>
 
-      <Group title="Keyboard and input">
+      <Group title="Keyboard and input" group="keyboard">
         {platform === 'macos' && (
-          <Field
+          <SettingField
+            k="macOptionAsMeta"
             label="⌥ as the Meta key"
             htmlFor="mac-option-as-meta"
             hint={
@@ -560,16 +586,17 @@ export function IntegratedTerminalSection() {
                 <SelectItem value="always">Always — every ⌥ chord is Meta</SelectItem>
               </SelectContent>
             </Select>
-          </Field>
+          </SettingField>
         )}
 
-        <Field
+        <SettingField
+          k="inputPosition"
           label="Input line position"
           htmlFor="input-position"
           hint="Where the line you type sits in the pane. Pinned to the bottom keeps it against the bottom edge and stacks the output above it, like Warp; the terminal itself is not resized, so nothing under the PTY can tell the difference."
         >
           <Select
-            value={terminal?.inputPosition ?? 'flow'}
+            value={terminal?.inputPosition ?? DEFAULT_INPUT_POSITION}
             onValueChange={(v: TerminalInputPosition) => patch({ inputPosition: v })}
             disabled={!terminal}
           >
@@ -577,13 +604,14 @@ export function IntegratedTerminalSection() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="flow">Follow the output (default)</SelectItem>
-              <SelectItem value="bottom">Pinned to the bottom</SelectItem>
+              <SelectItem value="flow">Follow the output</SelectItem>
+              <SelectItem value="bottom">Pinned to the bottom (default)</SelectItem>
             </SelectContent>
           </Select>
-        </Field>
+        </SettingField>
 
-        <ToggleField
+        <SettingToggle
+          k="inputEditor"
           id="input-editor"
           label="Universal input editor (beta)"
           hint={
@@ -602,9 +630,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ inputEditor: v })}
             disabled={!terminal || !shellIntegration}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <ToggleField
+        <SettingToggle
+          k="inputEditorHandoff"
           id="input-editor-handoff"
           label={<span className="text-xs text-muted-foreground">Hand unknown keys back to the shell</span>}
           hint="Tab, Ctrl+R, ↑ and ↓ write what you have typed to the shell without running it, close the editor and let the shell take the key — so PSReadLine completes and searches exactly as it does today. Off, those keys do nothing while the editor is open."
@@ -615,11 +644,12 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ inputEditorHandoff: v })}
             disabled={!terminal || !(terminal?.inputEditor ?? false)}
           />
-        </ToggleField>
+        </SettingToggle>
       </Group>
 
-      <Group title="Scrolling and scrollback">
+      <Group title="Scrolling and scrollback" group="scrolling">
         <NumberField
+          k="scrollbackLines"
           id="terminal-scrollback-lines"
           label="Scrollback — lines kept per terminal"
           hint={
@@ -650,6 +680,7 @@ export function IntegratedTerminalSection() {
         )}
 
         <NumberField
+          k="historyMaxMb"
           id="history-max-mb"
           label="Command history — size cap"
           hint={
@@ -669,7 +700,8 @@ export function IntegratedTerminalSection() {
           disabled={!terminal}
         />
 
-        <ToggleField
+        <SettingToggle
+          k="smoothScrollDuration"
           id="smooth-scroll"
           label="Smooth scrolling"
           hint="The wheel glides instead of jumping a line at a time. Typing still snaps to the bottom instantly, so this costs nothing at the prompt."
@@ -680,12 +712,13 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ smoothScrollDuration: v ? DEFAULT_SMOOTH_SCROLL_DURATION : 0 })}
             disabled={!terminal}
           />
-        </ToggleField>
+        </SettingToggle>
 
       </Group>
 
-      <Group title="Links, images and clipboard">
-        <ToggleField
+      <Group title="Links, images and clipboard" group="links">
+        <SettingToggle
+          k="filePathLinks"
           id="file-path-links"
           label="Clickable file paths"
           hint="Underlines the file paths in the output that really exist on disk, and opens them in your editor at the line the compiler pointed at. Alt- or Shift-click reveals the folder instead."
@@ -696,9 +729,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ filePathLinks: v })}
             disabled={!terminal}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <ToggleField
+        <SettingToggle
+          k="linkTooltip"
           id="link-tooltip"
           label={<span className="text-xs text-muted-foreground">Show a link&apos;s target on hover</span>}
           hint="A tooltip with the URL or the file path under the pointer, so you know where a link goes before you click it."
@@ -709,9 +743,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ linkTooltip: v })}
             disabled={!terminal}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <ToggleField
+        <SettingToggle
+          k="kittyGraphics"
           id="kitty-graphics"
           label="Kitty graphics"
           hint="A third inline-image protocol, on top of Sixel and iTerm2. Turn it off only if a program draws garbage instead of a picture."
@@ -722,9 +757,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ kittyGraphics: v })}
             disabled={!terminal}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <Field
+        <SettingField
+          k="osc52"
           label="Clipboard access from programs (OSC 52)"
           htmlFor="terminal-osc52"
           hint={
@@ -754,11 +790,12 @@ export function IntegratedTerminalSection() {
               <SelectItem value="readWrite">Read and write</SelectItem>
             </SelectContent>
           </Select>
-        </Field>
+        </SettingField>
       </Group>
 
-      <Group title="Tabs and windows">
-        <Field
+      <Group title="Tabs and windows" group="tabs">
+        <SettingField
+          k="tabsPlacement"
           label="Terminal window · tabs"
           htmlFor="tabs-placement"
           hint="Where the list of terminals lives in the Terminal window: a sessions rail on the left, or a tab strip above the panes. One or the other, never both."
@@ -776,9 +813,10 @@ export function IntegratedTerminalSection() {
               <SelectItem value="top">Tab strip (top)</SelectItem>
             </SelectContent>
           </Select>
-        </Field>
+        </SettingField>
 
-        <Field
+        <SettingField
+          k="ctrlTabBehavior"
           label="Ctrl+Tab goes to"
           htmlFor="ctrl-tab-behavior"
           hint="Recently used works like Alt+Tab between windows: keep Ctrl held and each Tab walks one tab further back through the ones you have actually been on, and the order only settles when you let Ctrl go."
@@ -796,8 +834,13 @@ export function IntegratedTerminalSection() {
               <SelectItem value="recentlyUsed">Recently used</SelectItem>
             </SelectContent>
           </Select>
-        </Field>
+        </SettingField>
 
+        {/* Five switches on one row, so the marker and the reset belong to
+            each switch rather than to the row: `tabDisplay` is one object in
+            the file, but it is five decisions on screen and nobody thinks of
+            it as a whole. `terminalDefaults.ts` addresses the sub-fields as
+            settings of their own for exactly that reason. */}
         <Field
           label="What a tab shows"
           hint="The title is always there. Everything around it is up to you."
@@ -805,20 +848,24 @@ export function IntegratedTerminalSection() {
         >
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             {TAB_DISPLAY_TOGGLES.map(({ key, label, hint }) => (
-              <label key={key} htmlFor={`tab-display-${key}`} className="flex items-center gap-2 text-xs" title={hint}>
-                <Switch
-                  id={`tab-display-${key}`}
-                  checked={tabDisplay[key]}
-                  onCheckedChange={(v) => patch({ tabDisplay: { ...tabDisplay, [key]: v } })}
-                  disabled={!terminal}
-                />
-                {label}
-              </label>
+              <span key={key} className="flex items-center gap-1">
+                <label htmlFor={`tab-display-${key}`} className="flex items-center gap-2 text-xs" title={hint}>
+                  <Switch
+                    id={`tab-display-${key}`}
+                    checked={tabDisplay[key]}
+                    onCheckedChange={(v) => patch({ tabDisplay: { ...tabDisplay, [key]: v } })}
+                    disabled={!terminal}
+                  />
+                  <MarkedLabel k={`tabDisplay.${key}`}>{label}</MarkedLabel>
+                </label>
+                <ResetSetting k={`tabDisplay.${key}`} />
+              </span>
             ))}
           </div>
         </Field>
 
-        <Field
+        <SettingField
+          k="tabDisplay.index"
           label={<span className="text-xs text-muted-foreground">Tab number</span>}
           hint="The number types Ctrl+N jumps to. It only means something while Ctrl is down, which is when it shows by default."
           htmlFor="tab-display-index"
@@ -837,10 +884,11 @@ export function IntegratedTerminalSection() {
               <SelectItem value="always">Always</SelectItem>
             </SelectContent>
           </Select>
-        </Field>
+        </SettingField>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field
+          <SettingField
+            k="openProcessesIn"
             label="Started services and scripts open in"
             htmlFor="open-processes-in"
             hint="Where a service or script started from the app shows up."
@@ -858,8 +906,9 @@ export function IntegratedTerminalSection() {
                 <SelectItem value="window">Terminal window</SelectItem>
               </SelectContent>
             </Select>
-          </Field>
-          <Field
+          </SettingField>
+          <SettingField
+            k="openDevSessionsIn"
             label="Dev sessions (launch configurations) open in"
             htmlFor="open-dev-sessions-in"
             hint="A configuration can still pick its own target."
@@ -877,12 +926,13 @@ export function IntegratedTerminalSection() {
                 <SelectItem value="dock">Dock (main window)</SelectItem>
               </SelectContent>
             </Select>
-          </Field>
+          </SettingField>
         </div>
       </Group>
 
-      <Group title="Sessions">
-        <ToggleField
+      <Group title="Sessions" group="sessions">
+        <SettingToggle
+          k="confirmCloseRunning"
           id="confirm-close-running"
           label="Ask before closing a busy terminal"
           hint="Closing a tab, a pane or CortX itself while a command is running asks first, and names what would be killed. A terminal sitting at its prompt always closes straight away."
@@ -893,9 +943,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ confirmCloseRunning: v })}
             disabled={!terminal}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <ToggleField
+        <SettingToggle
+          k="restoreSessions"
           id="restore-sessions"
           label="Restore sessions on start"
           hint="When you open terminal mode, your tabs come back where you left them — shells in their last directory, nothing re-run. Starting CortX never opens the terminal by itself."
@@ -906,9 +957,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ restoreSessions: v })}
             disabled={!terminal}
           />
-        </ToggleField>
+        </SettingToggle>
 
-        <ToggleField
+        <SettingToggle
+          k="restoreScrollback"
           id="restore-scrollback"
           label={<span className="text-xs text-muted-foreground">Restore scrollback</span>}
           hint="Seeds each restored shell with the tail of its previous output, so you keep the context of what ran."
@@ -919,9 +971,10 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ restoreScrollback: v })}
             disabled={!terminal || !restoreSessions}
           />
-        </ToggleField>
+        </SettingToggle>
 
         <NumberField
+          k="restoreScrollbackLines"
           id="restore-scrollback-lines"
           label={<span className="text-xs text-muted-foreground">Lines replayed on start</span>}
           hint="A one-off seed of the previous session, written into the tab as it reopens. Not the size of the live buffer — that is Scrollback, under “Scrolling and scrollback”."
@@ -939,8 +992,9 @@ export function IntegratedTerminalSection() {
           values — the first rewrites colours a theme author chose, the second
           is paid on every render — and both take effect on the terminals
           already open. */}
-      <Group title="Accessibility">
-        <Field
+      <Group title="Accessibility" group="accessibility">
+        <SettingField
+          k="minimumContrastRatio"
           label="Minimum text contrast"
           htmlFor="terminal-min-contrast"
           hint={
@@ -968,9 +1022,10 @@ export function IntegratedTerminalSection() {
               <SelectItem value="21">Maximum — black on white, white on black</SelectItem>
             </SelectContent>
           </Select>
-        </Field>
+        </SettingField>
 
-        <ToggleField
+        <SettingToggle
+          k="screenReaderMode"
           id="terminal-screen-reader"
           label="Screen reader support"
           hint="Mirrors the terminal's rows into the page so VoiceOver, NVDA and Narrator can read them — without it they hear nothing at all from a terminal. Off by default because the mirror is maintained on every render, which a fast build log makes you feel."
@@ -981,7 +1036,7 @@ export function IntegratedTerminalSection() {
             onCheckedChange={(v) => patch({ screenReaderMode: v })}
             disabled={!terminal}
           />
-        </ToggleField>
+        </SettingToggle>
       </Group>
     </Section>
   );

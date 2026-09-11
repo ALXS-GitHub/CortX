@@ -10,7 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Code, Field, Section } from '@/components/settings/SettingsPrimitives';
+import { Code, Section } from '@/components/settings/SettingsPrimitives';
+import { ResetCard, SettingField } from './controls';
 import { TERMINAL_PRESETS, getPlatform } from './meta';
 import { useTerminalSettings } from './useTerminalSettings';
 import type { TerminalPreset } from '@/types';
@@ -56,9 +57,11 @@ export function ExternalTerminalSection() {
     <Section
       title="External terminal"
       icon={TerminalSquare}
+      action={<ResetCard card="external" title="External terminal" />}
       description="Which program a service opens in when it is launched outside CortX. Everything else on this page is about the terminal CortX runs itself."
     >
-      <Field
+      <SettingField
+        k="preset"
         label="Terminal application"
         htmlFor="terminal-preset"
         hint={
@@ -82,13 +85,13 @@ export function ExternalTerminalSection() {
             ))}
           </SelectContent>
         </Select>
-      </Field>
+      </SettingField>
 
       {preset === 'custom' && (
         <>
           <Separator />
 
-          <Field label="Custom terminal path" htmlFor="custom-path" hint="Path to your terminal executable">
+          <SettingField k="customPath" label="Custom terminal path" htmlFor="custom-path" hint="Path to your terminal executable">
             <div className="flex gap-2">
               <Input
                 id="custom-path"
@@ -103,9 +106,10 @@ export function ExternalTerminalSection() {
                 <FolderOpen />
               </Button>
             </div>
-          </Field>
+          </SettingField>
 
-          <Field
+          <SettingField
+            k="customArgs"
             label="Custom arguments"
             htmlFor="custom-args"
             hint={
@@ -130,7 +134,7 @@ export function ExternalTerminalSection() {
               placeholder="e.g., -e bash -c {full_command}"
               className="font-mono text-[12px]"
             />
-          </Field>
+          </SettingField>
         </>
       )}
 

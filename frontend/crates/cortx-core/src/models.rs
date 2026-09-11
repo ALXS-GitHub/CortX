@@ -847,9 +847,16 @@ pub enum DockThemeMode {
 #[serde(rename_all = "camelCase")]
 pub enum TerminalInputPosition {
     /// The prompt follows the output down the pane (CortX's behaviour so far).
-    #[default]
     Flow,
     /// The prompt is pinned to the bottom of the pane; output stacks above it.
+    ///
+    /// The default since ticket #39: it is Warp's own
+    /// (`appearance.input.input_mode = pinned_to_bottom`) and it is half of
+    /// what makes the blocks read as blocks — the prompt stays put at the
+    /// bottom edge and the output stacks above it instead of the whole page
+    /// crawling down. Purely visual: it is a CSS offset on the xterm host, so
+    /// `rows` / `cols` and the PTY never learn about it.
+    #[default]
     Bottom,
 }
 
@@ -1068,8 +1075,22 @@ fn default_history_max_mb() -> u32 {
     10
 }
 
+/// Lines a fresh install keeps per terminal (ticket #39).
+///
+/// 10 000 for a long time, which is the classic emulator default and was
+/// chosen when the scrollback was only a scrollback. It is now also the depth
+/// of the **command blocks**: trimming the buffer destroys the `OSC 133`
+/// markers a block is built on, so at 10 000 lines a talkative agent session
+/// loses its blocks within the hour. Warp keeps 50 000
+/// (`terminal.maximum_grid_size`), but its buffers are in Rust and ours are in
+/// a WebView, so 25 000 is the compromise — still under the 50 000 the UI
+/// already warns about.
+///
+/// The backend budget derived from this number does not move at all:
+/// [`crate::terminal::scrollback_bytes_for_lines`] prices 25 000 lines at
+/// 3.05 MiB and clamps that up to the 4 MiB floor, exactly where 10 000 landed.
 fn default_scrollback_lines() -> u32 {
-    10_000
+    25_000
 }
 
 fn default_dev_sessions_target() -> TerminalTarget {
@@ -2292,6 +2313,46 @@ mod tests {
         assert_eq!(settings.terminal.cursor_style, CursorStyle::default());
         assert!(matches!(settings.appearance.theme, Theme::System));
         assert!(matches!(settings.defaults.launch_method, LaunchMethod::Integrated));
+    }
+
+    /// Ticket #39. The frontend has to be able to tell a value the user chose
+    /// from one serde wrote for them, and it cannot ask this process for
+    /// `TerminalConfig::default()` — there is no command for that yet. So the
+    /// defaults it compares against live in a table on its side
+    /// (`components/terminal/settings/terminalDefaults.ts`), and this snapshot
+    /// is the contract between the two: serde writes it here, a Node test
+    /// reads the same file and asserts the table agrees, key by key.
+    ///
+    /// If this fails you changed a default: paste the JSON it prints into
+    /// `src/components/terminal/settings/terminalDefaults.rust.ts`, and the TS
+    /// table is then checked against it in turn. That is the whole
+    /// regeneration procedure — the snapshot cannot go stale quietly.
+    ///
+    /// The keys *missing* from the snapshot are the `Option` fields — serde
+    /// writes nothing for them, so their effective default belongs to the
+    /// frontend and only the frontend.
+    #[test]
+    fn the_default_settings_snapshot_the_frontend_reads_is_current() {
+        let actual = serde_json::to_value(TerminalConfig::default()).unwrap();
+        // The snapshot is a `.ts` module so the frontend can import it without
+        // `resolveJsonModule`; its object literal is plain JSON, between the
+        // first `{` after the `=` and the last `}` of the file.
+        let source = include_str!("../../../src/components/terminal/settings/terminalDefaults.rust.ts");
+        let start = source
+            .find("RUST_TERMINAL_DEFAULTS =")
+            .and_then(|at| source[at..].find('{').map(|rel| at + rel))
+            .expect("terminalDefaults.rust.ts must export RUST_TERMINAL_DEFAULTS");
+        let end = source.rfind('}').expect("no closing brace");
+        let snapshot: serde_json::Value = serde_json::from_str(&source[start..=end])
+            .expect("the RUST_TERMINAL_DEFAULTS literal must be plain JSON");
+        assert_eq!(
+            actual,
+            snapshot,
+            "TerminalConfig::default() no longer matches the snapshot the frontend reads.
+             Replace the object in terminalDefaults.rust.ts with:
+{}",
+            serde_json::to_string_pretty(&actual).unwrap()
+        );
     }
 
     /// Ticket #39. A fresh install opens "launch outside the app" in CortX's

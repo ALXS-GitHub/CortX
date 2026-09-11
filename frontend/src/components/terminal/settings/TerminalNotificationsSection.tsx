@@ -3,17 +3,15 @@
  * Settings page and in the Terminal window's own panel.
  */
 import { useState } from 'react';
-import { Bell, RotateCcw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Bell } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Segmented } from '@/components/ui/Segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Code, Field, Section, ToggleField } from '@/components/settings/SettingsPrimitives';
-import { NumberField } from './controls';
+import { Code, Section } from '@/components/settings/SettingsPrimitives';
+import { NumberField, ResetCard, SettingField, SettingToggle } from './controls';
 import {
   DEFAULT_LONG_COMMAND_SECONDS,
-  DEFAULT_MUTED_COMMANDS,
   NOTIFY_STYLE_OPTIONS,
   NOTIFY_WHEN_OPTIONS,
   formatMutedCommands,
@@ -48,19 +46,15 @@ export function TerminalNotificationsSection() {
   const whenHint = NOTIFY_WHEN_OPTIONS.find((o) => o.value === when)?.hint;
   const styleHint = NOTIFY_STYLE_OPTIONS.find((o) => o.value === style)?.hint;
   const bellHint = BELL_OPTIONS.find((o) => o.value === bell)?.hint;
-  const isDefaultMuted = formatMutedCommands([...DEFAULT_MUTED_COMMANDS]) === storedMuted;
 
   return (
     <Section
       title="Notifications"
       icon={Bell}
+      action={<ResetCard card="notifications" title="Notifications" />}
       description="Shell integration marks the end of every command — quitting Claude Code, leaving vim or interrupting a watcher all look the same from the outside. These rules decide which of them is worth interrupting you."
     >
-      <Field
-        label="Notify me when"
-        htmlFor="terminal-notify-when"
-        hint={whenHint}
-      >
+      <SettingField k="notifyWhen" label="Notify me when" htmlFor="terminal-notify-when" hint={whenHint}>
         <Select
           value={when}
           onValueChange={(v: TerminalNotifyWhen) => patch({ notifyWhen: v, notifyOnLongCommand: v !== 'never' })}
@@ -77,9 +71,10 @@ export function TerminalNotificationsSection() {
             ))}
           </SelectContent>
         </Select>
-      </Field>
+      </SettingField>
 
       <NumberField
+        k="longCommandSeconds"
         id="terminal-long-command-seconds"
         label={<span className="text-xs text-muted-foreground">“Long” starts at (seconds)</span>}
         value={seconds}
@@ -89,7 +84,8 @@ export function TerminalNotificationsSection() {
         disabled={disabled || when !== 'failed-or-long'}
       />
 
-      <ToggleField
+      <SettingToggle
+        k="notifyOnlyWhenHidden"
         id="terminal-notify-hidden-only"
         label="Only for terminals out of sight"
         hint="A command that ends in the pane you are watching stays silent. Turn this off to be told about every command, foreground included."
@@ -100,9 +96,9 @@ export function TerminalNotificationsSection() {
           onCheckedChange={(v) => patch({ notifyOnlyWhenHidden: v })}
           disabled={disabled}
         />
-      </ToggleField>
+      </SettingToggle>
 
-      <Field label="Show it as" hint={styleHint}>
+      <SettingField k="notifyStyle" label="Show it as" hint={styleHint}>
         <div className={disabled ? 'pointer-events-none opacity-50' : undefined}>
           <Segmented<TerminalNotifyStyle>
             value={style}
@@ -111,9 +107,10 @@ export function TerminalNotificationsSection() {
             size="sm"
           />
         </div>
-      </Field>
+      </SettingField>
 
-      <Field
+      <SettingField
+        k="notifyMutedCommands"
         label="Never notify for these commands"
         htmlFor="terminal-notify-muted"
         hint={
@@ -143,24 +140,15 @@ export function TerminalNotificationsSection() {
           placeholder="claude, codex, vim, ssh…"
           disabled={disabled}
         />
-      </Field>
-      {!isDefaultMuted && (
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() => {
-            const next = [...DEFAULT_MUTED_COMMANDS];
-            setMutedText(formatMutedCommands(next));
-            patch({ notifyMutedCommands: next });
-          }}
-          disabled={disabled}
-        >
-          <RotateCcw />
-          Reset the list
-        </Button>
-      )}
+      </SettingField>
+      {/* The card's own "Reset the list" button is gone: the marker beside the
+          label now carries that gesture, and it is the same one every other
+          setting on the page offers (ticket #39). Typing the built-in list
+          back by hand still counts as untouched - see `notifyMutedCommands` in
+          `terminalDefaults.ts`. */}
 
-      <Field
+      <SettingField
+        k="bell"
         label="When a program rings the bell"
         hint={
           <>
@@ -180,7 +168,7 @@ export function TerminalNotificationsSection() {
             size="sm"
           />
         </div>
-      </Field>
+      </SettingField>
 
       <p className="text-xs text-faint">
         CortX cannot tell that a program is waiting for a password: shell integration reports command boundaries, not what

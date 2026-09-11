@@ -23,6 +23,8 @@ import {
   type KeybindingOverrides,
 } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
+import { MarkedLabel, ResetGroup, ResetSetting } from './controls';
+import type { TerminalSettingKey } from './terminalDefaults';
 
 interface ShortcutsSectionProps {
   /** The user's overrides (`settings.terminal.keybindings`); undefined = all defaults. */
@@ -32,14 +34,31 @@ interface ShortcutsSectionProps {
 }
 
 /** One labelled row of the "Keys and selection" card. */
-function BehaviourRow({ id, label, hint, children }: { id: string; label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+function BehaviourRow({
+  k,
+  id,
+  label,
+  hint,
+  children,
+}: {
+  k: TerminalSettingKey;
+  id: string;
+  label: ReactNode;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="min-w-0">
-        <Label htmlFor={id}>{label}</Label>
+        <Label htmlFor={id}>
+          <MarkedLabel k={k}>{label}</MarkedLabel>
+        </Label>
         {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </div>
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
+      <div className="flex shrink-0 items-center gap-2">
+        <ResetSetting k={k} />
+        {children}
+      </div>
     </div>
   );
 }
@@ -73,9 +92,13 @@ function KeysAndSelectionCard() {
           Keys and selection
         </CardTitle>
         <CardDescription>How the keyboard and the mouse behave inside a terminal. Saved as soon as you change them.</CardDescription>
+        <CardAction>
+          <ResetGroup group="keys" title="Keys and selection" />
+        </CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         <BehaviourRow
+          k="copyOnSelect"
           id="terminal-copy-on-select"
           label="Copy on select"
           hint={
@@ -89,6 +112,7 @@ function KeysAndSelectionCard() {
         </BehaviourRow>
 
         <BehaviourRow
+          k="shiftEnter"
           id="terminal-shift-enter"
           label="Shift+Enter sends"
           hint="A plain terminal sends the same key for Enter and Shift+Enter. ESC+Enter is what Claude Code's /terminal-setup binds, and what zsh and fish insert a new line for."

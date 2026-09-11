@@ -30,11 +30,15 @@
  */
 import type { IDisposable, Terminal } from '@xterm/xterm';
 import { useAppStore } from '@/stores/appStore';
+import { DEFAULT_INPUT_POSITION } from '@/components/terminal/settings/terminalDefaults';
 
 /** `flow` = today's behaviour (output flows down from the top). */
 export type TerminalInputPosition = 'flow' | 'bottom';
 
-export const DEFAULT_INPUT_POSITION: TerminalInputPosition = 'flow';
+// Ticket #39: `bottom` since this release, and defined once, in the settings
+// defaults table — the Rust `impl Default` is checked against the same
+// snapshot, so the two ends cannot drift apart again.
+export { DEFAULT_INPUT_POSITION } from '@/components/terminal/settings/terminalDefaults';
 
 export function inputPositionSetting(): TerminalInputPosition {
   return useAppStore.getState().settings?.terminal.inputPosition ?? DEFAULT_INPUT_POSITION;

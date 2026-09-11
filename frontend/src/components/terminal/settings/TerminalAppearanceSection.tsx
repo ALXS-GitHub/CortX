@@ -1,6 +1,6 @@
 import { useEffect, useMemo, type ReactNode } from 'react';
 import { Minus, Palette, RectangleHorizontal, TextCursor, Underline } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ThemePicker, ThemeSwatches } from '@/components/terminal/theme/ThemePicker';
+import { MarkedLabel, ResetCard, ResetSetting } from './controls';
+import type { TerminalSettingKey } from './terminalDefaults';
 import { useTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { useAppStore } from '@/stores/appStore';
 import {
@@ -54,12 +56,21 @@ const EFFECT_OPTIONS: { value: WindowEffect; label: string; hint: string }[] = I
       ]
     : [{ value: 'none', label: 'None', hint: 'Backdrop effects are not available on this platform.' }];
 
+/**
+ * One setting: label, control, hint - plus the "changed" marker and the reset
+ * beside the control when `k` names a setting (ticket #39). Same shape as
+ * `SettingField` in `controls.tsx`; this card predates that helper and keeps
+ * its own row because several of its controls are two-part (the cursor style
+ * and its blink, a slider and its number box).
+ */
 function Row({
+  k,
   label,
   htmlFor,
   hint,
   children,
 }: {
+  k?: TerminalSettingKey;
   label: ReactNode;
   htmlFor?: string;
   hint?: ReactNode;
@@ -67,14 +78,22 @@ function Row({
 }) {
   return (
     <div className="grid gap-2">
-      <Label htmlFor={htmlFor}>{label}</Label>
-      {children}
+      <Label htmlFor={htmlFor}>{k ? <MarkedLabel k={k}>{label}</MarkedLabel> : label}</Label>
+      {k ? (
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">{children}</div>
+          <ResetSetting k={k} />
+        </div>
+      ) : (
+        children
+      )}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </div>
   );
 }
 
 function ToggleRow({
+  k,
   id,
   label,
   hint,
@@ -82,6 +101,7 @@ function ToggleRow({
   onCheckedChange,
   disabled,
 }: {
+  k: TerminalSettingKey;
   id: string;
   label: ReactNode;
   hint?: ReactNode;
@@ -92,10 +112,15 @@ function ToggleRow({
   return (
     <div className="flex items-center justify-between gap-4">
       <div>
-        <Label htmlFor={id}>{label}</Label>
+        <Label htmlFor={id}>
+          <MarkedLabel k={k}>{label}</MarkedLabel>
+        </Label>
         {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </div>
-      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
+      <div className="flex shrink-0 items-center gap-2">
+        <ResetSetting k={k} />
+        <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
+      </div>
     </div>
   );
 }
@@ -245,6 +270,7 @@ export interface TerminalAppearanceSectionProps {
  */
 /** Range + number for a look setting; `clearable` offers "theme default" (undefined). */
 function LookSlider({
+  k,
   id,
   label,
   hint,
@@ -256,6 +282,7 @@ function LookSlider({
   onChange,
   clearable = true,
 }: {
+  k: TerminalSettingKey;
   id: string;
   label: string;
   hint?: string;
@@ -271,6 +298,7 @@ function LookSlider({
   const clamp = (n: number) => Math.min(max, Math.max(min, Math.round(n)));
   return (
     <Row
+      k={k}
       label={
         <span className="flex items-center gap-2">
           {label}
@@ -307,11 +335,9 @@ function LookSlider({
           className="w-20"
           aria-label={label}
         />
-        {clearable && value !== undefined && (
-          <Button variant="ghost" size="xs" onClick={() => onChange(undefined)} title="Back to the theme's value">
-            Reset
-          </Button>
-        )}
+        {/* The "back to the theme's value" button this row used to carry is
+            gone: `Row` now draws the same gesture from the defaults table, for
+            every setting in the card rather than for these four. */}
       </div>
     </Row>
   );
@@ -348,6 +374,9 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
           <Palette className="size-4 text-faint" />
           Terminal appearance
         </CardTitle>
+        <CardAction>
+          <ResetCard card="appearance" title="Terminal appearance" />
+        </CardAction>
         <CardDescription>
           Themes use Warp&apos;s YAML format — import your Warp themes as they are. In the Terminal window the theme
           colours the whole window (title bar, sessions rail, panes), with its wallpaper behind everything.
@@ -357,7 +386,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
         <PreviewStrip theme={previewTheme} opacity={opacity} cursorStyle={cursorStyle} padding={padding} />
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Row label="Theme for dark mode" htmlFor="terminal-theme-dark">
+          <Row k="themeDark" label="Theme for dark mode" htmlFor="terminal-theme-dark">
             <ThemeSelect
               id="terminal-theme-dark"
               value={value.themeDark}
@@ -366,7 +395,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
               onChange={(key) => onChange({ themeDark: key })}
             />
           </Row>
-          <Row label="Theme for light mode" htmlFor="terminal-theme-light">
+          <Row k="themeLight" label="Theme for light mode" htmlFor="terminal-theme-light">
             <ThemeSelect
               id="terminal-theme-light"
               value={value.themeLight}
@@ -390,6 +419,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
         </div>
 
         <ToggleRow
+          k="themeFollowsApp"
           id="terminal-theme-follows"
           label="Follow the app's light / dark mode"
           hint="Off: the dark-mode theme is used all the time, whatever the app mode."
@@ -398,6 +428,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
         />
 
         <Row
+          k="dockTheme"
           label="In the dock, the theme colours"
           htmlFor="terminal-dock-theme"
           hint="The Terminal window always wears the theme whole. The dock is one panel inside the app, so it is a choice: nothing, the black of the panes only, or the panel's header and tab rows with them."
@@ -415,7 +446,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
         </Row>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Row label="Cursor">
+          <Row k="cursorStyle" label="Cursor">
             <div className="flex flex-wrap items-center gap-3">
               <Segmented
                 size="sm"
@@ -427,14 +458,18 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
                   { value: 'bar', label: 'Bar', icon: TextCursor },
                 ]}
               />
+              {/* Blink and the unfocused-pane style share the "Cursor" row
+                  but are settings of their own, so they carry their own
+                  marker rather than hiding behind the row's. */}
               <label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor="terminal-cursor-blink">
                 <Switch
                   id="terminal-cursor-blink"
                   checked={value.cursorBlink ?? true}
                   onCheckedChange={(v) => onChange({ cursorBlink: v })}
                 />
-                Blink
+                <MarkedLabel k="cursorBlink">Blink</MarkedLabel>
               </label>
+              <ResetSetting k="cursorBlink" />
             </div>
             {/* Issue 52: with splits open, the cursor is the cheapest possible
                 answer to "which pane are my keys going to". xterm's default
@@ -443,7 +478,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
                 move — with a single pane the outline is the better look. */}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <label className="text-xs text-muted-foreground" htmlFor="terminal-cursor-inactive">
-                In a pane without the focus
+                <MarkedLabel k="cursorInactiveStyle">In a pane without the focus</MarkedLabel>
               </label>
               <Select
                 value={value.cursorInactiveStyle ?? 'outline'}
@@ -460,9 +495,10 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
                   <SelectItem value="underline">Underline</SelectItem>
                 </SelectContent>
               </Select>
+              <ResetSetting k="cursorInactiveStyle" />
             </div>
           </Row>
-          <Row label="Padding" htmlFor="terminal-padding" hint="Space around the text of every terminal, in px (0–48).">
+          <Row k="padding" label="Padding" htmlFor="terminal-padding" hint="Space around the text of every terminal, in px (0–48).">
             <Input
               id="terminal-padding"
               type="number"
@@ -481,6 +517,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
         {/* Look: wallpaper and chrome, on top of what the theme file says */}
         <div className="grid gap-4 sm:grid-cols-2">
           <LookSlider
+            k="wallpaperOpacity"
             id="terminal-wallpaper-opacity"
             label="Wallpaper opacity"
             hint="Empty = the theme's own value."
@@ -492,6 +529,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
             onChange={(v) => onChange({ wallpaperOpacity: v })}
           />
           <LookSlider
+            k="wallpaperBlur"
             id="terminal-wallpaper-blur"
             label="Wallpaper blur"
             hint="Empty = the theme's own value."
@@ -503,6 +541,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
             onChange={(v) => onChange({ wallpaperBlur: v })}
           />
           <LookSlider
+            k="wallpaperDim"
             id="terminal-wallpaper-dim"
             label="Wallpaper dimming"
             hint="Tones the picture down with the theme colour."
@@ -514,7 +553,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
             onChange={(v) => onChange({ wallpaperDim: v ?? 0 })}
             clearable={false}
           />
-          <Row label="Wallpaper fit" htmlFor="terminal-wallpaper-fit" hint="Empty = the theme's own value.">
+          <Row k="wallpaperFit" label="Wallpaper fit" htmlFor="terminal-wallpaper-fit" hint="Empty = the theme's own value.">
             <Select
               value={value.wallpaperFit ?? '__theme__'}
               onValueChange={(v) => onChange({ wallpaperFit: v === '__theme__' ? undefined : (v as 'cover' | 'contain' | 'tile' | 'center') })}
@@ -532,6 +571,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
             </Select>
           </Row>
           <LookSlider
+            k="chromeOpacity"
             id="terminal-chrome-opacity"
             label="Title bar & rail opacity"
             hint="Background of the title bar and the sessions rail."
@@ -544,6 +584,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
             clearable={false}
           />
           <LookSlider
+            k="chromeBlur"
             id="terminal-chrome-blur"
             label="Title bar & rail blur"
             hint="Frosted-glass blur behind the title bar and the rail."
@@ -559,6 +600,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Row
+            k="windowOpacity"
             label={
               <span className="flex items-center gap-2">
                 Window opacity <span className="font-mono text-[11px] text-faint">{opacity}%</span>
@@ -592,7 +634,7 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
               />
             </div>
           </Row>
-          <Row label="Backdrop effect" htmlFor="terminal-window-effect" hint={effectHint}>
+          <Row k="windowEffect" label="Backdrop effect" htmlFor="terminal-window-effect" hint={effectHint}>
             <Select value={effect} onValueChange={(v) => onChange({ windowEffect: v as WindowEffect })}>
               <SelectTrigger id="terminal-window-effect" className="w-full">
                 <SelectValue />
