@@ -7,6 +7,7 @@ pub enum Shell {
     Bash,
     Zsh,
     Fish,
+    Nu,
 }
 
 impl Shell {
@@ -16,6 +17,7 @@ impl Shell {
             "bash" => Some(Shell::Bash),
             "zsh" => Some(Shell::Zsh),
             "fish" => Some(Shell::Fish),
+            "nu" | "nushell" => Some(Shell::Nu),
             _ => None,
         }
     }
@@ -26,8 +28,46 @@ impl Shell {
             Shell::Bash => "bash",
             Shell::Zsh => "zsh",
             Shell::Fish => "fish",
+            Shell::Nu => "nu",
         }
     }
+}
+
+/// Every shell CortX can hand its integration to, spelled the way
+/// [`Shell::from_str`] wants it. The list a message shows the user when their
+/// shell is not one of them (see [`unsupported_shell_note`]).
+pub const SUPPORTED_SHELLS: &[&str] = &["bash", "zsh", "fish", "nu", "powershell"];
+
+/// What to tell the user about the shell they are actually running, or `None`
+/// when it is one CortX knows.
+///
+/// Without the OSC 7 / OSC 133 block a CortX terminal has no blocks, no
+/// enriched history, no command-finished notification, no universal input
+/// editor and no block spacing — almost everything that makes it more than an
+/// xterm. Today that happens *silently*: a `nu` user before this change, or a
+/// `csh`, `xonsh` or `elvish` user after it, simply sees a CortX with its
+/// features missing and never learns why.
+///
+/// This is only the sentence. Where it is shown is the caller's business —
+/// see the note on this function in the terminal UI: it is meant to appear
+/// once per unknown program, as a dismissible line, never per terminal.
+pub fn unsupported_shell_note(program: &str) -> Option<String> {
+    if shell_for_program(program).is_some() {
+        return None;
+    }
+    let name = std::path::Path::new(program)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(program);
+    if name.trim().is_empty() {
+        return None;
+    }
+    Some(format!(
+        "CortX has no shell integration for {name}. Blocks, command history, \
+         completion notifications and block spacing stay off in this terminal. \
+         Supported shells: {}.",
+        SUPPORTED_SHELLS.join(", ")
+    ))
 }
 
 const SHELL_BUILTINS: &[&str] = &[
@@ -181,6 +221,23 @@ pub fn generate_init_script_ext(shell: &Shell, aliases: &[ShellAlias], opts: Ini
                                         init_cmd.trim()
                                     ));
                                 }
+                                Shell::Nu => {
+                                    // Nushell has no `eval`: `source` is
+                                    // resolved when the line is *parsed*, so
+                                    // a string produced at run time can never
+                                    // be sourced. The documented way round —
+                                    // the one starship and zoxide tell their
+                                    // Nushell users to take — is to write the
+                                    // generated code into an autoload
+                                    // directory, where the next shell picks
+                                    // it up on its own.
+                                    output.push_str(&format!(
+                                        "mkdir ($nu.data-dir | path join \"vendor\" \"autoload\")\n\
+                                         {} | save --force ($nu.data-dir | path join \"vendor\" \"autoload\" \"{}.nu\")\n",
+                                        init_cmd.trim(),
+                                        alias.name
+                                    ));
+                                }
                             }
                         }
                     }
@@ -225,6 +282,26 @@ pub fn generate_init_script_ext(shell: &Shell, aliases: &[ShellAlias], opts: Ini
                             alias.name, alias.command
                         ));
                     }
+                    Shell::Nu => {
+                        // `--wrapped` is what makes this an alias rather than
+                        // a command with a fixed signature: it lets the rest
+                        // of the line through untouched, flags included,
+                        // which is what `"$@"` and `@args` do elsewhere.
+                        //
+                        // A command that starts with a quote is a *value* in
+                        // Nushell, not something to run, so it needs the `^`
+                        // sigil for the same reason PowerShell needs `&`.
+                        let cmd = alias.command.trim();
+                        let sigil = if cmd.starts_with('"') || cmd.starts_with('\'') {
+                            "^"
+                        } else {
+                            ""
+                        };
+                        output.push_str(&format!(
+                            "def --wrapped {} [...rest] {{ {}{} ...$rest }}\n",
+                            alias.name, sigil, cmd
+                        ));
+                    }
                 }
             }
         }
@@ -264,6 +341,7 @@ pub fn shell_for_program(program: &str) -> Option<Shell> {
         "bash" => Some(Shell::Bash),
         "zsh" => Some(Shell::Zsh),
         "fish" => Some(Shell::Fish),
+        "nu" => Some(Shell::Nu),
         _ => None,
     }
 }
@@ -357,12 +435,22 @@ fn settings_literal(shell: &Shell) -> String {
 /// still gets a snippet that runs.
 fn quoted_path(shell: &Shell, path: Option<&std::path::Path>) -> String {
     let Some(path) = path else {
-        return "''".to_string();
+        // An empty literal in the quoting each shell uses below.
+        return match shell {
+            Shell::Nu => "\"\"".to_string(),
+            _ => "''".to_string(),
+        };
     };
     let path = path.to_string_lossy();
     match shell {
         // PowerShell single quotes: only `'` is special, and it doubles.
         Shell::PowerShell => format!("'{}'", path.replace('\'', "''")),
+        // Nushell is the one shell where single quotes are *no* answer: they
+        // are strictly literal, which is perfect for the backslashes, but a
+        // `'` inside them cannot be escaped at all — there is no closing and
+        // reopening, the string simply ends. Double quotes take everything,
+        // as long as the two characters they do read are doubled/escaped.
+        Shell::Nu => nu_string(&path),
         // POSIX (and fish, which accepts the same `\'` outside the quotes):
         // close, escape, reopen.
         _ => sq(&path),
@@ -429,6 +517,14 @@ fn sq(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
+/// A Nushell string literal. Single quotes are literal in Nushell — which
+/// suits a Windows path — but a `'` inside them cannot be escaped by any
+/// means, so a double-quoted literal with the two characters it reads
+/// escaped is the only form that holds arbitrary text.
+pub fn nu_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', r"\\").replace('"', "\\\""))
+}
+
 /// The integration as **one line typed into an already-running shell**.
 ///
 /// The startup injection in `process_manager::inject_shell_integration` only
@@ -470,6 +566,26 @@ pub fn subshell_injection(shell: &Shell, terminal_id: &str, opts: InitOptions) -
             sq(terminal_id),
             sq(&b64)
         ),
+        // Nushell is the one shell the base64 trick cannot reach: it has no
+        // `eval`, and `source` resolves its argument when the line is
+        // *parsed*, which is before anything on that line has run — so a file
+        // written by the same line cannot be sourced by it. The code itself
+        // is what gets typed, which is why [`NU_INTEGRATION`] keeps every
+        // statement on one line: dropping the comments and joining with `;`
+        // is then a valid single line.
+        Shell::Nu => {
+            let body = shell_integration_snippet(shell)
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!(
+                " $env.CORTX_TERMINAL_ID = {}; {}",
+                nu_string(terminal_id),
+                body
+            )
+        }
         // bash and zsh: `base64 -d` on GNU coreutils, `-D` on the older BSD
         // tool that still ships on macOS.
         _ => format!(
@@ -520,6 +636,7 @@ pub fn shell_integration_snippet_for(shell: &Shell, spacing: TerminalBlockSpacin
         Shell::Bash => BASH_INTEGRATION,
         Shell::Zsh => ZSH_INTEGRATION,
         Shell::Fish => FISH_INTEGRATION,
+        Shell::Nu => NU_INTEGRATION,
     };
     let gap = match spacing {
         TerminalBlockSpacing::Compact => "0",
@@ -845,13 +962,122 @@ if set -q CORTX_TERMINAL_ID
 end
 "##;
 
+/// Nushell. Three things about the language shape this block, and none of
+/// them is a matter of taste:
+///
+/// 1. **Definitions are parse-time.** A `def` written inside an `if` belongs
+///    to that block and is gone when it ends, so the helpers are defined
+///    unconditionally and every one of them checks `CORTX_TERMINAL_ID` (or is
+///    only ever reached from a hook that does). Outside a CortX terminal the
+///    block defines five commands and emits nothing.
+/// 2. **One statement per line.** The same block is also typed into a running
+///    shell as a *single* line when a sub-shell is warpified
+///    ([`subshell_injection`]), and Nushell cannot `eval` a string — `source`
+///    resolves its path when the line is parsed, so there is no decoding a
+///    base64 payload the way the other four shells do. The only way in is to
+///    type the code itself, and the code can only be typed if every statement
+///    already fits on one line.
+/// 3. **State lives in `$env`.** A `let` at the top level cannot be mutated
+///    and a `mut` cannot be captured by a closure, so the flags the hooks
+///    hand each other (`__cortx_ran`, the spacing) have to be environment
+///    variables. `def --env` is what lets a helper write one.
+///
+/// The two-producer problem of ticket #41 turns up here in a different shape:
+/// hooks are *appended* to a list, so evaluating the block twice would emit
+/// every sequence twice. `__cortx_hooked` stops the same version from
+/// hooking twice, and `__cortx_owner` — the [`version_stamp`] of this very
+/// template — is what an *older* CortX hook compares itself against: the last
+/// block to run owns the stamp, and every hook another version installed sees
+/// the mismatch and returns without printing. Nushell closures capture the
+/// definitions in scope when they were made, so a newer block cannot redefine
+/// the old hooks' bodies out from under them; making them bow out is the only
+/// thing that works.
+const NU_INTEGRATION: &str = r##"
+# --- CortX shell integration (OSC 7 / OSC 133) — active only inside a CortX terminal ---
+# How many blank lines between a command's output and the next prompt
+# 0 = compact, 1 = normal, 2 = comfortable (settings.terminal.blockSpacing).
+# Seeded with the value this block was generated with, then re-read from the
+# settings file after every command, so a shell that is already open follows a
+# change to the setting too.
+$env.__cortx_gap = __CORTX_GAP__
+$env.__cortx_gap_file = __CORTX_SETTINGS__
+# Re-read the setting rather than trusting the value this block was written
+# with. An unreadable or half-written file keeps the seeded value: `try` with
+# no `catch` is Nushell's "and otherwise, nothing".
+def --env __cortx_read_gap [] { if ($env.__cortx_gap_file | is-empty) { return }; try { let v = (open --raw $env.__cortx_gap_file | parse --regex '"blockSpacing"\s*:\s*"(?<v>compact|normal|comfortable)"' | get v.0); $env.__cortx_gap = (if $v == "compact" { 0 } else if $v == "normal" { 1 } else { 2 }) } }
+def __cortx_osc [seq: string] { print --no-newline $"\u{1b}]($seq)\u{7}" }
+def __cortx_urlencode [p: string] { $p | str replace --all "%" "%25" | str replace --all " " "%20" | str replace --all "#" "%23" | str replace --all "?" "%3F" }
+# The command line is read by the hook and handed in, rather than read here:
+# `commandline` answers about the prompt that is being submitted, and the hook
+# is the only place that is certainly true.
+def --env __cortx_preexec [cmd: string] { if ($env.__cortx_owner? | default "") != "__CORTX_MARK__" { return }; __cortx_osc $"133;C;cmd=($cmd | encode base64)"; $env.__cortx_ran = 1 }
+# The blank rows that separate two blocks are printed here and only after a
+# command really ran, so the first prompt of a session — and an Enter on an
+# empty line — never opens on one. Spelled out instead of looped, because a
+# Nushell range counts *down* when its end is below its start and `0..0` is
+# one step, not none: two `if`s cannot be wrong, and the gap is at most two.
+def --env __cortx_precmd [] { if ($env.__cortx_owner? | default "") != "__CORTX_MARK__" { return }; if ($env.__cortx_ran? | default 0) == 1 { __cortx_osc $"133;D;($env.LAST_EXIT_CODE? | default 0)"; $env.__cortx_ran = 0; __cortx_read_gap; if $env.__cortx_gap >= 1 { print --no-newline "\n" }; if $env.__cortx_gap >= 2 { print --no-newline "\n" } }; __cortx_osc $"7;file://localhost(__cortx_urlencode $env.PWD)"; __cortx_osc "133;A"; __cortx_osc "133;B" }
+# Last to run owns the stamp; hooks installed by another version of this block
+# read it, see someone else's, and stay quiet (ticket #41).
+#
+# The install-once guard carries the process id as well as the version,
+# because everything Nushell keeps here is an *environment* variable — it has
+# no other kind — and a nested `nu` inherits all of them. Without the pid, the
+# child would read "already hooked" off its parent and install nothing, in a
+# shell that has no hooks at all.
+if ($env.CORTX_TERMINAL_ID? | default "") != "" { $env.__cortx_owner = "__CORTX_MARK__"; if ($env.__cortx_hooked? | default "") != $"__CORTX_MARK__:($nu.pid)" { $env.__cortx_hooked = $"__CORTX_MARK__:($nu.pid)"; $env.__cortx_ran = 0; $env.config.hooks.pre_execution = ($env.config.hooks.pre_execution? | default [] | append {|| __cortx_preexec (commandline) }); $env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt? | default [] | append {|| __cortx_precmd }) } }
+"##;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Every shell CortX carries a snippet for. A test that loops over this
+    /// rather than over a hand-written list is a test a new shell cannot be
+    /// added behind the back of.
+    const ALL_SHELLS: [Shell; 5] =
+        [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Nu];
+
+    #[test]
+    fn every_supported_shell_is_reachable_by_name_and_by_program() {
+        for name in SUPPORTED_SHELLS {
+            let shell = Shell::from_str(name).unwrap_or_else(|| panic!("{name}"));
+            assert!(ALL_SHELLS.contains(&shell), "{name}");
+            // …and the program the app actually spawns resolves the same way.
+            assert_eq!(shell_for_program(name), Some(shell.clone()), "{name}");
+        }
+        assert_eq!(SUPPORTED_SHELLS.len(), ALL_SHELLS.len());
+        assert_eq!(Shell::from_str("nushell"), Some(Shell::Nu));
+        assert_eq!(shell_for_program("/usr/local/bin/nu"), Some(Shell::Nu));
+        assert_eq!(shell_for_program(r"C:\Program Files\nu\bin\nu.exe"), Some(Shell::Nu));
+    }
+
+    /// A shell CortX has no snippet for used to give a terminal with its
+    /// features quietly missing and no way to find out why (issue #54).
+    #[test]
+    fn an_unknown_shell_has_something_to_say_and_a_known_one_does_not() {
+        for name in SUPPORTED_SHELLS {
+            assert_eq!(unsupported_shell_note(name), None, "{name}");
+        }
+        assert_eq!(unsupported_shell_note("/bin/zsh"), None);
+        assert_eq!(unsupported_shell_note("nu.exe"), None);
+
+        let note = unsupported_shell_note("/usr/bin/xonsh").expect("xonsh is not supported");
+        // Names the shell the user is actually running, says what is off, and
+        // says what would work instead — the three things a user needs to act.
+        assert!(note.contains("xonsh"), "{note}");
+        assert!(note.contains("Blocks"), "{note}");
+        for name in SUPPORTED_SHELLS {
+            assert!(note.contains(name), "{note} does not mention {name}");
+        }
+        // No path, no extension: the name, as the user thinks of it.
+        assert!(!note.contains("/usr/bin"), "{note}");
+        assert!(unsupported_shell_note("   ").is_none());
+    }
+
     #[test]
     fn integration_block_is_appended_last_and_guarded() {
-        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
+        for shell in ALL_SHELLS {
             let a = func_alias("hi", "echo hi");
             let with = generate_init_script(&shell, std::slice::from_ref(&a), true);
             let without = generate_init_script(&shell, std::slice::from_ref(&a), false);
@@ -897,7 +1123,7 @@ mod tests {
     /// setting changes: same script, same structure, both ways.
     #[test]
     fn every_shell_carries_the_gap_flag_and_nothing_else_moves() {
-        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
+        for shell in ALL_SHELLS {
             let on = shell_integration_snippet_for(&shell, TerminalBlockSpacing::Normal);
             let off = shell_integration_snippet_for(&shell, TerminalBlockSpacing::Compact);
             for snippet in [&on, &off] {
@@ -931,7 +1157,7 @@ mod tests {
     /// (ticket #41).
     #[test]
     fn every_shell_re_reads_the_spacing_from_the_settings_file() {
-        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
+        for shell in ALL_SHELLS {
             let snippet = shell_integration_snippet_for(&shell, TerminalBlockSpacing::Normal);
             assert!(snippet.contains("__cortx_read_gap"), "{shell:?}: no re-read");
             assert!(snippet.contains("__cortx_gap_file"), "{shell:?}: no settings path");
@@ -942,9 +1168,13 @@ mod tests {
                 assert!(snippet.contains(value), "{shell:?}: {value} not handled");
             }
             // The path is a quoted literal, not a bare word: it holds spaces
-            // on every Windows machine.
+            // on every Windows machine. Single quotes everywhere except
+            // Nushell, whose single quotes cannot hold a `'` at all (see
+            // [`quoted_path`]) — there the literal is a double-quoted one.
             let literal = settings_literal(&shell);
-            assert!(literal.starts_with('\''), "{shell:?}: {literal}");
+            let opener = if shell == Shell::Nu { '"' } else { '\'' };
+            assert!(literal.starts_with(opener), "{shell:?}: {literal}");
+            assert!(literal.ends_with(opener), "{shell:?}: {literal}");
             assert!(snippet.contains(&literal), "{shell:?}: {literal} not embedded");
         }
         // bash and zsh match the value with globs (`*compact*`), which only
@@ -1015,8 +1245,13 @@ mod tests {
         // Moves: every template is its own version, and so is the *same*
         // template with one character changed — which is the case that
         // matters, because that is what a real edit to the snippet looks like.
-        let templates =
-            [POWERSHELL_INTEGRATION, BASH_INTEGRATION, ZSH_INTEGRATION, FISH_INTEGRATION];
+        let templates = [
+            POWERSHELL_INTEGRATION,
+            BASH_INTEGRATION,
+            ZSH_INTEGRATION,
+            FISH_INTEGRATION,
+            NU_INTEGRATION,
+        ];
         let stamps: Vec<String> = templates.iter().map(|t| version_stamp(t)).collect();
         for (i, a) in stamps.iter().enumerate() {
             for b in stamps.iter().skip(i + 1) {
@@ -1054,15 +1289,21 @@ mod tests {
                 // no shell expands anything in there, backslash included.
                 assert_eq!(lit, format!("'{raw}'"), "{shell:?}");
             }
+        }
+        for shell in ALL_SHELLS {
             // The space and the backslashes came through untouched.
             let lit = quoted_path(&shell, Some(windows));
             assert!(lit.contains("Alexis Munch"), "{shell:?}: {lit}");
-            assert!(lit.contains(r"\AppData\"), "{shell:?}: {lit}");
-            // Every `'` is escaped, and the literal still opens and closes
-            // exactly once as far as the shell is concerned.
+            let kept = if shell == Shell::Nu { r"\\AppData\\" } else { r"\AppData\" };
+            assert!(lit.contains(kept), "{shell:?}: {lit}");
+            // Every `'` is escaped — or, for Nushell, put where it needs no
+            // escaping — and the literal still opens and closes exactly once
+            // as far as the shell is concerned.
             let lit = quoted_path(&shell, Some(quoted));
             assert!(lit.contains("o") && lit.contains("brien"), "{shell:?}: {lit}");
-            assert!(!lit.contains("o'brien"), "{shell:?}: bare quote left in {lit}");
+            if shell != Shell::Nu {
+                assert!(!lit.contains("o'brien"), "{shell:?}: bare quote left in {lit}");
+            }
         }
 
         // PowerShell doubles the quote; the POSIX shells (and fish, which
@@ -1078,6 +1319,23 @@ mod tests {
                 "{shell:?}"
             );
         }
+        // Nushell is the odd one out, and has to be: its single quotes are
+        // strictly literal, so a path containing `'` cannot go inside them by
+        // any escape — the string just ends there. A double-quoted literal
+        // holds it, at the price of doubling every backslash.
+        assert_eq!(
+            quoted_path(&Shell::Nu, Some(quoted)),
+            "\"/home/o'brien/.local/share/cortx/settings.json\""
+        );
+        assert_eq!(
+            quoted_path(&Shell::Nu, Some(windows)),
+            "\"C:\\\\Users\\\\Alexis Munch\\\\AppData\\\\Roaming\\\\cortx\\\\Cortx\\\\data\\\\settings.json\""
+        );
+        // A `"` in the path would otherwise close it and let the rest run.
+        assert_eq!(
+            nu_string(r#"a"b\c"#),
+            r#""a\"b\\c""#
+        );
     }
 
     /// No settings file to point at — a machine that has never opened the
@@ -1086,13 +1344,15 @@ mod tests {
     /// block was generated with rather than erroring at every prompt.
     #[test]
     fn without_a_settings_file_the_literal_is_empty_and_the_snippet_still_stands() {
-        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
-            assert_eq!(quoted_path(&shell, None), "''", "{shell:?}");
+        for shell in ALL_SHELLS {
+            let empty = if shell == Shell::Nu { "\"\"" } else { "''" };
+            assert_eq!(quoted_path(&shell, None), empty, "{shell:?}");
             let template = match shell {
                 Shell::PowerShell => POWERSHELL_INTEGRATION,
                 Shell::Bash => BASH_INTEGRATION,
                 Shell::Zsh => ZSH_INTEGRATION,
                 Shell::Fish => FISH_INTEGRATION,
+                Shell::Nu => NU_INTEGRATION,
             };
             let snippet = template.replace(GAP_TOKEN, "2").replace(MARK_TOKEN, "0").replace(
                 SETTINGS_TOKEN,
@@ -1103,6 +1363,7 @@ mod tests {
             let assignment = match shell {
                 Shell::PowerShell => "$global:__cortx_gap_file = ''",
                 Shell::Fish => "set -g __cortx_gap_file ''",
+                Shell::Nu => "$env.__cortx_gap_file = \"\"",
                 _ => "__cortx_gap_file=''",
             };
             assert!(snippet.contains(assignment), "{shell:?}: {assignment} missing");
@@ -1110,6 +1371,7 @@ mod tests {
             let bail = match shell {
                 Shell::PowerShell => "if (-not $global:__cortx_gap_file) { return }",
                 Shell::Fish => r#"if test -r "$__cortx_gap_file""#,
+                Shell::Nu => "if ($env.__cortx_gap_file | is-empty) { return }",
                 _ => r#"[ -r "$__cortx_gap_file" ] || return 0"#,
             };
             assert!(snippet.contains(bail), "{shell:?}: no guard on an empty path");
@@ -1171,6 +1433,95 @@ mod tests {
         let fish = shell_integration_snippet_for(&Shell::Fish, TerminalBlockSpacing::Normal);
         assert!(fish.contains("set -g __cortx_gap_pending 1"), "{fish}");
         assert!(fish.contains("set -e __cortx_gap_pending"), "{fish}");
+
+        // Nushell: `D`, the flag and the blank rows are one statement in
+        // `__cortx_precmd`, all inside the `__cortx_ran` branch, and `A`
+        // comes after it.
+        let nu = shell_integration_snippet_for(&Shell::Nu, TerminalBlockSpacing::Normal);
+        let ran = nu.find("if ($env.__cortx_ran? | default 0) == 1 {").unwrap();
+        let d = nu.find("133;D;($env.LAST_EXIT_CODE").unwrap();
+        let gap = nu.find("if $env.__cortx_gap >= 1 {").unwrap();
+        let a = nu.find(r#"__cortx_osc "133;A""#).unwrap();
+        assert!(ran < d && d < gap && gap < a, "nu: {nu}");
+        // Counted out rather than looped: `for _ in 1..$n` in Nushell walks
+        // *backwards* when `n` is below the start, so a gap of 0 would print
+        // two blank rows instead of none.
+        assert!(nu.contains("if $env.__cortx_gap >= 2 {"), "{nu}");
+        assert!(!nu.contains("seq $env.__cortx_gap"), "{nu}");
+    }
+
+    /// Nushell hooks are *appended* to a list, and the block is evaluated
+    /// twice on a normal start-up (the profile's `cortx init`, then the app's
+    /// own injection). Hooking twice would print every sequence twice, and
+    /// deferring to whatever hooked first is what ticket #41 was: the oldest
+    /// integration winning. So the newest block takes the stamp, and hooks
+    /// belonging to any other version read it and return.
+    #[test]
+    fn the_nu_hooks_are_installed_once_and_the_newest_block_owns_them() {
+        let nu = shell_integration_snippet_for(&Shell::Nu, TerminalBlockSpacing::Normal);
+        let stamp = version_stamp(NU_INTEGRATION);
+        assert_eq!(stamp.len(), 16, "{stamp}");
+
+        // Claimed by the owner, compared in both hooks, and claimed and
+        // compared again by the install-once guard: five mentions in all.
+        assert_eq!(nu.matches(&stamp).count(), 5, "{nu}");
+        assert!(nu.contains(&format!("$env.__cortx_owner = \"{stamp}\"")), "{nu}");
+        for hook in ["__cortx_preexec", "__cortx_precmd"] {
+            let at = nu.find(&format!("def --env {hook} [")).unwrap();
+            let body = &nu[at..];
+            let guard = body
+                .find(&format!("if ($env.__cortx_owner? | default \"\") != \"{stamp}\" {{ return }}"))
+                .unwrap_or_else(|| panic!("{hook} does not check the stamp: {nu}"));
+            // …and it checks before it prints anything.
+            assert!(guard < body.find("__cortx_osc").unwrap(), "{hook}: {nu}");
+        }
+        // The same version, evaluated twice in the same process, hooks once —
+        // and a nested `nu`, which inherits every one of these variables
+        // because Nushell has no other kind, is *not* the same process and
+        // hooks itself.
+        assert!(
+            nu.contains(&format!(
+                "if ($env.__cortx_hooked? | default \"\") != $\"{stamp}:($nu.pid)\""
+            )),
+            "{nu}"
+        );
+        assert!(nu.contains(&format!("$env.__cortx_hooked = $\"{stamp}:($nu.pid)\"")), "{nu}");
+        let hooked = nu.find("$env.__cortx_hooked =").unwrap();
+        let append = nu.find("$env.config.hooks.pre_execution =").unwrap();
+        assert!(hooked < append, "the guard is set after the hooks: {nu}");
+        // Both hooks, and neither replaces what the user already had.
+        assert!(nu.contains("$env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt? | default [] | append"), "{nu}");
+        assert!(nu.contains("$env.config.hooks.pre_execution = ($env.config.hooks.pre_execution? | default [] | append"), "{nu}");
+    }
+
+    /// Nushell resolves `def` at parse time, and a definition made inside an
+    /// `if` block dies with the block — so the helpers have to sit at the top
+    /// level, and the guard has to be somewhere else. It is: in the hooks,
+    /// which are the only things that print.
+    #[test]
+    fn the_nu_helpers_are_defined_at_the_top_level_and_still_guarded() {
+        let nu = shell_integration_snippet_for(&Shell::Nu, TerminalBlockSpacing::Normal);
+        let guard = nu.find(r#"if ($env.CORTX_TERMINAL_ID? | default "") != "" {"#).unwrap();
+        for def in ["__cortx_read_gap", "__cortx_osc", "__cortx_urlencode", "__cortx_preexec", "__cortx_precmd"] {
+            let at = nu.find(&format!(" {def} [")).unwrap_or_else(|| panic!("{def} is not defined: {nu}"));
+            assert!(at < guard, "{def} is defined inside the guard: {nu}");
+        }
+        // Nothing is emitted outside a CortX terminal all the same: defining
+        // a command prints nothing, and the only things that *call* the
+        // printing helpers are the two hooks, which are installed behind the
+        // guard and nowhere else.
+        assert_eq!(nu.matches("$env.config.hooks").count(), 4, "{nu}");
+        assert!(nu[guard..].contains("$env.config.hooks.pre_execution ="), "{nu}");
+        assert!(nu[guard..].contains("$env.config.hooks.pre_prompt ="), "{nu}");
+        // Every statement on its own line, or the sub-shell one-liner
+        // ([`subshell_injection`]) could not be built by joining them.
+        for line in nu.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            assert_eq!(
+                line.matches('{').count(),
+                line.matches('}').count(),
+                "a statement spans two lines: {line}"
+            );
+        }
     }
 
     /// A prompt that already opens on a new line (oh-my-posh, starship's
@@ -1211,6 +1562,20 @@ mod tests {
                 );
                 assert!(snippet.trim_end().ends_with("fi"), "{shell:?}: the guard is not closed");
             }
+            // Nushell: braces and parentheses both, because a closure and a
+            // pipeline are both delimited and the whole block is also joined
+            // into one line for a sub-shell, where a stray opener would eat
+            // everything after it.
+            // (Not `[]`: the `]` of the OSC introducer itself is a bracket
+            // no signature ever opened.)
+            let nu = shell_integration_snippet_for(&Shell::Nu, spacing);
+            for (open, close) in [('{', '}'), ('(', ')')] {
+                assert_eq!(
+                    nu.matches(open).count(),
+                    nu.matches(close).count(),
+                    "nu {spacing:?}: unbalanced {open}{close}"
+                );
+            }
             let fish = shell_integration_snippet_for(&Shell::Fish, spacing);
             let opens = fish
                 .lines()
@@ -1234,7 +1599,7 @@ mod tests {
 
     #[test]
     fn subshell_injection_is_a_single_space_prefixed_line_per_shell() {
-        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
+        for shell in ALL_SHELLS {
             let line = subshell_injection(&shell, "shell:abc", InitOptions::default());
             assert!(line.starts_with(' '), "{shell:?}: {line}");
             assert!(!line.contains('\n'), "{shell:?}: {line}");
@@ -1253,6 +1618,32 @@ mod tests {
         }
     }
 
+    /// Nushell is the one shell the base64 payload cannot reach: it has no
+    /// `eval`, and `source` resolves its path when the line is *parsed* —
+    /// before anything on that line has run — so a file written by the same
+    /// line can never be sourced by it. The code itself is what gets typed,
+    /// which only works because every statement of the block fits on one
+    /// line; joining them with `;` has to give back the whole block.
+    #[test]
+    fn the_nu_subshell_line_carries_the_code_itself() {
+        let line = subshell_injection(&Shell::Nu, "shell:abc", InitOptions::default());
+        let snippet = shell_integration_snippet(&Shell::Nu);
+        let statements: Vec<&str> = snippet
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect();
+        assert!(statements.len() >= 6, "{statements:?}");
+        for statement in &statements {
+            assert!(line.contains(statement), "missing from the line: {statement}");
+        }
+        assert!(line.contains(&statements.join("; ")), "{line}");
+        // Nothing to decode and nothing to source on the far side: the two
+        // things Nushell cannot do from a line it is currently running.
+        assert!(!line.contains("decode base64"), "{line}");
+        assert!(!line.contains("source "), "{line}");
+    }
+
     #[test]
     fn subshell_injection_quotes_a_hostile_terminal_id() {
         let line = subshell_injection(&Shell::Bash, "shell:'; rm -rf /; #", InitOptions::default());
@@ -1261,6 +1652,53 @@ mod tests {
         assert!(line.contains(r#"CORTX_TERMINAL_ID='shell:'\''; rm -rf /; #'"#), "{line}");
         let pwsh = subshell_injection(&Shell::PowerShell, "shell:'; rm x", InitOptions::default());
         assert!(pwsh.contains("$env:CORTX_TERMINAL_ID = 'shell:''; rm x'"), "{pwsh}");
+        // Nushell reads `"` and `\` inside a double-quoted literal, and only
+        // those two; a `'` is ordinary text there.
+        let nu = subshell_injection(&Shell::Nu, r#"shell:"; rm x"#, InitOptions::default());
+        assert!(nu.contains(r#"$env.CORTX_TERMINAL_ID = "shell:\"; rm x""#), "{nu}");
+        let nu = subshell_injection(&Shell::Nu, "shell:'; rm x", InitOptions::default());
+        assert!(nu.contains(r#"$env.CORTX_TERMINAL_ID = "shell:'; rm x""#), "{nu}");
+    }
+
+    /// Nushell's alias: `--wrapped` is what lets the rest of the line through
+    /// untouched, flags included, the way `"$@"` and `@args` do elsewhere.
+    #[test]
+    fn nu_aliases_wrap_the_command_and_pass_everything_through() {
+        let a = func_alias("onepack", r#"bun run script.ts"#);
+        let out = generate_init_script(&Shell::Nu, std::slice::from_ref(&a), false);
+        assert!(
+            out.contains("def --wrapped onepack [...rest] { bun run script.ts ...$rest }"),
+            "got: {out}"
+        );
+        // A quoted command word is a *value* in Nushell, not something to
+        // run — `^` is its call operator, for the same reason PowerShell
+        // needs `&`.
+        let a = func_alias("payledger", r#""/opt/a b/payledger""#);
+        let out = generate_init_script(&Shell::Nu, std::slice::from_ref(&a), false);
+        assert!(out.contains(r#"{ ^"/opt/a b/payledger" ...$rest }"#), "got: {out}");
+        assert!(!out.contains("^^"), "got: {out}");
+    }
+
+    /// Nushell has no `eval`, so an `init` alias (`starship init …`) cannot be
+    /// run through one. The documented way — the one starship and zoxide give
+    /// their Nushell users — is to write the generated code where the *next*
+    /// shell autoloads it.
+    #[test]
+    fn nu_init_aliases_are_written_to_the_autoload_directory() {
+        let mut a = func_alias("starship", "starship init nu");
+        a.alias_type = "init".to_string();
+        a.script = Some(std::collections::HashMap::from([
+            ("nu".to_string(), "starship init nu".to_string()),
+        ]));
+        let out = generate_init_script(&Shell::Nu, std::slice::from_ref(&a), false);
+        assert!(out.contains(r#"mkdir ($nu.data-dir | path join "vendor" "autoload")"#), "got: {out}");
+        assert!(
+            out.contains(r#"starship init nu | save --force ($nu.data-dir | path join "vendor" "autoload" "starship.nu")"#),
+            "got: {out}"
+        );
+        // Not an eval, and not a `source` of something that does not exist
+        // yet at parse time.
+        assert!(!out.contains("| source"), "got: {out}");
     }
 
     #[test]

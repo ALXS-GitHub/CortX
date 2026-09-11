@@ -1612,6 +1612,27 @@ fn inject_shell_integration(
             }
             Vec::new()
         }
+        Shell::Nu => {
+            // Nushell has no rc file to point at the way bash and zsh do, and
+            // no `eval` to hand the block to. `--execute` is fish's `-C`: it
+            // runs the given code once the user's own `config.nu` is loaded
+            // and then drops into the REPL, and `source` takes a literal path
+            // — which is all it needs, because the file is written before the
+            // shell starts.
+            if args.iter().any(|a| {
+                a == "-c" || a == "--commands" || a == "-e" || a == "--execute"
+            }) {
+                return Vec::new();
+            }
+            if let Some(path) = write("cortx.nu", &block) {
+                args.push("-e".into());
+                args.push(format!(
+                    "source {}",
+                    crate::shell_init::nu_string(&path.to_string_lossy())
+                ));
+            }
+            Vec::new()
+        }
     }
 }
 
