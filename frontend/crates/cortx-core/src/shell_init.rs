@@ -318,6 +318,73 @@ pub fn shell_integration_block_for(shell: &Shell, spacing: TerminalBlockSpacing)
 /// lines* the spacing asks for when the block is generated (see [`shell_integration_snippet_for`]).
 const GAP_TOKEN: &str = "__CORTX_GAP__";
 
+/// Placeholder for the *path of the settings file*, as a quoted literal for
+/// the shell the snippet is written in. The snippets re-read
+/// `terminal.blockSpacing` from it after every command, so a change to the
+/// setting reaches shells that are already open (see [`settings_literal`]).
+const SETTINGS_TOKEN: &str = "__CORTX_SETTINGS__";
+
+/// Placeholder for the integration's *version stamp* — a hash of the snippet
+/// itself, which the PowerShell wrapper leaves in the prompt it installs so a
+/// newer block can tell an older CortX wrapper from its own (see
+/// [`version_stamp`]).
+const MARK_TOKEN: &str = "__CORTX_MARK__";
+
+/// The file [`resolve_block_spacing`] reads, and the one the snippets re-read.
+fn settings_file() -> Option<std::path::PathBuf> {
+    let dirs = directories::ProjectDirs::from("com", "cortx", "Cortx")?;
+    Some(dirs.data_dir().join("settings.json"))
+}
+
+/// [`settings_file`] as a quoted literal for `shell`, or an empty literal when
+/// there is no settings file to point at (every snippet treats that as "don't
+/// re-read" and keeps the value it was generated with).
+fn settings_literal(shell: &Shell) -> String {
+    quoted_path(shell, settings_file().as_deref())
+}
+
+/// The pure half of [`settings_literal`] — a path, quoted for `shell`.
+///
+/// Always single quotes, which is the one form that needs no thought about
+/// what else is in the path: no shell expands anything inside them. The two
+/// families differ only in how a `'` is escaped, and both have to survive
+/// `C:\Users\Alexis Munch\…` — a space, and a backslash that a double-quoted
+/// literal would have eaten.
+///
+/// `None` gives `''`. That is not a broken path but a deliberate one: every
+/// snippet's re-read helper bows out on an empty file name and keeps the
+/// spacing it was generated with, so a machine with no settings file yet
+/// still gets a snippet that runs.
+fn quoted_path(shell: &Shell, path: Option<&std::path::Path>) -> String {
+    let Some(path) = path else {
+        return "''".to_string();
+    };
+    let path = path.to_string_lossy();
+    match shell {
+        // PowerShell single quotes: only `'` is special, and it doubles.
+        Shell::PowerShell => format!("'{}'", path.replace('\'', "''")),
+        // POSIX (and fish, which accepts the same `\'` outside the quotes):
+        // close, escape, reopen.
+        _ => sq(&path),
+    }
+}
+
+/// A deterministic 64-bit FNV-1a of the snippet *template*, hex encoded.
+///
+/// This is what tells two CortX shell integrations apart. It has to be stable
+/// for the same text forever and across machines — two different builds of
+/// CortX carrying the same integration code must agree that they are the same
+/// — which rules out `DefaultHasher` (explicitly not stable) and makes a
+/// four-line hash cheaper than a dependency.
+fn version_stamp(source: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in source.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
 /// The spacing the *current* settings ask for.
 ///
 /// Deliberately not a field of [`InitOptions`]: that struct is spelled out
@@ -329,14 +396,18 @@ const GAP_TOKEN: &str = "__CORTX_GAP__";
 /// resolve the same value — and that a change to the setting reaches the very
 /// next shell without anything having to be regenerated or restarted.
 ///
+/// This is only the value a shell *starts* with: the snippets re-read the same
+/// file after every command (`__cortx_read_gap`), so shells that are already
+/// open follow the setting too, without CortX having to type anything into a
+/// live PTY (ticket #41).
+///
 /// `settings.json` is read straight off disk rather than through `Storage`:
 /// this is called once per shell start, the file is the one `Storage` itself
 /// writes on every change, and shell_init has no business holding a handle to
 /// the whole store. Anything unreadable falls back to the default.
 pub fn resolve_block_spacing() -> TerminalBlockSpacing {
     fn read() -> Option<TerminalBlockSpacing> {
-        let dirs = directories::ProjectDirs::from("com", "cortx", "Cortx")?;
-        let bytes = std::fs::read(dirs.data_dir().join("settings.json")).ok()?;
+        let bytes = std::fs::read(settings_file()?).ok()?;
         let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
         let raw = json.get("terminal")?.get("blockSpacing")?.as_str()?;
         match raw {
@@ -423,14 +494,26 @@ pub fn subshell_injection(shell: &Shell, terminal_id: &str, opts: InitOptions) -
 /// exactly one row tall and no overlay can push two of them apart — and that
 /// blank line is also what gives the divider and the action bar a row nobody
 /// else wrote in.
+///
+/// **Two producers, newest wins.** The same block is emitted twice for the
+/// same shell: once by the profile's `cortx init` (whatever CLI is installed)
+/// and once by the app's own start-up injection (`process_manager`). They can
+/// be different builds, and before ticket #41 the PowerShell wrapper bowed out
+/// as soon as *any* CortX marker was on the prompt — so an older `cortx init`
+/// held the prompt for the whole session while the newer block only got as far
+/// as setting variables nothing read. The marker now carries a
+/// [`version_stamp`] of the snippet, and a wrapper that is not this exact
+/// version is replaced (its inner prompt, the user's real one, is inherited).
 pub fn shell_integration_snippet(shell: &Shell) -> String {
     shell_integration_snippet_for(shell, resolve_block_spacing())
 }
 
-/// [`shell_integration_snippet`] with the spacing spelled out. Pure: the only
-/// thing the setting changes is the number the snippet initialises its
+/// [`shell_integration_snippet`] with the spacing spelled out. The only thing
+/// the setting changes is the number the snippet *initialises* its
 /// `__cortx_gap` counter with, so every variant is the same script and the
-/// PowerShell one stays a single base64 line.
+/// PowerShell one stays a single base64 line — and so the version stamp, which
+/// is taken from the template before anything is substituted, is the same for
+/// all three spacings.
 pub fn shell_integration_snippet_for(shell: &Shell, spacing: TerminalBlockSpacing) -> String {
     let template = match shell {
         Shell::PowerShell => POWERSHELL_INTEGRATION,
@@ -443,7 +526,10 @@ pub fn shell_integration_snippet_for(shell: &Shell, spacing: TerminalBlockSpacin
         TerminalBlockSpacing::Normal => "1",
         TerminalBlockSpacing::Comfortable => "2",
     };
-    template.replace(GAP_TOKEN, gap)
+    template
+        .replace(GAP_TOKEN, gap)
+        .replace(MARK_TOKEN, &version_stamp(template))
+        .replace(SETTINGS_TOKEN, &settings_literal(shell))
 }
 
 const POWERSHELL_INTEGRATION: &str = r##"
@@ -452,18 +538,55 @@ if ($env:CORTX_TERMINAL_ID) {
     $global:__cortx_ran = $false
     # How many blank lines between a command's output and the next prompt
     # 0 = compact, 1 = normal, 2 = comfortable (settings.terminal.blockSpacing).
+    # Seeded with the value this block was generated with, then re-read from
+    # the settings file after every command: a shell that is already open has
+    # to follow a change to the setting too, and nothing else in the session
+    # ever goes back to ask.
     $global:__cortx_gap = __CORTX_GAP__
+    $global:__cortx_gap_file = __CORTX_SETTINGS__
+    $global:__cortx_gap_stamp = ''
+    function global:__cortx_read_gap {
+        if (-not $global:__cortx_gap_file) { return }
+        try {
+            $f = Get-Item -LiteralPath $global:__cortx_gap_file -ErrorAction Stop
+            $stamp = "$($f.LastWriteTimeUtc.Ticks)/$($f.Length)"
+            if ($stamp -eq $global:__cortx_gap_stamp) { return }
+            $global:__cortx_gap_stamp = $stamp
+            $raw = [IO.File]::ReadAllText($f.FullName)
+            if ($raw -match '"blockSpacing"\s*:\s*"(compact|normal|comfortable)"') {
+                $v = $matches[1]
+                if ($v -eq 'compact') { $global:__cortx_gap = 0 } elseif ($v -eq 'normal') { $global:__cortx_gap = 1 } else { $global:__cortx_gap = 2 }
+            }
+        } catch { }
+    }
     function global:__cortx_urlencode([string]$p) {
         return $p.Replace('%', '%25').Replace(' ', '%20').Replace('#', '%23').Replace('?', '%3F')
     }
     function global:__cortx_wrap_prompt {
         $inner = $function:prompt
-        if ($inner -and $inner.ToString().Contains('__cortx_marks')) { return }
+        if ($inner) {
+            $src = $inner.ToString()
+            # Already this exact version of the integration: nothing to do.
+            if ($src.Contains('__cortx_marks:__CORTX_MARK__')) { return }
+            if ($src.Contains('__cortx_marks')) {
+                # A *different* CortX wrapper holds the prompt — the profile's
+                # `cortx init` from an older CLI, run before the app injected
+                # this block at start-up. Take its place instead of leaving it
+                # in charge: the guard used to treat any CortX marker as "mine
+                # already", so the oldest producer of the integration won for
+                # the whole session and everything a newer one carries — the
+                # block spacing, for one — was a dead letter (ticket #41).
+                # Its own inner prompt is the user's real one; without it there
+                # is nothing safe to re-wrap, so the old wrapper stays.
+                if (-not $global:__cortx_inner_prompt) { return }
+                $inner = $global:__cortx_inner_prompt
+            }
+        }
         $global:__cortx_inner_prompt = $inner
         function global:prompt {
             $lastSuccess = $?
             $gle = $global:LASTEXITCODE
-            # __cortx_marks
+            # __cortx_marks:__CORTX_MARK__
             $inner = $global:__cortx_inner_prompt
             $loc = $ExecutionContext.SessionState.Path.CurrentLocation
             $text = if ($inner) { & $inner } else { "PS $loc> " }
@@ -474,17 +597,32 @@ if ($env:CORTX_TERMINAL_ID) {
                 $code = if ($lastSuccess) { 0 } elseif ($gle -is [int] -and $gle -ne 0) { $gle } else { 1 }
                 $out += "$e]133;D;$code$b"
                 $global:__cortx_ran = $false
-                # The blank line that separates two blocks. Only after a
+                __cortx_read_gap
+                # The blank rows that separate two blocks. Only after a
                 # command actually ran, so the first prompt of a session — and
-                # an Enter on an empty line — never opens on a blank row. And
-                # never when the prompt itself already starts on a new line
-                # (oh-my-posh, starship's add_newline), which would double it.
+                # an Enter on an empty line — never opens on a blank row.
                 # CR LF and not just LF: a command that ended without a newline
                 # of its own leaves the cursor mid-row, and a bare LF would
                 # start the prompt in that column.
                 if ($global:__cortx_gap -gt 0) {
-                    $head = $flat -replace '^(?:\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07)+', ''
                     $need = $global:__cortx_gap
+                    # A command that ended mid-row (`Write-Host -NoNewline`)
+                    # would spend the first CR LF merely *closing* its row
+                    # instead of making a blank one, and the gap would come out
+                    # a row short. Measured on pwsh 7 under ConPTY the host has
+                    # already closed that row by the time it asks for a prompt,
+                    # so this reads 0 and adds nothing; it is here for the
+                    # hosts that do not (Windows PowerShell 5.1). Either way
+                    # the column is a fact, which the prompt string is not.
+                    try { if ($Host.UI.RawUI.CursorPosition.X -gt 0) { $need = $need + 1 } } catch { }
+                    # And one row fewer when the prompt itself already opens on
+                    # a new line (oh-my-posh, starship's add_newline), which
+                    # would otherwise add a row on top of the gap. Read off the
+                    # prompt the inner function actually returned; a prompt that
+                    # writes to the console itself gives an empty string here,
+                    # and an empty string asks for no correction, which is the
+                    # safe way round.
+                    $head = $flat -replace '^(?:\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07)+', ''
                     if ($head -match '^\r?\n') { $need = $need - 1 }
                     for ($i = 0; $i -lt $need; $i++) { $out += "`r`n" }
                 }
@@ -524,11 +662,33 @@ if [ -n "$CORTX_TERMINAL_ID" ] && [ -n "$BASH_VERSION" ]; then
   # How many blank lines between a command's output and the next prompt
   # 0 = compact, 1 = normal, 2 = comfortable (settings.terminal.blockSpacing).
   __cortx_gap=__CORTX_GAP__
+  __cortx_gap_file=__CORTX_SETTINGS__
   __cortx_osc() { printf '\033]%s\007' "$1"; }
   __cortx_urlencode() { local s="$1"; s="${s//%/%25}"; s="${s// /%20}"; s="${s//#/%23}"; s="${s//\?/%3F}"; printf '%s' "$s"; }
+  # Re-read the setting rather than trusting the value this block was written
+  # with: a shell that is already open has to follow a change to
+  # `terminal.blockSpacing` too. Builtins only, so it costs no process.
+  __cortx_read_gap() {
+    [ -r "$__cortx_gap_file" ] || return 0
+    local line
+    while IFS= read -r line; do
+      case "$line" in
+        *'"blockSpacing"'*)
+          case "$line" in
+            *compact*) __cortx_gap=0 ;;
+            *comfortable*) __cortx_gap=2 ;;
+            *normal*) __cortx_gap=1 ;;
+          esac
+          break
+          ;;
+      esac
+    done 2>/dev/null < "$__cortx_gap_file"
+    return 0
+  }
   # The blank line that separates two blocks. Skipped when PS1 already opens
   # on a new line (a two-line prompt), which would otherwise double it.
   __cortx_gap_line() {
+    __cortx_read_gap
     local n="$__cortx_gap"
     [ "$n" -gt 0 ] 2>/dev/null || return 0
     case "$PS1" in $'\n'*|'\n'*) n=$((n - 1)) ;; esac
@@ -556,7 +716,14 @@ if [ -n "$CORTX_TERMINAL_ID" ] && [ -n "$BASH_VERSION" ]; then
     case "$PS1" in *'133;B'*) ;; *) PS1="${PS1}"'\[\e]133;B\a\]' ;; esac
     __cortx_mode=on
   }
-  PROMPT_COMMAND="__cortx_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND};__cortx_precmd_last"
+  # Once per shell, however many times the block is evaluated: the profile's
+  # `cortx init` and the app's own start-up injection both run it, and hooking
+  # twice means two `133;A` per prompt. The *functions* are redefined either
+  # way, so the newest block still wins (ticket #41).
+  case "$PROMPT_COMMAND" in
+    *__cortx_precmd*) ;;
+    *) PROMPT_COMMAND="__cortx_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND};__cortx_precmd_last" ;;
+  esac
   trap '__cortx_preexec' DEBUG
 fi
 "##;
@@ -568,11 +735,33 @@ if [[ -n "$CORTX_TERMINAL_ID" && -n "$ZSH_VERSION" ]]; then
   # How many blank lines between a command's output and the next prompt
   # 0 = compact, 1 = normal, 2 = comfortable (settings.terminal.blockSpacing).
   __cortx_gap=__CORTX_GAP__
+  __cortx_gap_file=__CORTX_SETTINGS__
   __cortx_osc() { printf '\033]%s\007' "$1"; }
   __cortx_urlencode() { local s="$1"; s="${s//\%/%25}"; s="${s// /%20}"; s="${s//\#/%23}"; s="${s//\?/%3F}"; printf '%s' "$s"; }
+  # Re-read the setting rather than trusting the value this block was written
+  # with: a shell that is already open has to follow a change to
+  # `terminal.blockSpacing` too. Builtins only, so it costs no process.
+  __cortx_read_gap() {
+    [ -r "$__cortx_gap_file" ] || return 0
+    local line
+    while IFS= read -r line; do
+      case "$line" in
+        *'"blockSpacing"'*)
+          case "$line" in
+            *compact*) __cortx_gap=0 ;;
+            *comfortable*) __cortx_gap=2 ;;
+            *normal*) __cortx_gap=1 ;;
+          esac
+          break
+          ;;
+      esac
+    done 2>/dev/null < "$__cortx_gap_file"
+    return 0
+  }
   # The blank line that separates two blocks. Skipped when PS1 already opens
   # on a new line (a two-line prompt), which would otherwise double it.
   __cortx_gap_line() {
+    __cortx_read_gap
     local n="$__cortx_gap"
     [[ "$n" -gt 0 ]] || return 0
     [[ "$PS1" == $'\n'* || "$PS1" == '\n'* ]] && n=$((n - 1))
@@ -602,6 +791,22 @@ if set -q CORTX_TERMINAL_ID
     # How many blank lines between a command's output and the next prompt
     # 0 = compact, 1 = normal, 2 = comfortable (settings.terminal.blockSpacing).
     set -g __cortx_gap __CORTX_GAP__
+    set -g __cortx_gap_file __CORTX_SETTINGS__
+    # Re-read the setting rather than trusting the value this block was written
+    # with: a shell that is already open has to follow a change to
+    # `terminal.blockSpacing` too.
+    function __cortx_read_gap
+        if test -r "$__cortx_gap_file"
+            set -l m (string match -rg '"blockSpacing"\s*:\s*"(compact|normal|comfortable)"' < $__cortx_gap_file)
+            if test "$m" = compact
+                set -g __cortx_gap 0
+            else if test "$m" = normal
+                set -g __cortx_gap 1
+            else if test "$m" = comfortable
+                set -g __cortx_gap 2
+            end
+        end
+    end
     function __cortx_osc
         printf '\033]%s\007' $argv[1]
     end
@@ -628,6 +833,7 @@ if set -q CORTX_TERMINAL_ID
         # `blockSpacing = compact` is the answer there.
         if set -q __cortx_gap_pending
             set -e __cortx_gap_pending
+            __cortx_read_gap
             for __cortx_i in (seq $__cortx_gap)
                 printf '\n'
             end
@@ -695,19 +901,245 @@ mod tests {
             let on = shell_integration_snippet_for(&shell, TerminalBlockSpacing::Normal);
             let off = shell_integration_snippet_for(&shell, TerminalBlockSpacing::Compact);
             for snippet in [&on, &off] {
-                assert!(!snippet.contains(GAP_TOKEN), "{shell:?}: placeholder left in place");
+                for token in [GAP_TOKEN, SETTINGS_TOKEN, MARK_TOKEN] {
+                    assert!(!snippet.contains(token), "{shell:?}: {token} left in place");
+                }
                 assert!(snippet.contains("__cortx_gap"), "{shell:?}: no spacing flag");
             }
-            // One character apart: `1` against `0`.
+            // Exactly one character apart: the digit the counter starts at.
+            // (Spelled out as a diff rather than a `replace`, because the
+            // re-read helper mentions every value the setting can take.)
             assert_eq!(on.len(), off.len(), "{shell:?}");
-            assert_eq!(
-                on.replace("__cortx_gap = 1", "__cortx_gap = 0")
-                    .replace("__cortx_gap=1", "__cortx_gap=0")
-                    .replace("__cortx_gap 1", "__cortx_gap 0"),
-                off,
-                "{shell:?}: the setting changed more than the flag"
+            let diffs: Vec<usize> = on
+                .char_indices()
+                .zip(off.chars())
+                .filter(|((_, a), b)| a != b)
+                .map(|((i, _), _)| i)
+                .collect();
+            assert_eq!(diffs.len(), 1, "{shell:?}: the setting changed more than the flag");
+            let line = on[..diffs[0]].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            assert!(
+                on[line..diffs[0]].contains("__cortx_gap"),
+                "{shell:?}: the character that moved is not the spacing flag"
             );
         }
+    }
+
+    /// The spacing is not frozen at start-up: every snippet knows where the
+    /// settings file is and goes back to it after a command, so a shell that
+    /// is already open follows a change to `terminal.blockSpacing` too
+    /// (ticket #41).
+    #[test]
+    fn every_shell_re_reads_the_spacing_from_the_settings_file() {
+        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
+            let snippet = shell_integration_snippet_for(&shell, TerminalBlockSpacing::Normal);
+            assert!(snippet.contains("__cortx_read_gap"), "{shell:?}: no re-read");
+            assert!(snippet.contains("__cortx_gap_file"), "{shell:?}: no settings path");
+            assert!(snippet.contains("blockSpacing"), "{shell:?}: the key is not looked for");
+            // Every value the setting can take is understood, or a mode would
+            // silently keep whatever the shell started with.
+            for value in ["compact", "normal", "comfortable"] {
+                assert!(snippet.contains(value), "{shell:?}: {value} not handled");
+            }
+            // The path is a quoted literal, not a bare word: it holds spaces
+            // on every Windows machine.
+            let literal = settings_literal(&shell);
+            assert!(literal.starts_with('\''), "{shell:?}: {literal}");
+            assert!(snippet.contains(&literal), "{shell:?}: {literal} not embedded");
+        }
+        // bash and zsh match the value with globs (`*compact*`), which only
+        // stays honest while no value contains another. `comfortable` and
+        // `compact` share three letters and are one edit away from the bug.
+        let values = ["compact", "normal", "comfortable"];
+        for a in values {
+            for b in values {
+                assert!(a == b || !a.contains(b), "{b} hides inside {a}: the glob match would lie");
+            }
+        }
+    }
+
+    /// The PowerShell wrapper must be able to tell *its own* version from
+    /// another CortX wrapper, and take over from the other one — otherwise the
+    /// first block to reach the shell (the profile's `cortx init`, from
+    /// whatever CLI happens to be installed) owns the prompt for the whole
+    /// session and everything a newer block carries is dead (ticket #41).
+    #[test]
+    fn a_foreign_cortx_wrapper_is_taken_over_not_deferred_to() {
+        let pwsh = shell_integration_snippet_for(&Shell::PowerShell, TerminalBlockSpacing::Normal);
+        let stamp = version_stamp(POWERSHELL_INTEGRATION);
+        assert_eq!(stamp.len(), 16, "{stamp}");
+        // The stamp is in the marker the prompt carries *and* in the guard, so
+        // the guard recognises a prompt this very snippet installed.
+        let mark = format!("__cortx_marks:{stamp}");
+        assert_eq!(pwsh.matches(&mark).count(), 2, "{pwsh}");
+        assert!(pwsh.contains(&format!("$src.Contains('{mark}')")), "{pwsh}");
+        // …and an older marker (no stamp) is inherited from, not deferred to.
+        assert!(pwsh.contains("$inner = $global:__cortx_inner_prompt"), "{pwsh}");
+        // The marker still sits inside the prompt function, which is the only
+        // thing `$function:prompt.ToString()` can be searched for.
+        let body = pwsh.find("function global:prompt {").unwrap();
+        assert!(pwsh[body..].contains(&mark), "{pwsh}");
+    }
+
+    /// The stamp says "this integration code", not "this spacing": it is taken
+    /// from the template, so the three spacings are the same version and a
+    /// terminal does not re-wrap its prompt just because the setting moved.
+    #[test]
+    fn the_version_stamp_is_the_same_for_every_spacing_and_stable() {
+        let a = shell_integration_snippet_for(&Shell::PowerShell, TerminalBlockSpacing::Compact);
+        let b = shell_integration_snippet_for(&Shell::PowerShell, TerminalBlockSpacing::Comfortable);
+        let stamp = version_stamp(POWERSHELL_INTEGRATION);
+        assert!(a.contains(&stamp) && b.contains(&stamp));
+        // FNV-1a, spelled out: the same text must hash the same in every build
+        // of CortX, for ever, or two builds would fight over the prompt.
+        assert_eq!(version_stamp(""), "cbf29ce484222325");
+        assert_eq!(version_stamp("a"), "af63dc4c8601ec8c");
+        assert_ne!(version_stamp("a"), version_stamp("b"));
+    }
+
+    /// The stamp is only worth carrying if it is *stable* for one text and
+    /// *moves* for another: a wrapper compares it against its own to decide
+    /// whether the prompt it is looking at is already its work. Stable-but-
+    /// colliding and moving-but-unstable are both fatal — the first leaves an
+    /// older integration in charge, the second re-wraps the prompt at every
+    /// single command.
+    #[test]
+    fn the_version_stamp_is_stable_for_one_text_and_moves_for_another() {
+        // Stable: the same text, hashed again, and hashed a third time after
+        // other work. Nothing in it may depend on process state.
+        assert_eq!(version_stamp(POWERSHELL_INTEGRATION), version_stamp(POWERSHELL_INTEGRATION));
+        let once = version_stamp(POWERSHELL_INTEGRATION);
+        let _ = version_stamp(BASH_INTEGRATION);
+        assert_eq!(once, version_stamp(POWERSHELL_INTEGRATION));
+
+        // Moves: every template is its own version, and so is the *same*
+        // template with one character changed — which is the case that
+        // matters, because that is what a real edit to the snippet looks like.
+        let templates =
+            [POWERSHELL_INTEGRATION, BASH_INTEGRATION, ZSH_INTEGRATION, FISH_INTEGRATION];
+        let stamps: Vec<String> = templates.iter().map(|t| version_stamp(t)).collect();
+        for (i, a) in stamps.iter().enumerate() {
+            for b in stamps.iter().skip(i + 1) {
+                assert_ne!(a, b, "two templates share a version");
+            }
+        }
+        let edited = POWERSHELL_INTEGRATION.replacen("__cortx_ran", "__cortx_RAN", 1);
+        assert_ne!(version_stamp(&edited), once, "an edit to the snippet kept its version");
+        // A fixed width, because it goes into the marker verbatim.
+        for stamp in &stamps {
+            assert_eq!(stamp.len(), 16, "{stamp}");
+            assert!(stamp.chars().all(|c| c.is_ascii_hexdigit()), "{stamp}");
+        }
+    }
+
+    /// The settings path goes into the snippet as a *literal*, in the quoting
+    /// of the shell it is written for. It is `C:\Users\Alexis Munch\…` on
+    /// every Windows machine — a space, and backslashes that a double-quoted
+    /// literal would have eaten — so single quotes are the only safe form, and
+    /// the one character they cannot hold has to be escaped each shell's way.
+    #[test]
+    fn the_settings_path_is_quoted_the_way_each_shell_quotes() {
+        use std::path::Path;
+        let windows = Path::new(r"C:\Users\Alexis Munch\AppData\Roaming\cortx\Cortx\data\settings.json");
+        let unix = Path::new("/home/alexis/.local/share/cortx/settings.json");
+        // A `'` in the path: the one character that can close the literal and
+        // let the rest of the path run as code.
+        let quoted = Path::new("/home/o'brien/.local/share/cortx/settings.json");
+
+        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
+            for path in [windows, unix] {
+                let lit = quoted_path(&shell, Some(path));
+                let raw = path.to_string_lossy();
+                // Whole thing in one pair of single quotes, nothing escaped:
+                // no shell expands anything in there, backslash included.
+                assert_eq!(lit, format!("'{raw}'"), "{shell:?}");
+            }
+            // The space and the backslashes came through untouched.
+            let lit = quoted_path(&shell, Some(windows));
+            assert!(lit.contains("Alexis Munch"), "{shell:?}: {lit}");
+            assert!(lit.contains(r"\AppData\"), "{shell:?}: {lit}");
+            // Every `'` is escaped, and the literal still opens and closes
+            // exactly once as far as the shell is concerned.
+            let lit = quoted_path(&shell, Some(quoted));
+            assert!(lit.contains("o") && lit.contains("brien"), "{shell:?}: {lit}");
+            assert!(!lit.contains("o'brien"), "{shell:?}: bare quote left in {lit}");
+        }
+
+        // PowerShell doubles the quote; the POSIX shells (and fish, which
+        // takes the same `\'` outside the quotes) close, escape and reopen.
+        assert_eq!(
+            quoted_path(&Shell::PowerShell, Some(quoted)),
+            "'/home/o''brien/.local/share/cortx/settings.json'"
+        );
+        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+            assert_eq!(
+                quoted_path(&shell, Some(quoted)),
+                r"'/home/o'\''brien/.local/share/cortx/settings.json'",
+                "{shell:?}"
+            );
+        }
+    }
+
+    /// No settings file to point at — a machine that has never opened the
+    /// settings — must still produce a snippet that *runs*. The literal is
+    /// empty and every re-read helper bows out on it, keeping the spacing the
+    /// block was generated with rather than erroring at every prompt.
+    #[test]
+    fn without_a_settings_file_the_literal_is_empty_and_the_snippet_still_stands() {
+        for shell in [Shell::PowerShell, Shell::Bash, Shell::Zsh, Shell::Fish] {
+            assert_eq!(quoted_path(&shell, None), "''", "{shell:?}");
+            let template = match shell {
+                Shell::PowerShell => POWERSHELL_INTEGRATION,
+                Shell::Bash => BASH_INTEGRATION,
+                Shell::Zsh => ZSH_INTEGRATION,
+                Shell::Fish => FISH_INTEGRATION,
+            };
+            let snippet = template.replace(GAP_TOKEN, "2").replace(MARK_TOKEN, "0").replace(
+                SETTINGS_TOKEN,
+                &quoted_path(&shell, None),
+            );
+            assert!(!snippet.contains(SETTINGS_TOKEN), "{shell:?}");
+            // The assignment is still an assignment, not a syntax hole.
+            let assignment = match shell {
+                Shell::PowerShell => "$global:__cortx_gap_file = ''",
+                Shell::Fish => "set -g __cortx_gap_file ''",
+                _ => "__cortx_gap_file=''",
+            };
+            assert!(snippet.contains(assignment), "{shell:?}: {assignment} missing");
+            // …and the helper refuses to read it rather than reading `''`.
+            let bail = match shell {
+                Shell::PowerShell => "if (-not $global:__cortx_gap_file) { return }",
+                Shell::Fish => r#"if test -r "$__cortx_gap_file""#,
+                _ => r#"[ -r "$__cortx_gap_file" ] || return 0"#,
+            };
+            assert!(snippet.contains(bail), "{shell:?}: no guard on an empty path");
+        }
+    }
+
+    /// A command that ended mid-row (`Write-Host -NoNewline`) would spend the
+    /// first CR LF closing its row rather than making a blank one, and the gap
+    /// would come out a row short. The cursor column is the only thing that
+    /// knows — measured on pwsh 7 under ConPTY the host has already closed the
+    /// row and it reads 0, but a host that has not is exactly the case this
+    /// covers, and a fact is a better basis than the prompt string.
+    #[test]
+    fn the_gap_counts_rows_not_newlines() {
+        let pwsh = shell_integration_snippet_for(&Shell::PowerShell, TerminalBlockSpacing::Normal);
+        assert!(pwsh.contains("$Host.UI.RawUI.CursorPosition.X -gt 0"), "{pwsh}");
+        // Guarded: a host without a real console throws on the cursor.
+        let at = pwsh.find("$Host.UI.RawUI.CursorPosition.X").unwrap();
+        let line_start = pwsh[..at].rfind('\n').unwrap() + 1;
+        assert!(pwsh[line_start..at].trim_start().starts_with("try {"), "{pwsh}");
+    }
+
+    /// Evaluating the bash block twice — the profile's `cortx init` and the
+    /// app's start-up injection both do — must not hook the prompt twice.
+    #[test]
+    fn the_bash_hook_is_installed_once_however_often_the_block_runs() {
+        let bash = shell_integration_snippet_for(&Shell::Bash, TerminalBlockSpacing::Normal);
+        let guard = bash.find("*__cortx_precmd*)").unwrap();
+        let install = bash.find("PROMPT_COMMAND=\"__cortx_precmd").unwrap();
+        assert!(guard < install, "{bash}");
     }
 
     /// Guarded on a command having run, so the first prompt of a session — and
