@@ -1,0 +1,117 @@
+name: 'CI'
+
+# Everything the project already checks by hand, run on every push and every
+# pull request. Issue #47: until this existed, nothing stopped a test that only
+# passed on one platform from being merged — which is exactly what #46 was.
+#
+# `ubuntu-latest` alone on purpose. The three-OS matrix lives in `release.yml`,
+# where it builds the artefacts; a second one here would triple the wait for
+# very little, and the tests that are platform-specific say so themselves.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch cancels the run that is already going: the
+# older answer is about code nobody is looking at any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: 'Frontend (lint, types, tests)'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      # `bun run test` is `node --test`, not `bun test`: the suites are .ts
+      # files run through Node's own type stripping, which needs a Node new
+      # enough to do it without a flag. The runner's default Node is not
+      # guaranteed to be, so it is pinned here.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: bun install
+
+      # 0 errors is the standing rule for this repository, not a target.
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bunx tsc -b
+
+      # 9 Node suites, plus the check-source-bytes guard over every source file.
+      - name: Test
+        run: bun run test
+
+  rust:
+    name: 'Rust (cargo test)'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # cortx-core links the Tauri stack, so the workspace does not build on a
+      # bare runner. Same list as `release.yml` installs for ubuntu-22.04 —
+      # deliberately copied rather than reasoned about again.
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './frontend -> target'
+
+      # `tauri::generate_context!` reads `frontendDist` and the two
+      # `externalBin` entries at *compile* time, and both are build products
+      # that are not in the repository. Nothing in this job tests the bundle,
+      # so stand-ins are enough — and they save a Vite build and two release
+      # builds of the sidecars on every run.
+      - name: Stand in for the build products
+        run: |
+          mkdir -p frontend/dist frontend/src-tauri/binaries
+          echo '<!doctype html><title>ci</title>' > frontend/dist/index.html
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          for bin in cortx cortx-mcp; do
+            printf '#!/bin/sh\n' > "frontend/src-tauri/binaries/$bin-$triple"
+            chmod +x "frontend/src-tauri/binaries/$bin-$triple"
+          done
+
+      - name: Test
+        working-directory: frontend
+        run: cargo test --workspace
+
+  # Not in this workflow, and on purpose:
+  #
+  # - `cargo fmt --check`: measured on `main` at 0.15.1, it reports 670 hunks
+  #   that differ from rustfmt's opinion, across the whole workspace.
+  # - `cargo clippy --workspace -- -D warnings`: 24 warnings in `cortx-core`
+  #   alone (redundant closures, `sort_by_key`, MSRV-newer items, a
+  #   `from_str` that shadows the trait method…).
+  #
+  # Either one added today would be red on its first run, and a gate that was
+  # never green teaches people to ignore the red. Both are worth turning on —
+  # each behind the commit that clears what it finds, in that order.
