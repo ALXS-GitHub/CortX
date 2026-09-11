@@ -118,8 +118,8 @@ import {
   type KeyDescriptor,
 } from '@/lib/terminalInputState';
 import { caretOffsetAt } from '@/lib/terminalInputHit';
-import { acceptanceFor, type CompletionItem } from '@/lib/terminalCompletion';
-import { onCompletionData } from '@/lib/terminalCompletionData';
+import { acceptanceFor, aliasHintFor, type CompletionItem } from '@/lib/terminalCompletion';
+import { onCompletionData, peekAliases } from '@/lib/terminalCompletionData';
 import {
   closeMenu,
   getEngine,
@@ -872,6 +872,11 @@ class InputEditorController {
   }
 
   /** Candidates for the line as it stands, or an empty list. */
+  /** What the first token of the line expands to, when it is a CortX alias. */
+  private aliasHint(): string | null {
+    return aliasHintFor(this.machine.text, peekAliases());
+  }
+
   menuItems(): CompletionItem[] {
     const engine = getEngine(this.id);
     if (!engine) return [];
@@ -896,7 +901,13 @@ class InputEditorController {
     }
     if (!this.offAccept) this.offAccept = registerAccept(this.id, (i) => this.acceptMenu(i));
     this.menuOpen = true;
-    setMenuState(this.id, { open: true, items, index: 0, anchor: this.menuAnchor() });
+    setMenuState(this.id, {
+      open: true,
+      items,
+      index: 0,
+      anchor: this.menuAnchor(),
+      hint: this.aliasHint(),
+    });
     // The ghost would sit on top of the list's first row.
     this.setGhost('');
     return true;
@@ -922,6 +933,7 @@ class InputEditorController {
       items,
       index: Math.min(previous.index, items.length - 1),
       anchor: this.menuAnchor(),
+      hint: this.aliasHint(),
     });
   }
 

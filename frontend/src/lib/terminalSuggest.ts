@@ -56,6 +56,7 @@ import { inputEditorOwnsLine } from '@/lib/terminalInputEditor';
 import { boundaryLine } from '@/lib/terminalBlockModel';
 import {
   acceptanceFor,
+  aliasHintFor,
   completeLine,
   ghostFor,
   GHOST_THRESHOLDS,
@@ -510,7 +511,8 @@ class SuggestionController {
   }
 
   private renderMenu(line: string, opening = false) {
-    const items = completeLine(line, this.dataFor(line), MENU_LIMIT);
+    const data = this.dataFor(line);
+    const items = completeLine(line, data, MENU_LIMIT);
     if (items.length === 0) {
       // While opening, keep the menu shut rather than flashing an empty box;
       // while open, a line that no longer matches closes it.
@@ -527,6 +529,8 @@ class SuggestionController {
       items,
       index: keepIndex,
       anchor: this.anchorPx(),
+      // What `cc` stands for, while `cc` is on the line (#38).
+      hint: aliasHintFor(line, data.aliases ?? []),
     });
     // The ghost would sit on top of the list's first row.
     this.hide();

@@ -19,7 +19,14 @@
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import type { CommandSpec, CommandSuggestion, PathCompletion, SpecItem } from '@/types';
-import { analyseLine, type CompletionData, type CompletionRequest } from '@/lib/terminalCompletion';
+import {
+  aliasCandidates,
+  aliasFor,
+  analyseLine,
+  type AliasEntry,
+  type CompletionData,
+  type CompletionRequest,
+} from '@/lib/terminalCompletion';
 
 interface Entry<T> {
   value: T;
@@ -103,6 +110,19 @@ function historyKey(cwd: string | null, projectId: string | null): string {
 }
 
 const HISTORY_TTL = 10_000;
+/**
+ * Aliases are edited by hand in Shell Config, so they move rarely — but when
+ * they move the user is *looking* at the terminal to check the change took.
+ *
+ * Twenty seconds is the compromise, and the reason it has to be a TTL at all
+ * is worth writing down: the only cross-window signal that exists is
+ * `data-changed`, and the file watcher behind it is deliberately suppressed
+ * while CortX itself writes (`storage.set_suppress_watcher`). An alias saved
+ * from the main window's Shell Config therefore reaches a Terminal window's
+ * store by no event whatsoever. Polling on a stale read is what closes that,
+ * and it costs one in-process command every twenty seconds of typing.
+ */
+const ALIAS_TTL = 20_000;
 const SPEC_TTL = 60 * 60 * 1000;
 const GIT_TTL = 15_000;
 const NPM_TTL = 30_000;
@@ -117,6 +137,20 @@ const specCache = new AsyncCache<CommandSpec | null>(SPEC_TTL, (command) =>
   api.getCommandSpec(command)
 );
 
+/**
+ * CortX's own alias registry (#38). One key, one entry: the registry is global,
+ * not per-directory.
+ *
+ * The filtering and the resolution are done **here, once per load**, not on
+ * every keystroke: `aliasCandidates` drops what could never be a first token
+ * and follows each alias to the program whose spec describes its flags.
+ */
+const aliasCache = new AsyncCache<AliasEntry[]>(
+  ALIAS_TTL,
+  async () => aliasCandidates(await api.getAllAliases()),
+  1
+);
+
 const gitRefsCache = new AsyncCache<string[]>(GIT_TTL, (cwd) => api.completeGitRefs(cwd));
 
 const npmScriptsCache = new AsyncCache<SpecItem[]>(NPM_TTL, (cwd) => api.completeNpmScripts(cwd));
@@ -129,6 +163,7 @@ const pathsCache = new AsyncCache<PathCompletion[]>(PATHS_TTL, (key) => {
 /** Everything is discarded when a setting that gates a source changes. */
 export function resetCompletionData() {
   historyCache.clear();
+  aliasCache.clear();
   specCache.clear();
   gitRefsCache.clear();
   npmScriptsCache.clear();
@@ -160,11 +195,19 @@ export interface CompletionScope {
  */
 export function peek(line: string, scope: CompletionScope): CompletionData {
   const req: CompletionRequest = analyseLine(line);
+  const aliases = peekAliases();
   const data: CompletionData = {
     history: historyCache.peek(historyKey(scope.cwd, scope.projectId)) ?? [],
+    aliases,
   };
   if (req.needsSpec && req.command && specsEnabled()) {
-    data.spec = specCache.peek(req.command) ?? null;
+    // The whole point of owning the registry: on `cc --`, ask for the spec of
+    // whatever `cc` really runs, so the flags of `claude` come back. When the
+    // alias is not expandable (`resolveAlias` refused) `target` is null and
+    // this falls through to the plain lookup, exactly as before.
+    const alias = aliasFor(req.command, aliases);
+    data.spec = specCache.peek(alias?.target ?? req.command) ?? null;
+    if (alias?.target) data.specShift = alias.targetShift;
   }
   if (scope.cwd && contextEnabled()) {
     if (req.needsGitRefs) data.gitRefs = gitRefsCache.peek(scope.cwd) ?? [];
@@ -186,4 +229,12 @@ export function peek(line: string, scope: CompletionScope): CompletionData {
  */
 export function peekHistory(scope: CompletionScope): CommandSuggestion[] {
   return historyCache.peek(historyKey(scope.cwd, scope.projectId)) ?? [];
+}
+
+/**
+ * The alias registry alone — what the expansion hint needs, and what a surface
+ * holding its own line can ask for without going through {@link peek}.
+ */
+export function peekAliases(): AliasEntry[] {
+  return aliasCache.peek('') ?? [];
 }

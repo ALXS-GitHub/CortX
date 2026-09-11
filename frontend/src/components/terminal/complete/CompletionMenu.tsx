@@ -23,6 +23,7 @@ import type { CompletionKind } from '@/lib/terminalCompletion';
 const KIND_LABEL: Record<CompletionKind, string> = {
   output: 'output',
   history: 'history',
+  alias: 'alias',
   subcommand: 'cmd',
   flag: 'flag',
   branch: 'git',
@@ -85,6 +86,11 @@ export function CompletionMenu({ terminalId }: { terminalId: string }) {
           <span className="cortx-completion-kind">{KIND_LABEL[item.kind]}</span>
         </div>
       ))}
+      {state.hint && (
+        // Not a row: no `role="option"`, no click target, nothing to select.
+        // It says what the line already means, not what could be added to it.
+        <div className="cortx-completion-hint">{state.hint}</div>
+      )}
     </div>
   );
 }

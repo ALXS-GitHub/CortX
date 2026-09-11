@@ -14,8 +14,13 @@
  */
 import {
   GHOST_THRESHOLDS,
+  acceptanceFor,
+  aliasCandidates,
+  aliasHintFor,
   completeLine,
   ghostFor,
+  resolveAlias,
+  type AliasSource,
   type CompletionData,
 } from './terminalCompletion.ts';
 
@@ -205,6 +210,145 @@ test('the menu ranks the output above the history above the rest', () => {
   const kinds = completeLine('npm', data, 10).map((i) => i.kind);
   assert.equal(kinds[0], 'output');
   assert.ok(kinds.includes('history'));
+});
+
+// ---------------------------------------------------------------------------
+// Aliases (#38) — the registry CortX already owns, as a completion source
+// ---------------------------------------------------------------------------
+
+/** One row of Shell Config, with only the fields the engine reads. */
+function al(name: string, command: string, extra: Partial<AliasSource> = {}): AliasSource {
+  return { name, command, ...extra };
+}
+
+const registry = aliasCandidates([
+  al('cc', 'claude --dangerously-skip-permissions', { description: 'Claude, unattended' }),
+  al('gs', 'git status'),
+  al('ls', 'ls --color=auto'),
+  // Both faces of the `script` type, taken from the real registry: one that
+  // declares a command of its own name, one that is a block of init code.
+  al('wslpath', '-', {
+    aliasType: 'script',
+    script: { powershell: 'function wslpath {\n  return 1\n}' },
+  }),
+  al('omp-init', '-', {
+    aliasType: 'script',
+    script: { powershell: '$t = "alxs"\noh-my-posh init pwsh' },
+  }),
+  al('zoxide-init', '-', { aliasType: 'init', script: { bash: 'zoxide init bash' } }),
+]);
+
+test('a script alias is offered only when it declares a command of its own name', () => {
+  const names = registry.map((a) => a.name);
+  assert.deepEqual(names, ['cc', 'gs', 'ls', 'wslpath']);
+  // `omp-init` sets variables and calls oh-my-posh; nothing named `omp-init`
+  // exists afterwards. `zoxide-init` is a tool's own output handed to `eval`:
+  // its name is a label for the block, never a first token. Offering either
+  // would be inventing a command.
+  assert.equal(registry.find((a) => a.name === 'wslpath')?.target, null, 'never followed');
+  assert.equal(registry.find((a) => a.name === 'wslpath')?.expansion, '', 'one body per shell');
+});
+
+test('an alias is a first-token candidate, with its expansion as the detail', () => {
+  const items = completeLine('c', { aliases: registry }, 10);
+  const cc = items.find((i) => i.value === 'cc');
+  assert.ok(cc, 'cc is offered for the prefix c');
+  assert.equal(cc?.kind, 'alias');
+  assert.equal(cc?.detail, 'Claude, unattended');
+  assert.equal(cc?.from, 0);
+  // Nothing else is: `gs` and `ls` do not start with a c.
+  assert.equal(items.filter((i) => i.kind === 'alias').length, 1);
+});
+
+test('an alias is only ever a first token', () => {
+  const items = completeLine('git c', { aliases: registry }, 10);
+  assert.equal(items.filter((i) => i.kind === 'alias').length, 0);
+});
+
+test('an alias that is used outranks the history, one that is not does not', () => {
+  const cold = completeLine('c', { aliases: registry, history: [h('cargo build', 9)] }, 10);
+  assert.equal(cold[0].kind, 'history', 'an unused alias stays under the history');
+
+  // The ticket's corollary, done as evidence rather than as an identity: the
+  // runs of `cc` *and* of `claude` both count, and what is offered is still
+  // the form the user types.
+  const warm = completeLine(
+    'c',
+    {
+      aliases: registry,
+      history: [h('cargo build', 9), h('cc', 9, { count: 30 }), h('claude --resume', 9, { count: 40 })],
+    },
+    10
+  );
+  assert.equal(warm[0].value, 'cc');
+  assert.equal(warm[0].kind, 'alias');
+});
+
+test('an alias resolves to the program whose flags it really takes', () => {
+  const cc = registry.find((a) => a.name === 'cc');
+  assert.equal(cc?.target, 'claude');
+  assert.equal(cc?.targetShift, 1, '`--dangerously-skip-permissions` is one word already supplied');
+});
+
+test('an alias that resolves back to its own name is not followed', () => {
+  // The walk that looks up the spec would go straight back where it started,
+  // and looking `ls` up directly is what happens with no alias at all.
+  const ls = registry.find((a) => a.name === 'ls');
+  assert.equal(ls?.target, null);
+  assert.equal(resolveAlias('ls', [al('ls', 'ls --color=auto')]), null);
+  // Same answer when the name only comes back after a hop.
+  assert.equal(resolveAlias('a', [al('a', 'b -x'), al('b', 'a -y')]), null);
+  // And when it comes back as the program of a longer path.
+  assert.equal(resolveAlias('ls', [al('ls', '/usr/bin/ls --color')]), null);
+});
+
+test('an alias chain is followed, and a word already supplied is counted', () => {
+  const chain = [al('c1', 'c2 --flag'), al('c2', 'cargo build')];
+  assert.deepEqual(resolveAlias('c1', chain), {
+    program: 'cargo',
+    shift: 2,
+    expansion: 'c2 --flag',
+  });
+  assert.equal(resolveAlias('cargo', chain), null, 'a plain program is not an alias');
+});
+
+test('a launcher suffix and a quoted path are stripped off the target', () => {
+  const found = resolveAlias('cx', [al('cx', '"C:\\Program Files\\nodejs\\claude.cmd" --print')]);
+  assert.equal(found?.program, 'claude');
+  assert.equal(found?.shift, 1);
+});
+
+test('the subcommand slot is not offered twice for an alias that fills it', () => {
+  // `gs` is `git status`, so the word after it is git's *second* argument.
+  const data: CompletionData = { spec: spec(['status', 'stash']), specShift: 1 };
+  const withShift = completeLine('gs st', data, 10);
+  assert.equal(withShift.filter((i) => i.kind === 'subcommand').length, 0);
+  // Without the shift it is the ordinary subcommand slot, unchanged.
+  const plain = completeLine('git st', { spec: spec(['status', 'stash']) }, 10);
+  assert.equal(plain.filter((i) => i.kind === 'subcommand').length, 2);
+});
+
+test('what is offered is the name, never the expansion', () => {
+  // #38 changes what is *proposed*; the line is never rewritten. Accepting
+  // `cc` types `cc`, and the shell expands it as it does today.
+  const cc = completeLine('c', { aliases: registry }, 10).find((i) => i.kind === 'alias');
+  assert.equal(cc?.value, 'cc');
+  assert.equal(cc?.label, 'cc');
+  assert.equal(
+    acceptanceFor('c', cc!)?.text,
+    'c ',
+    'one keystroke and a space, not the expansion'
+  );
+});
+
+test('the expansion is shown back, but only on an exact name', () => {
+  assert.equal(aliasHintFor('cc --resume', registry), 'cc → claude --dangerously-skip-permissions');
+  assert.equal(aliasHintFor('cc', registry), 'cc → claude --dangerously-skip-permissions');
+  assert.equal(aliasHintFor('c', registry), null, 'a prefix is not yet an alias');
+  assert.equal(aliasHintFor('cargo build', registry), null);
+  assert.equal(aliasHintFor('', registry), null);
+  // Even the ones that must never be expanded are explained.
+  assert.equal(aliasHintFor('ls -l', registry), 'ls → ls --color=auto');
 });
 
 report('terminalCompletion');

@@ -31,6 +31,13 @@ export interface CompletionMenuState {
   index: number;
   /** Cursor cell in viewport coordinates, for `position: fixed`. */
   anchor: { left: number; top: number; bottom: number; cellHeight: number } | null;
+  /**
+   * One line of context about the command being typed rather than about any
+   * row — today, the expansion of an alias CortX itself defines (#38),
+   * `cc → claude --dangerously-skip-permissions`. Drawn as a footer, dimmed,
+   * never selectable. Optional: a surface that has nothing to say omits it.
+   */
+  hint?: string | null;
 }
 
 const CLOSED: CompletionMenuState = { open: false, items: [], index: 0, anchor: null };
@@ -66,6 +73,7 @@ export function setMenuState(terminalId: string, next: CompletionMenuState) {
     prev.open === next.open &&
     prev.index === next.index &&
     prev.items === next.items &&
+    (prev.hint ?? null) === (next.hint ?? null) &&
     prev.anchor?.left === next.anchor?.left &&
     prev.anchor?.top === next.anchor?.top
   ) {

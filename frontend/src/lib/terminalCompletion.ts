@@ -22,6 +22,7 @@ import type { OutputCandidate } from '@/lib/terminalCompletionOutput';
 export type CompletionKind =
   | 'output'
   | 'history'
+  | 'alias'
   | 'subcommand'
   | 'flag'
   | 'branch'
@@ -79,10 +80,225 @@ export interface CompletionData {
    */
   output?: OutputCandidate[];
   history?: CommandSuggestion[];
+  /** CortX's own alias registry, already filtered by {@link aliasCandidates}. */
+  aliases?: AliasEntry[];
   spec?: CommandSpec | null;
+  /**
+   * Words the alias on the line already supplies after the program `spec`
+   * describes — `gs` = `git status` gives 1, so the word the user is typing is
+   * git's *second* argument, not the subcommand slot. 0 or absent when the
+   * first token is a plain program.
+   */
+  specShift?: number;
   gitRefs?: string[];
   npmScripts?: SpecItem[];
   paths?: PathCompletion[];
+}
+
+// ---------------------------------------------------------------------------
+// Aliases — CortX's own registry, as a completion source
+// ---------------------------------------------------------------------------
+
+/**
+ * The shape the engine needs out of a `ShellAlias`. Structural on purpose:
+ * this module stays free of the data model, so the tests can build one by
+ * hand and the input editor can feed it from anywhere.
+ */
+export interface AliasSource {
+  name: string;
+  command: string;
+  /** `function` (the default), `script` or `init`. */
+  aliasType?: string;
+  description?: string;
+  /** Per-shell body, for the `script` and `init` types. */
+  script?: Record<string, string>;
+}
+
+/** One alias the completion engine is willing to talk about. */
+export interface AliasEntry {
+  name: string;
+  /** What the shell definition runs in its place. Empty for a `script` alias,
+   *  which has one body per shell and therefore no single expansion. */
+  expansion: string;
+  description?: string;
+  /**
+   * Program the expansion really invokes, once followed through any chain of
+   * aliases — the one whose learned `--help` spec describes this alias's
+   * flags. Used to pick *what to offer*, never to rewrite the line. `null`
+   * when the walk must stop (see {@link resolveAlias}).
+   */
+  target: string | null;
+  /** Words the expansion already supplies after `target` (`git status` → 1). */
+  targetShift: number;
+}
+
+/** An alias pointing at an alias pointing at… — bounded, and cycle-proof. */
+const MAX_ALIAS_HOPS = 5;
+
+/**
+ * Executable name of a first word: basename, minus a launcher suffix.
+ *
+ * `"C:\\Program Files\\nodejs\\claude.cmd"` → `claude`. Case is preserved —
+ * the result is handed to `getCommandSpec`, which resolves it in `PATH`, and
+ * that is case-sensitive everywhere but Windows.
+ */
+function programName(word: string): string {
+  const base = word.slice(Math.max(word.lastIndexOf('/'), word.lastIndexOf('\\')) + 1);
+  return base.replace(/\.(exe|cmd|bat|ps1|sh)$/i, '');
+}
+
+/**
+ * Follow `command` through the alias registry to the program a shell would end
+ * up running, or `null` when it is not an alias — or must not be followed.
+ *
+ * **This resolution never leaves the engine.** It decides *what to offer*: on
+ * `cc --`, which spec to look up so the flags of `claude` come back. The line
+ * is not rewritten, the alias is not expanded in the buffer, and what reaches
+ * the PTY stays exactly what the user typed — the shell expands its own
+ * aliases, as it does today. That is a deliberate divergence from Warp, which
+ * expands in the input itself.
+ *
+ * Two refusals, and both are about the walk, not about the shell:
+ *
+ * - **An alias that resolves back to its own name is not followed.** `ls` →
+ *   `ls --color` would send the walk straight back where it started, and
+ *   looking `ls` up directly is what already happens with no alias at all, so
+ *   there is nothing to gain and a loop to lose. (Warp has the same rule for a
+ *   different reason — they expand in the editor, so following it would make
+ *   the shell expand a second time on submission. Not our risk: we never
+ *   rewrite the line. Same rule, plain recursion guard.)
+ * - **A cycle is not followed.** `a` → `b …`, `b` → `a …` stops dead rather
+ *   than spinning, and the walk is bounded at {@link MAX_ALIAS_HOPS} anyway.
+ */
+export function resolveAlias(
+  command: string,
+  aliases: readonly AliasSource[]
+): { program: string; shift: number; expansion: string } | null {
+  const byName = new Map(aliases.map((a) => [a.name, a]));
+  let current = command;
+  let shift = 0;
+  let expansion: string | null = null;
+  const seen = new Set<string>();
+  for (let hop = 0; hop < MAX_ALIAS_HOPS; hop++) {
+    if (seen.has(current)) return null;
+    const entry = byName.get(current);
+    if (!entry) break;
+    seen.add(current);
+    if ((entry.aliasType ?? 'function') !== 'function') return null;
+    const words = splitWords(entry.command);
+    const first = words[0];
+    if (!first) return null;
+    // Straight back where we started, then the same one step removed.
+    if (first.text === current) return null;
+    const program = programName(first.text);
+    if (!program || program === current) return null;
+    if (expansion === null) expansion = entry.command.trim();
+    shift += words.length - 1;
+    current = program;
+  }
+  if (expansion === null) return null; // `command` was simply not an alias
+  if (!isSafeCommandName(current)) return null;
+  return { program: current, shift, expansion };
+}
+
+/** True when one of a `script` alias's bodies declares a command by that name. */
+function declaresCommand(bodies: Record<string, string> | undefined, name: string): boolean {
+  if (!bodies) return false;
+  const n = name.replace(/[.+*?^$()[\]{}|\\-]/g, '\\$&');
+  // `function name`, `function name(` and `name()` — between them, bash, zsh,
+  // fish, PowerShell and Nushell.
+  const declares = new RegExp(
+    `(^|[\\s;])function\\s+${n}\\s*(\\(|\\{|\\s|$)|(^|[\\s;])${n}\\s*\\(\\s*\\)`,
+    'm'
+  );
+  return Object.values(bodies).some((body) => declares.test(body));
+}
+
+/**
+ * The aliases worth offering, out of everything Shell Config holds.
+ *
+ * The type says most of it. A **`function`** alias always qualifies: it is a
+ * name bound to a command line, which is exactly a first token. An **`init`**
+ * alias never does: it is a tool's own output handed to `eval`
+ * (`zoxide init`, `starship init`) and its name is a label for the block, not
+ * a command — offering `zoxide-init` would invent a command that does not
+ * exist.
+ *
+ * **`script`** is the one that has to be looked at rather than classified,
+ * because the registry genuinely holds both kinds under it. In the real data
+ * this was written against, `which`, `wslpath`, `y` and `omp-theme` all open
+ * with `function <name>` — they *are* commands, and leaving them out would be
+ * a hole. `omp-init` sets three variables and calls oh-my-posh, and
+ * `fastfetch-init` is the single word `fastfetch`: neither declares anything
+ * callable. So a `script` alias is offered only when one of its per-shell
+ * bodies declares a command of its own name, and never resolved to a target —
+ * it has one body per shell and so no single expansion to follow.
+ *
+ * A name that could not be a first token anyway (whitespace, a separator, a
+ * quote — the rule `getCommandSpec` already enforces) is dropped too, and the
+ * first entry wins on a duplicate name, matching the `order` the registry is
+ * already sorted by.
+ */
+export function aliasCandidates(sources: readonly AliasSource[]): AliasEntry[] {
+  const usable = sources.filter((a) => {
+    if (!isSafeCommandName(a.name)) return false;
+    switch (a.aliasType ?? 'function') {
+      case 'function':
+        return a.command.trim().length > 0;
+      case 'script':
+        return declaresCommand(a.script, a.name);
+      default:
+        return false;
+    }
+  });
+  const out: AliasEntry[] = [];
+  const seen = new Set<string>();
+  for (const a of usable) {
+    if (seen.has(a.name)) continue;
+    seen.add(a.name);
+    const resolved = resolveAlias(a.name, usable);
+    out.push({
+      name: a.name,
+      expansion: (a.aliasType ?? 'function') === 'function' ? a.command.trim() : '',
+      description: a.description?.trim() || undefined,
+      target: resolved?.program ?? null,
+      targetShift: resolved?.shift ?? 0,
+    });
+  }
+  return out;
+}
+
+/** The registry entry for a first token, or null when it is a plain program. */
+export function aliasFor(
+  command: string | null | undefined,
+  aliases: readonly AliasEntry[]
+): AliasEntry | null {
+  if (!command) return null;
+  return aliases.find((a) => a.name === command) ?? null;
+}
+
+/** Longest an expansion may be before the hint and the menu cut it short. */
+const EXPANSION_MAX = 88;
+
+function shorten(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * The one-line reminder to draw under the prompt when the first token of
+ * `line` is an alias CortX itself defines — `cc → claude --dangerously-skip-permissions`.
+ *
+ * Only on an **exact** name: while the token is still a prefix the menu is
+ * already showing what it could become, and guessing there would be noise.
+ */
+export function aliasHintFor(line: string, aliases: readonly AliasEntry[]): string | null {
+  const first = splitWords(line)[0];
+  const entry = aliasFor(first?.text, aliases);
+  // A `script` alias has one body per shell: there is no single line to show,
+  // and guessing which shell's body applies would be worse than saying nothing.
+  if (!entry || !entry.expansion) return null;
+  return `${entry.name} → ${shorten(entry.expansion, EXPANSION_MAX)}`;
 }
 
 /** `git <these> <TAB>` completes a branch / tag rather than a path. */
@@ -194,6 +410,7 @@ function startsWithCI(haystack: string, needle: string): boolean {
 const SCORE = {
   output: 1100,
   history: 1000,
+  alias: 950,
   script: 800,
   subcommand: 780,
   branch: 760,
@@ -203,6 +420,60 @@ const SCORE = {
 
 /** How much a history entry's own ranking can move it inside its band. */
 const HISTORY_SPREAD = 40;
+
+/**
+ * How far usage evidence can lift an alias — deliberately past the top of the
+ * history band (1000 + {@link HISTORY_SPREAD}).
+ *
+ * An alias nobody has run yet sits just under the history: it is a real,
+ * curated command, but the line the user actually typed last week is a better
+ * guess. An alias that is *earning its keep* climbs above it, which is the
+ * point — the short form is what the user wants offered.
+ */
+const ALIAS_SPREAD = 120;
+
+/**
+ * Runs that count towards an alias, its target's included.
+ *
+ * This is the ticket's "treat `cc` and `claude …` as the same command", done
+ * where it belongs: the evidence is pooled, the **offered form stays the one
+ * the user types**. Someone who has always typed `cc` is never handed back
+ * `claude --dangerously-skip-permissions`.
+ *
+ * The target's runs count for half. They are evidence that the *program* is
+ * wanted; only the alias's own runs are evidence that the *short form* is.
+ */
+const TARGET_WEIGHT = 0.5;
+/** Runs beyond this add nothing: the scale is "used" vs "never used". */
+const ALIAS_SATURATION = 20;
+
+/** First word of a command line, cheaply — no quote handling needed here. */
+function firstWordOf(command: string): string {
+  const trimmed = command.trimStart();
+  const end = trimmed.search(/\s/);
+  return end < 0 ? trimmed : trimmed.slice(0, end);
+}
+
+/** `first word → total runs`, built once per call rather than per alias. */
+function runsByProgram(history: readonly CommandSuggestion[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const h of history) {
+    const first = firstWordOf(h.command);
+    if (!first) continue;
+    out.set(first, (out.get(first) ?? 0) + Math.max(1, h.count));
+  }
+  return out;
+}
+
+/** 0..{@link ALIAS_SPREAD}, from the pooled run count of an alias. */
+function aliasBoost(entry: AliasEntry, runs: Map<string, number>): number {
+  const own = runs.get(entry.name) ?? 0;
+  const target = entry.target ? (runs.get(entry.target) ?? 0) : 0;
+  const pooled = own + target * TARGET_WEIGHT;
+  if (pooled <= 0) return 0;
+  const ratio = Math.log1p(pooled) / Math.log1p(ALIAS_SATURATION);
+  return Math.min(1, ratio) * ALIAS_SPREAD;
+}
 
 /** Second column of an output candidate in the menu. */
 const OUTPUT_DETAIL: Record<OutputCandidate['reason'], string> = {
@@ -275,6 +546,25 @@ export function completeLine(line: string, data: CompletionData, limit = 40): Co
     items.push({ value, label: value, detail, kind, from: wordStart, score, space });
   };
 
+  // --- Aliases: CortX's own registry, as first-token candidates ----------
+  // The registry is the one source that describes commands *the user made
+  // up*; nothing else can know them, and on an empty prompt it doubles as a
+  // list of what this machine can do.
+  if (req.wordIndex === 0) {
+    const aliases = (data.aliases ?? []).filter((a) => startsWithCI(a.name, word));
+    if (aliases.length > 0) {
+      const runs = runsByProgram(data.history ?? []);
+      for (const a of aliases) {
+        push(
+          a.name,
+          'alias',
+          SCORE.alias + aliasBoost(a, runs),
+          a.description ?? (a.expansion ? shorten(a.expansion, EXPANSION_MAX) : 'shell function')
+        );
+      }
+    }
+  }
+
   // --- npm run <script> ------------------------------------------------
   if (req.needsNpmScripts) {
     for (const s of data.npmScripts ?? []) {
@@ -303,7 +593,7 @@ export function completeLine(line: string, data: CompletionData, limit = 40): Co
         const long = f.name.startsWith('--') ? 5 : 0;
         push(f.name, 'flag', SCORE.flag + long - rank++ * 0.1, f.description, !f.takesValue);
       }
-    } else if (req.wordIndex === 1) {
+    } else if (req.wordIndex + (data.specShift ?? 0) === 1) {
       let rank = 0;
       for (const s of spec.subcommands) {
         if (!startsWithCI(s.name, word)) continue;
