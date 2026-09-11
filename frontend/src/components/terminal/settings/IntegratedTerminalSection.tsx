@@ -452,6 +452,48 @@ export function IntegratedTerminalSection() {
             disabled={!terminal || !shellIntegration || !blocks}
           />
         </SettingToggle>
+
+        <SettingToggle
+          k="blockCards"
+          id="terminal-block-cards"
+          label={<span className="text-xs text-muted-foreground">Block cards</span>}
+          hint="A plate behind each block, so a command and its output read as a card rather than as scrollback. Terminal window only: the plate is drawn beneath the terminal canvas and only shows through where that canvas is transparent, which a docked pane's is not — the switch does nothing in the dock, and that is why."
+        >
+          <Switch
+            id="terminal-block-cards"
+            checked={terminal?.blockCards ?? true}
+            onCheckedChange={(v) => patch({ blockCards: v })}
+            disabled={!terminal || !shellIntegration || !blocks}
+          />
+        </SettingToggle>
+
+        <SettingToggle
+          k="blockStickyHeader"
+          id="terminal-block-sticky-header"
+          label={<span className="text-xs text-muted-foreground">Pin the command while scrolling</span>}
+          hint="Once the command that produced what you are reading has scrolled off the top, it stays pinned there; clicking it goes back to it. Hidden while the command is still running, and while its own row is still on screen."
+        >
+          <Switch
+            id="terminal-block-sticky-header"
+            checked={terminal?.blockStickyHeader ?? true}
+            onCheckedChange={(v) => patch({ blockStickyHeader: v })}
+            disabled={!terminal || !shellIntegration || !blocks}
+          />
+        </SettingToggle>
+
+        <SettingToggle
+          k="blockJumpToBottom"
+          id="terminal-block-jump-to-bottom"
+          label={<span className="text-xs text-muted-foreground">Jump to the end of a block</span>}
+          hint="A button at the bottom right of a block whose output runs off the bottom of the pane: one click goes to its end. It stays while the command is still running, since that is where the progress is."
+        >
+          <Switch
+            id="terminal-block-jump-to-bottom"
+            checked={terminal?.blockJumpToBottom ?? true}
+            onCheckedChange={(v) => patch({ blockJumpToBottom: v })}
+            disabled={!terminal || !shellIntegration || !blocks}
+          />
+        </SettingToggle>
       </Group>
 
       <Group title="Suggestions and completion" group="completion">
@@ -699,6 +741,20 @@ export function IntegratedTerminalSection() {
           onCommit={(v) => patch({ historyMaxMb: v ?? DEFAULT_HISTORY_MAX_MB })}
           disabled={!terminal}
         />
+
+        <SettingToggle
+          k="redactSecrets"
+          id="terminal-redact-secrets"
+          label="Mask secrets in the command history"
+          hint="Before a command line reaches the history file, replace what looks like a token, a password or an API key with bullets. That file is what the history view, Ctrl+R and the ranking behind ghost text all read, so masking on the way in covers all three — and a secret that reaches the disk once is on the disk. It masks the file, never the screen, and it leaves lines already written alone."
+        >
+          <Switch
+            id="terminal-redact-secrets"
+            checked={terminal?.redactSecrets ?? true}
+            onCheckedChange={(v) => patch({ redactSecrets: v })}
+            disabled={!terminal}
+          />
+        </SettingToggle>
 
         <SettingToggle
           k="smoothScrollDuration"

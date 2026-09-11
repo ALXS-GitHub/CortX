@@ -276,6 +276,23 @@ export interface TerminalConfig {
    *  `exit 1` findable in a pane full of output. Off leaves the gutter bar.
    *  Default true. */
   blockFailedWash?: boolean;
+  /** A background plate under each block, so a command and its output read as
+   *  a card rather than as scrollback. **Terminal window only**: it is drawn
+   *  beneath the xterm canvas and only shows through where that canvas is
+   *  transparent, which a docked pane's is not. Default true. */
+  blockCards?: boolean;
+  /** Once the command that produced what you are reading has scrolled off,
+   *  pin it to the top of the pane; click it to go back. Hidden while the
+   *  command is still running. Default true. */
+  blockStickyHeader?: boolean;
+  /** A button at the bottom-right of a block whose output runs off the bottom
+   *  of the pane: one click goes to its end. Default true. */
+  blockJumpToBottom?: boolean;
+  /** Mask what looks like a secret — a token, a password, an API key — in the
+   *  command line before it reaches the history file. That file feeds the
+   *  history view, Ctrl+R and the ranking behind ghost text, so masking on the
+   *  way in covers all three. Only the file, never the screen. Default true. */
+  redactSecrets?: boolean;
   /** Air between two blocks — Warp's `appearance.spacing`. `comfortable` by
    *  default, because that is what Warp's own `normal` amounts to. The shell
    *  integration prints that many real blank lines before a prompt that

@@ -647,6 +647,30 @@ pub struct TerminalConfig {
     /// bar alone is three pixels in the margin. Off leaves the gutter bar.
     #[serde(default = "default_true")]
     pub block_failed_wash: bool,
+    /// A background plate under each block, so a command and its output read
+    /// as a card rather than as scrollback — Warp's `draw_block_background`.
+    /// **Terminal window only**: the plate is drawn beneath the xterm canvas
+    /// and only shows through where that canvas is transparent, which a docked
+    /// pane's is not.
+    #[serde(default = "default_true")]
+    pub block_cards: bool,
+    /// Once you have scrolled past the command that produced what you are
+    /// reading, pin it to the top of the pane; click it to go back to it.
+    /// Warp's snackbar. Hidden while the command is still running.
+    #[serde(default = "default_true")]
+    pub block_sticky_header: bool,
+    /// A button at the bottom-right of a block whose output runs off the
+    /// bottom of the pane: one click goes to its end. Warp's
+    /// `appearance.blocks.show_jump_to_bottom_of_block_button`.
+    #[serde(default = "default_true")]
+    pub block_jump_to_bottom: bool,
+    /// Mask what looks like a secret — a token, a password, an API key — in
+    /// the command line before it is written to the shared history file.
+    /// That file is read back by the history view, by Ctrl+R and by the
+    /// ranking behind ghost text, so masking on the way in covers all three.
+    /// Only the file: what is already on screen is untouched.
+    #[serde(default = "default_true")]
+    pub redact_secrets: bool,
     /// Vertical air between two blocks — Warp's `appearance.spacing`.
     /// `Comfortable` by default, because that is what Warp's own `normal`
     /// amounts to (see [`TerminalBlockSpacing`]). Read by
@@ -1221,6 +1245,10 @@ impl Default for TerminalConfig {
             block_dividers: true,
             block_actions: true,
             block_failed_wash: true,
+            block_cards: true,
+            block_sticky_header: true,
+            block_jump_to_bottom: true,
+            redact_secrets: true,
             block_spacing: TerminalBlockSpacing::default(),
             mac_option_as_meta: MacOptionAsMeta::default(),
             link_tooltip: true,

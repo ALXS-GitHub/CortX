@@ -252,6 +252,9 @@ export const TERMINAL_SETTINGS = {
   blockActions: { label: 'Block actions on hover', group: 'blocks', fallback: true },
   blockGutter: { label: 'Block gutter', group: 'blocks', fallback: true },
   blockFailedWash: { label: 'Tint failed blocks', group: 'blocks', fallback: true },
+  blockCards: { label: 'Block cards', group: 'blocks', fallback: true },
+  blockStickyHeader: { label: 'Pin the command while scrolling', group: 'blocks', fallback: true },
+  blockJumpToBottom: { label: 'Jump to the end of a block', group: 'blocks', fallback: true },
 
   // --- Suggestions and completion -----------------------------------------
   inlineSuggestions: { label: 'Inline suggestions', group: 'completion', fallback: true },
@@ -270,6 +273,7 @@ export const TERMINAL_SETTINGS = {
   // --- Scrolling and scrollback -------------------------------------------
   scrollbackLines: { label: 'Scrollback', group: 'scrolling', fallback: DEFAULT_SCROLLBACK_LINES },
   historyMaxMb: { label: 'Command history size cap', group: 'scrolling', fallback: 10 },
+  redactSecrets: { label: 'Mask secrets in the command history', group: 'scrolling', fallback: true },
   smoothScrollDuration: { label: 'Smooth scrolling', group: 'scrolling', fallback: 100 },
 
   // --- Links, images and clipboard ----------------------------------------
