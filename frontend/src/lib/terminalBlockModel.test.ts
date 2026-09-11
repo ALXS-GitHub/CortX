@@ -15,15 +15,20 @@
  */
 import {
   ACCENT_EDGE_MIN_CONTRAST,
+  BLOCK_CARD_GAP,
   MAX_SPACING_ROWS,
+  STICKY_HEADER_MAX_RATIO,
   type BlockActionContext,
   type BlockActionId,
   type TerminalBlock,
   accentUsableAsEdge,
   blockActions,
   blockAtLine,
+  blockCardRect,
   blockFailed,
+  blockIdsBetween,
   blockMarkdown,
+  blockOverflow,
   blockRange,
   blockStatusLabel,
   blockToolbarWidth,
@@ -34,12 +39,16 @@ import {
   dividerOffsetRows,
   foldLabel,
   foldedRange,
+  joinBlockTexts,
   joinBufferRows,
+  jumpToBottomVisible,
   navigateBlocks,
   parseBlockMarker,
+  selectionEdges,
   shortCommand,
   spacingRowMax,
   spacingRowsAbove,
+  stickyHeaderVisible,
   terminalIsDark,
 } from './terminalBlockModel.ts';
 
@@ -603,6 +612,188 @@ test('the toolbar width is predicted before the toolbar exists', () => {
   assert.equal(blockToolbarWidth(0), 0);
   assert.equal(blockToolbarWidth(1), 30);
   assert.equal(blockToolbarWidth(6), 145);
+});
+
+// ---------------------------------------------------------------------------
+// Multi-block selection (ticket #10)
+// ---------------------------------------------------------------------------
+
+/** Four blocks of ten lines each, ids 1..4, the way the shell announces them. */
+function fourBlocks(): TerminalBlock[] {
+  return [0, 1, 2, 3].map((i) =>
+    block({ id: i + 1, start: i * 10, outputStart: i * 10 + 1, endExclusive: i * 10 + 10 })
+  );
+}
+
+test('a range extends from the anchor in buffer order, either way round', () => {
+  const blocks = fourBlocks();
+  assert.deepEqual(blockIdsBetween(blocks, 2, 4), [2, 3, 4]);
+  // Shift-clicking *above* the anchor selects the same run, still in order.
+  assert.deepEqual(blockIdsBetween(blocks, 4, 2), [2, 3, 4]);
+  assert.deepEqual(blockIdsBetween(blocks, 3, 3), [3], 'the anchor alone is a range of one');
+});
+
+test('a range whose anchor was trimmed out of the scrollback is empty, not a guess', () => {
+  const blocks = fourBlocks();
+  assert.deepEqual(blockIdsBetween(blocks, 99, 2), []);
+  assert.deepEqual(blockIdsBetween(blocks, 2, 99), []);
+  assert.deepEqual(blockIdsBetween([], 1, 1), []);
+});
+
+test('a run of selected blocks is framed once, not once per block', () => {
+  const blocks = fourBlocks();
+  const selected = new Set([2, 3]);
+  const is = (id: number) => selected.has(id);
+  // Everything on screen: the run opens on block 2 and closes on block 3.
+  const edges = (i: number) =>
+    selectionEdges(blocks, i, is, blockRange(blocks[i], 40), 0, 100);
+  assert.deepEqual(edges(1), { top: true, bottom: false }, 'the run opens here');
+  assert.deepEqual(edges(2), { top: false, bottom: true }, 'and closes here');
+});
+
+test('a single selected block keeps both of its edges', () => {
+  const blocks = fourBlocks();
+  const is = (id: number) => id === 3;
+  assert.deepEqual(selectionEdges(blocks, 2, is, blockRange(blocks[2], 40), 0, 100), {
+    top: true,
+    bottom: true,
+  });
+});
+
+test('an edge is never drawn where the viewport cut the block, only where it ends', () => {
+  const blocks = fourBlocks();
+  const is = (id: number) => id === 3; // lines 20..30
+  // A five-row viewport starting at line 22: both of the block's own edges are
+  // off screen, so the selection is drawn open at both ends.
+  assert.deepEqual(selectionEdges(blocks, 2, is, blockRange(blocks[2], 40), 22, 5), {
+    top: false,
+    bottom: false,
+  });
+  // Scrolled so the block's top edge is on screen but its end is not.
+  assert.deepEqual(selectionEdges(blocks, 2, is, blockRange(blocks[2], 40), 20, 5), {
+    top: true,
+    bottom: false,
+  });
+});
+
+test('several blocks are copied in buffer order, one blank line apart', () => {
+  assert.equal(joinBlockTexts(['git status\nclean', 'ls\na b']), 'git status\nclean\n\nls\na b');
+  assert.equal(joinBlockTexts(['one', '', 'two']), 'one\n\ntwo', 'an empty block adds no separator');
+  assert.equal(joinBlockTexts(['only  \n']), 'only', 'trailing blanks are trimmed');
+  assert.equal(joinBlockTexts([]), '');
+});
+
+// ---------------------------------------------------------------------------
+// Viewport furniture (tickets #8 and #9)
+// ---------------------------------------------------------------------------
+
+test('overflow is read at both edges of the viewport', () => {
+  const range = { start: 10, endExclusive: 40 };
+  assert.deepEqual(blockOverflow(range, 0, 100), { above: false, below: false });
+  assert.deepEqual(blockOverflow(range, 20, 5), { above: true, below: true });
+  assert.deepEqual(blockOverflow(range, 10, 10), { above: false, below: true });
+  assert.deepEqual(blockOverflow(range, 35, 10), { above: true, below: false });
+});
+
+test('the card plate covers the block and keeps a gap at each end', () => {
+  // Rows of 20 px, the grid starting 4 px down the container.
+  const metrics = { cell: 20, top: 4 };
+  const rect = blockCardRect({ start: 10, endExclusive: 13 }, 10, 24, metrics);
+  assert.equal(rect?.top, 4 + 0 + BLOCK_CARD_GAP);
+  assert.equal(rect?.height, 3 * 20 - 2 * BLOCK_CARD_GAP);
+  assert.equal(rect?.roundTop, true);
+  assert.equal(rect?.roundBottom, true);
+});
+
+test('a card cut by the viewport is flush and square at the cut, never rounded', () => {
+  const metrics = { cell: 20, top: 0 };
+  // Block 10..40 seen through a 5-row viewport at line 20: cut at both ends.
+  const rect = blockCardRect({ start: 10, endExclusive: 40 }, 20, 5, metrics);
+  assert.equal(rect?.top, 0, 'no gap where the block continues off screen');
+  assert.equal(rect?.height, 100);
+  assert.deepEqual({ t: rect?.roundTop, b: rect?.roundBottom }, { t: false, b: false });
+});
+
+test('a block with no rows on screen has no card at all', () => {
+  const metrics = { cell: 20, top: 0 };
+  assert.equal(blockCardRect({ start: 0, endExclusive: 5 }, 50, 10, metrics), null);
+  // And one so thin the gaps would eat it is dropped rather than drawn inverted.
+  assert.equal(blockCardRect({ start: 0, endExclusive: 1 }, 0, 10, { cell: 4, top: 0 }), null);
+});
+
+test('the sticky header names a block you have scrolled past the top of', () => {
+  const b = block({ start: 0, endExclusive: 100 });
+  const shown = (viewportY: number) =>
+    stickyHeaderVisible({
+      block: b,
+      range: blockRange(b, 100),
+      viewportY,
+      rows: 24,
+      headerHeight: 24,
+      cell: 20,
+      paneHeight: 480,
+    });
+  assert.equal(shown(0), false, 'its command row is on screen: the header would repeat it');
+  assert.equal(shown(40), true, 'scrolled into the middle of a big block');
+});
+
+test('the sticky header keeps out of the way of a bare prompt and a running command', () => {
+  const base = { viewportY: 40, rows: 24, headerHeight: 24, cell: 20, paneHeight: 480 };
+  const running = block({ start: 0, endExclusive: null, status: 'running' });
+  assert.equal(
+    stickyHeaderVisible({ block: running, range: blockRange(running, 100), ...base }),
+    false,
+    "Warp's should_hide_snackbar_during_long_running_command"
+  );
+  const prompt = block({ start: 0, endExclusive: null, status: 'prompt', command: null });
+  assert.equal(stickyHeaderVisible({ block: prompt, range: blockRange(prompt, 100), ...base }), false);
+});
+
+test('the sticky header gives up rather than cover what is left of its block', () => {
+  const b = block({ start: 0, endExclusive: 100 });
+  // Only one 20 px row of the block is still on screen; a 24 px header would
+  // be the whole of it.
+  assert.equal(
+    stickyHeaderVisible({
+      block: b,
+      range: blockRange(b, 100),
+      viewportY: 99,
+      rows: 24,
+      headerHeight: 24,
+      cell: 20,
+      paneHeight: 480,
+    }),
+    false
+  );
+});
+
+test('the sticky header gives up on a pane too short to carry it', () => {
+  const b = block({ start: 0, endExclusive: 100 });
+  const input = {
+    block: b,
+    range: blockRange(b, 100),
+    viewportY: 40,
+    rows: 4,
+    headerHeight: 24,
+    cell: 20,
+    paneHeight: 80,
+  };
+  // 24 of 80 px is over the ratio Warp caps the header at.
+  assert.equal(24 / 80 > STICKY_HEADER_MAX_RATIO, true);
+  assert.equal(stickyHeaderVisible(input), false);
+  assert.equal(stickyHeaderVisible({ ...input, paneHeight: 480 }), true);
+});
+
+test('the jump button appears only while the block runs off the bottom', () => {
+  const b = block({ start: 0, endExclusive: 100 });
+  const range = blockRange(b, 100);
+  assert.equal(jumpToBottomVisible(b, range, 0, 24), true);
+  assert.equal(jumpToBottomVisible(b, range, 90, 24), false, 'the end is on screen');
+  // Unlike the header, a running block keeps it: its end is where the progress is.
+  const running = block({ start: 0, endExclusive: null, status: 'running' });
+  assert.equal(jumpToBottomVisible(running, blockRange(running, 100), 0, 24), true);
+  const prompt = block({ start: 0, endExclusive: null, status: 'prompt', command: null });
+  assert.equal(jumpToBottomVisible(prompt, blockRange(prompt, 100), 0, 24), false);
 });
 
 report();

@@ -6,8 +6,16 @@
  * (`plans/terminal_mode.md` §9) decided to keep the classic flow and the
  * xterm grid exactly as they are, and to add block *markers* on top. So
  * nothing here writes to the buffer, resizes the PTY or re-renders a line —
- * every pixel this module produces lives in one absolutely-positioned overlay
- * layer that is drawn *over* the grid and never displaces a glyph.
+ * every pixel this module produces lives in absolutely-positioned layers that
+ * are drawn over — and, in one case, *under* — the grid, and never displace a
+ * glyph.
+ *
+ * There are two layers. The overlay is the one almost everything is on: it
+ * sits above the canvas and paints dividers, plates, the gutter, the toolbar.
+ * The second is `.cortx-blocks-cards`, inserted *before* xterm's own element
+ * so it paints beneath the canvas, and it exists for exactly one thing — the
+ * per-block background plate (see "The card, and why only one window has
+ * it").
  *
  * What it gives you:
  * - **Dividers**: a 1 px rule the full width of the pane on every block's top
@@ -47,17 +55,59 @@
  *   actions silently did not exist.
  * - **A clickable gutter** in the pane's left padding: one bar per block,
  *   coloured by the exit code the shell reported. Click selects, double-click
- *   folds, right-click opens the block menu.
+ *   folds, right-click opens the block menu, **Shift + click extends** the
+ *   selection from its anchor.
  * - **Prompt-to-prompt navigation** (Ctrl+↑ / Ctrl+↓): scrolls the previous /
- *   next prompt to the top of the pane and highlights its block.
+ *   next prompt to the top of the pane and highlights its block. **Shift +**
+ *   the same keys extends the selection instead of moving it.
+ * - **A selection of several blocks** (`terminalBlockModel.selectionEdges`).
+ *   Warp keeps a `SelectedBlocks` made of ranges plus a `tail` — the anchor
+ *   the keyboard extends from — and frames a continuous run *once*: a top edge
+ *   only where the run opens, a bottom edge only where it closes, so three
+ *   selected blocks read as one object instead of three boxes. Ours is a flat
+ *   `Set` of ids plus an anchor, because the blocks are one sorted list and
+ *   "is this one selected" is the only question the renderer asks.
+ * - **A sticky header** (Warp's *snackbar*) naming the block you are inside
+ *   once its command row has scrolled off the top, and a **jump-to-bottom**
+ *   button when its output runs off the bottom — `terminal.blockStickyHeader`
+ *   and `terminal.blockJumpToBottom`, both on by default.
  * - **Copy** the command, the output, both, or the whole thing as a Markdown
  *   `console` fence — plus Ctrl+Shift+C when a block is selected and there is
- *   no text selection, which copies nothing today.
+ *   no text selection, which copies nothing today. The two whole-block copies
+ *   take the *whole selection* when there is more than one block in it, in
+ *   buffer order and one blank line apart.
  * - **Fold** a block's output behind a "412 lines hidden" strip.
  * - **Run the command again**, or **put it back on the prompt line** to edit
  *   it first (Warp's `terminal:reinput_commands`).
  * - **Scroll to the top / bottom** of a block, and hand its rows to the
  *   terminal's own text selection.
+ *
+ * ## The card, and why only one window has it
+ *
+ * Warp's blocks read as *cards* because each one is drawn on a plate of its
+ * own (`draw_block_background`). We do not own the layout — xterm does — so
+ * the plate cannot be a box around the text. It can, however, be a layer
+ * *underneath* the text: in the Terminal window the xterm canvas is
+ * transparent (`allowTransparency`, background `rgba(0,0,0,0)` — see
+ * `lib/terminalSessions.ts`), and a plate slid beneath it shows through every
+ * cell the shell did not paint itself. That is `terminal.blockCards`, and
+ * `blockCardRect` is the geometry.
+ *
+ * It does **not** work in the dock, and it never will without changing what a
+ * docked pane is: the canvas there is opaque, because a pane in the app's own
+ * chrome is a solid surface. A layer under an opaque canvas is invisible, so
+ * `blockCardsEnabled()` is false in the dock whatever the setting says, and
+ * the Settings row is where that has to be explained rather than left as a
+ * feature that silently does nothing.
+ *
+ * The plate's colour starts from the *terminal theme's own background* and
+ * nothing else: its background lifted 7 % towards its foreground (the recipe
+ * `chromeTokens` uses for `--card`), at 55 % so a wallpaper still reads
+ * through it and the gap between two cards still shows the photograph at full
+ * strength. Not `--accent`, not `--primary`, and not a strong `--foreground`
+ * mix — a full-block plate is the largest surface in this window and the
+ * worst possible place to discover that a theme's accent is a near-black or
+ * that a white mix goes pink over a brown-red ground.
  *
  * ## The one thing the overlay cannot do: make room
  *
@@ -89,9 +139,12 @@
  * needs: text selection, the file-path and URL links, the inline images, the
  * scrollbar. So the layer is `pointer-events: none` and the hovered block is
  * worked out from the pointer's *y coordinate* and the cell height. The only
- * three things that accept a click are the gutter bar, the fold cover and the
- * toolbar's own buttons, and each of them stops the event so the pane's
- * copy-on-select and right-click-pastes handlers never see it.
+ * things that accept a click are the gutter bar, the fold cover, the toolbar's
+ * own buttons and the two viewport controls (the sticky header and the jump
+ * button) — each opts back in with `pointer-events: auto` on itself, and each
+ * stops the event so the pane's copy-on-select and right-click-pastes handlers
+ * never see it. Nothing else on either layer may ever take the mouse; that
+ * rule is the reason a link in a block is still a link.
  *
  * ## Why markers, and what breaks them
  *
@@ -146,18 +199,21 @@
  * longer mean anything.
  */
 import type { IDisposable, IMarker, Terminal } from '@xterm/xterm';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { toast } from 'sonner';
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
-import { comboFromEvent, effectiveCombos } from '@/lib/keybindings';
+import { comboFromEvent, comboWithoutShift, effectiveCombos } from '@/lib/keybindings';
 import { closeBlockMenu, openBlockMenu } from '@/lib/terminalBlockMenu';
 import { blockIconSvg } from '@/lib/terminalBlockIcons';
 import {
   accentUsableAsEdge,
   blockActions,
   blockAtLine,
+  blockCardRect,
   blockFailed,
+  blockIdsBetween,
   blockMarkdown,
   blockRange,
   blockStatusLabel,
@@ -167,12 +223,16 @@ import {
   dividerOffsetRows,
   foldLabel,
   foldedRange,
+  joinBlockTexts,
   joinBufferRows,
+  jumpToBottomVisible,
   navigateBlocks,
   parseBlockMarker,
+  selectionEdges,
   shortCommand,
   spacingRowMax,
   spacingRowsAbove,
+  stickyHeaderVisible,
   terminalIsDark,
   type BlockActionId,
   type BlockSpacingRow,
@@ -181,6 +241,27 @@ import {
   type BlockStatus,
   type TerminalBlock,
 } from '@/lib/terminalBlockModel';
+
+/**
+ * True inside the dedicated Terminal window, whose xterm canvas is
+ * *transparent* (`allowTransparency`, background `rgba(0,0,0,0)` — see
+ * `lib/terminalSessions.ts`). That single fact is what makes the block cards
+ * of ticket #9 possible at all: a layer slid *under* the canvas shows through
+ * the glyphs' own background. The dock's canvas is opaque and would hide it,
+ * so the cards are a Terminal-window feature and say so in Settings.
+ *
+ * Recomputed here rather than imported: `terminalSessions.ts` keeps it
+ * private, and the answer is a constant of the window.
+ */
+const IS_TERMINAL_WINDOW = (() => {
+  try {
+    const label = getCurrentWindow().label;
+    // `terminal`, plus `terminal-2`… for a window a tab was detached into.
+    return label === 'terminal' || label.startsWith('terminal-');
+  } catch {
+    return false;
+  }
+})();
 
 /** Blocks are on unless the user turns them off (see the Settings copy). */
 export function blocksEnabled(): boolean {
@@ -216,8 +297,52 @@ export function blockActionBarEnabled(): boolean {
  * `!== false` keeps the default at "on" until it lands and afterwards.
  */
 export function blockFailedWashEnabled(): boolean {
+  return terminalFlag('blockFailedWash');
+}
+
+/**
+ * A setting that is still being added to `TerminalSettings` / `models.rs` in
+ * another change, read off the settings object rather than through its type so
+ * this module compiles either side of that landing. `!== false` keeps the
+ * default at "on" before the field exists and after.
+ */
+function terminalFlag(key: string): boolean {
   const terminal = useAppStore.getState().settings?.terminal as Record<string, unknown> | undefined;
-  return terminal?.blockFailedWash !== false;
+  return terminal?.[key] !== false;
+}
+
+/**
+ * The per-block background plate — the "card" rendering (ticket #9, Warp's
+ * `draw_block_background`).
+ *
+ * **Terminal window only**, and not by choice: the plate is drawn *under* the
+ * xterm canvas, which only shows through where the canvas is transparent. In
+ * the dock it is opaque (a pane there is a solid surface in the app's own
+ * chrome), so the same layer would be painted over by the grid and nothing
+ * would change. The setting is therefore reported off here whatever it says,
+ * and the Settings row is the place that has to explain why.
+ */
+export function blockCardsEnabled(): boolean {
+  return IS_TERMINAL_WINDOW && terminalFlag('blockCards');
+}
+
+/**
+ * The header that pins a big block's command to the top of the pane once you
+ * have scrolled past it — Warp's *snackbar* (`general.snackbar_enabled`,
+ * default on). Works in both surfaces: it is drawn in the overlay, over the
+ * grid, like the action toolbar.
+ */
+export function blockStickyHeaderEnabled(): boolean {
+  return terminalFlag('blockStickyHeader');
+}
+
+/**
+ * The companion button to the header: "go to the end of this block", for a
+ * command whose output runs off the bottom of the pane
+ * (`appearance.blocks.show_jump_to_bottom_of_block_button`, default on).
+ */
+export function blockJumpToBottomEnabled(): boolean {
+  return terminalFlag('blockJumpToBottom');
 }
 
 /**
@@ -253,6 +378,20 @@ const TOOLBAR_HEIGHT = 24;
 
 /** Shortest a toolbar may be squeezed to before it is simply not drawn. */
 const TOOLBAR_MIN_HEIGHT = 15;
+
+/**
+ * Height of the sticky block header, in px. Warp requires its snackbar to be
+ * "at least as tall as the toolbelt icons" so the two never read as different
+ * sizes of the same furniture — here that is `TOOLBAR_HEIGHT`, and the header
+ * takes the same number. It is a *fixed* height and not a row's: the header is
+ * a floating label, not a row of the grid, and a pane with 12 px rows would
+ * otherwise get an unreadable one. `stickyHeaderVisible` is what keeps it off
+ * a pane too short to carry it.
+ */
+const STICKY_HEADER_HEIGHT = TOOLBAR_HEIGHT;
+
+/** Corner radius of a block's background plate, in px (ticket #9). */
+const CARD_RADIUS = 6;
 
 /**
  * Blank px the toolbar wants past its own width at the right edge of the pane:
@@ -311,7 +450,26 @@ class BlockController {
   private records: BlockRecord[] = [];
   /** The block the shell is currently at a prompt in / running. */
   private current: BlockRecord | null = null;
-  private selectedId: number | null = null;
+  /**
+   * The selected blocks, by id (ticket #10). A *set* and not one id: Warp
+   * keeps a `SelectedBlocks` made of ranges, because copying three commands in
+   * a row is the reason a block is a thing you can select at all.
+   *
+   * Ours is flat rather than a list of ranges — the blocks are one sorted
+   * list, so "is this one selected" is the only question the renderer ever
+   * asks, and `selectionEdges` turns the answer for three neighbours into the
+   * single frame Warp draws around a continuous run.
+   */
+  private selection = new Set<number>();
+  /**
+   * The anchor of the selection — Warp's `tail`. `Shift` extends *from* it, so
+   * you can walk the selection back and forth past the block you started on
+   * without it losing its grip. Set by a plain click, a jump, or the first
+   * `Shift`-extension of a fresh selection; never moved by extending.
+   */
+  private anchorId: number | null = null;
+  /** The far end of the selection, i.e. the block a further `Shift` moves from. */
+  private headId: number | null = null;
   /** The block under the pointer: highlighted, and the one the toolbar acts on. */
   private hoveredId: number | null = null;
   /** Viewport row the pointer was last resolved on (mousemove fires per pixel). */
@@ -324,8 +482,24 @@ class BlockController {
    * to the buttons — the bar would flee from under the cursor.
    */
   private toolbarRows: number[] = [];
+  /**
+   * The block the sticky header and the jump button currently act on — the one
+   * that owns the pane's top row. Read at click time, never closed over: the
+   * pane scrolls and output arrives between the frame that drew the control
+   * and the click that uses it.
+   */
+  private stickyId: number | null = null;
 
   private layer: HTMLElement | null = null;
+  /**
+   * The *other* layer: the block cards, which are the one thing here drawn
+   * **under** the grid instead of over it (ticket #9). It cannot live inside
+   * `this.layer` — that one sits above the canvas by construction — so it is a
+   * second child of the session container, inserted *before* xterm's own
+   * element so the painting order puts it underneath. Null in the dock, whose
+   * canvas is opaque and would hide it anyway.
+   */
+  private cardLayer: HTMLElement | null = null;
   /** Elements of the last render, keyed `<blockId>:<kind>`, for reconciling. */
   private elements = new Map<string, HTMLElement>();
   /**
@@ -385,7 +559,7 @@ class BlockController {
     for (const record of this.records) this.disposeMarkers(record);
     this.records = [];
     this.current = null;
-    this.selectedId = null;
+    this.clearSelection();
     this.hoveredId = null;
     this.usedCache.clear();
     this.removeLayer();
@@ -400,7 +574,7 @@ class BlockController {
       for (const record of this.records) this.disposeMarkers(record);
       this.records = [];
       this.current = null;
-      this.selectedId = null;
+      this.clearSelection();
       this.hoveredId = null;
       this.tearingDown = false;
       this.removeLayer();
@@ -529,7 +703,13 @@ class BlockController {
     const i = this.records.indexOf(record);
     if (i >= 0) this.records.splice(i, 1);
     if (this.current === record) this.current = null;
-    if (this.selectedId === record.id) this.selectedId = null;
+    // A block trimmed out of the scrollback leaves the selection; the anchor
+    // goes with it, so a later `Shift` starts again from where the user is
+    // rather than from a block that no longer exists.
+    if (this.selection.delete(record.id)) {
+      if (this.anchorId === record.id) this.anchorId = null;
+      if (this.headId === record.id) this.headId = null;
+    }
     if (this.hoveredId === record.id) this.hoveredId = null;
     this.disposeMarkers(record);
     this.schedule();
@@ -591,16 +771,22 @@ class BlockController {
   // -- Keyboard -----------------------------------------------------------
 
   /**
-   * Ctrl+↑ / Ctrl+↓. The key only ever stops here when there really is a
-   * block to jump to and the pane is showing the normal buffer — otherwise it
-   * reaches the shell exactly as it does today, which is what keeps a TUI, a
-   * REPL or a session without shell integration untouched.
+   * Ctrl+↑ / Ctrl+↓, and the same two with Shift. The key only ever stops here
+   * when there really is a block to jump to and the pane is showing the normal
+   * buffer — otherwise it reaches the shell exactly as it does today, which is
+   * what keeps a TUI, a REPL or a session without shell integration untouched.
    *
    * One more case is handed straight back: a command is running *and* the
    * viewport is at the bottom. That is someone typing into a program that took
    * the keyboard without an alternate screen (Claude Code, `fzf` inline), and
    * its keys must not be second-guessed. Scroll up first and navigation is
    * yours again.
+   *
+   * **Shift extends instead of moving** (ticket #10), the way it does in every
+   * list and every editor. It is read as a modifier of whatever the navigation
+   * keys currently are rather than as two bindings of its own
+   * (`comboWithoutShift`), so rebinding `block.previous` rebinds the extension
+   * with it and Settings > Shortcuts keeps one row per idea.
    */
   private readonly onKeyDown = (e: KeyboardEvent) => {
     if (e.type !== 'keydown' || !blocksEnabled()) return;
@@ -611,32 +797,101 @@ class BlockController {
     const combo = comboFromEvent(e);
     if (!combo) return;
     const overrides = useAppStore.getState().settings?.terminal.keybindings;
-    const direction = effectiveCombos('block.previous', overrides).includes(combo)
-      ? 'previous'
-      : effectiveCombos('block.next', overrides).includes(combo)
-        ? 'next'
-        : null;
+    const directionOf = (c: string) =>
+      effectiveCombos('block.previous', overrides).includes(c)
+        ? ('previous' as const)
+        : effectiveCombos('block.next', overrides).includes(c)
+          ? ('next' as const)
+          : null;
+    let direction = directionOf(combo);
+    let extend = false;
+    if (!direction) {
+      // Shift + the navigation combo: extend the selection from its anchor.
+      const bare = comboWithoutShift(combo);
+      direction = bare ? directionOf(bare) : null;
+      extend = direction !== null;
+    }
     if (!direction) return;
     const buf = this.term.buffer.active;
     if (buf.type !== 'normal') return;
     if (this.current?.status === 'running' && buf.viewportY >= buf.baseY) return;
-    if (!this.jump(direction)) return;
+    if (!this.jump(direction, extend)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
   };
 
-  /** Returns true when a block was actually reached (so the key is consumed). */
-  jump(direction: 'previous' | 'next'): boolean {
+  /**
+   * Returns true when a block was actually reached (so the key is consumed).
+   *
+   * `extend` is the Shift variant: the target is found from the *head* of the
+   * selection (the end that moved last), and everything from the anchor to it
+   * is selected — so Shift+Ctrl+↑ three times takes three blocks, and going
+   * back down again gives them up one at a time instead of jumping the anchor.
+   */
+  jump(direction: 'previous' | 'next', extend = false): boolean {
     const blocks = this.blocks();
     if (blocks.length === 0) return false;
-    const selected = this.selectedId === null ? null : blocks.find((b) => b.id === this.selectedId) ?? null;
-    const anchor = selected ? selected.start : this.term.buffer.active.viewportY;
-    const target = navigateBlocks(blocks, anchor, direction);
+    const from = extend ? this.headId ?? this.anchorId : this.anchorId;
+    const current = from === null ? null : blocks.find((b) => b.id === from) ?? null;
+    const anchorLine = current ? current.start : this.term.buffer.active.viewportY;
+    const target = navigateBlocks(blocks, anchorLine, direction);
     if (!target) return false;
-    this.selectedId = target.id;
+    if (extend && this.anchorId !== null && this.selection.size > 0) this.extendTo(blocks, target.id);
+    else this.selectOnly(target.id);
     this.term.scrollToLine(target.start);
     this.schedule();
     return true;
+  }
+
+  // -- Selection ----------------------------------------------------------
+
+  /** One block, and the anchor a later Shift extends from. */
+  private selectOnly(id: number) {
+    this.selection = new Set([id]);
+    this.anchorId = id;
+    this.headId = id;
+  }
+
+  private clearSelection() {
+    this.selection.clear();
+    this.anchorId = null;
+    this.headId = null;
+  }
+
+  /**
+   * Everything from the anchor to `id`, in buffer order. The anchor does not
+   * move — that is the whole point of a `tail` — so the run can be walked past
+   * its starting block and back without losing its grip.
+   */
+  private extendTo(blocks: readonly TerminalBlock[], id: number) {
+    const ids = this.anchorId === null ? [] : blockIdsBetween(blocks, this.anchorId, id);
+    // An anchor that was trimmed out of the scrollback while the selection was
+    // live: start again from the block actually pointed at rather than guess.
+    if (ids.length === 0) {
+      this.selectOnly(id);
+      return;
+    }
+    this.selection = new Set(ids);
+    this.headId = id;
+  }
+
+  /** The selected blocks, in buffer order — the order they were printed in. */
+  private selectedBlocks(): TerminalBlock[] {
+    if (this.selection.size === 0) return [];
+    return this.blocks().filter((b) => this.selection.has(b.id));
+  }
+
+  /**
+   * The blocks an action on `block` really covers: the whole selection when
+   * `block` is part of it and there is more than one, and just `block`
+   * otherwise. Acting on a run the user cannot see they are in would be worse
+   * than useless, so membership — not merely "something is selected" — is the
+   * condition.
+   */
+  private runOf(block: TerminalBlock): TerminalBlock[] {
+    if (this.selection.size < 2 || !this.selection.has(block.id)) return [block];
+    const run = this.selectedBlocks();
+    return run.length > 1 ? run : [block];
   }
 
   // -- Mouse --------------------------------------------------------------
@@ -648,8 +903,8 @@ class BlockController {
     // A drag that ends on the row it started on would otherwise leave the
     // hover cache thinking it is already resolved.
     this.hoverRow = -1;
-    if (this.selectedId === null) return;
-    this.selectedId = null;
+    if (this.selection.size === 0) return;
+    this.clearSelection();
     this.schedule();
   };
 
@@ -703,8 +958,20 @@ class BlockController {
     this.schedule();
   }
 
-  private select(id: number) {
-    this.selectedId = this.selectedId === id ? null : id;
+  /**
+   * A click on a gutter bar. Plain: this block alone, and it becomes the
+   * anchor; clicking it again gives the selection up. With `Shift`: extend the
+   * run from the anchor down (or up) to it, which is the other half of ticket
+   * #10 — three commands selected with two clicks, then copied as one.
+   */
+  private select(id: number, extend: boolean) {
+    if (extend && this.anchorId !== null && this.selection.size > 0) {
+      this.extendTo(this.blocks(), id);
+    } else if (this.selection.size === 1 && this.selection.has(id)) {
+      this.clearSelection();
+    } else {
+      this.selectOnly(id);
+    }
     this.schedule();
   }
 
@@ -763,9 +1030,9 @@ class BlockController {
    * when there is nothing selected, so the caller keeps today's behaviour.
    */
   copySelected(): boolean {
-    const block = this.selectedBlock();
-    if (!block) return false;
-    void this.copy(this.blockText(block), 'block');
+    const blocks = this.selectedBlocks();
+    if (blocks.length === 0) return false;
+    void this.copy(joinBlockTexts(blocks.map((b) => this.blockText(b))), what(blocks.length, 'block'));
     return true;
   }
 
@@ -774,8 +1041,10 @@ class BlockController {
     return [this.commandText(block), this.outputText(block)].filter(Boolean).join('\n');
   }
 
+  /** The block a menu / a right-click acts on: the anchor of the selection. */
   private selectedBlock(): TerminalBlock | null {
-    return this.selectedId === null ? null : this.blockById(this.selectedId);
+    const id = this.headId ?? this.anchorId;
+    return id === null ? null : this.blockById(id);
   }
 
   /** The block's geometry *right now* — never a snapshot kept across a click. */
@@ -853,15 +1122,25 @@ class BlockController {
       case 'copyOutput':
         void this.copy(this.outputText(block), 'output');
         break;
-      case 'copyBlock':
-        void this.copy(this.blockText(block), 'block');
+      // The two whole-block copies are the ones a *range* changes (ticket
+      // #10): when the block acted on is part of a run of several, all of them
+      // are copied, in the order the buffer holds them and one blank line
+      // apart — which is how they read on the pane. The two partial copies
+      // (command, output) stay single-block: "copy the command" of three
+      // blocks at once is a list, not a command.
+      case 'copyBlock': {
+        const run = this.runOf(block);
+        void this.copy(joinBlockTexts(run.map((b) => this.blockText(b))), what(run.length, 'block'));
         break;
-      case 'copyMarkdown':
+      }
+      case 'copyMarkdown': {
+        const run = this.runOf(block);
         void this.copy(
-          blockMarkdown(this.commandText(block), this.outputText(block), block.exitCode),
-          'block as Markdown'
+          joinBlockTexts(run.map((b) => blockMarkdown(this.commandText(b), this.outputText(b), b.exitCode))),
+          `${what(run.length, 'block')} as Markdown`
         );
         break;
+      }
       case 'rerun':
         this.rerun(block);
         break;
@@ -931,9 +1210,47 @@ class BlockController {
     return layer;
   }
 
+  /**
+   * The card layer (ticket #9) — the only thing this module draws *under* the
+   * grid, and therefore the only thing that cannot live in the overlay.
+   *
+   * It is inserted as the session container's **first** child, before xterm's
+   * own element. That, and not a z-index, is what puts it underneath: the
+   * canvases xterm paints with are `position: absolute` with no z-index of
+   * their own, so they and this layer are all in the same painting step and
+   * *tree order* decides. A negative z-index would have been the obvious move
+   * and is the wrong one — `.cortx-xterm` is not a stacking context (except
+   * while the prompt is pinned to the bottom, when its `translateY` makes it
+   * one), so `-1` would mean "behind the pane's own background" in one mode
+   * and "behind the canvas" in the other.
+   *
+   * Nothing is ever created in the dock: its canvas is opaque and would hide
+   * every pixel of this.
+   */
+  private ensureCardLayer(): HTMLElement {
+    if (this.cardLayer) return this.cardLayer;
+    const layer = document.createElement('div');
+    layer.className = 'cortx-blocks-cards';
+    this.container.insertBefore(layer, this.container.firstChild);
+    this.cardLayer = layer;
+    return layer;
+  }
+
+  private removeCardLayer() {
+    if (!this.cardLayer) return;
+    this.cardLayer.remove();
+    this.cardLayer = null;
+    // The cards went with their layer; forget them, or the next frame would
+    // reuse elements that are no longer in the document.
+    for (const key of [...this.elements.keys()]) {
+      if (key.endsWith(':card')) this.elements.delete(key);
+    }
+  }
+
   private removeLayer() {
     this.layer?.remove();
     this.layer = null;
+    this.removeCardLayer();
     this.elements.clear();
   }
 
@@ -964,8 +1281,10 @@ class BlockController {
     const buf = this.term.buffer.active;
     if (buf.type !== 'normal') {
       // A full-screen program owns the pane; xterm hides its own decorations
-      // in the alternate buffer for the same reason.
+      // in the alternate buffer for the same reason. The cards go with them:
+      // vim has no blocks, and a plate under its grid would be a stripe.
       if (this.layer) this.layer.hidden = true;
+      if (this.cardLayer) this.cardLayer.hidden = true;
       return;
     }
     const metrics = this.metrics();
@@ -973,6 +1292,18 @@ class BlockController {
     const layer = this.ensureLayer();
     layer.hidden = false;
     this.applyPalette(layer);
+    // The cards live on their own layer under the grid, and it carries the
+    // palette too: `--cortx-block-*` is set on `layer`, which is not its
+    // ancestor.
+    const cards = blockCardsEnabled();
+    let cardLayer: HTMLElement | null = null;
+    if (cards) {
+      cardLayer = this.ensureCardLayer();
+      cardLayer.hidden = false;
+      this.applyCardPalette(cardLayer);
+    } else {
+      this.removeCardLayer();
+    }
     // Recomputed below, for the one block that has a toolbar (if any).
     this.toolbarRows = [];
     this.usedCache.clear();
@@ -1008,6 +1339,29 @@ class BlockController {
       const selected = this.isSelected(block.id);
       const hovered = block.id === this.hoveredId;
 
+      // The card: the block's own background plate, on the layer *under* the
+      // grid (ticket #9, Warp's `draw_block_background`). It is the socle the
+      // rest of this loop then draws on — the failure wash, the selection, the
+      // fold cover — and it is what makes a block read as a card rather than
+      // as a run of scrollback with a rule above it.
+      if (cardLayer) {
+        const rect = blockCardRect(range, viewportY, rows, metrics);
+        if (rect) {
+          const card = this.element(keep, `${block.id}:card`, 'cortx-blocks-card', cardLayer);
+          card.style.top = `${Math.round(rect.top)}px`;
+          card.style.height = `${Math.max(1, Math.round(rect.height))}px`;
+          // Square where the viewport cut the block, round where it really
+          // ends: a rounded corner says "this is the end of the card", and at
+          // the edge of the pane that would be a lie.
+          card.style.borderTopLeftRadius = card.style.borderTopRightRadius = rect.roundTop
+            ? `${CARD_RADIUS}px`
+            : '0';
+          card.style.borderBottomLeftRadius = card.style.borderBottomRightRadius = rect.roundBottom
+            ? `${CARD_RADIUS}px`
+            : '0';
+        }
+      }
+
       // The two plates, both under everything else on the layer (their
       // z-indexes are in `terminal-window.css`): the failure wash first, the
       // selection over it, so a selected block that failed still reads as
@@ -1024,27 +1378,24 @@ class BlockController {
         wash.style.height = `${Math.max(1, Math.round(visible.count * metrics.cell))}px`;
       }
 
-      // The selected block: a weak achromatic plate plus an edge down each
+      // A selected block: a weak achromatic plate plus an edge down each
       // side, in the accent when the accent is actually visible against this
       // pane (see `applyPalette`). Warp borders a selection on all four sides
       // but only draws the top and bottom edges at the *ends* of a continuous
       // run, so several selected blocks read as one object rather than a
-      // stack of boxes (`compute_border_info`). Multi-block selection is a
-      // separate change (ticket #10); this asks `isSelected` about the
-      // neighbours rather than comparing ids, so it only has to grow a set.
+      // stack of boxes (`compute_border_info`) — which is exactly what ticket
+      // #10 needed, and why it only had to grow one id into a set.
       if (visible && selected) {
         const plate = this.element(keep, `${block.id}:select`, 'cortx-blocks-select', layer);
         plate.style.top = `${Math.round(metrics.top + visible.row * metrics.cell)}px`;
         plate.style.height = `${Math.max(1, Math.round(visible.count * metrics.cell))}px`;
         // Only cap the run where it really ends — and only where the block's
         // own edge is on screen, so a selection scrolled through does not grow
-        // a lid at the top of the viewport.
-        const above = blocks[i - 1];
-        const below = blocks[i + 1];
-        const opensRun = !above || !this.isSelected(above.id);
-        const closesRun = !below || !this.isSelected(below.id);
-        plate.dataset.top = opensRun && range.start >= viewportY ? 'true' : 'false';
-        plate.dataset.bottom = closesRun && range.endExclusive <= viewportY + rows ? 'true' : 'false';
+        // a lid at the top of the viewport. `selectionEdges` is the pure half
+        // of that decision and is where its tests are.
+        const edges = selectionEdges(blocks, i, this.isSelected, range, viewportY, rows);
+        plate.dataset.top = edges.top ? 'true' : 'false';
+        plate.dataset.bottom = edges.bottom ? 'true' : 'false';
       }
 
       // The divider that opens the block: a 1 px rule the full width of the
@@ -1105,8 +1456,12 @@ class BlockController {
       // has run something: the prompt being typed has no command to act on,
       // and that row belongs to the input editor (ticket #15). The selected
       // block gets one too when the pointer is elsewhere, so Ctrl+↑ / Ctrl+↓
-      // reach the actions without a mouse — but never two toolbars at once.
-      const armed = hovered || (selected && this.hoveredId === null);
+      // reach the actions without a mouse — but never two toolbars at once,
+      // which with a *range* selected means only the end the keyboard last
+      // moved (`headId`). One toolbar per selected block would be four
+      // identical toolbars down the pane, and the copy they offer covers the
+      // whole run anyway.
+      const armed = hovered || (this.hoveredId === null && block.id === this.headId);
       if (visible && toolbars && armed && block.status !== 'prompt') {
         this.toolbar(keep, layer, block, metrics, visible, viewportY, rows, usable ? spacing : null);
       }
@@ -1126,6 +1481,8 @@ class BlockController {
       }
     }
 
+    this.furniture(keep, layer, blocks, liveEnd, metrics, viewportY, rows);
+
     for (const [key, element] of this.elements) {
       if (keep.has(key)) continue;
       element.remove();
@@ -1134,17 +1491,115 @@ class BlockController {
   }
 
   /**
+   * The two pieces of furniture that belong to the *viewport* rather than to a
+   * block's own geometry (ticket #8): the sticky header and the jump-to-bottom
+   * button. Both act on one block — the one that owns the pane's top row,
+   * which is the one you are reading — and there is never more than one of
+   * each, so they are keyed by name and their block is remembered in
+   * `stickyId`.
+   *
+   * These are the only two elements on this layer, besides the gutter bar, the
+   * fold cover and the toolbar's buttons, that take the mouse. The layer as a
+   * whole stays `pointer-events: none` and each of them opts back in by
+   * itself: that is what keeps text selection, the file-path links and the
+   * inline images working straight through the overlay, and it is the first
+   * thing to check if any of them ever stops working.
+   */
+  private furniture(
+    keep: Set<string>,
+    layer: HTMLElement,
+    blocks: readonly TerminalBlock[],
+    liveEnd: number,
+    metrics: Metrics,
+    viewportY: number,
+    rows: number
+  ) {
+    const block = blockAtLine(blocks, viewportY, liveEnd);
+    if (!block) {
+      this.stickyId = null;
+      return;
+    }
+    this.stickyId = block.id;
+    const range = blockRange(block, liveEnd);
+    const paneHeight = rows * metrics.cell;
+
+    if (
+      blockStickyHeaderEnabled() &&
+      stickyHeaderVisible({
+        block,
+        range,
+        viewportY,
+        rows,
+        headerHeight: STICKY_HEADER_HEIGHT,
+        cell: metrics.cell,
+        paneHeight,
+      })
+    ) {
+      const header = this.element(keep, 'sticky:header', 'cortx-blocks-sticky', layer);
+      header.style.top = `${Math.round(metrics.top)}px`;
+      header.style.height = `${STICKY_HEADER_HEIGHT}px`;
+      header.dataset.status = barStatus(block);
+      const label = shortCommand(this.commandText(block)) || blockStatusLabel(block);
+      if (header.dataset.label !== label) {
+        header.dataset.label = label;
+        header.textContent = '';
+        const dot = document.createElement('span');
+        dot.className = 'cortx-blocks-sticky-dot';
+        const text = document.createElement('span');
+        text.className = 'cortx-blocks-sticky-label';
+        text.textContent = label;
+        header.append(dot, text);
+      }
+      setText(header, 'title', `${blockStatusLabel(block)} · back to the top of this block`);
+      this.bindFurniture(header, 'scrollTop');
+    }
+
+    if (blockJumpToBottomEnabled() && jumpToBottomVisible(block, range, viewportY, rows)) {
+      const jump = this.element(keep, 'sticky:jump', 'cortx-blocks-jump', layer);
+      if (!jump.firstChild) jump.appendChild(blockIconSvg('scrollBottom'));
+      setText(jump, 'title', 'Go to the end of this block');
+      this.bindFurniture(jump, 'scrollBottom');
+    }
+  }
+
+  /**
+   * Wire one of the two viewport controls. Bound once — the element is reused
+   * from frame to frame — and it reads `stickyId` at click time rather than
+   * closing over the block it was drawn for, because output keeps arriving and
+   * the pane keeps scrolling under it.
+   */
+  private bindFurniture(element: HTMLElement, action: 'scrollTop' | 'scrollBottom') {
+    if (element.dataset.bound === 'true') return;
+    element.dataset.bound = 'true';
+    // Never let this start a text selection in the grid, move the focus, or
+    // reach the pane's own copy-on-select / right-click-pastes handlers.
+    element.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    element.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.stickyId === null) return;
+      this.run(this.stickyId, action);
+      // The `mousedown` above refuses the focus so the click cannot start a
+      // text selection in the grid — which would otherwise leave the focus on
+      // `<body>` and the pane's own keys (Ctrl+arrow among them) dead. These
+      // two are *navigation*: you use them while reading and keep reading.
+      this.term.focus();
+    });
+  }
+
+  /**
    * Is this block part of the selection?
    *
-   * One block today. It is a predicate and not an `=== this.selectedId`
-   * scattered through `render` so that multi-block selection (ticket #10) is a
-   * change of state and not a change of drawing: the selection plate already
-   * asks it about the blocks above and below to decide where the run's top and
-   * bottom edges go.
+   * Written as a predicate rather than an `=== this.selectedId` scattered
+   * through `render`, and that is what made ticket #10 a change of *state*
+   * instead of a change of drawing: the plate already asked it about the
+   * blocks above and below to decide where the run's top and bottom edges go,
+   * so growing one id into a set changed nothing here at all.
    */
-  private isSelected(id: number): boolean {
-    return id === this.selectedId;
-  }
+  private readonly isSelected = (id: number): boolean => this.selection.has(id);
 
   /** Reuse the element of the previous frame, or make one. */
   private element(keep: Set<string>, key: string, className: string, layer: HTMLElement): HTMLElement {
@@ -1499,12 +1954,15 @@ class BlockController {
       e.preventDefault();
       e.stopPropagation();
       if (e.detail >= 2) this.toggleFold(id);
-      else this.select(id);
+      else this.select(id, e.shiftKey);
     });
     bar.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      this.selectedId = id;
+      // A right-click inside an existing run keeps it — that is how you copy
+      // three blocks from the menu. Outside it, it selects the one clicked.
+      if (!this.selection.has(id)) this.selectOnly(id);
+      else this.headId = id;
       this.schedule();
       this.openMenu(id, e.clientX, e.clientY);
     });
@@ -1527,6 +1985,29 @@ class BlockController {
       e.stopPropagation();
       this.openMenu(id, e.clientX, e.clientY);
     });
+  }
+
+  /**
+   * The card layer's own tokens — a short list, because a plate has one
+   * colour. The plate is the *terminal theme's* card: its own background
+   * lifted a few percent towards its own foreground, which is the recipe
+   * `chromeTokens` uses for `--card` and the one the occluded toolbar plate
+   * already uses. The two ingredients are the theme's foreground (at a low
+   * percentage — a strong `--foreground` mix is what turned the divider pink
+   * on a wallpaper theme) and `--terminal-window-solid`, the theme's own
+   * opaque background, which is inherited from `<html>`.
+   *
+   * Never `--accent` or `--primary`: an imported theme is free to make either
+   * a near-black (`aespa_wda`'s is `#0c161f`), and a full-block plate is the
+   * largest surface in this window — the worst possible place to find that
+   * out.
+   */
+  private applyCardPalette(layer: HTMLElement) {
+    const theme = this.term.options.theme ?? {};
+    layer.style.setProperty(
+      '--cortx-block-fg',
+      theme.foreground?.trim() || 'var(--terminal-fg, var(--foreground))'
+    );
   }
 
   /**
@@ -1588,7 +2069,7 @@ class BlockController {
     // Only computed when something is selected: this runs on every frame, and
     // reading a custom property off the cascade costs a style recalculation.
     const neutralEdge = dark ? 'rgb(255 255 255 / 0.55)' : 'rgb(0 0 0 / 0.45)';
-    if (this.selectedId !== null) {
+    if (this.selection.size > 0) {
       const accent = getComputedStyle(layer).getPropertyValue('--primary').trim();
       const usable = accentUsableAsEdge(accent, theme.background);
       layer.style.setProperty('--cortx-block-select-edge', usable ? accent : neutralEdge);
@@ -1622,11 +2103,21 @@ class BlockController {
   debug() {
     return {
       blocks: this.blocks(),
-      selectedId: this.selectedId,
+      selection: [...this.selection],
+      anchorId: this.anchorId,
+      headId: this.headId,
       hoveredId: this.hoveredId,
       liveEnd: this.liveEnd(),
+      cards: blockCardsEnabled(),
+      stickyHeader: blockStickyHeaderEnabled(),
+      jumpToBottom: blockJumpToBottomEnabled(),
     };
   }
+}
+
+/** `block` / `3 blocks`, for the toast that says what went to the clipboard. */
+function what(count: number, noun: string): string {
+  return count <= 1 ? noun : `${count} ${noun}s`;
 }
 
 /** Write an attribute only when it changed (this runs on every frame). */

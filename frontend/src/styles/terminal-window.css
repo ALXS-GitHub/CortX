@@ -96,17 +96,26 @@
    moves, which is the whole contract of this feature.
 
    What is drawn: a 1 px divider on each block's top edge, the gutter bar, a
-   plate under a failed or selected block, and — only while the pointer is
+   plate under a failed or selected block, the two viewport controls (the
+   sticky header and the jump-to-bottom button) and — only while the pointer is
    inside a block — its action toolbar. The gutter bars and the dividers reach
    into the pane's left padding (`--terminal-padding`, applied by
    `.cortx-xterm-host`) with a negative `left`: the host clips at its border box
    and the padding is inside it, so they show without stealing a column.
 
-   Paint order inside the layer, which is why every rule below carries a
-   `z-index` (elements are reused between frames, so their DOM order is
+   There is a SECOND layer, `.cortx-blocks-cards`, and it is the only thing
+   this feature draws *under* the grid: the block cards (ticket #9). It is not
+   part of the order below because it is not in the same layer at all — see its
+   own rule further down.
+
+   Paint order inside the overlay layer, which is why every rule below carries
+   a `z-index` (elements are reused between frames, so their DOM order is
    creation order and says nothing):
 
-     0  the failure wash          under everything
+    -1  the block cards           NOT in this layer: a separate layer under
+                                  the xterm canvas, so it is below everything
+                                  here *and* below the text itself
+     0  the failure wash          under everything in the overlay
      1  the selection plate       over the wash: a selected block that failed
                                   still reads as selected
      2  the dividers
@@ -114,6 +123,12 @@
      4  a fold cover              opaque, so it must beat the plates
      5  the action toolbar        always on top; it is the only thing here
                                   that is ever deliberately over a glyph
+     5  the sticky header and the jump button — the same level as the toolbar
+                                  and for the same reason: they float over the
+                                  rows on purpose. They never collide with it,
+                                  because the toolbar belongs to the *hovered*
+                                  block's top edge and these two only exist
+                                  while that edge is off the top of the pane.
 
    *Hover* still paints nothing over the rows: the block under the pointer is
    the one whose hairline — and the next one's — comes up, with its gutter bar
@@ -121,6 +136,12 @@
    weak (10 % for the failure wash, 5–7 % for the selection) and both are mixed
    from the *terminal's* palette, never from the app chrome — see the module
    header of `lib/terminalBlocks.ts` for why that line moved.
+
+   Nothing on the overlay takes the mouse except the gutter bar, the fold
+   cover, the toolbar's buttons and the two viewport controls; each opts in by
+   itself with `pointer-events: auto`. The layer stays `pointer-events: none`,
+   and that is what lets a selection, a link and an inline image be reached
+   straight through it.
 
    Status colours come from the *terminal* palette (the ANSI colours xterm is
    drawing with, pushed onto the layer as `--cortx-block-*` by `applyPalette`),
@@ -139,6 +160,66 @@
 }
 .cortx-blocks[hidden] {
   display: none !important;
+}
+
+/* ------------------------------------------------------------------
+   The block cards (ticket #9) — Warp's `draw_block_background`.
+
+   This is the one layer of the feature drawn UNDER the grid, and the only
+   reason it can exist: in the Terminal window the xterm canvas is transparent
+   (`allowTransparency`, background `rgba(0,0,0,0)`), so a plate slid beneath
+   it shows through. The dock's canvas is opaque and no layer under it can be
+   seen at all, which is why `blockCardsEnabled()` is false there whatever the
+   setting says, and why the setting's row has to say so.
+
+   The layer is inserted as the session container's FIRST child, before
+   xterm's own element. That is what puts it underneath — not a z-index: the
+   canvases are `position: absolute` with no z-index of their own, so they and
+   this layer are in the same painting step and tree order decides. A negative
+   z-index would mean "behind the pane's background" while `.cortx-xterm` is
+   not a stacking context and "behind the canvas" while it is (the prompt
+   pinned to the bottom gives it a `translateY`) — two different results for
+   one rule.
+
+   The plate is the *terminal theme's* card: its own background lifted 7 %
+   towards its own foreground, the recipe `chromeTokens` uses for `--card`,
+   held at 55 % so a wallpaper still reads through it and the gaps between two
+   cards still show the photograph at full strength. That is the whole effect —
+   the blocks become surfaces laid on the wallpaper instead of text floating on
+   it. Never `--accent` / `--primary` (an imported theme is free to make either
+   a near-black) and never a strong `--foreground` mix (which is what turned
+   the divider pink on `aespa_wda`): everything here starts from the terminal
+   theme's own background.
+
+   The right margin clears the scrollbar, so the card never sits under the
+   thing you grab to scroll it. The left edge reaches into the pane's padding
+   like the divider does, and the gutter bar — which is on the overlay above —
+   draws on top of it. */
+.cortx-blocks-cards {
+  position: absolute;
+  inset: 0;
+  /* Same painting step as the canvases, ahead of them in tree order. */
+  z-index: 0;
+  pointer-events: none;
+  /* Deliberately NOT `overflow: hidden`: the cards reach out into the pane's
+     left padding, the way the divider and the gutter bar do, and the element
+     that clips them is `.cortx-xterm-host` (at its border box, with the
+     padding inside it). Clipping here would cut exactly the part that makes
+     the card span the pane. */
+}
+.cortx-blocks-cards[hidden] {
+  display: none !important;
+}
+.cortx-blocks-card {
+  position: absolute;
+  left: calc(0px - var(--terminal-padding, 8px));
+  /* Clear of the 8 px scrollbar, plus a little air. */
+  right: 10px;
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--cortx-block-fg) 7%, var(--terminal-window-solid, var(--card))) 55%,
+    transparent
+  );
 }
 
 /* A failed block, washed at 10 % of the palette's own red — Warp's
@@ -384,6 +465,115 @@
   cursor: default;
 }
 
+/* ------------------------------------------------------------------
+   The sticky block header (ticket #8) — Warp's *snackbar*.
+
+   Scroll into the middle of a 500-line block and the command that produced it
+   is off the top of the pane; from then on you are reading output with no idea
+   what printed it. This pins the command to the top of the viewport until its
+   own row comes back into view. `lib/terminalBlockModel.ts` holds the rules
+   about when it may appear (never for a bare prompt, never during a running
+   command, never when it would cover what is left of its block or take more
+   than a quarter of the pane).
+
+   It is one of the two things on this layer that take the mouse, and it opts
+   in by itself: the layer stays `pointer-events: none` so a selection, a link
+   and an inline image are still reachable straight through it. Clicking it
+   scrolls back to the top of the block.
+
+   Its plate is the terminal's own background, blurred, for the same reason the
+   action toolbar's is: a themed window is see-through down to the wallpaper,
+   and a label floating on a photograph is unreadable. It is deliberately the
+   same height as the toolbar (Warp requires its snackbar to be at least as
+   tall as the toolbelt icons) so the two read as one family of furniture. */
+.cortx-blocks-sticky {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  /* Never the full width: the right-hand end is where the pane's own controls
+     and the scrollbar live, and a long command is elided rather than run into
+     them. */
+  max-width: min(60ch, calc(100% - 56px));
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px 0 8px;
+  box-sizing: border-box;
+  border-radius: 0 999px 999px 0;
+  border: 1px solid color-mix(in srgb, var(--cortx-block-fg) 18%, transparent);
+  border-left: 0;
+  background: color-mix(in srgb, var(--cortx-block-bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.22);
+  color: color-mix(in srgb, var(--cortx-block-fg) 72%, transparent);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: pointer;
+  animation: cortx-blocks-actions-in 110ms ease-out;
+}
+.cortx-blocks-sticky:hover {
+  color: var(--cortx-block-fg);
+  border-color: color-mix(in srgb, var(--cortx-block-fg) 30%, transparent);
+}
+/* The same status colours as the gutter bar, so the header says at a glance
+   what the bar out in the margin says — and it is the *only* colour on it. */
+.cortx-blocks-sticky-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--cortx-block-idle);
+}
+.cortx-blocks-sticky[data-status='running'] .cortx-blocks-sticky-dot {
+  background: var(--cortx-block-run);
+}
+.cortx-blocks-sticky[data-status='ok'] .cortx-blocks-sticky-dot {
+  background: var(--cortx-block-ok);
+}
+.cortx-blocks-sticky[data-status='failed'] .cortx-blocks-sticky-dot {
+  background: var(--cortx-block-fail);
+}
+.cortx-blocks-sticky-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The companion button: "go to the end of this block", for output that runs
+   off the bottom of the pane (Warp's
+   `appearance.blocks.show_jump_to_bottom_of_block_button`). Bottom-right, wide
+   of the scrollbar, and the second and last thing on this layer that takes the
+   mouse. */
+.cortx-blocks-jump {
+  position: absolute;
+  z-index: 5;
+  right: 16px;
+  bottom: 10px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--cortx-block-fg) 18%, transparent);
+  background: color-mix(in srgb, var(--cortx-block-bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.22);
+  color: color-mix(in srgb, var(--cortx-block-fg) 68%, transparent);
+  pointer-events: auto;
+  cursor: pointer;
+  animation: cortx-blocks-actions-in 110ms ease-out;
+}
+.cortx-blocks-jump:hover {
+  color: var(--cortx-block-fg);
+  border-color: color-mix(in srgb, var(--cortx-block-fg) 30%, transparent);
+}
+.cortx-blocks-jump > svg {
+  width: 13px;
+  height: 13px;
+}
+
 /* A folded block's output. Purely a cover: the rows are still in the buffer,
    so Find still matches them and a selection still copies them — folding is a
    drawing decision, not an edit. */
@@ -605,9 +795,12 @@
     opacity: 1;
     background: color-mix(in srgb, var(--terminal-fg, var(--foreground)) 10%, transparent);
   }
-  /* The other thing in this sheet that moves: the block toolbar slides down
-     3 px as it appears. It can simply be there. */
-  .cortx-blocks-actions {
+  /* The other things in this sheet that move: the block toolbar and the two
+     viewport controls slide down 3 px as they appear. They can simply be
+     there. */
+  .cortx-blocks-actions,
+  .cortx-blocks-sticky,
+  .cortx-blocks-jump {
     animation: none;
   }
 }

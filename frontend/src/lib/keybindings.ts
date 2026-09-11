@@ -233,6 +233,30 @@ export function comboFromEvent(e: KeyboardEvent): string | null {
   return buildCombo(mods, key);
 }
 
+/**
+ * The same combo without its Shift, or null when there was none.
+ *
+ * Shift is how an editor says "extend the selection instead of moving it", and
+ * that convention has to keep working *after* the user has rebound the thing
+ * it modifies: block selection extends with Shift + whatever `block.previous`
+ * and `block.next` are currently bound to (`lib/terminalBlocks.ts`), not with a
+ * hard-coded `ctrl+shift+up`. So the pressed combo is stripped of its Shift and
+ * looked up among the navigation bindings, rather than Shift'd variants being
+ * registered as actions of their own — which would be two more rows in
+ * Settings > Shortcuts that can silently drift from the two above them.
+ *
+ * Combos are normalised (`ctrl+alt+shift+meta+key`), so this is textual.
+ */
+export function comboWithoutShift(combo: string): string | null {
+  const parts = combo.split('+');
+  const at = parts.indexOf('shift');
+  // Never the *key* `shift` — `comboFromEvent` never produces one, but a combo
+  // typed into the settings could, and dropping it would leave a bare modifier.
+  if (at < 0 || at === parts.length - 1) return null;
+  parts.splice(at, 1);
+  return parts.join('+');
+}
+
 const KEY_LABELS: Record<string, string> = {
   left: '←',
   right: '→',

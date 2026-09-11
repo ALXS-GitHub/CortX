@@ -6,8 +6,11 @@
  * `C;cmd=<base64>` command start, `D;<exit>` command end. CortX keeps the
  * classic terminal rendering — the grid is still xterm's, byte for byte — and
  * only ever *draws over* it, so everything here is geometry: which absolute
- * buffer lines a block covers, which block a keystroke should jump to, and how
- * to turn a range of buffer rows back into text.
+ * buffer lines a block covers, which block a keystroke should jump to, how a
+ * *range* of selected blocks is framed and copied, whether a block spills past
+ * the edges of the viewport (which is what decides the background plate, the
+ * sticky header and the jump-to-bottom button), and how to turn a range of
+ * buffer rows back into text.
  *
  * Nothing in this module touches xterm, the DOM or the store; `terminalBlocks.ts`
  * is the half that does. That split is what makes the interesting parts
@@ -302,6 +305,211 @@ export function blockAtLine(blocks: readonly TerminalBlock[], line: number, live
     if (line >= range.start && line < range.endExclusive) return blocks[i];
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Selection
+// ---------------------------------------------------------------------------
+
+/**
+ * The ids of every block from `anchorId` to `targetId` inclusive, in buffer
+ * order — the set `Shift + click` and `Shift + Ctrl + arrow` extend to.
+ *
+ * Warp keeps a `SelectedBlocks` made of *ranges* plus a `tail` (the anchor the
+ * keyboard extends from). CortX's blocks are a single sorted list, so a range
+ * is two indices into it and this is all the arithmetic there is; the
+ * controller keeps the anchor and the resulting id set.
+ *
+ * Either id being unknown (its block was trimmed out of the scrollback while
+ * the selection was live) gives an empty list rather than a guess: the caller
+ * then falls back to selecting the block that was actually clicked.
+ */
+export function blockIdsBetween(
+  blocks: readonly TerminalBlock[],
+  anchorId: number,
+  targetId: number
+): number[] {
+  const from = blocks.findIndex((b) => b.id === anchorId);
+  const to = blocks.findIndex((b) => b.id === targetId);
+  if (from < 0 || to < 0) return [];
+  const [lo, hi] = from <= to ? [from, to] : [to, from];
+  const out: number[] = [];
+  for (let i = lo; i <= hi; i++) out.push(blocks[i].id);
+  return out;
+}
+
+/**
+ * Which of a selected block's four edges get a lid.
+ *
+ * Warp's `compute_border_info`: a run of selected blocks is bordered left and
+ * right all the way down, but only gets a *top* edge where the run opens and a
+ * *bottom* edge where it closes, so three selected blocks read as one framed
+ * object instead of three stacked boxes.
+ *
+ * The viewport is the second half of the rule: an edge is only drawn where the
+ * block's own boundary is really on screen. A selection scrolled through must
+ * not grow a lid at the top of the pane — that would draw a line where there
+ * is no boundary.
+ */
+export function selectionEdges(
+  blocks: readonly TerminalBlock[],
+  index: number,
+  isSelected: (id: number) => boolean,
+  range: LineRange,
+  viewportY: number,
+  rows: number
+): { top: boolean; bottom: boolean } {
+  const above = blocks[index - 1];
+  const below = blocks[index + 1];
+  const opensRun = !above || !isSelected(above.id);
+  const closesRun = !below || !isSelected(below.id);
+  return {
+    top: opensRun && range.start >= viewportY,
+    bottom: closesRun && range.endExclusive <= viewportY + rows,
+  };
+}
+
+/**
+ * Several blocks' text, in buffer order, as one clipboard payload: a blank
+ * line between two blocks, and nothing at all for a block that is empty.
+ *
+ * A blank line is the separator because that is what the blocks look like on
+ * the pane (`terminal.blockSpacing` prints exactly one), so what is pasted is
+ * what was read.
+ */
+export function joinBlockTexts(parts: readonly string[]): string {
+  return parts.map((p) => p.replace(/\s+$/, '')).filter(Boolean).join('\n\n');
+}
+
+// ---------------------------------------------------------------------------
+// Viewport furniture: the card plate, the sticky header, the jump button
+// ---------------------------------------------------------------------------
+
+/** Does a block reach past the top / bottom edge of the viewport? */
+export interface BlockOverflow {
+  above: boolean;
+  below: boolean;
+}
+
+export function blockOverflow(range: LineRange, viewportY: number, rows: number): BlockOverflow {
+  return {
+    above: range.start < viewportY,
+    below: range.endExclusive > viewportY + rows,
+  };
+}
+
+/**
+ * The air a block's background plate keeps at its top and bottom edge, in px,
+ * so two cards never fuse into one slab (`terminal.blockCards`).
+ */
+export const BLOCK_CARD_GAP = 3;
+
+export interface BlockCardRect {
+  /** Top of the plate, in px from the top of the session container. */
+  top: number;
+  height: number;
+  /** The block's own top / bottom edge is on screen: round that corner. */
+  roundTop: boolean;
+  roundBottom: boolean;
+}
+
+/**
+ * Where a block's background plate goes — the "card" look, and the one thing
+ * on this layer that is drawn *under* the grid rather than over it (the
+ * Terminal window's xterm canvas is transparent; the dock's is not).
+ *
+ * The plate covers the block's own lines and nothing else, minus `gap` px at
+ * each end. A block clipped by the viewport keeps its cut edge square and
+ * flush: rounding a corner that is only there because the pane ran out of
+ * room would draw a card boundary where the block does not end.
+ */
+export function blockCardRect(
+  range: LineRange,
+  viewportY: number,
+  rows: number,
+  metrics: { cell: number; top: number },
+  gap = BLOCK_CARD_GAP
+): BlockCardRect | null {
+  const clip = clipToViewport(range, viewportY, rows);
+  if (!clip) return null;
+  const overflow = blockOverflow(range, viewportY, rows);
+  const top = metrics.top + clip.row * metrics.cell + (overflow.above ? 0 : gap);
+  const bottom = metrics.top + (clip.row + clip.count) * metrics.cell - (overflow.below ? 0 : gap);
+  if (bottom - top < 1) return null;
+  return {
+    top,
+    height: bottom - top,
+    roundTop: !overflow.above,
+    roundBottom: !overflow.below,
+  };
+}
+
+/**
+ * The most of the pane the sticky header may take before it is simply not
+ * drawn — Warp's `SNACKBAR_HEADER_MAX_RATIO`. A header is meant to say what
+ * you are reading; one that eats a quarter of a short pane *is* what you are
+ * reading.
+ */
+export const STICKY_HEADER_MAX_RATIO = 0.25;
+
+export interface StickyHeaderInput {
+  block: TerminalBlock;
+  range: LineRange;
+  viewportY: number;
+  rows: number;
+  /** Height of the header itself, in px. */
+  headerHeight: number;
+  /** Height of one grid row, in px. */
+  cell: number;
+  /** Height of the whole grid, in px. */
+  paneHeight: number;
+}
+
+/**
+ * Should the block that owns the top of the viewport be named by a header
+ * pinned there? (Warp calls it the *snackbar*.)
+ *
+ * The rules are Warp's, in the order they rule things out:
+ *
+ * 1. the block must actually have *run* something. A bare prompt has no
+ *    command to name, and a block that is still running is Warp's
+ *    `should_hide_snackbar_during_long_running_command` — output arriving
+ *    under a header that names it is noise, and the command is about to come
+ *    back into view at the bottom anyway;
+ * 2. the block's own command row must be **off the top of the pane**. While it
+ *    is on screen the header would merely repeat the row underneath it;
+ * 3. what is left of the block on screen must be at least as tall as the
+ *    header. Otherwise the header covers the whole of the thing it describes;
+ * 4. and the header must not take more than `STICKY_HEADER_MAX_RATIO` of the
+ *    pane.
+ *
+ * There is no rule 5 about *hover*: unlike the action toolbar, this is not a
+ * control that appears where the pointer is — it answers "what am I looking
+ * at", which is a question you have while scrolling with no pointer at all.
+ */
+export function stickyHeaderVisible(input: StickyHeaderInput): boolean {
+  const { block, range, viewportY, rows, headerHeight, cell, paneHeight } = input;
+  if (block.status !== 'done') return false;
+  const overflow = blockOverflow(range, viewportY, rows);
+  if (!overflow.above) return false;
+  const clip = clipToViewport(range, viewportY, rows);
+  if (!clip || clip.count * cell < headerHeight) return false;
+  if (paneHeight > 0 && headerHeight > paneHeight * STICKY_HEADER_MAX_RATIO) return false;
+  return true;
+}
+
+/**
+ * Should the companion "go to the end of this block" button be drawn?
+ *
+ * Warp's `appearance.blocks.show_jump_to_bottom_of_block_button`: "whether to
+ * show the jump-to-bottom button in long command output". So: the block spills
+ * past the bottom of the pane, and it is a block that ran something — a prompt
+ * has no end worth jumping to. A *running* block does keep the button, unlike
+ * the header: its end is exactly where a long build's progress is.
+ */
+export function jumpToBottomVisible(block: TerminalBlock, range: LineRange, viewportY: number, rows: number): boolean {
+  if (block.status === 'prompt') return false;
+  return blockOverflow(range, viewportY, rows).below;
 }
 
 // ---------------------------------------------------------------------------
