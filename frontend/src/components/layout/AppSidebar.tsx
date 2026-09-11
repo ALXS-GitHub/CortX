@@ -22,11 +22,21 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useViewPrefsStore } from '@/stores/viewPrefsStore';
+import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { BetaBadge } from '@/components/ui/BetaBadge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ShellNoteBanner } from '@/components/terminal/ShellNoteBanner';
 import { cn } from '@/lib/utils';
 import { applyThemeMode, type ThemeMode } from '@/lib/theme';
+import { describeCloseReach, type WindowShare } from '@/lib/closeReach';
+import {
+  collectLeaves,
+  terminalWindowIdOf,
+  terminalWindowName,
+  terminalWindowNumber,
+  type TerminalTab,
+} from '@/lib/terminalLayout';
 import type { View } from '@/types';
 
 const RAIL_WIDTH = 56;
@@ -69,6 +79,29 @@ interface ActivityGroup {
 }
 
 /**
+ * Which Terminal windows hold `terminalIds`, and how many each holds — the
+ * shape `describeCloseReach` turns into "2 in Terminal 2" (ticket #37).
+ *
+ * The layout document is shared between the windows, so the main window can
+ * name them without asking anyone.
+ */
+function windowShares(tabs: TerminalTab[], terminalIds: string[]): WindowShare[] {
+  if (terminalIds.length === 0) return [];
+  const wanted = new Set(terminalIds);
+  const counts = new Map<string, number>();
+  for (const tab of tabs) {
+    for (const leaf of collectLeaves(tab.layout)) {
+      if (!wanted.has(leaf.terminalId)) continue;
+      const windowId = terminalWindowIdOf(tab);
+      counts.set(windowId, (counts.get(windowId) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => terminalWindowNumber(a[0]) - terminalWindowNumber(b[0]))
+    .map(([windowId, count]) => ({ name: terminalWindowName(windowId), count }));
+}
+
+/**
  * Left navigation (frosted glass). Two halves: the section nav on top and, when
  * something runs or has output, an "Activity" tree of the live services and
  * scripts (grouped by project) with start / stop / close actions on hover.
@@ -83,6 +116,7 @@ export function AppSidebar() {
     serviceRuntimes,
     scriptRuntimes,
     terminals,
+    terminalSurfaces,
     openTerminal,
     closeTerminal,
     startService,
@@ -251,6 +285,24 @@ export function AppSidebar() {
     else stopGlobalScript(row.key);
   };
 
+  /**
+   * The row's own X: one terminal, named by the user, closed wherever it lives
+   * — unlike the group's "close all", which stays in this window (see
+   * `CloseAllAction`). An aimed gesture may cross the surface; an unaimed one
+   * may not.
+   *
+   * Crossing it properly takes both halves, which is what the Terminal window
+   * does for its own panes (`closeLeafNow`): the leaf has to leave the shared
+   * layout document, or the window keeps showing a pane whose session has just
+   * been killed.
+   */
+  const closeRow = (row: ActivityRow) => {
+    if (terminalSurfaces[row.id] === 'window') {
+      useTerminalLayoutStore.getState().removeTerminalFromWindow(row.id, null);
+    }
+    closeTerminal(row.id);
+  };
+
   const collapsed = sidebarCollapsed;
   const groups = useMemo(() => {
     const out: { name: string; items: NavItem[] }[] = [];
@@ -369,11 +421,7 @@ export function AppSidebar() {
                           <Square className="size-3" />
                         </RowAction>
                       )}
-                      {running.length === 0 && (
-                        <RowAction tone="close" title="Close all terminals" onClick={() => group.rows.forEach((r) => closeTerminal(r.id))}>
-                          <X className="size-3" />
-                        </RowAction>
-                      )}
+                      {running.length === 0 && <CloseAllAction rows={group.rows} subject="Close all terminals" />}
                     </>
                   }
                 >
@@ -385,7 +433,7 @@ export function AppSidebar() {
                       onOpen={() => openTerminal(row.kind, row.key)}
                       onStart={() => startRow(row)}
                       onStop={() => stopRow(row)}
-                      onClose={() => closeTerminal(row.id)}
+                      onClose={() => closeRow(row)}
                     />
                   ))}
                 </ActivityGroupBlock>
@@ -409,9 +457,7 @@ export function AppSidebar() {
                         </RowAction>
                       )}
                       {running.length === 0 && (
-                        <RowAction tone="close" title="Close all script terminals" onClick={() => group.rows.forEach((r) => closeTerminal(r.id))}>
-                          <X className="size-3" />
-                        </RowAction>
+                        <CloseAllAction rows={group.rows} subject="Close all script terminals" />
                       )}
                     </>
                   }
@@ -424,7 +470,7 @@ export function AppSidebar() {
                       onOpen={() => openTerminal(row.kind, row.key)}
                       onStart={() => startRow(row)}
                       onStop={() => stopRow(row)}
-                      onClose={() => closeTerminal(row.id)}
+                      onClose={() => closeRow(row)}
                     />
                   ))}
                 </ActivityGroupBlock>
@@ -443,9 +489,7 @@ export function AppSidebar() {
                       <Square className="size-3" />
                     </RowAction>
                   ) : (
-                    <RowAction tone="close" title="Close all" onClick={() => globalRows.forEach((r) => closeTerminal(r.id))}>
-                      <X className="size-3" />
-                    </RowAction>
+                    <CloseAllAction rows={globalRows} subject="Close all" />
                   )
                 }
               >
@@ -457,7 +501,7 @@ export function AppSidebar() {
                     onOpen={() => openTerminal(row.kind, row.key)}
                     onStart={() => startRow(row)}
                     onStop={() => stopRow(row)}
-                    onClose={() => closeTerminal(row.id)}
+                    onClose={() => closeRow(row)}
                   />
                 ))}
               </ActivityGroupBlock>
@@ -482,6 +526,20 @@ export function AppSidebar() {
           <ThemeIcon className="size-4" />
         </RailButton>
       </div>
+
+      {/*
+        "CortX has no shell integration for <shell>" (issue #54), for the
+        shells of *this* dock. It is drawn through a portal at the bottom of
+        the window, over the dock it is about, and only while the dock is open
+        — a note about a terminal nobody can see explains nothing.
+
+        Mounted from the sidebar because it is the one piece of permanent main
+        window chrome this change owns; its natural home is `TerminalPanel`,
+        next to where the Terminal window mounts its own copy (see
+        `SubshellBanner`). Moving it there is a one-line change and nothing
+        here depends on the sidebar.
+      */}
+      {terminalPanelOpen && <ShellNoteBanner surface="dock" anchor="fixed" />}
 
       {/* Resize handle */}
       {!collapsed && (
@@ -577,11 +635,13 @@ function RowAction({
   tone,
   title,
   onClick,
+  disabled,
   children,
 }: {
   tone: 'start' | 'stop' | 'close';
   title: string;
   onClick: () => void;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -589,19 +649,83 @@ function RowAction({
       type="button"
       title={title}
       aria-label={title}
+      disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
       className={cn(
         'grid size-5 place-items-center rounded-[6px] text-muted-foreground transition-colors',
-        tone === 'start' && 'hover:bg-st-done/18 hover:text-st-done',
-        tone === 'stop' && 'hover:bg-destructive/15 hover:text-destructive',
-        tone === 'close' && 'hover:bg-accent hover:text-foreground'
+        disabled && 'cursor-default opacity-40',
+        !disabled && tone === 'start' && 'hover:bg-st-done/18 hover:text-st-done',
+        !disabled && tone === 'stop' && 'hover:bg-destructive/15 hover:text-destructive',
+        !disabled && tone === 'close' && 'hover:bg-accent hover:text-foreground'
       )}
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * "Close all terminals" for one Activity group — and it stops at this window's
+ * dock (ticket #37).
+ *
+ * The rule the rest of the app follows is that a bulk close belongs to the
+ * surface it was pressed in: the dock's own "Close all" has consulted
+ * `terminalSurfaces` since `f026107`, and the Terminal windows treat
+ * themselves as one set. This family was the one left outside, and it is the
+ * least defensible place to reach across: it is an unlabelled hover button in
+ * the *main* window's chrome, it asks nothing before it fires, and what it
+ * calls — `closeTerminal` — is a dock action. On a terminal that lives in a
+ * Terminal window it kills the PTY and removes the backend session but leaves
+ * the tab standing in the layout document, so the reach is not even a clean
+ * close: it is a dead pane in a window the user may well be looking at.
+ *
+ * There is a real argument the other way — these actions close *a project's*
+ * terminals, by identity, so one could say they should find them wherever they
+ * are. That argument is honoured one row down: the per-row X still reaches
+ * into the Terminal window, because it is aimed at exactly one terminal the
+ * user picked out. It is the unaimed gesture that stays home.
+ *
+ * And when the scope is cut, the button says so: the tooltip names what stays
+ * open, in the words `closeReach` gives the Terminal windows.
+ */
+function CloseAllAction({ rows, subject }: { rows: ActivityRow[]; subject: string }) {
+  const closeTerminal = useAppStore((s) => s.closeTerminal);
+  const surfaces = useAppStore((s) => s.terminalSurfaces);
+  const tabs = useTerminalLayoutStore((s) => s.doc.window.tabs);
+
+  const { here, title } = useMemo(() => {
+    const inDock = rows.filter((r) => surfaces[r.id] !== 'window').map((r) => r.id);
+    const inWindows = rows.filter((r) => surfaces[r.id] === 'window').map((r) => r.id);
+    const reach = describeCloseReach(windowShares(tabs, inWindows));
+    if (inDock.length === 0) {
+      return {
+        here: inDock,
+        // The reach names the window, which is also where the close has to be
+        // pressed instead — so the sentence says where without saying "them",
+        // which would have to know whether it is one terminal or five.
+        title: reach
+          ? `Nothing to close in this window — ${reach}`
+          : 'Nothing to close in this window',
+      };
+    }
+    return {
+      here: inDock,
+      title: reach ? `${subject} in this window — leaves ${reach}` : subject,
+    };
+  }, [rows, surfaces, tabs, subject]);
+
+  return (
+    <RowAction
+      tone="close"
+      title={title}
+      disabled={here.length === 0}
+      onClick={() => here.forEach((id) => closeTerminal(id))}
+    >
+      <X className="size-3" />
+    </RowAction>
   );
 }
 
