@@ -23,8 +23,21 @@
  * where the rest of the theme lives; it was under "Text", which it never had
  * anything to do with.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { ShieldCheck } from 'lucide-react';
+import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Code, Field, Section } from '@/components/settings/SettingsPrimitives';
@@ -43,6 +56,7 @@ import {
   fontFamilyResolves,
 } from '@/lib/terminalSessions';
 import { resolveTabDisplay } from '@/components/terminal/model';
+import { redactCommandHistory, type RedactionReport } from '@/lib/tauri';
 import type {
   MacOptionAsMeta,
   SuggestionConfidence,
@@ -67,6 +81,105 @@ const TAB_DISPLAY_TOGGLES = [
     hint: "The tab colour as a bar down the left edge of the row, on top of the tint. Sessions rail only; off by default, because the tint already carries the colour.",
   },
 ] as const;
+
+/** `1 line` / `12 lines`, because the report is read as a sentence. */
+function lines(n: number): string {
+  return `${n.toLocaleString('en-US')} line${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * The one-off pass of the secret filter over the history **already on disk**
+ * (ticket #41).
+ *
+ * The toggle above it covers every line from now on; this covers the file as
+ * it stands, which on a machine that has been running CortX for months is the
+ * half that actually holds something. It sits here, under that toggle, because
+ * that is where the question occurs to you — and it is a **button, not a
+ * consequence of the toggle**: switching masking on must not silently rewrite
+ * a file, and nothing calls this at startup or on a timer.
+ *
+ * Three things follow from the rewrite being irreversible:
+ *
+ * - it asks first, and the question says plainly that no backup is kept and
+ *   why (a `.bak` with the secrets in it would defeat the exercise);
+ * - the button is the only caller, and it is never the default action of the
+ *   dialog's keyboard focus path — `Cancel` is;
+ * - the report is shown afterwards and *stays* shown. "12 lines examined,
+ *   0 masked" is the answer to "did that do anything?", and without it the
+ *   only way to find out is to go and read the history file — the very file
+ *   this is meant to stop anyone having to open.
+ */
+function RedactExistingHistory() {
+  const [open, setOpen] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [report, setReport] = useState<RedactionReport | null>(null);
+
+  const run = async () => {
+    setRunning(true);
+    try {
+      const result = await redactCommandHistory();
+      setReport(result);
+      toast.success(
+        result.redacted > 0
+          ? `${lines(result.redacted)} masked, out of ${lines(result.scanned)} examined`
+          : `${lines(result.scanned)} examined — nothing in them looked like a secret`
+      );
+    } catch (error) {
+      setReport(null);
+      toast.error('Could not mask the existing history', { description: String(error) });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+      <p className="text-[13px] text-muted-foreground">
+        The setting above only masks lines from now on. Everything written before it was switched on is still in{' '}
+        <Code>command-history.jsonl</Code> exactly as it was typed — run the same filter over that file once to catch up.
+      </p>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)} disabled={running}>
+        <ShieldCheck />
+        {running ? 'Masking…' : 'Mask secrets already in the history…'}
+      </Button>
+      {report && (
+        <p className="text-[13px] text-muted-foreground" role="status">
+          <span className="text-foreground">{lines(report.scanned)} examined</span>,{' '}
+          <span className="text-foreground">{report.redacted.toLocaleString('en-US')} masked</span>
+          {report.skipped > 0 && <> — plus {lines(report.skipped)} kept as they were, not readable as records</>}.
+        </p>
+      )}
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mask the secrets already in the command history?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  CortX reads <Code>command-history.jsonl</Code> and its <Code>.jsonl.1</Code> archive, replaces
+                  anything that looks like a token, a password or an API key with bullets, and writes the files back in
+                  place. Lines with nothing to hide are kept byte for byte, and the history stays searchable.
+                </p>
+                <p className="text-foreground">
+                  This cannot be undone, and no backup is kept — a copy still holding the secrets would defeat the
+                  point. The original command lines are gone for good.
+                </p>
+                <p>
+                  Nothing else is touched: your settings, your open terminals and the output already on their screens
+                  are left exactly as they are.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void run()}>Mask them</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
 
 export function IntegratedTerminalSection() {
   const { terminal, patch } = useTerminalSettings();
@@ -755,6 +868,8 @@ export function IntegratedTerminalSection() {
             disabled={!terminal}
           />
         </SettingToggle>
+
+        <RedactExistingHistory />
 
         <SettingToggle
           k="smoothScrollDuration"
