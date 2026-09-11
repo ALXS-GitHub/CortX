@@ -15,9 +15,23 @@
  * Relative paths are resolved against the terminal's live directory, which
  * shell integration reports over OSC 7 (`TerminalShellState.cwd`).
  *
- * Click opens the file in the editor CortX already uses elsewhere
- * (`open_in_editor`, at the line the output pointed at); a directory opens in
- * the file manager. Alt- or Shift-click reveals the containing folder instead.
+ * ## What opens a link (zorg #43)
+ *
+ * **Ctrl+click** (⌘+click on macOS) opens the file in the editor CortX already
+ * uses elsewhere (`open_in_editor`, at the line the output pointed at); a
+ * directory opens in the file manager, and holding Alt as well reveals the
+ * containing folder instead.
+ *
+ * A **plain click opens nothing**. In a terminal the left button belongs to
+ * the text: it places the caret and drags out a selection, and that is true of
+ * the pixels a link happens to sit on too. VS Code, iTerm2 and Windows
+ * Terminal all require a modifier for the same reason — copying half of an
+ * error message should never launch an editor. Shift and Alt on their own are
+ * left to the terminal as well (Shift extends a selection, Alt moves the
+ * caret), so the old Alt/Shift-click reveal is now Ctrl+Alt+click.
+ *
+ * The gesture-free way in is the hover panel below: its buttons answer to an
+ * ordinary click, because a button is a button.
  *
  * ## The hover surface (ticket #31)
  *
@@ -42,8 +56,25 @@
  * `LinkHover` also carries a **click fallback** for paths. xterm activates a
  * link from the linkifier's `_currentLink`, which the same render churn can
  * clear between `mousedown` and `mouseup`; the fallback re-resolves the token
- * under the pointer on `click` and opens it, de-duplicated against the
+ * under the pointer on a Ctrl+click and opens it, de-duplicated against the
  * provider's own activation so a working click never opens twice.
+ *
+ * ## The cursor, and why the underline stays
+ *
+ * The underline says *this is a link*; it no longer promises that a click will
+ * follow it, so the promise has to be made and withdrawn somewhere else — the
+ * pointer cursor. Over a link it is now an I-beam like the rest of the grid
+ * (a plain click really does select text there) and it turns into a hand the
+ * moment Ctrl is held, which is exactly VS Code's affordance.
+ *
+ * The underline itself is *not* gated on Ctrl, for a mechanical reason: it is
+ * a decoration xterm reads once, when the linkifier asks the provider for the
+ * line under the pointer, and it is painted by the renderer — there is no API
+ * to re-evaluate it on a keydown. Faking it would mean tearing the link cache
+ * down and rebuilding it on every Ctrl press, i.e. the same flicker under a
+ * running command that this module already goes out of its way to avoid. And
+ * an underline is honest either way: it marks a link, and the panel that comes
+ * up on the same hover names the gesture.
  */
 import type { IDisposable, ILink, ILinkProvider, Terminal } from '@xterm/xterm';
 import { exists, readDir } from '@tauri-apps/plugin-fs';
@@ -53,8 +84,61 @@ import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import '@/styles/terminal-links.css';
 import * as api from '@/lib/tauri';
+import { IS_MAC } from '@/lib/keybindings';
 import { useAppStore } from '@/stores/appStore';
 import type { TerminalConfig } from '@/types';
+
+/**
+ * Does this click mean "open this link"? (zorg #43)
+ *
+ * Ctrl on Windows and Linux, ⌘ on macOS — where Ctrl+click *is* the context
+ * menu, so it must not be an accelerator for anything. Left button only: the
+ * right button opens the terminal's own menu, and the middle one pastes.
+ *
+ * Exported because every way a link can be opened has to agree on the
+ * gesture: this provider, the click fallback in `LinkHover`, and — over in
+ * `terminalSessions.ts` — the `WebLinksAddon` handler and the `OSC 8` one,
+ * whose `linkModifierHeld` is this same test.
+ */
+export function isLinkOpenClick(event: MouseEvent): boolean {
+  if (event.button !== 0) return false;
+  return IS_MAC ? event.metaKey : event.ctrlKey;
+}
+
+/**
+ * Ctrl+Alt+click shows the containing folder instead of opening the file.
+ * Shift is deliberately not part of it any more: in every terminal Shift+click
+ * extends the selection, and that is a gesture we have no business overriding
+ * now that the modifier is what decides whether anything opens at all.
+ */
+function wantsReveal(event: MouseEvent): boolean {
+  return event.altKey;
+}
+
+/**
+ * `cortx-link-mod` on `<body>` while the open modifier is held — the one thing
+ * that still promises a click will follow the link (see the module header).
+ * Installed once, on the first terminal that gets a link provider, and left
+ * there: it is two listeners doing a `getModifierState` call, and the panel
+ * singleton below sets the same precedent.
+ *
+ * Capture phase, because the terminal eats plenty of keystrokes on their way
+ * up; `blur` clears the class, since a keyup that happens in another window
+ * never reaches us.
+ */
+const MOD_CLASS = 'cortx-link-mod';
+let modifierWatched = false;
+
+function watchOpenModifier(): void {
+  if (modifierWatched || typeof window === 'undefined') return;
+  modifierWatched = true;
+  const sync = (held: boolean) => document.body.classList.toggle(MOD_CLASS, held);
+  const fromKey = (e: KeyboardEvent) =>
+    sync(e.getModifierState(IS_MAC ? 'Meta' : 'Control'));
+  window.addEventListener('keydown', fromKey, true);
+  window.addEventListener('keyup', fromKey, true);
+  window.addEventListener('blur', () => sync(false));
+}
 
 /** A run of non-space characters holding at least one separator. */
 const CANDIDATE = /[^\s"'`<>|]*[\\/][^\s"'`<>|]*/g;
@@ -454,7 +538,17 @@ class LinkPanel {
       });
       return button;
     });
-    this.actionsEl.replaceChildren(...buttons);
+    // The gesture, spelled out. The panel is where a plain click *does* work,
+    // so it is also the only honest place to say what a click on the link
+    // itself needs (zorg #43); dimmed, and last, so it never competes with the
+    // buttons next to it.
+    const hint = document.createElement('span');
+    hint.className = 'cortx-link-hint';
+    hint.textContent = IS_MAC ? '⌘ click' : 'Ctrl click';
+    hint.title = IS_MAC
+      ? '⌘-click the link to open it — a plain click selects text'
+      : 'Ctrl-click the link to open it — a plain click selects text';
+    this.actionsEl.replaceChildren(...buttons, hint);
 
     // Measure before placing: the panel is as wide as the target it shows.
     this.root.style.left = '0px';
@@ -560,6 +654,7 @@ class LinkHover {
   constructor(term: Terminal, terminalId: string) {
     this.term = term;
     this.terminalId = terminalId;
+    watchOpenModifier();
     // `registerFileLinkProvider` runs in `createSession`, before `term.open()`:
     // there is no DOM to listen on yet. The first render is when there is.
     this.tryAttach();
@@ -723,7 +818,8 @@ class LinkHover {
    * has just opened the very same thing.
    */
   private readonly onClick = (e: MouseEvent) => {
-    if (e.button !== 0 || e.ctrlKey || e.metaKey) return;
+    // Ctrl / ⌘ or nothing happens — a bare click belongs to the selection.
+    if (!isLinkOpenClick(e)) return;
     if (!filePathLinksEnabled()) return;
     if (this.term.modes.mouseTrackingMode !== 'none') return;
     const cell = this.cellAt(e);
@@ -731,7 +827,7 @@ class LinkHover {
     // A drag is a selection, never a click on a link.
     if (!this.downCell || this.downCell.col !== cell.col || this.downCell.row !== cell.row) return;
     if (this.term.hasSelection() && this.term.getSelection().trim()) return;
-    const reveal = e.altKey || e.shiftKey;
+    const reveal = wantsReveal(e);
     void (async () => {
       const token = this.findToken(cell.col, cell.row, true);
       if (!token || token.kind !== 'path') return;
@@ -923,8 +1019,13 @@ export function registerFileLinkProvider(term: Terminal, terminalId: string): ID
               start: { x: first.x + 1, y: first.y + 1 },
               end: { x: last.x + 1, y: last.y + 1 },
             },
-            activate: (event) =>
-              void activate(resolved, event.altKey || event.shiftKey, candidate.line, candidate.column),
+            // xterm hands us every left-button mouseup on the link; the
+            // modifier is what tells an *open* from a click that was only
+            // ever meant to put the caret down (zorg #43).
+            activate: (event) => {
+              if (!isLinkOpenClick(event)) return;
+              void activate(resolved, wantsReveal(event), candidate.line, candidate.column);
+            },
           };
           return link;
         })

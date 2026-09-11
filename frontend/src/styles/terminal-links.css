@@ -135,3 +135,44 @@
   outline: 1px solid color-mix(in srgb, var(--cortx-link-fg, currentcolor) 45%, transparent);
   outline-offset: 1px;
 }
+
+/* The gesture (zorg #43). A plain click on the link does nothing at all now,
+   so the panel — the one surface where a plain click *does* work — says what
+   the link itself wants. Dimmed and pushed to the far end: it is a reminder,
+   not a third action. */
+.cortx-link-hint {
+  margin-left: auto;
+  padding: 0 4px 0 8px;
+  color: color-mix(in srgb, var(--cortx-link-fg, currentcolor) 45%, transparent);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+/* The pointer over a link (zorg #43).
+
+   xterm puts `xterm-cursor-pointer` on the grid whenever a link is hovered,
+   and a hand cursor is a promise that the button under it will do something.
+   Since ticket #43 a plain click only ever selects text, so the I-beam the
+   rest of the grid shows is the truth — until the open modifier goes down,
+   which `terminalLinks.ts` mirrors onto `<body>`. Same affordance as VS Code.
+
+   The underline is left alone on purpose: it is a renderer-painted decoration
+   xterm samples once per hover, with no way to re-evaluate it on a keydown. */
+.cortx-xterm .xterm.xterm-cursor-pointer,
+.cortx-xterm .xterm .xterm-cursor-pointer {
+  cursor: text;
+}
+
+body.cortx-link-mod .cortx-xterm .xterm.xterm-cursor-pointer,
+body.cortx-link-mod .cortx-xterm .xterm .xterm-cursor-pointer {
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cortx-link-pop {
+    animation: none;
+  }
+  .cortx-link-action {
+    transition: none;
+  }
+}
