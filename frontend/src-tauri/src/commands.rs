@@ -3138,6 +3138,22 @@ pub fn terminal_subshell_snippet(
     ))
 }
 
+/// What there is to say about the shell a terminal is actually running, or
+/// `None` when it is one CortX has an integration for
+/// (`cortx_core::shell_init::unsupported_shell_note`).
+///
+/// A pure lookup on a program name — no state, no side effect — because the
+/// decision of *when* to say it belongs to the UI: the sentence is shown once
+/// per program name, as a dismissible banner over the terminal surface
+/// (`ShellNoteBanner`), never as a toast and never once per terminal. Without
+/// it, a user running `xonsh` or `csh` gets a CortX with its blocks, enriched
+/// history, completion notifications, input editor, live tab title and block
+/// spacing all quietly missing, and no way to find out why.
+#[tauri::command]
+pub fn terminal_shell_note(program: String) -> Option<String> {
+    cortx_core::shell_init::unsupported_shell_note(&program)
+}
+
 /// Show / focus the main window (from the Terminal window).
 #[tauri::command]
 pub fn show_main_window(app_handle: AppHandle) {

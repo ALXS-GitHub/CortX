@@ -14,6 +14,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { tabsInScope } from '@/lib/terminalLayout';
 import { activeLeafOf } from './model';
+import { NoticeBar, ShellNoteBanner } from './ShellNoteBanner';
 import { detectSubshell, warpifySubshell, type SubshellShell } from './subshell';
 
 /**
@@ -24,6 +25,14 @@ import { detectSubshell, warpifySubshell, type SubshellShell } from './subshell'
  * It lives here rather than inside the pane because a pane is a terminal
  * surface: anything drawn in it has to be a floating layer anyway, and this
  * one is per-window, not per-split.
+ *
+ * It is also the banner *slot* of the Terminal window, because two banners
+ * stacked in the same corner is one banner too many. The other tenant is
+ * `ShellNoteBanner` ("CortX has no shell integration for <shell>"), and the
+ * offer wins whenever both apply: it is actionable and it lasts only as long
+ * as the sub-shell command runs, while the note is a standing fact about the
+ * user's shell that will still be true a minute later — so the note simply
+ * takes the slot back when the offer is gone.
  */
 
 const SHELLS: Array<{ id: SubshellShell; label: string }> = [
@@ -82,23 +91,17 @@ export function SubshellBanner() {
     [target, dismiss]
   );
 
-  if (!target) return null;
+  // Nothing to offer: the slot goes back to the standing shell note.
+  if (!target) return <ShellNoteBanner surface="window" />;
   const suggested = target.match.shell ?? 'bash';
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-40 flex justify-center px-4">
-      <div className="pointer-events-auto flex max-w-[min(680px,100%)] items-center gap-3 rounded-[var(--rad-md)] border border-border-strong bg-popover/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
-        <Plug className="size-4 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate">
-            <span className="font-medium">{target.match.what}</span> is running here without CortX shell
-            integration.
-          </p>
-          <p className="truncate text-[11px] text-faint">
-            Wait for its prompt, then enable it: CortX types one line to set up the cwd and command tracking.
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center">
+    <NoticeBar
+      icon={Plug}
+      onDismiss={() => dismiss(target.terminalId, target.command)}
+      dismissLabel="Not now"
+      actions={
+        <>
           <Button size="xs" disabled={busy} className="rounded-r-none" onClick={() => void run(suggested)}>
             Enable
           </Button>
@@ -128,17 +131,16 @@ export function SubshellBanner() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
-        <button
-          type="button"
-          className="grid size-5 shrink-0 place-items-center rounded-[6px] text-muted-foreground hover:bg-accent hover:text-foreground"
-          onClick={() => dismiss(target.terminalId, target.command)}
-          title="Not now"
-          aria-label="Not now"
-        >
-          <X className="size-3" />
-        </button>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <p className="truncate">
+        <span className="font-medium">{target.match.what}</span> is running here without CortX shell
+        integration.
+      </p>
+      <p className="truncate text-[11px] text-faint">
+        Wait for its prompt, then enable it: CortX types one line to set up the cwd and command tracking.
+      </p>
+    </NoticeBar>
   );
 }

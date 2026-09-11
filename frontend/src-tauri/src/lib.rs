@@ -666,6 +666,7 @@ pub fn run() {
             commands::open_terminal_window,
             commands::open_terminal_window_labelled,
             commands::terminal_subshell_snippet,
+            commands::terminal_shell_note,
             commands::show_main_window,
             commands::take_terminal_window_scope,
             commands::take_terminal_window_launch,

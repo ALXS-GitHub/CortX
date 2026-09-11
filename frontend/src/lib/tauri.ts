@@ -746,6 +746,18 @@ export async function onShellExit(
 // Shell integration (OSC 7 / OSC 133 from `cortx init`)
 // ============================================================================
 
+/**
+ * What to tell the user about the shell a terminal runs, or `null` when CortX
+ * has an integration for it. `program` is what the PTY was started with — a
+ * bare name or a full path, both understood.
+ *
+ * Cheap and pure: the answer only depends on the name, so callers cache it per
+ * program rather than asking once per terminal (see `ShellNoteBanner`).
+ */
+export async function terminalShellNote(program: string): Promise<string | null> {
+  return (await invoke<string | null>('terminal_shell_note', { program })) ?? null;
+}
+
 /** Fired whenever a terminal's shell reports a new cwd, command start or end. */
 export async function onTerminalState(
   callback: (state: TerminalShellState) => void
