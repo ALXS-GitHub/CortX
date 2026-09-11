@@ -49,7 +49,11 @@
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-raised, var(--surface));
+  /* `--surface-raised` / `--surface` are not defined anywhere in this app, so
+     both fell through and the list drew with *no* fill at all — the terminal
+     text showed straight through it. `--popover` is the token the rest of the
+     floating UI already uses, and it keeps the intended override working. */
+  background: var(--surface-raised, var(--surface, var(--popover)));
   box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
   font-size: 12px;
   line-height: 1.4;
@@ -67,11 +71,11 @@
 }
 
 .cortx-completion-row[data-active='true'] {
-  background: var(--accent-soft, rgb(255 255 255 / 10%));
+  background: var(--accent-soft, var(--accent, rgb(255 255 255 / 10%)));
 }
 
 .cortx-completion-value {
-  color: var(--text);
+  color: var(--text, var(--popover-foreground));
   font-family: var(--font-mono, monospace);
   flex: 0 1 auto;
   overflow: hidden;
@@ -79,15 +83,33 @@
 }
 
 .cortx-completion-detail {
-  color: var(--text-muted);
+  color: var(--text-muted, var(--muted-foreground));
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Footer of the menu: what the first token of the line already means — the
+   expansion of a CortX alias (#38). Sticks to the bottom so it stays readable
+   while the list scrolls, and holds nothing clickable. */
+.cortx-completion-hint {
+  position: sticky;
+  bottom: -4px;
+  margin: 4px -4px -4px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-raised, var(--surface, var(--popover)));
+  color: var(--text-muted, var(--muted-foreground));
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .cortx-completion-kind {
-  color: var(--text-faint);
+  color: var(--text-faint, var(--muted-foreground));
   margin-left: auto;
   padding-left: 8px;
   font-size: 10px;
