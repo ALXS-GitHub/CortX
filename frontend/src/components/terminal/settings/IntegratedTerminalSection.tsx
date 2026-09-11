@@ -33,6 +33,7 @@ import { useTerminalSettings } from './useTerminalSettings';
 import { getPlatform, TERMINAL_FONT_SUGGESTIONS } from './meta';
 import { DEFAULT_MAC_OPTION_AS_META, DEFAULT_SMOOTH_SCROLL_DURATION } from '@/lib/terminalKeys';
 import {
+  DEFAULT_MINIMUM_CONTRAST,
   DEFAULT_SCROLLBACK_LINES,
   MAX_SCROLLBACK_LINES,
   MIN_SCROLLBACK_LINES,
@@ -158,9 +159,41 @@ export function IntegratedTerminalSection() {
               ))}
             </datalist>
             {fontMissing && (
-              <p className="text-xs text-destructive">
-                This font is not installed — falling back to the default stack.
-              </p>
+              <div className="space-y-1">
+                <p className="text-xs text-destructive">
+                  The terminal cannot use this font — falling back to the default stack.
+                </p>
+                {/* Issue 49: on macOS the usual cause is not a typo. A
+                    WKWebView does not see `~/Library/Fonts`, which is where
+                    Font Book installs by default, so a font you can pick in
+                    every other app is invisible here. Saying "not installed"
+                    to someone who has just installed it is how #34 failed to
+                    fix what it was aiming at. */}
+                {platform === 'macos' && (
+                  <p className="text-xs text-muted-foreground">
+                    Check the spelling first — then where it is installed. The terminal cannot see fonts installed for
+                    your user only (<Code>~/Library/Fonts</Code>), which is Font Book&apos;s default. Reinstall it with{' '}
+                    <em>Install for: All Users</em>, or copy it over:{' '}
+                    <Code>sudo cp ~/Library/Fonts/&lt;font&gt;*.ttf /Library/Fonts/</Code>. Apple&apos;s own{' '}
+                    <Code>SF Mono</Code> is not offered to any browser engine under that name — leave the field empty to
+                    get it, the default stack asks for it as <Code>ui-monospace</Code>.
+                  </p>
+                )}
+                {platform === 'linux' && (
+                  <p className="text-xs text-muted-foreground">
+                    Check the spelling first — then where it is installed. A font dropped in{' '}
+                    <Code>~/.local/share/fonts</Code> may not be visible to the terminal; if it is not, put it in{' '}
+                    <Code>/usr/local/share/fonts</Code> and run <Code>fc-cache -f</Code>.
+                  </p>
+                )}
+                {platform === 'windows' && (
+                  <p className="text-xs text-muted-foreground">
+                    Check the spelling — it is the <em>family</em> name, the one the font&apos;s preview window shows,
+                    not the file name. A Nerd Font installed for the current user only may also need to be reinstalled
+                    for all users.
+                  </p>
+                )}
+              </div>
             )}
           </TextField>
           <NumberField
@@ -876,6 +909,57 @@ export function IntegratedTerminalSection() {
           onCommit={(v) => patch({ restoreScrollbackLines: v ?? 200 })}
           disabled={!terminal || !restoreSessions || !restoreScrollback}
         />
+      </Group>
+
+      {/* Issue 52. Two xterm options that were sitting at their default: one
+          that makes unreadable colours readable, one without which the
+          terminal is silent to a screen reader. Both are settings rather than
+          values — the first rewrites colours a theme author chose, the second
+          is paid on every render — and both take effect on the terminals
+          already open. */}
+      <Group title="Accessibility">
+        <Field
+          label="Minimum text contrast"
+          htmlFor="terminal-min-contrast"
+          hint={
+            <>
+              Raises the contrast of text that falls below the ratio, cell by cell, against the background actually
+              behind it. Off leaves every colour exactly as the theme and the program wrote it — which is right until a
+              theme&apos;s dim grey lands on its own dark background and the text disappears. Applies to the terminals
+              already open.
+            </>
+          }
+        >
+          <Select
+            value={String(terminal?.minimumContrastRatio ?? DEFAULT_MINIMUM_CONTRAST)}
+            onValueChange={(v) => patch({ minimumContrastRatio: Number(v) })}
+            disabled={!terminal}
+          >
+            <SelectTrigger id="terminal-min-contrast" className="w-[320px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1">Off — the theme&apos;s colours (default)</SelectItem>
+              <SelectItem value="3">3:1 — large text (WCAG AA)</SelectItem>
+              <SelectItem value="4.5">4.5:1 — WCAG AA</SelectItem>
+              <SelectItem value="7">7:1 — WCAG AAA</SelectItem>
+              <SelectItem value="21">Maximum — black on white, white on black</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+
+        <ToggleField
+          id="terminal-screen-reader"
+          label="Screen reader support"
+          hint="Mirrors the terminal's rows into the page so VoiceOver, NVDA and Narrator can read them — without it they hear nothing at all from a terminal. Off by default because the mirror is maintained on every render, which a fast build log makes you feel."
+        >
+          <Switch
+            id="terminal-screen-reader"
+            checked={terminal?.screenReaderMode ?? false}
+            onCheckedChange={(v) => patch({ screenReaderMode: v })}
+            disabled={!terminal}
+          />
+        </ToggleField>
       </Group>
     </Section>
   );

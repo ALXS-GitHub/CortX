@@ -29,7 +29,12 @@ import {
   themeAccentCss,
   themeCanvasCss,
 } from '@/lib/terminalTheme';
-import type { TerminalConfig, TerminalDockTheme, TerminalThemeSummary } from '@/types';
+import type {
+  TerminalConfig,
+  TerminalCursorInactiveStyle,
+  TerminalDockTheme,
+  TerminalThemeSummary,
+} from '@/types';
 
 const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
 const IS_MAC = /Mac/i.test(navigator.userAgent);
@@ -430,6 +435,31 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
                 />
                 Blink
               </label>
+            </div>
+            {/* Issue 52: with splits open, the cursor is the cheapest possible
+                answer to "which pane are my keys going to". xterm's default
+                draws the unfocused one hollow, which is discreet to the point
+                of being missed; `None` is unmistakable. The default does not
+                move — with a single pane the outline is the better look. */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <label className="text-xs text-muted-foreground" htmlFor="terminal-cursor-inactive">
+                In a pane without the focus
+              </label>
+              <Select
+                value={value.cursorInactiveStyle ?? 'outline'}
+                onValueChange={(v: TerminalCursorInactiveStyle) => onChange({ cursorInactiveStyle: v })}
+              >
+                <SelectTrigger id="terminal-cursor-inactive" className="h-8 w-[260px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="outline">Outline — hollow (default)</SelectItem>
+                  <SelectItem value="none">Nothing — only the focused pane</SelectItem>
+                  <SelectItem value="bar">Bar</SelectItem>
+                  <SelectItem value="block">Block</SelectItem>
+                  <SelectItem value="underline">Underline</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </Row>
           <Row label="Padding" htmlFor="terminal-padding" hint="Space around the text of every terminal, in px (0–48).">

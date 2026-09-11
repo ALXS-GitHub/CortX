@@ -169,6 +169,11 @@ export interface TerminalConfig {
   themeFollowsApp?: boolean;
   cursorStyle?: 'block' | 'underline' | 'bar';
   cursorBlink?: boolean;
+  /** The cursor of a pane that does *not* have the focus (issue 52). Default
+   *  `outline` — the shape above, hollow — which is xterm's own. `none` is
+   *  the one to pick with splits open: the pane your keys go to becomes the
+   *  only one with a cursor in it. */
+  cursorInactiveStyle?: TerminalCursorInactiveStyle;
   /** Inner padding in px. Default 8. */
   padding?: number;
   /** Terminal window opacity 50–100. Default 100. */
@@ -281,7 +286,25 @@ export interface TerminalConfig {
   /** Join `!=`, `=>`, `->` into the ligatures the font draws for them. Off by
    *  default: the joiner runs over every rendered row. Default false. */
   ligatures?: boolean;
+  /** Minimum contrast ratio between a cell's text and its background, 1–21
+   *  (issue 52). `1` (the default) leaves every colour exactly as the theme
+   *  and the program wrote it; `4.5` is WCAG AA and `7` AAA — xterm then
+   *  lightens or darkens a foreground, per cell, only where the pair falls
+   *  short. What rescues a third-party theme whose `brightBlack` is
+   *  unreadable on its own background; what distorts a theme whose dim greys
+   *  are the point. Applies to the terminals already open. */
+  minimumContrastRatio?: number;
+  /** Expose the terminal's rows as live DOM for VoiceOver / NVDA (issue 52).
+   *  Default false — xterm's own default, because the mirror is rebuilt on
+   *  every render. Without it a screen reader hears nothing at all from a
+   *  terminal. Applies to the terminals already open. */
+  screenReaderMode?: boolean;
 }
+
+/** The cursor of a pane that does not have the focus (issue 52). xterm's own
+ *  default is `outline`; CortX keeps it, and offers the rest because a window
+ *  full of splits wants a louder answer to "where do my keys go". */
+export type TerminalCursorInactiveStyle = 'outline' | 'block' | 'bar' | 'underline' | 'none';
 
 /**
  * What a `BEL` byte does (issue 11). Warp has a whole `audible_bell` module;

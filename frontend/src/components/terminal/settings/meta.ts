@@ -29,10 +29,24 @@ export function getPlatform(): Platform {
  * the same font installs as `Hack Nerd Font Mono`. The **Mono** variant is
  * the one to suggest: in the plain `Nerd Font` build the added glyphs are
  * double width and push a terminal's columns out of line.
+ *
+ * `SF Mono` was in the macOS list and is gone (issue 49). The file is there —
+ * `/System/Library/Fonts/SFNSMono.ttf` — but Apple does not publish the SF
+ * families to web engines under their name, so a WKWebView never resolves
+ * `SF Mono` and never will. The way to that typeface from a browser engine is
+ * the `ui-monospace` generic, which CortX's default stack already contains:
+ * leaving the field empty is what gets you SF Mono on a Mac. Suggesting the
+ * name only produced "this font is not installed" on the one machine where
+ * the font is certainly present.
+ *
+ * The two Nerd Font entries stay, with a caveat the settings card now spells
+ * out: a WKWebView cannot see `~/Library/Fonts`, which is where Font Book
+ * installs by default ("Install for: Me only"). The same font in
+ * `/Library/Fonts` resolves immediately.
  */
 export const TERMINAL_FONT_SUGGESTIONS: Record<Platform, readonly string[]> = {
   windows: ['Cascadia Mono', 'Cascadia Code', 'Consolas', 'Hack NFM', 'Hack NF', 'JetBrains Mono'],
-  macos: ['SF Mono', 'Menlo', 'Monaco', 'Hack Nerd Font Mono', 'JetBrains Mono'],
+  macos: ['Menlo', 'Monaco', 'Hack Nerd Font Mono', 'JetBrains Mono'],
   linux: ['DejaVu Sans Mono', 'Liberation Mono', 'Hack Nerd Font Mono', 'JetBrains Mono'],
 };
 
@@ -135,11 +149,11 @@ export const TERMINAL_SECTION_KEYWORDS = {
   external:
     'terminal application external windows terminal powershell cmd warp custom path arguments cortx terminal preset',
   integrated:
-    'integrated terminal shell integration inline suggestions ghost font size line height weight letter spacing selection renderer tabs placement rail restore sessions scrollback close busy open in dock window processes dev sessions file path links clickable paths kitty graphics images tab display number cwd agent completion menu flags subcommands git branches npm scripts input line position bottom pinned universal input editor blocks dividers gutter fold prompt navigation suggestions from output confidence ghost text smooth scrolling block spacing comfortable failed tint wash link tooltip hover target option meta alt key macos word keys dead keys azerty swiss font family missing not installed nerd font mono osc52 osc 52 clipboard access escape sequence tmux neovim yank write only read write deny security ssh scrollback lines kept buffer memory history block navigation trim markers ligatures font ligature calt fira code cascadia jetbrains arrow glyph ctrl tab behavior next tab recently used mru most recently used alt+tab alt tab switch tabs order stack hold ctrl cycle tabs previous tab',
+    'integrated terminal shell integration inline suggestions ghost font size line height weight letter spacing selection renderer tabs placement rail restore sessions scrollback close busy open in dock window processes dev sessions file path links clickable paths kitty graphics images tab display number cwd agent completion menu flags subcommands git branches npm scripts input line position bottom pinned universal input editor blocks dividers gutter fold prompt navigation suggestions from output confidence ghost text smooth scrolling block spacing comfortable failed tint wash link tooltip hover target option meta alt key macos word keys dead keys azerty swiss font family missing not installed nerd font mono osc52 osc 52 clipboard access escape sequence tmux neovim yank write only read write deny security ssh scrollback lines kept buffer memory history block navigation trim markers ligatures font ligature calt fira code cascadia jetbrains arrow glyph ctrl tab behavior next tab recently used mru most recently used alt+tab alt tab switch tabs order stack hold ctrl cycle tabs previous tab accessibility screen reader voiceover nvda narrator minimum contrast ratio wcag aa aaa readable text legibility font installed all users library fonts font book',
   notifications:
     'terminal notifications notify toast system desktop long command failed exit code muted commands claude codex vim ssh hidden background password prompt bell BEL 0x07 visual flash audible beep sound ring attention',
   appearance:
-    'terminal appearance theme picker wallpaper opacity blur dim cursor padding window opacity effect acrylic mica vibrancy chrome dock theme dock colours dock skin panes only whole dock',
+    'terminal appearance theme picker wallpaper opacity blur dim cursor padding window opacity effect acrylic mica vibrancy chrome dock theme dock colours dock skin panes only whole dock inactive cursor unfocused pane split focus which pane',
   shortcuts: 'terminal shortcuts keybindings keyboard combo copy on select shift enter smooth scroll keys selection',
   launch: 'terminal launch configurations dev session yaml tabs layout',
 } as const;

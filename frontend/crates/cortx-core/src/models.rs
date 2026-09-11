@@ -487,6 +487,11 @@ pub struct TerminalConfig {
     pub cursor_style: CursorStyle,
     #[serde(default = "default_true")]
     pub cursor_blink: bool,
+    /// The cursor of a pane that does not have the focus. See
+    /// [`CursorInactiveStyle`].
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub cursor_inactive_style: CursorInactiveStyle,
     /// Inner padding of every terminal, in px.
     #[serde(default = "default_terminal_padding")]
     pub padding: u16,
@@ -674,6 +679,34 @@ pub struct TerminalConfig {
     /// this (`lib/terminalSessions.ts`).
     #[serde(default)]
     pub ligatures: bool,
+    /// Minimum contrast ratio between a cell's text and its background, 1–21
+    /// (issue 52).
+    ///
+    /// `1` — the default, and xterm's — leaves every colour exactly as the
+    /// theme and the program wrote it. `4.5` is WCAG AA, `7` AAA: xterm then
+    /// lightens or darkens a foreground, cell by cell, only where the pair
+    /// falls short. Offered because CortX ships many third-party themes and
+    /// some of them have a `bright_black` that is unreadable on their own
+    /// background; left at `1` by default because raising it rewrites colours
+    /// the theme author chose on purpose.
+    ///
+    /// Only the frontend reads this (`lib/terminalSessions.ts`).
+    #[serde(default = "default_minimum_contrast_ratio")]
+    pub minimum_contrast_ratio: f32,
+    /// Expose the terminal's rows as live DOM elements so VoiceOver and NVDA
+    /// can read them (issue 52).
+    ///
+    /// Off by default, as in xterm: the mirror is maintained on every render.
+    /// Without it a screen reader gets nothing at all from the terminal, so
+    /// it has to be reachable — behind a setting is where it belongs.
+    ///
+    /// Only the frontend reads this (`lib/terminalSessions.ts`).
+    #[serde(default)]
+    pub screen_reader_mode: bool,
+}
+
+fn default_minimum_contrast_ratio() -> f32 {
+    1.0
 }
 
 /// What a `BEL` (`0x07`) does (issue 11).
@@ -938,6 +971,28 @@ pub enum CursorStyle {
     Bar,
 }
 
+/// What the cursor of a pane that does **not** have the focus looks like
+/// (issue 52).
+///
+/// xterm's default is `Outline` — the same shape as the focused cursor, drawn
+/// hollow — and CortX keeps it: with a single terminal open it is the right
+/// look, and taking it away would be a change nobody asked for. The value
+/// exists because the Terminal window has splits, where the first thing you
+/// need to know is which pane your keys are going to; `None` answers that
+/// without ambiguity.
+///
+/// Only the frontend reads this (`lib/terminalSessions.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CursorInactiveStyle {
+    #[default]
+    Outline,
+    Block,
+    Underline,
+    Bar,
+    None,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum WindowEffect {
@@ -1101,6 +1156,7 @@ impl Default for TerminalConfig {
             theme_follows_app: true,
             cursor_style: CursorStyle::default(),
             cursor_blink: true,
+            cursor_inactive_style: CursorInactiveStyle::default(),
             padding: default_terminal_padding(),
             window_opacity: default_window_opacity(),
             window_effect: WindowEffect::default(),
@@ -1139,6 +1195,8 @@ impl Default for TerminalConfig {
             osc52: Osc52Access::default(),
             bell: TerminalBell::default(),
             ligatures: false,
+            minimum_contrast_ratio: default_minimum_contrast_ratio(),
+            screen_reader_mode: false,
         }
     }
 }
