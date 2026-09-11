@@ -331,10 +331,18 @@ const DISABLE_PSREADLINE_PREDICTION: &str = "if ($env:CORTX_TERMINAL_ID -and (Ge
 /// Which shell a program name is, for the app-side injection (`pwsh.exe`,
 /// `/bin/zsh`, `fish`…). `None` for anything we have no snippet for.
 pub fn shell_for_program(program: &str) -> Option<Shell> {
-    let base = std::path::Path::new(program)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(program)
+    // Split on both separators by hand rather than through `Path`, which
+    // only knows the host's own. `data/terminal/` is git-backed and shared
+    // between machines, so a launch config written on Windows can carry a
+    // backslash path and be read on macOS — where `Path` finds no separator,
+    // hands back the whole string, and the shell goes unrecognised, silently
+    // costing that terminal its shell integration. A Unix filename may
+    // legally contain a backslash; misreading one costs nothing worse than
+    // the default answer of "not a shell I know".
+    let file = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let base = file
+        .rsplit_once('.')
+        .map_or(file, |(stem, _)| stem)
         .to_ascii_lowercase();
     match base.as_str() {
         "pwsh" | "powershell" => Some(Shell::PowerShell),
