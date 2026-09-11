@@ -2939,6 +2939,60 @@ pub async fn get_command_history(
         .map_err(|e| e.to_string())
 }
 
+/// `TerminalConfig::default()`, as serde writes it — the defaults the settings
+/// panel's "changed" markers compare against (ticket #39).
+///
+/// Why a command rather than a constant in the frontend: there were two
+/// answers to "what is this setting worth untouched?", one here and one in
+/// TypeScript, and nothing stopped them drifting. This is the one that reaches
+/// `settings.json`, so it is the one that counts, and the frontend now reads
+/// it from the process that writes the file.
+///
+/// **What this does not answer.** The `Option` fields are
+/// `skip_serializing_if = "Option::is_none"`, so they are simply absent from
+/// the object — `font_size` is `None` here and a terminal opens at 13. That
+/// effective default is the frontend's (`terminalDefaults.ts` holds the
+/// seventeen of them, and `checkTerminalDefaults` verifies at runtime that the
+/// two sets do not overlap). Serialising the `None`s as `null` instead would
+/// hand the frontend a value that is wrong rather than a field that is
+/// missing, which is worse: absent is unambiguous.
+///
+/// Cheap and synchronous on purpose — it builds a struct and touches no disk,
+/// and the frontend calls it once at startup alongside `get_settings`.
+#[tauri::command]
+pub fn terminal_default_settings() -> cortx_core::models::TerminalConfig {
+    cortx_core::models::TerminalConfig::default()
+}
+
+/// Run the secret filter over the command history that is **already on disk**
+/// (ticket #41's other half).
+///
+/// `redact_secrets` masks every new line on its way into
+/// `command-history.jsonl`, but a file written before that existed still holds
+/// whatever was typed. This puts the existing file — and its `.jsonl.1`
+/// archive — through the same filter.
+///
+/// It is deliberately a lever and not a reflex: nothing calls it at startup,
+/// and the only caller is a button behind a confirmation. The rewrite is
+/// **irreversible by design** — see `CommandHistory::redact_existing`, which
+/// writes no `.bak`, because a backup with the secrets still in it would
+/// defeat the whole exercise. Only lines that actually change are rewritten;
+/// everything else is copied byte for byte.
+///
+/// Off the UI thread like [`get_command_history`]: the file is capped at
+/// `history_max_mb` (10 MB by default) and this is a full read-and-rewrite
+/// pass over it.
+#[tauri::command]
+pub async fn redact_command_history(
+    state: State<'_, AppState>,
+) -> Result<cortx_core::terminal::history::RedactionReport, String> {
+    let history = state.process_manager.command_history().clone();
+    tauri::async_runtime::spawn_blocking(move || history.redact_existing())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Completions and suggestions (#17)
 // ---------------------------------------------------------------------------

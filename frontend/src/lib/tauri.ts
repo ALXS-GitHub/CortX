@@ -17,6 +17,7 @@ import type {
   ShellInfo,
   ShellExitPayload,
   TerminalCapabilities,
+  TerminalConfig,
   TerminalShellState,
   TerminalAgentInfo,
   CommandRecord,
@@ -845,6 +846,42 @@ export async function getCommandHistory(limit = 200): Promise<CommandRecord[]> {
  */
 export async function getCommandHistoryPage(query: HistoryQuery): Promise<HistoryPage> {
   return invoke('get_command_history', { query });
+}
+
+/** What one pass of `redactCommandHistory` did. */
+export interface RedactionReport {
+  /** Lines read, across the history file and its `.jsonl.1` archive. */
+  scanned: number;
+  /** Lines whose command held a secret and was masked. */
+  redacted: number;
+  /** Lines that are not readable records; kept byte for byte. */
+  skipped: number;
+}
+
+/**
+ * Run the secret filter over the command history **already on disk**.
+ *
+ * `redactSecrets` only masks new lines on their way in; this is the one-off
+ * pass over what is already there. It **rewrites the user's own history file
+ * in place and keeps no backup** — a `.bak` holding the secrets would defeat
+ * the point — so it is only ever called from behind a confirmation, never at
+ * startup and never on a timer.
+ */
+export async function redactCommandHistory(): Promise<RedactionReport> {
+  return invoke('redact_command_history');
+}
+
+/**
+ * `TerminalConfig::default()` from the process that writes `settings.json` —
+ * what the settings panel's "changed" markers compare against (ticket #39).
+ *
+ * `Partial`, and not by accident: serde skips the `Option` fields, so the
+ * seventeen of them are simply **absent** from the object rather than `null`.
+ * Their effective default is the frontend's
+ * (`components/terminal/settings/terminalDefaults.ts`).
+ */
+export async function terminalDefaultSettings(): Promise<Partial<TerminalConfig>> {
+  return invoke('terminal_default_settings');
 }
 
 /**

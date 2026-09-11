@@ -655,6 +655,8 @@ pub fn run() {
             commands::remove_terminal,
             commands::get_terminal_states,
             commands::get_command_history,
+            commands::redact_command_history,
+            commands::terminal_default_settings,
             commands::suggest_history,
             commands::get_command_spec,
             commands::complete_git_refs,

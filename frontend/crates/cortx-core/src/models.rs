@@ -2343,44 +2343,48 @@ mod tests {
         assert!(matches!(settings.defaults.launch_method, LaunchMethod::Integrated));
     }
 
-    /// Ticket #39. The frontend has to be able to tell a value the user chose
-    /// from one serde wrote for them, and it cannot ask this process for
-    /// `TerminalConfig::default()` — there is no command for that yet. So the
-    /// defaults it compares against live in a table on its side
-    /// (`components/terminal/settings/terminalDefaults.ts`), and this snapshot
-    /// is the contract between the two: serde writes it here, a Node test
-    /// reads the same file and asserts the table agrees, key by key.
-    ///
-    /// If this fails you changed a default: paste the JSON it prints into
-    /// `src/components/terminal/settings/terminalDefaults.rust.ts`, and the TS
-    /// table is then checked against it in turn. That is the whole
-    /// regeneration procedure — the snapshot cannot go stale quietly.
-    ///
-    /// The keys *missing* from the snapshot are the `Option` fields — serde
-    /// writes nothing for them, so their effective default belongs to the
-    /// frontend and only the frontend.
+    /// Ticket #39 / #41. There is no snapshot of `TerminalConfig::default()`
+    /// on the frontend side any more: it asks this process for it through the
+    /// `terminal_default_settings` command, so a default changed here reaches
+    /// the settings panel's "changed" markers with nothing to regenerate and
+    /// nothing that can go stale. What the frontend still owns are the
+    /// `Option` fields, which serde skips entirely — and that boundary is the
+    /// one thing worth pinning down here.
     #[test]
-    fn the_default_settings_snapshot_the_frontend_reads_is_current() {
-        let actual = serde_json::to_value(TerminalConfig::default()).unwrap();
-        // The snapshot is a `.ts` module so the frontend can import it without
-        // `resolveJsonModule`; its object literal is plain JSON, between the
-        // first `{` after the `=` and the last `}` of the file.
-        let source = include_str!("../../../src/components/terminal/settings/terminalDefaults.rust.ts");
-        let start = source
-            .find("RUST_TERMINAL_DEFAULTS =")
-            .and_then(|at| source[at..].find('{').map(|rel| at + rel))
-            .expect("terminalDefaults.rust.ts must export RUST_TERMINAL_DEFAULTS");
-        let end = source.rfind('}').expect("no closing brace");
-        let snapshot: serde_json::Value = serde_json::from_str(&source[start..=end])
-            .expect("the RUST_TERMINAL_DEFAULTS literal must be plain JSON");
-        assert_eq!(
-            actual,
-            snapshot,
-            "TerminalConfig::default() no longer matches the snapshot the frontend reads.
-             Replace the object in terminalDefaults.rust.ts with:
-{}",
-            serde_json::to_string_pretty(&actual).unwrap()
-        );
+    fn the_optional_fields_are_the_ones_the_frontend_has_to_answer_for() {
+        let json = serde_json::to_value(TerminalConfig::default()).unwrap();
+        let written = json.as_object().expect("an object");
+        // Skipped, so the frontend's own fallback is the effective default.
+        for absent in [
+            "integratedShell",
+            "fontFamily",
+            "fontSize",
+            "lineHeight",
+            "letterSpacing",
+            "fontWeight",
+            "fontWeightBold",
+            "selectionColor",
+            "themeDark",
+            "themeLight",
+            "wallpaperOpacity",
+            "wallpaperBlur",
+            "wallpaperFit",
+            "dockTheme",
+            "notifyWhen",
+            "notifyStyle",
+            "notifyMutedCommands",
+        ] {
+            assert!(
+                !written.contains_key(absent),
+                "{absent} is now written by serde, so `terminalDefaults.ts` must stop \
+                 carrying a fallback for it — its `checkTerminalDefaults` says so at startup"
+            );
+        }
+        // Everything else is written, which is what makes the command a
+        // complete answer for the settings the panel marks.
+        for present in ["scrollbackLines", "inputPosition", "redactSecrets", "tabDisplay"] {
+            assert!(written.contains_key(present), "{present} must be written by serde");
+        }
     }
 
     /// Ticket #39. A fresh install opens "launch outside the app" in CortX's

@@ -51,6 +51,37 @@ import * as api from '@/lib/tauri';
 import { disposeTerminal, measuredTerminalSize } from '@/lib/terminalSessions';
 import type { TerminalSurface } from '@/lib/terminalLayout';
 import { focusInTerminalWindow, sendToTerminalWindow } from '@/lib/terminalWindowBridge';
+import { setRustTerminalDefaults } from '@/components/terminal/settings/terminalDefaults';
+
+/**
+ * `TerminalConfig::default()`, fetched once per window and handed to
+ * `terminalDefaults.ts` (ticket #39).
+ *
+ * The promise is the lock: `loadSettings` runs again on every `data-changed`
+ * and whenever the Settings page mounts, and the defaults are a compile-time
+ * constant of the backend — one command is enough for the life of the process.
+ * A failure is not cached, so a reload gets another try; until one succeeds the
+ * panel simply marks nothing, which is the honest answer.
+ */
+let terminalDefaultsRequest: Promise<void> | null = null;
+
+function ensureTerminalDefaults(): Promise<void> {
+  terminalDefaultsRequest ??= api
+    .terminalDefaultSettings()
+    .then((defaults) => {
+      // `checkTerminalDefaults`' verdict on the split between the backend's
+      // defaults and the frontend's: this is what replaced the hand-pasted
+      // snapshot and the Rust test that policed it, so it has to be heard.
+      for (const problem of setRustTerminalDefaults(defaults)) {
+        console.error(`Terminal defaults are out of step — ${problem}`);
+      }
+    })
+    .catch((error) => {
+      console.error('Failed to read the terminal defaults:', error);
+      terminalDefaultsRequest = null;
+    });
+  return terminalDefaultsRequest;
+}
 
 interface ServiceRuntime {
   status: ServiceStatus;
@@ -1253,7 +1284,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadSettings: async () => {
     set({ isLoadingSettings: true });
     try {
-      const settings = await api.getSettings();
+      // Both halves, together. `settings.terminal` is compared against
+      // `TerminalConfig::default()` to decide which values the user actually
+      // chose (ticket #39), so publishing the settings before those defaults
+      // are in would leave the panel unable to answer — and a "changed" dot
+      // that pops in a second late, or worse appears wrongly, is what the
+      // whole marker was meant to fix. `ensureTerminalDefaults` sends its
+      // command once per process, so the reloads this action also serves (the
+      // `data-changed` watcher, the Settings page) cost nothing extra.
+      const [settings] = await Promise.all([api.getSettings(), ensureTerminalDefaults()]);
       set({ settings, isLoadingSettings: false });
     } catch (error) {
       console.error('Failed to load settings:', error);

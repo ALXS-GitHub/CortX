@@ -17,7 +17,12 @@
  *
  * What is pinned down:
  *
- *  1. the contract with Rust — every default serde writes matches the table;
+ *  1. the contract with Rust — not the *values* any more (the backend sends
+ *     those at startup, so there is nothing here that can go stale), but the
+ *     **split**: `checkTerminalDefaults` has to notice a setting this table
+ *     claims that serde does not write, a setting serde writes that this table
+ *     also carries a fallback for, a field the backend has that nothing here
+ *     covers, and a reader fallback that has stopped agreeing with Rust;
  *  2. the contract with the notification policy, the other module that still
  *     owns defaults of its own;
  *  3. the awkward comparisons: a renderer-dependent default, a deprecated
@@ -33,18 +38,19 @@ import {
   DEFAULT_SCROLLBACK_LINES,
   GROUP_KEYS,
   TERMINAL_SETTINGS,
-  UNMARKED_TERMINAL_FIELDS,
+  checkTerminalDefaults,
   formatSettingValue,
   isSettingModified,
   modifiedSettings,
   resetPatch,
   restorePatch,
+  rustTerminalDefaultsLoaded,
+  setRustTerminalDefaults,
   settingChanges,
   settingDefault,
   settingValue,
   type TerminalSettingKey,
 } from './terminalDefaults.ts';
-import { RUST_TERMINAL_DEFAULTS } from './terminalDefaults.rust.ts';
 import {
   DEFAULT_LONG_COMMAND_SECONDS,
   DEFAULT_MUTED_COMMANDS,
@@ -93,6 +99,88 @@ function report() {
 
 // --- fixtures --------------------------------------------------------------
 
+/**
+ * What `terminal_default_settings` answers — `serde_json` on
+ * `TerminalConfig::default()`, copied here once.
+ *
+ * This is a **fixture, not a contract**. Nothing asserts it still matches
+ * `models.rs`, and nothing needs to: the app reads the real thing from the
+ * backend at startup, and `checkTerminalDefaults` runs over *that* object, in
+ * the running app, every time. What this copy is for is giving the arithmetic
+ * below something to compare against under plain Node, where there is no
+ * backend to ask — and giving the drift tests a known-good payload to spoil.
+ *
+ * The keys absent from it are the seventeen `Option` fields, which serde skips
+ * and `terminalDefaults.ts` answers for itself.
+ */
+const BACKEND_DEFAULTS = {
+  bell: 'visual',
+  blockActions: true,
+  blockCards: true,
+  blockDividers: true,
+  blockFailedWash: true,
+  blockGutter: true,
+  blockJumpToBottom: true,
+  blockSpacing: 'comfortable',
+  blockStickyHeader: true,
+  blocks: true,
+  chromeBlur: 20,
+  chromeOpacity: 72,
+  completionContext: true,
+  completionMenu: 'ctrlSpace',
+  completionSpecs: true,
+  confirmCloseRunning: true,
+  copyOnSelect: true,
+  ctrlTabBehavior: 'sequential',
+  cursorBlink: true,
+  cursorInactiveStyle: 'outline',
+  cursorStyle: 'bar',
+  customArgs: [],
+  customPath: '',
+  dockUsesTerminalTheme: false,
+  filePathLinks: true,
+  historyMaxMb: 10,
+  inlineSuggestions: true,
+  inputEditor: false,
+  inputEditorHandoff: true,
+  inputPosition: 'bottom',
+  keybindings: {},
+  kittyGraphics: true,
+  ligatures: false,
+  linkTooltip: true,
+  longCommandSeconds: 10,
+  macOptionAsMeta: 'wordKeys',
+  minimumContrastRatio: 1,
+  notifyOnLongCommand: true,
+  notifyOnlyWhenHidden: true,
+  openDevSessionsIn: 'window',
+  openProcessesIn: 'dock',
+  osc52: 'deny',
+  padding: 8,
+  preset: 'cortxterminal',
+  redactSecrets: true,
+  renderer: 'canvas',
+  restoreScrollback: true,
+  restoreScrollbackLines: 200,
+  restoreSessions: true,
+  screenReaderMode: false,
+  scrollbackLines: 25000,
+  shellIntegration: true,
+  shiftEnter: 'escape-enter',
+  smoothScrollDuration: 100,
+  suggestionConfidence: 'balanced',
+  suggestionsFromOutput: true,
+  tabDisplay: { agent: true, colorBar: false, command: true, cwd: true, index: 'ctrl', status: true },
+  tabsPlacement: 'sidebar',
+  themeFollowsApp: true,
+  wallpaperDim: 0,
+  windowEffect: 'none',
+  windowOpacity: 100,
+} as Record<string, unknown>;
+
+/** The app store does this once at startup; every test below assumes it. */
+setRustTerminalDefaults(BACKEND_DEFAULTS);
+
 /** Nothing stored at all: a fresh install before anyone opens the panel. */
 const FRESH = {};
 
@@ -127,32 +215,70 @@ const LIVED_IN = {
 
 // --- 1. the contract with Rust --------------------------------------------
 
-test('every default serde writes is the default the panel compares against', () => {
-  const snapshot = RUST_TERMINAL_DEFAULTS as Record<string, unknown>;
-  const unmarked = new Set<string>(UNMARKED_TERMINAL_FIELDS);
-  for (const [key, rust] of Object.entries(snapshot)) {
-    if (unmarked.has(key)) continue;
-    if (key === 'tabDisplay') {
-      for (const [sub, value] of Object.entries(rust as Record<string, unknown>)) {
-        const k = `tabDisplay.${sub}` as TerminalSettingKey;
-        assert.ok(k in TERMINAL_SETTINGS, `tabDisplay.${sub} is missing from the table`);
-        assert.deepEqual(settingDefault(k), value, `tabDisplay.${sub}`);
-      }
-      continue;
-    }
-    assert.ok(key in TERMINAL_SETTINGS, `${key} is written by Rust but missing from the table`);
-    assert.deepEqual(settingDefault(key as TerminalSettingKey), rust, key);
-  }
+test('the table and the backend split every setting between them, once each', () => {
+  assert.deepEqual(checkTerminalDefaults(BACKEND_DEFAULTS), []);
 });
 
-test('the three defaults ticket #39 moved are the ones that moved', () => {
-  // If one of these ever reads differently, the Rust test above has already
-  // failed too: the snapshot carries the same three numbers.
+test('a setting the backend stopped writing is named', () => {
+  // What happens if `scrollback_lines` becomes an `Option` in `models.rs`: the
+  // table would still be waiting for a value nobody sends, and every
+  // scrollback would quietly read as untouched.
+  const without = { ...BACKEND_DEFAULTS };
+  delete without.scrollbackLines;
+  assert.deepEqual(checkTerminalDefaults(without), [
+    'scrollbackLines: marked FROM_RUST, but TerminalConfig::default() writes no such field',
+    'scrollbackLines: the backend says undefined, the frontend\'s reader fallback still says 25000',
+  ]);
+});
+
+test('a setting that would have two defaults is named', () => {
+  // The other direction: `font_size` stops being an `Option`, so Rust starts
+  // writing a number while this file still carries 13. Exactly the drift the
+  // deleted snapshot existed to catch.
+  const both = { ...BACKEND_DEFAULTS, fontSize: 12 };
+  assert.deepEqual(checkTerminalDefaults(both), [
+    'fontSize: has a fallback here *and* is written by serde — two defaults that can disagree',
+  ]);
+});
+
+test('a field nobody has added to the table is named', () => {
+  // `tsc`'s `_EverySettingIsAccountedFor` catches this the moment the field
+  // reaches `types/index.ts`; this catches it while it is still only in Rust.
+  const extra = { ...BACKEND_DEFAULTS, cursorTrail: true };
+  assert.deepEqual(checkTerminalDefaults(extra), [
+    'cursorTrail: written by the backend, but no setting in this table claims it',
+  ]);
+});
+
+test('a reader fallback that has drifted from Rust is named', () => {
+  // `DEFAULT_SCROLLBACK_LINES` and friends are read before any command is
+  // answered, so they cannot come from the backend — but they are still copies
+  // of a Rust number, and this is what watches them.
+  const moved = { ...BACKEND_DEFAULTS, inputPosition: 'flow' };
+  assert.deepEqual(checkTerminalDefaults(moved), [
+    'inputPosition: the backend says "flow", the frontend\'s reader fallback still says "bottom"',
+  ]);
+});
+
+test('the defaults the panel compares against are the backend\'s', () => {
+  assert.equal(settingDefault('scrollbackLines'), 25000);
+  assert.equal(settingDefault('inputPosition'), 'bottom');
+  assert.equal(settingDefault('padding'), 8);
+  assert.equal(settingDefault('tabDisplay.index'), 'ctrl', 'a dotted key walks into tabDisplay');
+  assert.equal(settingDefault('tabDisplay.colorBar'), false);
+});
+
+test('and the Option fields are answered here, because Rust sends nothing', () => {
+  assert.equal(BACKEND_DEFAULTS.fontSize, undefined, 'serde skips it');
+  assert.equal(settingDefault('fontSize'), DEFAULT_FONT_SIZE);
   assert.equal(DEFAULT_FONT_SIZE, 13);
+  assert.equal(settingDefault('themeDark'), 'dark-modern');
+  assert.equal(settingDefault('dockTheme'), 'app');
+});
+
+test('the two reader constants still agree with what the backend sent', () => {
   assert.equal(DEFAULT_SCROLLBACK_LINES, 25000);
   assert.equal(DEFAULT_INPUT_POSITION, 'bottom');
-  assert.equal((RUST_TERMINAL_DEFAULTS as Record<string, unknown>).scrollbackLines, 25000);
-  assert.equal((RUST_TERMINAL_DEFAULTS as Record<string, unknown>).inputPosition, 'bottom');
 });
 
 test('a settings file from before the change is marked on exactly those three', () => {
@@ -162,6 +288,25 @@ test('a settings file from before the change is marked on exactly those three', 
   assert.equal(isSettingModified(LIVED_IN, 'scrollbackLines'), true, 'scrollbackLines 10000');
   assert.equal(isSettingModified(LIVED_IN, 'inputPosition'), true, 'inputPosition flow');
   assert.equal(isSettingModified(LIVED_IN, 'fontSize'), false, 'fontSize 13 is now the default');
+});
+
+test('nothing is marked before the backend has answered', () => {
+  // The window between the panel mounting and `terminal_default_settings`
+  // coming back. A marker drawn from a default nobody knows yet would be a
+  // lie, and a group reset built on it would write `undefined` over real
+  // settings — so every FROM_RUST setting reads as untouched until then.
+  setRustTerminalDefaults(null);
+  try {
+    assert.equal(rustTerminalDefaultsLoaded(), false);
+    assert.equal(isSettingModified(LIVED_IN, 'scrollbackLines'), false, 'a Rust-owned setting waits');
+    assert.deepEqual(resetPatch(LIVED_IN, GROUP_KEYS.blocks), {}, 'and so a reset does nothing');
+    // The Option fields never needed the backend, so they still answer.
+    assert.equal(isSettingModified({ fontSize: 20 }, 'fontSize'), true);
+  } finally {
+    setRustTerminalDefaults(BACKEND_DEFAULTS);
+  }
+  assert.equal(rustTerminalDefaultsLoaded(), true);
+  assert.equal(isSettingModified(LIVED_IN, 'scrollbackLines'), true, 'and comes back when it lands');
 });
 
 // --- 2. the contract with the notification policy -------------------------
