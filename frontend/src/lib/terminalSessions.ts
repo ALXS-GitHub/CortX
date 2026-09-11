@@ -27,7 +27,7 @@ import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { toast } from 'sonner';
-import type { TerminalBellStyle, TerminalOsc52Access } from '@/types';
+import type { TerminalBellStyle, TerminalCursorInactiveStyle, TerminalOsc52Access } from '@/types';
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
@@ -43,7 +43,7 @@ import {
 import { TerminalImageFilter, type ImagePart } from '@/lib/terminalImages';
 import { attachInputPosition, inputPositionSetting, refreshInputPositions } from '@/lib/terminalInputPosition';
 import { attachInputEditor, inputEditorEnabled, refreshInputEditors } from '@/lib/terminalInputEditor';
-import { registerFileLinkProvider } from '@/lib/terminalLinks';
+import { isLinkOpenClick, registerFileLinkProvider } from '@/lib/terminalLinks';
 import {
   attachBlocks,
   blockActionBarEnabled,
@@ -202,11 +202,25 @@ function isDarkTheme(): boolean {
 }
 
 /**
+ * The overview ruler (see `createSession`) always paints a 1 px rule down its
+ * own left edge, in `theme.overviewRulerBorder` — which xterm defaults to
+ * **black**. A black hairline the height of every pane, on every theme and
+ * over the wallpaper of the Terminal window, is not a thing CortX is asking
+ * for: the ruler is meant to be invisible until something is marked in it.
+ * So the colour is transparent, and the ruler only ever shows its marks.
+ */
+const OVERVIEW_RULER_BORDER = 'rgba(0, 0, 0, 0)';
+
+/**
  * xterm palette: the active / previewed terminal theme when the theme store
  * has one (see `stores/terminalThemeStore`), else derived from the app's
  * CSS tokens.
  */
 export function buildTerminalTheme(): ITheme {
+  return { ...buildPaletteTheme(), overviewRulerBorder: OVERVIEW_RULER_BORDER };
+}
+
+function buildPaletteTheme(): ITheme {
   const override = getXtermThemeOverride();
   const selectionColor = useAppStore.getState().settings?.terminal.selectionColor;
   if (override) {
@@ -545,19 +559,53 @@ function glyphAdvance(fontFamily: string, fontSize: number): number {
  *
  * There is no API that answers "is this family installed" in every webview
  * (`queryLocalFonts` is Chromium-only, so it exists in WebView2 and in
- * neither WKWebView nor WebKitGTK), so this measures instead: the advance of
- * the requested family, against the advance of a family that certainly does
- * not exist. Equal advances mean both fell through to `monospace`.
+ * neither WKWebView nor WebKitGTK), so this measures instead — and *what* it
+ * measures was changed by issue 49.
  *
- * Imperfect on purpose — a font whose metrics match the fallback exactly
- * reads as missing — but it catches the case that actually happens, which is
- * a typo or a name from the wrong platform.
+ * It used to compare the requested family against a family that certainly
+ * does not exist, both above `monospace`: equal advances meant both had
+ * fallen through to the generic. That reads a real font as missing whenever
+ * its advance happens to match the generic's, and the risk is not theoretical
+ * — `Hack` and `Menlo` share exactly the same advance (`1233/2048 em`, both
+ * descend from Bitstream Vera), so on a machine whose `monospace` generic is
+ * Menlo an installed Hack would have been called missing. It only held
+ * because WKWebView's `monospace` is Courier (`0.60010 em`). A coincidence,
+ * not a guarantee, and one macOS release could end it.
+ *
+ * What is measured now is the family **against itself**, above two generics
+ * whose metrics differ: `"X", serif` and `"X", monospace`. A family that
+ * really resolves is used in both stacks and gives one width twice; a family
+ * that does not resolve falls through to two different generics and gives two
+ * widths. Nothing is compared to a generic any more, so no font can be
+ * mistaken for one. Same cost: two measurements either way, both cached.
+ *
+ * The one thing it still cannot see is a font the webview refuses to use even
+ * though the system has it — on macOS, anything under `~/Library/Fonts`
+ * (issue 49). That is not a wrong answer: the terminal genuinely cannot draw
+ * with it. The settings card explains the fix.
  */
-const ABSENT_FAMILY_STACK = '"__cortx_absent__", monospace';
+
+/** CSS generic families: a name xterm passes straight through, never missing. */
+const CSS_GENERIC_FAMILIES = new Set([
+  'monospace',
+  'serif',
+  'sans-serif',
+  'cursive',
+  'fantasy',
+  'system-ui',
+  'ui-monospace',
+  'ui-serif',
+  'ui-sans-serif',
+  'ui-rounded',
+  'math',
+  'emoji',
+  'fangsong',
+]);
 
 export function fontFamilyResolves(family: string): boolean {
   const name = family.trim();
   if (!name) return true;
+  if (CSS_GENERIC_FAMILIES.has(name.toLowerCase())) return true;
   // No 2D context (a test environment, a webview without canvas): nothing can
   // be measured, and an unverifiable font is never accused.
   if (advanceCanvas === undefined) advanceCanvas = document.createElement('canvas').getContext('2d');
@@ -565,8 +613,10 @@ export function fontFamilyResolves(family: string): boolean {
   // A big size makes the two advances differ by whole pixels when they differ
   // at all; the measurement is cached, so it costs nothing to repeat.
   const size = 64;
-  const requested = glyphAdvance(`"${name.replace(/"/g, '')}", monospace`, size);
-  return Math.abs(requested - glyphAdvance(ABSENT_FAMILY_STACK, size)) > 0.01;
+  const quoted = `"${name.replace(/"/g, '')}"`;
+  const overSerif = glyphAdvance(`${quoted}, serif`, size);
+  const overMono = glyphAdvance(`${quoted}, monospace`, size);
+  return Math.abs(overSerif - overMono) <= 0.01;
 }
 
 /**
@@ -611,13 +661,67 @@ function applyFontMetrics(term: Terminal, font: ReturnType<typeof terminalFontOp
 
 const DEFAULT_PADDING = 8;
 
+/**
+ * What the cursor of a pane that does *not* have the focus looks like
+ * (issue 52). xterm's default is `outline` — the same shape, hollow — which
+ * is a fine answer for one terminal and a poor one for a window full of
+ * splits, where the first thing you need to know is which pane your keys are
+ * going to. `none` makes that unmistakable; `bar` keeps a trace of where the
+ * cursor was.
+ *
+ * A setting rather than a value, because the answer depends on how the user
+ * works: with one pane open the outline is the better look, and taking it
+ * away would be a change nobody asked for. The default therefore does not
+ * move.
+ */
+const DEFAULT_CURSOR_INACTIVE_STYLE: TerminalCursorInactiveStyle = 'outline';
+
 /** xterm cursor options from the user's settings. */
-export function terminalCursorOptions(): { cursorStyle: 'block' | 'underline' | 'bar'; cursorBlink: boolean } {
+export function terminalCursorOptions(): {
+  cursorStyle: 'block' | 'underline' | 'bar';
+  cursorBlink: boolean;
+  cursorInactiveStyle: TerminalCursorInactiveStyle;
+} {
   const cfg = useAppStore.getState().settings?.terminal;
   return {
     cursorStyle: cfg?.cursorStyle ?? 'bar',
     cursorBlink: cfg?.cursorBlink ?? true,
+    cursorInactiveStyle: cfg?.cursorInactiveStyle ?? DEFAULT_CURSOR_INACTIVE_STYLE,
   };
+}
+
+/**
+ * Minimum contrast ratio between text and its background (issue 52).
+ *
+ * xterm's default is `1`, which means "leave every colour exactly as the
+ * program and the theme wrote it". `4.5` is WCAG AA: xterm then lightens or
+ * darkens a foreground colour, per cell, only when the pair falls below it.
+ *
+ * A setting, not a value, and the default deliberately stays at `1`: raising
+ * it rewrites colours the theme author chose — a dim grey comment, the muted
+ * half of a diff — and CortX ships dozens of themes whose whole point is the
+ * palette. It is offered because the same feature is what rescues a
+ * third-party theme whose `brightBlack` is unreadable on its own background.
+ * VS Code exposes exactly this, with the same default.
+ */
+export const DEFAULT_MINIMUM_CONTRAST = 1;
+export const MAX_MINIMUM_CONTRAST = 21;
+
+export function terminalMinimumContrast(): number {
+  const raw = useAppStore.getState().settings?.terminal.minimumContrastRatio;
+  if (raw === undefined || !Number.isFinite(raw)) return DEFAULT_MINIMUM_CONTRAST;
+  return Math.min(MAX_MINIMUM_CONTRAST, Math.max(1, raw));
+}
+
+/**
+ * Screen reader support (issue 52). Off by default, and that is not an
+ * oversight: xterm mirrors the rows into live DOM elements when it is on,
+ * which costs on every render — the reason xterm ships it off too. Without
+ * it the terminal is *completely* silent to VoiceOver and NVDA, so it has to
+ * be reachable; behind a setting is where it belongs.
+ */
+export function screenReaderModeEnabled(): boolean {
+  return useAppStore.getState().settings?.terminal.screenReaderMode === true;
 }
 
 /** Inner padding of every terminal, in px (clamped 0–48). */
@@ -663,6 +767,8 @@ function ensureSettingsSubscription() {
   let lastOsc52 = osc52Access();
   let lastScrollback = terminalScrollbackLines();
   let lastLigatures = ligaturesEnabled();
+  let lastMinimumContrast = terminalMinimumContrast();
+  let lastScreenReader = screenReaderModeEnabled();
   useAppStore.subscribe(() => {
     const font = terminalFontOptions();
     const fontKey = JSON.stringify(font);
@@ -683,6 +789,7 @@ function ensureSettingsSubscription() {
       for (const s of sessions.values()) {
         s.term.options.cursorStyle = cursor.cursorStyle;
         s.term.options.cursorBlink = cursor.cursorBlink;
+        s.term.options.cursorInactiveStyle = cursor.cursorInactiveStyle;
       }
     }
     const padding = terminalPadding();
@@ -743,6 +850,19 @@ function ensureSettingsSubscription() {
     if (ligatures !== lastLigatures) {
       lastLigatures = ligatures;
       for (const s of sessions.values()) void applyLigatures(s);
+    }
+    // Issue 52: both are live options — xterm drops its colour cache when the
+    // contrast ratio moves, and builds or tears down the accessibility DOM
+    // when the screen reader flag does. Nobody has to reopen a terminal.
+    const minimumContrast = terminalMinimumContrast();
+    if (minimumContrast !== lastMinimumContrast) {
+      lastMinimumContrast = minimumContrast;
+      for (const s of sessions.values()) s.term.options.minimumContrastRatio = minimumContrast;
+    }
+    const screenReader = screenReaderModeEnabled();
+    if (screenReader !== lastScreenReader) {
+      lastScreenReader = screenReader;
+      for (const s of sessions.values()) s.term.options.screenReaderMode = screenReader;
     }
   });
 }
@@ -941,6 +1061,70 @@ function attachOsc52(session: TerminalSession) {
 }
 
 // ---------------------------------------------------------------------------
+// Links (issue 48)
+// ---------------------------------------------------------------------------
+
+/**
+ * The modifier a link needs before it opens: Ctrl, or ⌘ on macOS.
+ *
+ * Ticket #43 made that the rule for the file paths in `lib/terminalLinks` —
+ * a plain click in a terminal is a click in a *terminal*, it places a
+ * selection and it must never navigate anywhere on its own. The two other
+ * kinds of link live here, so the rule is applied here for both of them: the
+ * URLs the `WebLinksAddon` finds in the output, and the `OSC 8` links a
+ * program declares. One gesture for all three, whichever one you are looking
+ * at — and one implementation of it, `isLinkOpenClick`, so the three can
+ * never drift apart.
+ */
+function linkModifierHeld(event: MouseEvent | undefined): boolean {
+  return event ? isLinkOpenClick(event) : false;
+}
+
+/**
+ * Open a link the terminal produced, in the system browser.
+ *
+ * The scheme filter is not decoration. `OSC 8` lets the program choose the
+ * URI, text and all: anything that can write to the PTY — a file you `cat`,
+ * a process behind `ssh` — can declare a link on `javascript:`, and handing
+ * that to the webview would run it inside CortX. `file:` and `data:` are the
+ * same class of problem. Only `http` and `https` leave this function.
+ *
+ * xterm's `OscLinkProvider` refuses non-http(s) URIs of its own accord too,
+ * unless `allowNonHttpProtocols` is turned on — which it is not, and must not
+ * be. Two belts: this one is the one CortX controls, and it covers the
+ * `WebLinksAddon` path with the same line of code.
+ */
+function openTerminalLink(event: MouseEvent | undefined, uri: string): void {
+  if (!linkModifierHeld(event)) return;
+  if (!/^https?:\/\//i.test(uri)) return;
+  openExternal(uri).catch((err) => console.error('Failed to open URL:', err));
+}
+
+/**
+ * What xterm does with an `OSC 8` hyperlink — the sequence `eza`, `gh`,
+ * `cargo`, `delta`, `rustc` and most CI output use to declare a link on a
+ * piece of text (issue 48).
+ *
+ * Without this, xterm falls back to `confirm()` with "WARNING: This link
+ * could potentially be dangerous", a native modal that blocks the whole
+ * webview and warns the user against their own terminal, and then opens the
+ * URL with `window.open()` — *inside* the app, since nothing here is a
+ * browser. So the one link kind the program declared explicitly, the most
+ * trustworthy of the three, was the only one handled badly. It now takes the
+ * very same path as a URL the `WebLinksAddon` spots: the same modifier, the
+ * same scheme filter, the same `openExternal`.
+ *
+ * No `hover` on purpose: the target panel is `LinkHover`'s
+ * (`lib/terminalLinks`), which tracks the pointer itself over both kinds of
+ * link, and a second tooltip would fight it. What it cannot yet show is an
+ * `OSC 8` target whose *text* is not a URL — it reads the grid, and the URI
+ * of an OSC 8 link is not in the grid.
+ */
+const OSC8_LINK_HANDLER = {
+  activate: (event: MouseEvent, uri: string) => openTerminalLink(event, uri),
+};
+
+// ---------------------------------------------------------------------------
 // Session lifecycle
 // ---------------------------------------------------------------------------
 
@@ -954,6 +1138,11 @@ function createSession(id: string): TerminalSession {
     allowProposedApi: true, // needed by addon-image / unicode11
     cursorBlink: cursor.cursorBlink,
     cursorStyle: cursor.cursorStyle,
+    // Which pane the keys are going to, seen at a glance (issue 52).
+    cursorInactiveStyle: cursor.cursorInactiveStyle,
+    // `OSC 8` hyperlinks; without it xterm shows a `confirm()` warning and
+    // opens the URL inside the webview. See `OSC8_LINK_HANDLER`.
+    linkHandler: OSC8_LINK_HANDLER,
     // Terminal window: the canvas is see-through so the theme's window
     // opacity and wallpaper show behind the text (see lib/terminalTheme).
     allowTransparency: IS_TERMINAL_WINDOW,
@@ -980,6 +1169,29 @@ function createSession(id: string): TerminalSession {
     // `scrollOnUserInput`), so this costs nothing at the prompt.
     smoothScrollDuration: smoothScrollDuration(),
     drawBoldTextInBrightColors: true,
+    // Issue 52. The overview ruler is the strip beside the scrollbar where
+    // decorations are drawn at their position in the *whole* buffer, not the
+    // viewport — a minimap of the scrollback. CortX already asks for it
+    // without having it: the find bar passes `matchOverviewRuler` /
+    // `activeMatchColorOverviewRuler` colours (`FindBar.tsx`), which xterm
+    // has been dropping on the floor because the ruler is only created when
+    // a width is set. Eight px is the width of the terminal's scrollbar
+    // (`styles/terminal-window.css`), which the ruler sits over and which
+    // xterm sizes from this very number; the ruler paints nothing where
+    // there is no decoration, so the scrollbar shows through it.
+    overviewRuler: { width: 8 },
+    // Issue 52: a glyph one cell wide whose ink spills into the next cell is
+    // squeezed back into its own. This is the Nerd Font / ambiguous-width
+    // case, which is CortX's daily bread — a powerline separator or a folder
+    // glyph that bleeds over the character after it.
+    rescaleOverlappingGlyphs: true,
+    // Issue 52: `1` (xterm's default) leaves every colour as the theme wrote
+    // it; `4.5` is WCAG AA. A setting, because raising it rewrites colours
+    // the theme author chose — see `terminalMinimumContrast`.
+    minimumContrastRatio: terminalMinimumContrast(),
+    // Issue 52: off unless the user asks. Mirrors the rows into live DOM for
+    // VoiceOver / NVDA, and costs on every render — see `screenReaderModeEnabled`.
+    screenReaderMode: screenReaderModeEnabled(),
     // Tells xterm which reflow quirks to expect from ConPTY.
     windowsPty: IS_WINDOWS ? { backend: 'conpty' } : undefined,
   });
@@ -990,11 +1202,9 @@ function createSession(id: string): TerminalSession {
   term.loadAddon(search);
   term.loadAddon(new Unicode11Addon());
   term.unicode.activeVersion = '11';
-  term.loadAddon(
-    new WebLinksAddon((_event, uri) => {
-      openExternal(uri).catch((err) => console.error('Failed to open URL:', err));
-    })
-  );
+  // URLs spotted in the output. Same gesture and same filter as the `OSC 8`
+  // links above (issue 48, ticket #43): Ctrl / ⌘ + click, `http(s)` only.
+  term.loadAddon(new WebLinksAddon((event, uri) => openTerminalLink(event, uri)));
   // Sixel + iTerm2 inline images. Kitty graphics reach the same renderer
   // through `lib/terminalImages`, which rewrites them as iTerm2 sequences —
   // the addon has no kitty support and xterm.js has no APC handler at all.
