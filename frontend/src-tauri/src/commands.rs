@@ -823,26 +823,37 @@ pub fn is_script_running(state: State<AppState>, script_id: String) -> bool {
 /// Called from both settings commands rather than from `setup`: writing them
 /// is what changes the answer, and reading them is the first thing either
 /// window does on boot, so the hub is in step before a terminal exists.
-fn sync_scrollback_budget(state: &AppState, settings: &AppSettings) {
+/// Push the two size caps the backend owns into the objects that enforce them.
+///
+/// Both are built before any setting has been read — `ProcessManager::new`
+/// runs at startup — so they cannot take their value at construction. Called
+/// from `get_settings` as well as `update_settings`: writing settings is what
+/// changes the answer, but reading them is the first thing either window does,
+/// so the caps are in step before a terminal exists.
+fn sync_terminal_budgets(state: &AppState, settings: &AppSettings) {
     state
         .process_manager
         .terminal_hub()
         .set_max_bytes(cortx_core::terminal::scrollback_bytes_for_lines(
             settings.terminal.scrollback_lines,
         ));
+    state
+        .process_manager
+        .command_history()
+        .set_max_bytes(u64::from(settings.terminal.history_max_mb.clamp(1, 200)) * 1024 * 1024);
 }
 
 #[tauri::command]
 pub fn get_settings(state: State<AppState>) -> AppSettings {
     let settings = state.storage.get_settings();
-    sync_scrollback_budget(&state, &settings);
+    sync_terminal_budgets(&state, &settings);
     settings
 }
 
 #[tauri::command]
 pub fn update_settings(state: State<AppState>, settings: AppSettings) -> Result<(), String> {
     state.agents.set_settings(settings.agents.clone());
-    sync_scrollback_budget(&state, &settings);
+    sync_terminal_budgets(&state, &settings);
     state
         .storage
         .update_settings(settings)

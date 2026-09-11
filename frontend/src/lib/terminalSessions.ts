@@ -312,6 +312,9 @@ export function terminalFontOptions(): {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_SCROLLBACK_LINES = 10000;
+
+/** Default size cap of `command-history.jsonl`, in megabytes (see `historyMaxMb`). */
+export const DEFAULT_HISTORY_MAX_MB = 10;
 export const MIN_SCROLLBACK_LINES = 1000;
 export const MAX_SCROLLBACK_LINES = 200000;
 /**

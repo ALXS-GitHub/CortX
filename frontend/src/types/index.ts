@@ -147,8 +147,19 @@ export interface TerminalConfig {
   /** Lines of output kept behind the viewport, per terminal (1 000–200 000).
    *  Default 10 000. Also caps how far back the command blocks stay
    *  navigable: trimming the scrollback destroys the markers the blocks are
-   *  built on. Applies to the terminals already open. */
+   *  built on. Applies to the terminals already open.
+   *
+   *  The backend keeps its own copy of the same output — that is what is
+   *  replayed when the Terminal window is reopened or the webview reloads —
+   *  and it is budgeted from this number (128 bytes a line, never under 4 MB,
+   *  never over 32 MB). It counts raw bytes, so a session full of Sixel
+   *  images reaches the budget well before the line count does. */
   scrollbackLines?: number;
+  /** Size cap of the shared command-history file, in megabytes (1-200).
+   *  Default 10. Past it the file is rewritten keeping only its most recent
+   *  half, so what stays searchable is between half and all of it. At roughly
+   *  250 bytes a command, 10 MB is about 40 000 of them. */
+  historyMaxMb?: number;
   /** Reopen the Terminal window's tabs on start (shells in their last cwd, nothing re-run). Default true. */
   restoreSessions?: boolean;
   /** Seed restored shells with the tail of their previous scrollback. Default true. */

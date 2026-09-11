@@ -10,6 +10,8 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Compact past this size so the file can't grow forever: it is rewritten
 /// with only its most recent half (see [`CommandHistory::compact`]).
@@ -17,6 +19,10 @@ use std::path::{Path, PathBuf};
 /// At ~250 bytes a record, 10 MB is about 40 000 commands, so one rewrite
 /// every ~20 000 — a few tens of milliseconds, that rare.
 pub const DEFAULT_MAX_HISTORY_BYTES: u64 = 10 * 1024 * 1024;
+
+/// Floor for the cap. Below this, compaction would fire on nearly every
+/// append and the file would never hold a useful number of commands.
+pub const MIN_MAX_HISTORY_BYTES: u64 = 4 * 1024;
 
 /// How much is read at a time when walking a history file backwards.
 const TAIL_CHUNK: usize = 64 * 1024;
@@ -47,26 +53,42 @@ pub struct CommandRecord {
 #[derive(Debug, Clone)]
 pub struct CommandHistory {
     path: PathBuf,
-    /// Size past which [`compact`](Self::compact) rewrites the file. A field
-    /// rather than a constant so the cap can become a setting (and so the
-    /// tests can exercise compaction without writing 10 MB).
-    max_bytes: u64,
+    /// Size past which [`compact`](Self::compact) rewrites the file.
+    ///
+    /// Shared rather than copied: `CommandHistory` derives `Clone` and the
+    /// Tauri commands clone it off the process manager to move work onto a
+    /// blocking thread, so a plain field would let each copy drift from the
+    /// setting. One cell behind an `Arc` means [`set_max_bytes`] reaches the
+    /// clone that is actually appending.
+    max_bytes: Arc<AtomicU64>,
 }
 
 impl CommandHistory {
     pub fn new(runtime_dir: &Path) -> Self {
         Self {
             path: runtime_dir.join("command-history.jsonl"),
-            max_bytes: DEFAULT_MAX_HISTORY_BYTES,
+            max_bytes: Arc::new(AtomicU64::new(DEFAULT_MAX_HISTORY_BYTES)),
         }
     }
 
     /// Override the size cap. Clamped to something that can still hold a
     /// useful number of commands — a cap of a few bytes would compact on
     /// every append.
-    pub fn with_max_bytes(mut self, bytes: u64) -> Self {
-        self.max_bytes = bytes.max(4 * 1024);
+    pub fn with_max_bytes(self, bytes: u64) -> Self {
+        self.set_max_bytes(bytes);
         self
+    }
+
+    /// The size cap, from the setting. Takes `&self` so it can be called on
+    /// the live history rather than only at construction — `ProcessManager`
+    /// builds this before any setting has been read.
+    pub fn set_max_bytes(&self, bytes: u64) {
+        self.max_bytes
+            .store(bytes.max(MIN_MAX_HISTORY_BYTES), Ordering::Relaxed);
+    }
+
+    fn max_bytes(&self) -> u64 {
+        self.max_bytes.load(Ordering::Relaxed)
     }
 
     pub fn path(&self) -> &Path {
@@ -91,7 +113,7 @@ impl CommandHistory {
             fs::create_dir_all(parent)?;
         }
         if let Ok(meta) = fs::metadata(&self.path) {
-            if meta.len() > self.max_bytes {
+            if meta.len() > self.max_bytes() {
                 if let Err(e) = self.compact() {
                     log::warn!("Could not compact {}: {}", self.path.display(), e);
                 }
@@ -117,7 +139,7 @@ impl CommandHistory {
     /// or the whole compacted one — never a truncated history. The copy also
     /// starts at a line boundary, so the first record is never half a line.
     fn compact(&self) -> std::io::Result<()> {
-        let keep = self.max_bytes / 2;
+        let keep = self.max_bytes() / 2;
         let mut file = File::open(&self.path)?;
         let size = file.seek(SeekFrom::End(0))?;
         let start = line_start_at_or_after(&mut file, size.saturating_sub(keep))?;

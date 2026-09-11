@@ -448,6 +448,12 @@ pub struct TerminalConfig {
     /// which is how much of the *previous* session is replayed on start.
     #[serde(default = "default_scrollback_lines")]
     pub scrollback_lines: u32,
+    /// Size cap of the shared command-history file, in megabytes. Past it the
+    /// file is rewritten keeping only its most recent half, so what stays
+    /// searchable is between half and all of this. At roughly 250 bytes a
+    /// command, 10 MB is about 40 000 of them. Clamped to 1-200.
+    #[serde(default = "default_history_max_mb")]
+    pub history_max_mb: u32,
     /// Reopen the Terminal window's tabs (shells in their last directory,
     /// nothing re-run) when the app starts.
     #[serde(default = "default_true")]
@@ -1058,6 +1064,10 @@ fn default_restore_scrollback_lines() -> u32 {
     200
 }
 
+fn default_history_max_mb() -> u32 {
+    10
+}
+
 fn default_scrollback_lines() -> u32 {
     10_000
 }
@@ -1145,6 +1155,7 @@ impl Default for TerminalConfig {
             renderer: TerminalRenderer::default(),
             selection_color: None,
             scrollback_lines: default_scrollback_lines(),
+            history_max_mb: default_history_max_mb(),
             restore_sessions: true,
             restore_scrollback: true,
             restore_scrollback_lines: default_restore_scrollback_lines(),

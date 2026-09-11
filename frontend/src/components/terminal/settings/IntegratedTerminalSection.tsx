@@ -34,6 +34,7 @@ import { getPlatform, TERMINAL_FONT_SUGGESTIONS } from './meta';
 import { DEFAULT_MAC_OPTION_AS_META, DEFAULT_SMOOTH_SCROLL_DURATION } from '@/lib/terminalKeys';
 import {
   DEFAULT_MINIMUM_CONTRAST,
+  DEFAULT_HISTORY_MAX_MB,
   DEFAULT_SCROLLBACK_LINES,
   MAX_SCROLLBACK_LINES,
   MIN_SCROLLBACK_LINES,
@@ -74,6 +75,7 @@ export function IntegratedTerminalSection() {
   const restoreSessions = terminal?.restoreSessions ?? true;
   const restoreScrollback = terminal?.restoreScrollback ?? true;
   const scrollbackLines = terminal?.scrollbackLines ?? DEFAULT_SCROLLBACK_LINES;
+  const historyMaxMb = terminal?.historyMaxMb ?? DEFAULT_HISTORY_MAX_MB;
   const selectionColor = terminal?.selectionColor ?? '';
   const blocks = terminal?.blocks ?? true;
   const suggestions = terminal?.inlineSuggestions ?? true;
@@ -646,6 +648,26 @@ export function IntegratedTerminalSection() {
             expensive for twenty idle shells.
           </p>
         )}
+
+        <NumberField
+          id="history-max-mb"
+          label="Command history — size cap"
+          hint={
+            <>
+              How large <Code>command-history.jsonl</Code> may grow before CortX rewrites it keeping only the most
+              recent half. That file is what the history view, <span className="kbd">Ctrl R</span> and the ranking
+              behind ghost text all read, so this is how much of your own past stays searchable — between half of this
+              number and all of it. At roughly 250 bytes a command, 10 MB is about 40 000 of them.
+            </>
+          }
+          value={historyMaxMb}
+          min={1}
+          max={200}
+          step={5}
+          className="w-32"
+          onCommit={(v) => patch({ historyMaxMb: v ?? DEFAULT_HISTORY_MAX_MB })}
+          disabled={!terminal}
+        />
 
         <ToggleField
           id="smooth-scroll"
