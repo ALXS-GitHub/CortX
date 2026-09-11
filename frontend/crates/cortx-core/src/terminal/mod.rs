@@ -37,14 +37,47 @@ pub use themes::{TerminalTheme, ThemeStore, ThemeSummary};
 
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-/// Upper bound on the raw bytes kept per terminal. Images (Sixel / iTerm2)
-/// are large, so this is deliberately generous.
+/// Floor — and default — for the raw bytes kept per terminal. Images
+/// (Sixel / iTerm2) are large, so this is deliberately generous, and a small
+/// `terminal.scrollbackLines` never takes the buffer below it.
 pub const MAX_SCROLLBACK_BYTES: usize = 4 * 1024 * 1024;
-/// When the cap is hit, drop the oldest bytes down to this size so trimming
-/// isn't triggered on every push.
-const TRIM_TO_BYTES: usize = 3 * 1024 * 1024;
+/// Ceiling on the same budget, whatever `terminal.scrollbackLines` says.
+///
+/// The setting tops out at 200 000 lines, which the formula prices at
+/// 25.6 MB, so the whole range the UI offers is honoured and this only guards
+/// against a hand-edited settings file. It is worth keeping in mind what the
+/// budget buys: it is paid *per terminal*, but it is an order of magnitude
+/// cheaper than the xterm.js buffer the same setting already sizes in the
+/// webview (~16 bytes per cell there, against one byte per byte here).
+pub const MAX_SCROLLBACK_BYTES_CEILING: usize = 32 * 1024 * 1024;
+/// Bytes budgeted per line of scrollback (#51).
+///
+/// The hub stores the raw PTY stream, escape sequences included, so a "line"
+/// is worth more here than the text it renders to. 128 B covers an ordinary
+/// coloured line; long ones and images simply reach the cap sooner, which is
+/// what the cap is for.
+const BYTES_PER_SCROLLBACK_LINE: usize = 128;
+
+/// Backend scrollback budget for a `terminal.scrollbackLines` setting (#51).
+///
+/// The hub's buffer is the only copy that survives a webview reload —
+/// [`TerminalHub::attach`] replays it — so leaving it fixed at 4 MB meant
+/// raising the setting bought lines that vanished the moment the Terminal
+/// window was reopened. Clamped at both ends: the floor keeps the default
+/// exactly as generous as it was, the ceiling keeps the memory bounded.
+pub fn scrollback_bytes_for_lines(lines: u32) -> usize {
+    (lines as usize)
+        .saturating_mul(BYTES_PER_SCROLLBACK_LINE)
+        .clamp(MAX_SCROLLBACK_BYTES, MAX_SCROLLBACK_BYTES_CEILING)
+}
+
+/// When the cap is hit, drop the oldest bytes down to three quarters of it so
+/// trimming isn't triggered on every push.
+fn trim_target(cap: usize) -> usize {
+    cap - cap / 4
+}
 
 /// Which kind of thing a terminal id refers to. The string form is the prefix
 /// used on both sides of the IPC (`service:<id>`, `shell:<id>`, ...), matching
@@ -95,6 +128,10 @@ impl Entry {
 pub struct TerminalHub {
     entries: Mutex<HashMap<String, Entry>>,
     next_token: AtomicU64,
+    /// Per-terminal scrollback budget, following `terminal.scrollbackLines`
+    /// (#51). Read on the PTY reader threads on every chunk, hence an atomic
+    /// rather than something behind the entries lock.
+    max_bytes: AtomicUsize,
 }
 
 impl Default for TerminalHub {
@@ -108,6 +145,33 @@ impl TerminalHub {
         Self {
             entries: Mutex::new(HashMap::new()),
             next_token: AtomicU64::new(1),
+            max_bytes: AtomicUsize::new(MAX_SCROLLBACK_BYTES),
+        }
+    }
+
+    /// Current per-terminal scrollback budget in bytes.
+    pub fn max_bytes(&self) -> usize {
+        self.max_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Set that budget from [`scrollback_bytes_for_lines`] (#51).
+    ///
+    /// Lowering it gives the memory back immediately instead of at the next
+    /// byte each terminal happens to print — a terminal that has gone quiet
+    /// would otherwise sit on the old buffer forever.
+    pub fn set_max_bytes(&self, bytes: usize) {
+        let cap = bytes.clamp(MAX_SCROLLBACK_BYTES, MAX_SCROLLBACK_BYTES_CEILING);
+        if self.max_bytes.swap(cap, Ordering::Relaxed) <= cap {
+            return;
+        }
+        let target = trim_target(cap);
+        let mut entries = self.entries.lock();
+        for entry in entries.values_mut() {
+            if entry.scrollback.len() > cap {
+                let excess = entry.scrollback.len() - target;
+                entry.scrollback.drain(..excess);
+                entry.scrollback.shrink_to_fit();
+            }
         }
     }
 
@@ -122,8 +186,9 @@ impl TerminalHub {
             .entry(id.to_string())
             .or_insert_with(Entry::new);
         entry.scrollback.extend_from_slice(data);
-        if entry.scrollback.len() > MAX_SCROLLBACK_BYTES {
-            let excess = entry.scrollback.len() - TRIM_TO_BYTES;
+        let cap = self.max_bytes.load(Ordering::Relaxed);
+        if entry.scrollback.len() > cap {
+            let excess = entry.scrollback.len() - trim_target(cap);
             entry.scrollback.drain(..excess);
         }
         entry.sinks.retain(|(_, sink)| sink(data));
@@ -447,11 +512,51 @@ mod tests {
         }
         let len = hub.scrollback("t").len();
         assert!(len <= MAX_SCROLLBACK_BYTES, "len = {len}");
-        assert!(len >= TRIM_TO_BYTES, "len = {len}");
+        assert!(len >= trim_target(MAX_SCROLLBACK_BYTES), "len = {len}");
         hub.clear("t");
         assert!(hub.scrollback("t").is_empty());
         hub.remove("t");
         assert_eq!(hub.sink_count("t"), 0);
+    }
+
+    #[test]
+    fn scrollback_budget_follows_the_setting_between_its_two_bounds() {
+        // The default setting asks for less than the old fixed buffer: nobody
+        // who leaves the slider alone loses a byte.
+        assert_eq!(scrollback_bytes_for_lines(10_000), MAX_SCROLLBACK_BYTES);
+        assert_eq!(scrollback_bytes_for_lines(1_000), MAX_SCROLLBACK_BYTES);
+        assert_eq!(scrollback_bytes_for_lines(0), MAX_SCROLLBACK_BYTES);
+        // Above it, the budget really does follow the setting — including at
+        // the 200 000 the UI allows, which is the promise that was broken.
+        assert_eq!(scrollback_bytes_for_lines(100_000), 100_000 * 128);
+        assert_eq!(scrollback_bytes_for_lines(200_000), 200_000 * 128);
+        // Only a settings file edited by hand can reach the ceiling.
+        assert_eq!(scrollback_bytes_for_lines(u32::MAX), MAX_SCROLLBACK_BYTES_CEILING);
+    }
+
+    #[test]
+    fn raising_the_budget_keeps_more_and_lowering_it_gives_memory_back() {
+        let hub = TerminalHub::new();
+        hub.set_max_bytes(scrollback_bytes_for_lines(100_000));
+        assert_eq!(hub.max_bytes(), 100_000 * 128);
+
+        let chunk = vec![b'x'; 1024 * 1024];
+        for _ in 0..14 {
+            hub.push("t", &chunk);
+        }
+        let big = hub.scrollback("t").len();
+        assert!(
+            big > MAX_SCROLLBACK_BYTES,
+            "the raised setting really is held by the backend: {big}"
+        );
+
+        // Back to the default: the buffer shrinks straight away, without
+        // waiting for the terminal to print again.
+        hub.set_max_bytes(scrollback_bytes_for_lines(10_000));
+        assert_eq!(hub.max_bytes(), MAX_SCROLLBACK_BYTES);
+        let small = hub.scrollback("t").len();
+        assert!(small <= MAX_SCROLLBACK_BYTES, "len = {small}");
+        assert!(small >= trim_target(MAX_SCROLLBACK_BYTES), "len = {small}");
     }
 
     #[test]

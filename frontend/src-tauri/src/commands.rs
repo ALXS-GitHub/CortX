@@ -810,14 +810,39 @@ pub fn is_script_running(state: State<AppState>, script_id: String) -> bool {
 
 // Settings commands
 
+/// Give the backend's per-terminal scrollback the size the user asked for
+/// (#51).
+///
+/// `terminal.scrollbackLines` used to drive xterm.js alone, while the hub —
+/// the only copy that survives a webview reload, since `attach` replays it —
+/// stayed at a hard-coded 4 MB. Raising the setting therefore bought lines
+/// that disappeared the moment the Terminal window was reopened. See
+/// `cortx_core::terminal::scrollback_bytes_for_lines` for the budget and its
+/// two bounds.
+///
+/// Called from both settings commands rather than from `setup`: writing them
+/// is what changes the answer, and reading them is the first thing either
+/// window does on boot, so the hub is in step before a terminal exists.
+fn sync_scrollback_budget(state: &AppState, settings: &AppSettings) {
+    state
+        .process_manager
+        .terminal_hub()
+        .set_max_bytes(cortx_core::terminal::scrollback_bytes_for_lines(
+            settings.terminal.scrollback_lines,
+        ));
+}
+
 #[tauri::command]
 pub fn get_settings(state: State<AppState>) -> AppSettings {
-    state.storage.get_settings()
+    let settings = state.storage.get_settings();
+    sync_scrollback_budget(&state, &settings);
+    settings
 }
 
 #[tauri::command]
 pub fn update_settings(state: State<AppState>, settings: AppSettings) -> Result<(), String> {
     state.agents.set_settings(settings.agents.clone());
+    sync_scrollback_budget(&state, &settings);
     state
         .storage
         .update_settings(settings)
@@ -2907,8 +2932,9 @@ pub async fn get_command_history(
 // Completions and suggestions (#17)
 // ---------------------------------------------------------------------------
 
-/// How many history records the ranking looks at. The file is capped at
-/// 10 MB and read in full by `recent`, so this bounds the work, not the file.
+/// How many history records the ranking looks at. `recent` reads backwards
+/// from the end of the file and stops here, so this bounds the work *and* the
+/// bytes touched (~1 MB), whatever the history has grown to.
 const SUGGEST_SCAN: usize = 4000;
 
 /// Commands from the shared history, ranked for one terminal's context.
@@ -2919,22 +2945,27 @@ const SUGGEST_SCAN: usize = 4000;
 /// what the user has typed so far, which is what lets the frontend fetch the
 /// list once per prompt and filter it locally without touching the disk on
 /// each keystroke.
+///
+/// Off the UI thread like `get_command_history`: this is disk work, called
+/// again every 10 s per directory, and the IPC thread has a whole GUI waiting
+/// behind it.
 #[tauri::command]
-pub fn suggest_history(
-    state: State<AppState>,
+pub async fn suggest_history(
+    state: State<'_, AppState>,
     cwd: Option<String>,
     project_id: Option<String>,
     limit: Option<usize>,
-) -> Vec<cortx_core::terminal::CommandSuggestion> {
+) -> Result<Vec<cortx_core::terminal::CommandSuggestion>, String> {
     let ctx = cortx_core::terminal::SuggestContext {
         cwd,
         project_id,
         now_ms: Utc::now().timestamp_millis(),
     };
-    state
-        .process_manager
-        .command_history()
-        .suggestions(&ctx, SUGGEST_SCAN, limit.unwrap_or(400).min(2000))
+    let history = state.process_manager.command_history().clone();
+    let limit = limit.unwrap_or(400).min(2000);
+    tauri::async_runtime::spawn_blocking(move || history.suggestions(&ctx, SUGGEST_SCAN, limit))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Flags and subcommands of `command`, learned from its own `--help` page the

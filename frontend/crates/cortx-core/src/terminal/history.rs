@@ -8,11 +8,18 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-/// Rotate to `.jsonl.1` past this size so the file can't grow forever.
-const MAX_HISTORY_BYTES: u64 = 10 * 1024 * 1024;
+/// Compact past this size so the file can't grow forever: it is rewritten
+/// with only its most recent half (see [`CommandHistory::compact`]).
+///
+/// At ~250 bytes a record, 10 MB is about 40 000 commands, so one rewrite
+/// every ~20 000 — a few tens of milliseconds, that rare.
+pub const DEFAULT_MAX_HISTORY_BYTES: u64 = 10 * 1024 * 1024;
+
+/// How much is read at a time when walking a history file backwards.
+const TAIL_CHUNK: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -40,17 +47,37 @@ pub struct CommandRecord {
 #[derive(Debug, Clone)]
 pub struct CommandHistory {
     path: PathBuf,
+    /// Size past which [`compact`](Self::compact) rewrites the file. A field
+    /// rather than a constant so the cap can become a setting (and so the
+    /// tests can exercise compaction without writing 10 MB).
+    max_bytes: u64,
 }
 
 impl CommandHistory {
     pub fn new(runtime_dir: &Path) -> Self {
         Self {
             path: runtime_dir.join("command-history.jsonl"),
+            max_bytes: DEFAULT_MAX_HISTORY_BYTES,
         }
+    }
+
+    /// Override the size cap. Clamped to something that can still hold a
+    /// useful number of commands — a cap of a few bytes would compact on
+    /// every append.
+    pub fn with_max_bytes(mut self, bytes: u64) -> Self {
+        self.max_bytes = bytes.max(4 * 1024);
+        self
     }
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The `.jsonl.1` archive older builds rotated to. Never written any
+    /// more, but still read: it holds real commands, and until the next
+    /// compaction folds it away it is the only copy of them.
+    fn archive_path(&self) -> PathBuf {
+        self.path.with_extension("jsonl.1")
     }
 
     /// Append one record. Errors are swallowed on purpose: history must
@@ -64,9 +91,10 @@ impl CommandHistory {
             fs::create_dir_all(parent)?;
         }
         if let Ok(meta) = fs::metadata(&self.path) {
-            if meta.len() > MAX_HISTORY_BYTES {
-                let rotated = self.path.with_extension("jsonl.1");
-                let _ = fs::rename(&self.path, rotated);
+            if meta.len() > self.max_bytes {
+                if let Err(e) = self.compact() {
+                    log::warn!("Could not compact {}: {}", self.path.display(), e);
+                }
             }
         }
         let mut file = OpenOptions::new().create(true).append(true).open(&self.path)?;
@@ -74,25 +102,74 @@ impl CommandHistory {
         writeln!(file, "{}", line)
     }
 
-    /// Most recent records first, at most `limit`. Reads the whole file;
-    /// fine for the 10 MB cap.
+    /// Rewrite the history with only its most recent half.
+    ///
+    /// This replaces the `.jsonl.1` rotation that used to happen here. The
+    /// rotation renamed the file away and *no reader ever opened the result*,
+    /// so crossing the cap emptied the history view, the Ctrl+R search and
+    /// the inline suggestions in one go — and the next rotation overwrote the
+    /// archive for good. Keeping the recent half in the one file everything
+    /// reads costs the same rewrite and loses half as much, once per
+    /// ~20 000 commands instead of all of it once per 40 000.
+    ///
+    /// The new file is written beside the old one and renamed over it, so a
+    /// crash (or a power cut) mid-compaction leaves either the whole old file
+    /// or the whole compacted one — never a truncated history. The copy also
+    /// starts at a line boundary, so the first record is never half a line.
+    fn compact(&self) -> std::io::Result<()> {
+        let keep = self.max_bytes / 2;
+        let mut file = File::open(&self.path)?;
+        let size = file.seek(SeekFrom::End(0))?;
+        let start = line_start_at_or_after(&mut file, size.saturating_sub(keep))?;
+        file.seek(SeekFrom::Start(start))?;
+
+        let tmp = self.path.with_extension("jsonl.tmp");
+        {
+            // `create` truncates, so a `.jsonl.tmp` left by an interrupted
+            // compaction is simply overwritten.
+            let mut out = File::create(&tmp)?;
+            std::io::copy(&mut file, &mut out)?;
+            out.sync_all()?;
+        }
+        // Close the source before renaming over it: Windows is the platform
+        // that minds.
+        drop(file);
+        match fs::rename(&tmp, &self.path) {
+            Ok(()) => {
+                // Everything the legacy archive holds predates the half that
+                // was just dropped from the live file, so it goes with it —
+                // it was readable right up to this point, which is the part
+                // the rotation got wrong.
+                let _ = fs::remove_file(self.archive_path());
+                Ok(())
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&tmp);
+                Err(e)
+            }
+        }
+    }
+
+    /// Most recent records first, at most `limit`.
+    ///
+    /// Walks the file backwards from the end and stops as soon as it has
+    /// enough, so the 4 000 records the suggestion ranking asks for cost
+    /// ~1 MB rather than the whole cap. This runs on the IPC thread through
+    /// `suggest_history`, several times a minute.
     pub fn recent(&self, limit: usize) -> Vec<CommandRecord> {
-        let Ok(text) = fs::read_to_string(&self.path) else {
-            return Vec::new();
-        };
-        text.lines()
-            .rev()
-            .filter_map(|l| serde_json::from_str(l).ok())
-            .take(limit)
-            .collect()
+        let mut out = Vec::with_capacity(limit.min(4096));
+        tail_records(&self.path, limit, &mut out);
+        // Older than anything above, hence last — see `archive_path`.
+        tail_records(&self.archive_path(), limit, &mut out);
+        out
     }
 
     /// One page of the history, filtered by `q`, newest first.
     ///
     /// The whole filter runs here rather than in the GUI: the file is capped
-    /// at [`MAX_HISTORY_BYTES`], which is far more than a webview wants to
-    /// hold, and every one of these predicates is a substring test the
-    /// frontend would have to redo on every keystroke. One streamed pass
+    /// at [`DEFAULT_MAX_HISTORY_BYTES`], which is far more than a webview
+    /// wants to hold, and every one of these predicates is a substring test
+    /// the frontend would have to redo on every keystroke. One streamed pass
     /// answers the page, the match count and the facet lists at once.
     pub fn query(&self, q: &HistoryQuery) -> HistoryPage {
         let limit = if q.limit == 0 { DEFAULT_PAGE } else { q.limit.min(MAX_PAGE) };
@@ -108,7 +185,13 @@ impl CommandHistory {
         let mut projects: HashMap<String, usize> = HashMap::new();
         let mut cwds: HashMap<String, usize> = HashMap::new();
 
-        if let Ok(file) = File::open(&self.path) {
+        // Oldest first, so `window` ends up holding the newest matches: the
+        // legacy `.jsonl.1` archive (when one is still around) precedes the
+        // live file.
+        for path in [self.archive_path(), self.path.clone()] {
+            let Ok(file) = File::open(&path) else {
+                continue;
+            };
             for line in BufReader::new(file).lines().map_while(Result::ok) {
                 if line.trim().is_empty() {
                     continue;
@@ -167,6 +250,84 @@ impl CommandHistory {
     ) -> Vec<CommandSuggestion> {
         rank_commands(&self.recent(scan), ctx, limit)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Reading from the end (#50)
+// ---------------------------------------------------------------------------
+
+/// Append records from the end of `path`, newest first, until `out` holds
+/// `limit` of them (whatever it held on entry counts).
+///
+/// The file is read backwards in [`TAIL_CHUNK`] blocks and stops as soon as
+/// there are enough records, so this is bounded by what the caller asked for
+/// rather than by the size of the history. Splitting raw bytes on `\n` is
+/// safe: a newline can never appear inside a multi-byte UTF-8 sequence.
+///
+/// Anything unreadable — a missing file, a bad seek, a corrupt line — yields
+/// what was collected so far. History must never break a terminal.
+fn tail_records(path: &Path, limit: usize, out: &mut Vec<CommandRecord>) {
+    if out.len() >= limit {
+        return;
+    }
+    let Ok(mut file) = File::open(path) else {
+        return;
+    };
+    let Ok(size) = file.seek(SeekFrom::End(0)) else {
+        return;
+    };
+    let mut pos = size;
+    // The bytes read so far that are not yet a complete line: always a prefix
+    // of some line, so at most one record long.
+    let mut head: Vec<u8> = Vec::new();
+    while pos > 0 && out.len() < limit {
+        let step = (TAIL_CHUNK as u64).min(pos);
+        pos -= step;
+        let mut chunk = vec![0u8; step as usize];
+        if file.seek(SeekFrom::Start(pos)).is_err() || file.read_exact(&mut chunk).is_err() {
+            return;
+        }
+        chunk.extend_from_slice(&head);
+        head = chunk;
+        // Whatever follows a newline is a whole line; what comes before the
+        // first one may still be continued by the chunk before it.
+        while out.len() < limit {
+            let Some(nl) = head.iter().rposition(|&b| b == b'\n') else {
+                break;
+            };
+            push_record(&head[nl + 1..], out);
+            head.truncate(nl);
+        }
+    }
+    // Start of file reached: what is left is a whole line after all.
+    if pos == 0 && out.len() < limit {
+        push_record(&head, out);
+    }
+}
+
+fn push_record(line: &[u8], out: &mut Vec<CommandRecord>) {
+    let Ok(text) = std::str::from_utf8(line) else {
+        return;
+    };
+    if text.trim().is_empty() {
+        return;
+    }
+    if let Ok(record) = serde_json::from_str(text) {
+        out.push(record);
+    }
+}
+
+/// Offset of the first line starting at or after `offset`, so a compacted
+/// file never begins in the middle of a record. Returns the file size when
+/// there is no newline left (a single oversized line), i.e. "keep nothing".
+fn line_start_at_or_after(file: &mut File, offset: u64) -> std::io::Result<u64> {
+    if offset == 0 {
+        return Ok(0);
+    }
+    file.seek(SeekFrom::Start(offset))?;
+    let mut skipped = Vec::new();
+    let consumed = BufReader::new(file).read_until(b'\n', &mut skipped)?;
+    Ok(offset + consumed as u64)
 }
 
 // ---------------------------------------------------------------------------
@@ -943,6 +1104,162 @@ mod tests {
         let page = hist.query(&HistoryQuery::default());
         assert_eq!(page.scanned, 2, "the blank line is skipped, the junk one is counted");
         assert_eq!(page.total, 1, "and only the readable record comes back");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // Compaction and reading from the end (#50)
+    // -----------------------------------------------------------------------
+
+    /// A history in its own directory, with a cap small enough that
+    /// compaction can be exercised without writing megabytes.
+    fn temp_history(tag: &str, max_bytes: u64) -> (PathBuf, CommandHistory) {
+        let dir = std::env::temp_dir().join(format!("cortx-hist-{tag}-{}", uuid::Uuid::new_v4()));
+        let hist = CommandHistory::new(&dir).with_max_bytes(max_bytes);
+        (dir, hist)
+    }
+
+    const SMALL_CAP: u64 = 8 * 1024;
+
+    #[test]
+    fn compaction_keeps_the_recent_half_and_the_file_stays_readable() {
+        let (dir, hist) = temp_history("compact", SMALL_CAP);
+        for i in 0..400i64 {
+            hist.append(&rec(i, &format!("cmd{i:04}"), "/work", Some(0)));
+        }
+
+        let size = fs::metadata(hist.path()).unwrap().len();
+        assert!(size <= SMALL_CAP + 1024, "the file stops growing: {size} bytes");
+        assert!(
+            !hist.path().with_extension("jsonl.1").exists(),
+            "the rotation that nothing read is gone: no orphan archive"
+        );
+        assert!(!hist.path().with_extension("jsonl.tmp").exists(), "no temporary is left behind");
+
+        // The newest commands are still there — this is exactly what the old
+        // rotation threw away wholesale.
+        let recent = hist.recent(5);
+        assert_eq!(recent[0].command.as_deref(), Some("cmd0399"));
+        assert_eq!(recent[4].command.as_deref(), Some("cmd0395"));
+
+        // And every line kept is a whole one: the copy started at a line
+        // boundary, so nothing is half a record.
+        let page = hist.query(&HistoryQuery::default());
+        assert_eq!(page.total, page.scanned, "no truncated line survived compaction");
+        assert!(page.total > 10, "a useful window is kept, not a handful: {}", page.total);
+        assert_eq!(page.records[0].command.as_deref(), Some("cmd0399"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_legacy_archive_is_read_and_only_ages_out_with_the_rest() {
+        let (dir, hist) = temp_history("archive", SMALL_CAP);
+        fs::create_dir_all(&dir).unwrap();
+        // What an older build left on disk and never opened again.
+        let archive = hist.path().with_extension("jsonl.1");
+        let mut rotated = String::new();
+        for i in 0..20i64 {
+            rotated.push_str(&serde_json::to_string(&rec(i, &format!("old{i:02}"), "/work", Some(0))).unwrap());
+            rotated.push('\n');
+        }
+        fs::write(&archive, rotated).unwrap();
+        for i in 100..110i64 {
+            hist.append(&rec(i, &format!("new{i}"), "/work", Some(0)));
+        }
+
+        // The history view sees both files, oldest last.
+        let page = hist.query(&HistoryQuery::default());
+        assert_eq!(page.total, 30, "the rotated archive is not invisible any more");
+        assert_eq!(page.records[0].command.as_deref(), Some("new109"));
+        assert_eq!(page.records[29].command.as_deref(), Some("old00"));
+
+        // So do the suggestions, which read from the end of each file.
+        let recent = hist.recent(30);
+        assert_eq!(recent.len(), 30);
+        assert_eq!(recent[0].command.as_deref(), Some("new109"));
+        assert_eq!(
+            recent[10].command.as_deref(),
+            Some("old19"),
+            "the archive picks up where the live file stops"
+        );
+
+        // It is only dropped when compaction retires that whole period —
+        // never silently on the way in.
+        for i in 200..400i64 {
+            hist.append(&rec(i, &format!("cmd{i}"), "/work", Some(0)));
+        }
+        assert!(!archive.exists(), "one file is left, not an archive nobody reads");
+        assert_eq!(hist.recent(1)[0].command.as_deref(), Some("cmd399"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn recent_returns_what_reading_the_whole_file_returned() {
+        let (dir, hist) = temp_history("tail", DEFAULT_MAX_HISTORY_BYTES);
+        // Comfortably more than one `TAIL_CHUNK`, so the backwards walk has
+        // to stitch chunks together.
+        for i in 0..2_000i64 {
+            hist.append(&rec(i, &format!("cmd{i:05}"), "/work", Some(0)));
+        }
+        let whole_file: Vec<CommandRecord> = fs::read_to_string(hist.path())
+            .unwrap()
+            .lines()
+            .rev()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .take(7)
+            .collect();
+        assert_eq!(hist.recent(7), whole_file, "same answer as the old whole-file read");
+        assert!(hist.recent(0).is_empty());
+        assert_eq!(hist.recent(5_000).len(), 2_000, "asking for more than exists returns all of it");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tail_reading_survives_blanks_junk_and_a_missing_final_newline() {
+        let (dir, hist) = temp_history("ragged", DEFAULT_MAX_HISTORY_BYTES);
+        fs::create_dir_all(&dir).unwrap();
+        let one = |ts: i64, cmd: &str| serde_json::to_string(&rec(ts, cmd, "/work", Some(0))).unwrap();
+        fs::write(
+            hist.path(),
+            format!(
+                "{}\n\n{{not json}}\n{}\n\n{}",
+                one(1, "first"),
+                one(2, "second"),
+                one(3, "third")
+            ),
+        )
+        .unwrap();
+        let commands: Vec<String> = hist.recent(10).into_iter().filter_map(|r| r.command).collect();
+        assert_eq!(
+            commands,
+            vec!["third", "second", "first"],
+            "an unterminated last line, blank lines and junk are all handled"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compaction_is_atomic_and_overwrites_a_leftover_temporary() {
+        let (dir, hist) = temp_history("atomic", SMALL_CAP);
+        for i in 0..200i64 {
+            hist.append(&rec(i, &format!("cmd{i:04}"), "/work", Some(0)));
+        }
+        // What a process killed mid-compaction leaves: a partial `.jsonl.tmp`.
+        // The history itself is whole, because it is only ever replaced by a
+        // finished rename.
+        let tmp = hist.path().with_extension("jsonl.tmp");
+        fs::write(&tmp, "{\"ts\":1,\"terminal").unwrap();
+        let interrupted = hist.query(&HistoryQuery::default());
+        assert!(interrupted.total > 0, "the history is intact after a crash");
+        assert_eq!(interrupted.total, interrupted.scanned, "and holds no half record");
+
+        for i in 200..400i64 {
+            hist.append(&rec(i, &format!("cmd{i:04}"), "/work", Some(0)));
+        }
+        assert!(!tmp.exists(), "the next compaction reuses and renames the temporary away");
+        let page = hist.query(&HistoryQuery::default());
+        assert_eq!(page.total, page.scanned);
+        assert_eq!(page.records[0].command.as_deref(), Some("cmd0399"));
         let _ = fs::remove_dir_all(&dir);
     }
 }
