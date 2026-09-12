@@ -117,7 +117,7 @@ import {
   type InputAction,
   type KeyDescriptor,
 } from '@/lib/terminalInputState';
-import { caretOffsetAt } from '@/lib/terminalInputHit';
+import { caretOffsetAtPoint } from '@/lib/terminalInputHit';
 import { acceptanceFor, aliasHintFor, type CompletionItem } from '@/lib/terminalCompletion';
 import { onCompletionData, peekAliases } from '@/lib/terminalCompletionData';
 import {
@@ -313,6 +313,12 @@ class InputEditorController {
   previousInactiveCursor: Terminal['options']['cursorInactiveStyle'];
   frameId = 0;
   syncFrame = 0;
+  /**
+   * What `place()` last measured, so a keystroke can re-height the block
+   * without re-measuring the grid: the prompt row's top and the cell height
+   * in container pixels, and the room there is below before the pane ends.
+   */
+  geom: { rowTop: number; cellHeight: number; hostHeight: number } | null = null;
   disposables: IDisposable[] = [];
   cleanup: Array<() => void> = [];
 
@@ -354,7 +360,10 @@ class InputEditorController {
     const field = document.createElement('textarea');
     field.className = 'cortx-uinput-field';
     field.rows = 1;
-    field.wrap = 'off';
+    // `soft`, so a line longer than the row continues on the next one instead
+    // of scrolling the box sideways. The height that continuation needs is
+    // measured in `applyHeight()`.
+    field.wrap = 'soft';
     field.spellcheck = false;
     field.autocapitalize = 'off';
     field.setAttribute('autocorrect', 'off');
@@ -637,7 +646,7 @@ class InputEditorController {
     // still bubbles up to it.
     if (e.button !== 0) return;
     if (!this.machine.isEditing || this.root.hidden) return;
-    const offset = this.offsetAt(e.clientX);
+    const offset = this.offsetAt(e.clientX, e.clientY);
     e.preventDefault();
     this.field.focus({ preventScroll: true });
     this.root.dataset.focus = document.activeElement === this.field ? 'true' : 'false';
@@ -666,17 +675,19 @@ class InputEditorController {
    * as the ghost text does (`terminalSuggest.paint`). The search itself lives
    * in `terminalInputHit.ts` and is tested there.
    */
-  offsetAt(clientX: number): number {
+  offsetAt(clientX: number, clientY: number): number {
     const text = this.machine.text;
     if (!text) return 0;
     const rect = this.field.getBoundingClientRect();
     const x = clientX - rect.left + this.field.scrollLeft;
+    const y = clientY - rect.top + this.field.scrollTop;
+    const lineHeight = Math.max(1, Math.round(this.geom?.cellHeight ?? rect.height));
     const saved = this.caretLead.textContent;
-    const offset = caretOffsetAt(text, x, (index) => {
+    const offset = caretOffsetAtPoint(text, x, y, lineHeight, (index) => {
       this.caretLead.textContent = text.slice(0, index);
-      // `offsetLeft` is measured from the caret layer (its offset parent) and
-      // ignores its `scrollLeft`, which is why `x` adds the scroll back in.
-      return this.caret.offsetLeft;
+      // Both offsets are measured from the caret layer (the offset parent) and
+      // ignore its scroll, which is why the point added it back in above.
+      return { left: this.caret.offsetLeft, top: this.caret.offsetTop };
     });
     this.caretLead.textContent = saved;
     return offset;
@@ -750,17 +761,15 @@ class InputEditorController {
     // few pixels into the pane's own padding (`.cortx-xterm-host` clips at its
     // padding box, not at its content box), which is what keeps the block from
     // looking sawn off in the "pinned to bottom" mode.
-    const top = Math.max(0, Math.round(rowTop - PAD_TOP));
-    const bottom = Math.min(host.height + PAD_BOTTOM, Math.round(rowTop + cellHeight + PAD_BOTTOM));
-
     const style = this.root.style;
     style.left = `${Math.round(gridLeft)}px`;
     style.width = `${Math.max(1, Math.round(rect.width))}px`;
-    style.top = `${top}px`;
-    style.height = `${Math.max(1, bottom - top)}px`;
     style.lineHeight = `${Math.max(1, Math.round(cellHeight))}px`;
     // A block / underline caret is exactly one cell wide, like the grid's.
     style.setProperty('--cortx-uinput-caret-w', `${Math.max(2, Math.round(cellWidth))}px`);
+    // One line, for the caret: the text box may now be several rows tall and
+    // a percentage height would stretch the caret down all of them.
+    style.setProperty('--cortx-uinput-line-h', `${Math.max(1, Math.round(cellHeight))}px`);
 
     // The text box starts on the column the prompt ended on, so what is typed
     // lands where the shell would have echoed it — but never so far right that
@@ -768,15 +777,84 @@ class InputEditorController {
     // repaints on its own terms, and one bad value must not cost the user the
     // whole editor. The block itself stays full width and clickable either
     // way (`onBlockMouseDown`).
+    //
+    // A wrapped line therefore continues under the *start of the typed text*,
+    // not under the shell's prompt at column 0 the way a bare shell would.
+    // That is not a preference: the obvious way to get column 0 is to span the
+    // grid and push the first line with `text-indent`, and a `<textarea>`
+    // ignores `text-indent` while the ghost and caret layers (plain divs)
+    // honour it — measured in Chromium, the field then breaks its lines at
+    // 50 columns while the overlays break at 38, and the caret walks off the
+    // text. One box, one set of line breaks, three layers that cannot drift.
     const width = Math.round(rect.width);
     const room = Math.max(0, width - Math.round(cellWidth * MIN_TEXT_COLS) - TEXT_INSET_RIGHT);
     const textLeft = Math.min(Math.max(0, Math.round(anchor.x * cellWidth)), room);
     const text = this.text.style;
     text.left = `${textLeft}px`;
-    text.top = `${Math.round(rowTop) - top}px`;
-    text.height = `${Math.max(1, Math.round(cellHeight))}px`;
     text.width = `${Math.max(cellWidth * 2, width - textLeft - TEXT_INSET_RIGHT)}px`;
+
+    this.geom = { rowTop, cellHeight, hostHeight: host.height };
+    this.applyHeight();
     return true;
+  }
+
+  /**
+   * Height of the block, from the number of visual lines the text takes.
+   *
+   * Split out of `place()` because the two run at different rhythms: `place()`
+   * answers "where is the prompt row" and needs the grid's rectangles, while
+   * this one answers "how tall is what I just typed" and has to run on every
+   * keystroke — the row the block sits on does not move when a line wraps,
+   * but the block has to grow the moment it does.
+   *
+   * The count is measured rather than computed from the column width, so it
+   * cannot drift on a ligature or a double-width glyph the way
+   * `text.length / cols` would. It is measured on the **field**, because that
+   * is the only layer holding the whole line: the caret layer carries just
+   * the text *before* the caret, so it would report a box that shrinks as you
+   * walk the caret backwards through a wrapped command.
+   *
+   * The box is squeezed to a single row before the read. `scrollHeight` never
+   * returns less than the element's own height, so measuring at the current
+   * size would let the block grow and never shrink back.
+   *
+   * Growing downwards is the rule (`PAD_BOTTOM`), because below the prompt
+   * there is nothing until the command runs. When there is not enough room
+   * left — a prompt on the last row of a short pane — the block is pushed up
+   * instead of being sawn off by the pane's edge, which is the same thing the
+   * shell's own scroll would have done.
+   */
+  applyHeight() {
+    const geom = this.geom;
+    if (!geom) return;
+    const { rowTop, cellHeight, hostHeight } = geom;
+    const lineHeight = Math.max(1, Math.round(cellHeight));
+    const text = this.text.style;
+    text.height = `${lineHeight}px`;
+    const content = this.field.scrollHeight || lineHeight;
+    const lines = Math.max(1, Math.round(content / lineHeight));
+    const wanted = lines * lineHeight;
+
+    // Slide the block up when the rows below the prompt have run out, so it
+    // is never sawn off by the pane's edge.
+    const limit = hostHeight + PAD_BOTTOM;
+    const textTop = Math.max(0, Math.min(Math.round(rowTop), Math.round(limit - PAD_BOTTOM - wanted)));
+    // A command long enough to out-grow the whole pane is the one case the
+    // block cannot answer with height. The box then stops at what is left and
+    // the field scrolls inside it — which is why it must be sized to the room
+    // it has and not to the text: a box as tall as its own content has
+    // nothing to scroll, and the caret would sit below the clip instead of
+    // being carried into view.
+    const room = Math.max(lineHeight, Math.round(limit - PAD_BOTTOM - textTop));
+    const textHeight = Math.min(wanted, room);
+    const top = Math.max(0, textTop - PAD_TOP);
+    const bottom = Math.min(limit, textTop + textHeight + PAD_BOTTOM);
+
+    const style = this.root.style;
+    style.top = `${top}px`;
+    style.height = `${Math.max(1, bottom - top)}px`;
+    text.top = `${textTop - top}px`;
+    text.height = `${Math.max(1, textHeight)}px`;
   }
 
   // -- text in and out ------------------------------------------------------
@@ -1050,6 +1128,9 @@ class InputEditorController {
   render() {
     this.updateGhost();
     this.renderCaret();
+    // Before the menu is anchored (it hangs off the caret's own box) and
+    // after the field has the text: a keystroke can add or drop a wrapped row.
+    this.applyHeight();
     this.syncScroll();
     // Last, and on purpose: the list is anchored on the caret's own box, so
     // it has to be re-anchored *after* `renderCaret` has moved it, or it
@@ -1105,11 +1186,23 @@ class InputEditorController {
     style.animation = '';
   }
 
-  /** Long line: the textarea scrolls, both overlays must scroll with it. */
+  /**
+   * The overlays follow the field's scroll.
+   *
+   * Sideways there is nothing left to follow — the box wraps instead of
+   * scrolling — but `scrollTop` can still move in the one case the block
+   * cannot grow its way out of: a command so long its wrapped form is taller
+   * than the pane, where `applyHeight()` clamps the box and the field scrolls
+   * inside it. The horizontal sync stays for the same reason it always had:
+   * it costs nothing when the value is 0.
+   */
   syncScroll() {
     const left = this.field.scrollLeft;
     if (this.ghost.scrollLeft !== left) this.ghost.scrollLeft = left;
     if (this.caretLayer.scrollLeft !== left) this.caretLayer.scrollLeft = left;
+    const top = this.field.scrollTop;
+    if (this.ghost.scrollTop !== top) this.ghost.scrollTop = top;
+    if (this.caretLayer.scrollTop !== top) this.caretLayer.scrollTop = top;
   }
 
   // -- keyboard -------------------------------------------------------------

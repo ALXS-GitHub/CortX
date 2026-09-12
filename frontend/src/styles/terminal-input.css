@@ -160,10 +160,20 @@
   font: inherit;
   line-height: inherit;
   letter-spacing: inherit;
-  white-space: pre;
+  /* Wrap, do not scroll sideways. A prompt that runs past the right edge is
+     continued on the next row, exactly as the shell would have continued it —
+     the editor owns the line, so nothing else was going to do it. The three
+     layers must break at the *same* place or the ghost and the caret drift
+     off the text, which is why the rule is written once for all of them.
+
+     `break-all` rather than word wrapping: a terminal breaks at the cell it
+     runs out of, mid-word, and the continuation lines here line up with the
+     grid's columns. Word wrapping would leave a ragged right edge that no
+     row of the grid under it shares. */
+  white-space: pre-wrap;
   overflow: hidden;
-  overflow-wrap: normal;
-  word-break: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
   tab-size: 8;
 }
 
@@ -209,7 +219,10 @@
   display: inline-block;
   position: relative;
   width: 0;
-  height: 100%;
+  /* One *line*, not the whole box. Since the block wraps, `100%` here would
+     resolve against a text box several rows tall and draw a caret down all of
+     them. `place()` sets the variable to the grid's own cell height. */
+  height: var(--cortx-uinput-line-h, 1em);
   vertical-align: top;
 }
 .cortx-uinput-caret::before {
