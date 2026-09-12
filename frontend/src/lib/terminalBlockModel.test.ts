@@ -714,6 +714,19 @@ test('a card cut by the viewport is flush and square at the cut, never rounded',
   assert.deepEqual({ t: rect?.roundTop, b: rect?.roundBottom }, { t: false, b: false });
 });
 
+test('the card reaches the hairlines, half a blank row past its own lines', () => {
+  const metrics = { cell: 20, top: 0 };
+  // Block 10..13 with one spacing row above it and another above the block
+  // below: both rules sit half a row out, and the plate goes with them.
+  const bleed = { top: dividerOffsetRows('above', 1), bottom: 1 + dividerOffsetRows('above', 1) };
+  const rect = blockCardRect({ start: 10, endExclusive: 13 }, 0, 24, metrics, bleed);
+  assert.equal(rect?.top, 9.5 * 20 + BLOCK_CARD_GAP);
+  assert.equal(rect?.height, 4 * 20 - 2 * BLOCK_CARD_GAP);
+  // And the same block with nothing to share: the plate is its lines exactly.
+  const plain = blockCardRect({ start: 10, endExclusive: 13 }, 0, 24, metrics);
+  assert.equal(plain?.height, 3 * 20 - 2 * BLOCK_CARD_GAP);
+});
+
 test('a block with no rows on screen has no card at all', () => {
   const metrics = { cell: 20, top: 0 };
   assert.equal(blockCardRect({ start: 0, endExclusive: 5 }, 50, 10, metrics), null);

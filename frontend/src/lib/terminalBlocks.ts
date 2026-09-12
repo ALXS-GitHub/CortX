@@ -93,6 +93,13 @@
  * cell the shell did not paint itself. That is `terminal.blockCards`, and
  * `blockCardRect` is the geometry.
  *
+ * A card spans the block **from one hairline to the next**, not from its first
+ * buffer line to its last. The blank row `terminal.blockSpacing` asks the
+ * shell for belongs to no block, and the divider is centred in it, so a plate
+ * that stopped at the block's own lines left a whole unpainted row inside what
+ * the two rules announce as a single card. `dividerEdge` is the one place that
+ * decides where a rule goes, and both the rule and the card read it.
+ *
  * It does **not** work in the dock, and it never will without changing what a
  * docked pane is: the canvas there is opaque, because a pane in the app's own
  * chrome is a solid surface. A layer under an opaque canvas is invisible, so
@@ -226,6 +233,7 @@ import {
   joinBlockTexts,
   joinBufferRows,
   jumpToBottomVisible,
+  MAX_SPACING_ROWS,
   navigateBlocks,
   parseBlockMarker,
   selectionEdges,
@@ -1339,13 +1347,38 @@ class BlockController {
       const selected = this.isSelected(block.id);
       const hovered = block.id === this.hoveredId;
 
+      // Where this block's opening hairline lands, and where the next one's
+      // does. Both are wanted before anything is drawn: the rule is one of
+      // them, and the card has to reach from the first to the second.
+      const edge = this.dividerEdge(block.start, spacingMax, viewportY, rows);
+      const next = blocks[i + 1];
+      const nextEdge = next ? this.dividerEdge(next.start, spacingMax, viewportY, rows) : null;
+
       // The card: the block's own background plate, on the layer *under* the
       // grid (ticket #9, Warp's `draw_block_background`). It is the socle the
       // rest of this loop then draws on — the failure wash, the selection, the
       // fold cover — and it is what makes a block read as a card rather than
       // as a run of scrollback with a rule above it.
       if (cardLayer) {
-        const rect = blockCardRect(range, viewportY, rows, metrics);
+        // Hairline to hairline, not first buffer line to last. The blank row
+        // `terminal.blockSpacing` asks the shell for belongs to no block and
+        // the rule is centred in it, so a plate that stopped at the block's
+        // own lines left a whole unpainted row inside what the two dividers
+        // announce as one card — the card looked shorter than its block.
+        // Passing the very offsets the rules are drawn at is what keeps the
+        // plate's edge and the hairline on the same line.
+        const bleed = {
+          top: edge.offset,
+          // Clamped at the deepest a divider can legitimately be pulled up
+          // (half of the longest blank run). A block that never got its `D`
+          // marker runs to the cursor and can reach past the next prompt;
+          // without the floor such a card would be inverted and vanish, where
+          // before it merely overlapped — and a missing card is the worse lie.
+          bottom: nextEdge
+            ? Math.max(-MAX_SPACING_ROWS / 2, next.start + nextEdge.offset - range.endExclusive)
+            : 0,
+        };
+        const rect = blockCardRect(range, viewportY, rows, metrics, bleed);
         if (rect) {
           const card = this.element(keep, `${block.id}:card`, 'cortx-blocks-card', cardLayer);
           card.style.top = `${Math.round(rect.top)}px`;
@@ -1417,22 +1450,9 @@ class BlockController {
       // when that row is actually in the viewport; at the very top of the pane
       // the blank line has scrolled off and the top edge is right again.
       const dividerRow = block.start - viewportY;
-      // The blank row is only used when it is on screen: at the very top of
-      // the pane the spacing line has scrolled off and at the very bottom
-      // there is nothing under the last row to move into.
-      const spacing = this.spacingRow(block.start, spacingMax);
-      // How many blank rows the shell actually left: `comfortable` asks for
-      // two, and the rule belongs in the middle of the run rather than half a
-      // row above the prompt. Capped at what the setting can have printed, so
-      // a command that ends on blank lines does not drag the rule up into its
-      // own output (ticket #15).
-      const blanks = spacing === 'above' ? this.blankRowsAbove(block.start, spacingMax) : 1;
-      const usable =
-        (spacing === 'above' && dividerRow >= blanks / 2) || (spacing === 'first' && dividerRow < rows);
-      const offset = usable ? dividerOffsetRows(spacing, blanks) : 0;
       if (dividers && dividerRow >= 0 && dividerRow <= rows) {
         const rule = this.element(keep, `${block.id}:rule`, 'cortx-blocks-rule', layer);
-        rule.style.top = `${Math.round(metrics.top + (dividerRow + offset) * metrics.cell)}px`;
+        rule.style.top = `${Math.round(metrics.top + (dividerRow + edge.offset) * metrics.cell)}px`;
         rule.dataset.active = bracketed.has(block.id) ? 'true' : 'false';
       }
 
@@ -1463,7 +1483,7 @@ class BlockController {
       // whole run anyway.
       const armed = hovered || (this.hoveredId === null && block.id === this.headId);
       if (visible && toolbars && armed && block.status !== 'prompt') {
-        this.toolbar(keep, layer, block, metrics, visible, viewportY, rows, usable ? spacing : null);
+        this.toolbar(keep, layer, block, metrics, visible, viewportY, rows, edge.usable ? edge.spacing : null);
       }
 
       if (block.folded) {
@@ -1882,6 +1902,40 @@ class BlockController {
    */
   private blankRowsAbove(start: number, max: number): number {
     return spacingRowsAbove(start, (line) => this.usedColumns(line) === 0, max);
+  }
+
+  /**
+   * Where a block's opening hairline goes: the shape of the blank run above
+   * its first line, how many rows that run really has, and the offset in rows
+   * the rule is drawn at (`dividerOffsetRows`).
+   *
+   * The blank row is only used when it is on screen: at the very top of the
+   * pane the spacing line has scrolled off and at the very bottom there is
+   * nothing under the last row to move into — `usable` is that, and it zeroes
+   * the offset.
+   *
+   * One function because three things have to agree on the answer: the rule
+   * itself, the action bar centred on it, and the edge of the block's card,
+   * which reaches to it (see `blockCardRect`). They used to work it out
+   * separately — which is precisely how the card ended up an unpainted row
+   * short of the block the dividers drew around it.
+   */
+  private dividerEdge(
+    start: number,
+    spacingMax: number,
+    viewportY: number,
+    rows: number
+  ): { spacing: BlockSpacingRow; blanks: number; usable: boolean; offset: number } {
+    const row = start - viewportY;
+    const spacing = this.spacingRow(start, spacingMax);
+    // How many blank rows the shell actually left: `comfortable` asks for
+    // two, and the rule belongs in the middle of the run rather than half a
+    // row above the prompt. Capped at what the setting can have printed, so a
+    // command that ends on blank lines does not drag the rule up into its own
+    // output (ticket #15).
+    const blanks = spacing === 'above' ? this.blankRowsAbove(start, spacingMax) : 1;
+    const usable = (spacing === 'above' && row >= blanks / 2) || (spacing === 'first' && row < rows);
+    return { spacing, blanks, usable, offset: usable ? dividerOffsetRows(spacing, blanks) : 0 };
   }
 
   /** The uncached half of `usedColumns`. */

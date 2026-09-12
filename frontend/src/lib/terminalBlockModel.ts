@@ -414,33 +414,66 @@ export interface BlockCardRect {
 }
 
 /**
+ * How far a card reaches past the block's own lines, in *rows*, so that its
+ * two edges land on the hairlines that bracket the block rather than on the
+ * block's first and last buffer line.
+ *
+ * `top` is the offset of the block's own divider (`dividerOffsetRows`) and
+ * `bottom` the offset of the next block's — both signed, both fractional,
+ * both zero when there is no blank row to share or no block below.
+ */
+export interface BlockCardBleed {
+  top: number;
+  bottom: number;
+}
+
+const NO_BLEED: BlockCardBleed = { top: 0, bottom: 0 };
+
+/**
  * Where a block's background plate goes — the "card" look, and the one thing
  * on this layer that is drawn *under* the grid rather than over it (the
  * Terminal window's xterm canvas is transparent; the dock's is not).
  *
- * The plate covers the block's own lines and nothing else, minus `gap` px at
- * each end. A block clipped by the viewport keeps its cut edge square and
- * flush: rounding a corner that is only there because the pane ran out of
- * room would draw a card boundary where the block does not end.
+ * The plate spans the block **as the eye reads it**: from the hairline that
+ * opens it to the one that opens the block below, minus `gap` px at each end.
+ * That is not the same as the block's own lines — with `terminal.blockSpacing`
+ * at `normal` or `comfortable` the shell leaves blank rows above each prompt
+ * and the rule is centred in them (`dividerOffsetRows`), so a plate stopping
+ * at the buffer lines left a whole unpainted row inside what the dividers
+ * announce as one block. `bleed` is that difference, and it is the caller's
+ * job to pass the very offsets it draws the rules at, so the plate's edge and
+ * the hairline are the same line.
+ *
+ * A block clipped by the viewport keeps its cut edge square and flush:
+ * rounding a corner that is only there because the pane ran out of room would
+ * draw a card boundary where the block does not end.
  */
 export function blockCardRect(
   range: LineRange,
   viewportY: number,
   rows: number,
   metrics: { cell: number; top: number },
+  bleed: BlockCardBleed = NO_BLEED,
   gap = BLOCK_CARD_GAP
 ): BlockCardRect | null {
-  const clip = clipToViewport(range, viewportY, rows);
-  if (!clip) return null;
-  const overflow = blockOverflow(range, viewportY, rows);
-  const top = metrics.top + clip.row * metrics.cell + (overflow.above ? 0 : gap);
-  const bottom = metrics.top + (clip.row + clip.count) * metrics.cell - (overflow.below ? 0 : gap);
+  // Fractional absolute lines: half a row is exactly what a centred divider
+  // asks for, so the clipping is done here rather than through
+  // `clipToViewport`, which counts whole rows.
+  const start = range.start + bleed.top;
+  const end = range.endExclusive + bleed.bottom;
+  const visibleTop = Math.max(start, viewportY);
+  const visibleBottom = Math.min(end, viewportY + rows);
+  if (visibleBottom <= visibleTop) return null;
+  const above = start < viewportY;
+  const below = end > viewportY + rows;
+  const top = metrics.top + (visibleTop - viewportY) * metrics.cell + (above ? 0 : gap);
+  const bottom = metrics.top + (visibleBottom - viewportY) * metrics.cell - (below ? 0 : gap);
   if (bottom - top < 1) return null;
   return {
     top,
     height: bottom - top,
-    roundTop: !overflow.above,
-    roundBottom: !overflow.below,
+    roundTop: !above,
+    roundBottom: !below,
   };
 }
 
