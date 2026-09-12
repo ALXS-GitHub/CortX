@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Cortx",
   "mainBinaryName": "cortx-app",
-  "version": "0.15.4",
+  "version": "0.15.5",
   "identifier": "com.cortx.app",
   "build": {
     "frontendDist": "../dist",
