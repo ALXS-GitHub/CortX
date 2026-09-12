@@ -75,6 +75,7 @@ import {
   type ThemeMode,
 } from '@/lib/theme';
 import { TERMINAL_SECTION_KEYWORDS } from '@/components/terminal/settings/meta';
+import { ColorField } from '@/components/ui/ColorField';
 import { TerminalSettingsSections } from '@/components/terminal/settings/TerminalSettingsPanel';
 import { Section, Field, Code } from '@/components/settings/SettingsPrimitives';
 import type { AppSettings, AgentsSettings, ExportSummary, ImportOptions, ShimStatus } from '@/types';
@@ -1167,31 +1168,38 @@ function AppearanceSection({
               );
             })}
             <span className="mx-1 h-5 w-px bg-border" />
-            <label
-              className={cn(
-                'relative grid size-7 cursor-pointer place-items-center rounded-full border border-dashed border-border-strong',
-                isCustom && 'border-solid ring-2 ring-offset-2 ring-offset-card'
-              )}
-              style={
-                isCustom && accent
-                  ? ({ backgroundColor: accent, '--tw-ring-color': accent } as CSSProperties)
-                  : undefined
+            {/* CortX's own picker, not `<input type="color">`: that one opens
+                Windows' colour dialog, which knows nothing of the app's theme
+                and drops the user out of the window to pick a colour for it.
+                The trigger keeps the round pip of the presets beside it. */}
+            <ColorField
+              value={accent ?? ''}
+              onChange={(hex) => setStyle({ accent: hex || undefined })}
+              swatches={ACCENT_PRESETS.map((p) => p.value)}
+              aria-label="Custom accent colour"
+              trigger={
+                <button
+                  type="button"
+                  title="Custom colour"
+                  aria-label="Custom accent colour"
+                  className={cn(
+                    'relative grid size-7 cursor-pointer place-items-center rounded-full border border-dashed border-border-strong',
+                    isCustom && 'border-solid ring-2 ring-offset-2 ring-offset-card'
+                  )}
+                  style={
+                    isCustom && accent
+                      ? ({ backgroundColor: accent, '--tw-ring-color': accent } as CSSProperties)
+                      : undefined
+                  }
+                >
+                  {isCustom && accent ? (
+                    <Check className="size-3.5" style={{ color: accentForeground(accent) }} />
+                  ) : (
+                    <Palette className="size-3.5 text-faint" />
+                  )}
+                </button>
               }
-              title="Custom colour"
-            >
-              {isCustom && accent ? (
-                <Check className="size-3.5" style={{ color: accentForeground(accent) }} />
-              ) : (
-                <Palette className="size-3.5 text-faint" />
-              )}
-              <input
-                type="color"
-                value={accent ?? '#0d9488'}
-                onChange={(e) => setStyle({ accent: e.target.value })}
-                className="absolute inset-0 size-full cursor-pointer opacity-0"
-                aria-label="Custom accent colour"
-              />
-            </label>
+            />
             <span className="font-mono text-[11px] text-faint">{accent ? accent.toLowerCase() : 'theme default'}</span>
             <Button variant="ghost" size="sm" onClick={reset} disabled={isDefaultStyle} className="ml-auto">
               <RotateCcw />

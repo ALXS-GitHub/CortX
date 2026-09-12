@@ -48,6 +48,14 @@ interface TerminalThemeState {
   previewTheme: TerminalTheme | null;
   pickerOpen: boolean;
   /**
+   * The theme studio (create / edit). `studioKey` is the theme being edited,
+   * `null` while a new one is being made — one surface for both, because
+   * "edit this" and "start from nothing" differ only by what the form opens
+   * with.
+   */
+  studioOpen: boolean;
+  studioKey: string | null;
+  /**
    * Bumped whenever the theme files change on disk. Anything holding a
    * cached asset (the wallpaper data URL) reloads when it moves.
    */
@@ -74,6 +82,18 @@ interface TerminalThemeState {
   importFile: (path: string) => Promise<TerminalTheme | null>;
   importFolder: (path: string) => Promise<TerminalThemeImportReport | null>;
   remove: (key: string) => Promise<boolean>;
+  /** Write a theme to disk (new or edited) and relist. */
+  save: (theme: TerminalTheme) => Promise<TerminalTheme | null>;
+  /**
+   * Open the studio on a theme, or on a blank one. Closes the picker.
+   *
+   * `copy:<key>` opens that theme as a new, unsaved one — what "duplicate and
+   * edit" needs for a bundled theme, whose file is rewritten from the binary
+   * and cannot be edited in place.
+   */
+  openStudio: (key?: string | null) => void;
+  /** Shut the studio and hand the picker back. */
+  closeStudio: (reopenPicker?: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +261,8 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
     activeTheme: null,
     previewTheme: null,
     pickerOpen: false,
+    studioOpen: false,
+    studioKey: null,
     assetVersion: 0,
 
     load: async () => {
@@ -315,6 +337,37 @@ export const useTerminalThemeStore = create<TerminalThemeState>()((set, get) => 
     openPicker: () => {
       if (!get().loaded && !get().loading) void get().load();
       set({ pickerOpen: true });
+    },
+
+    save: async (theme) => {
+      let saved: TerminalTheme;
+      try {
+        saved = await api.saveTerminalTheme(theme);
+      } catch (err) {
+        toast.error('Could not save the theme', { description: String(err) });
+        return null;
+      }
+      // The file changed under the watcher's nose; drop every cached asset
+      // for it (the wallpaper data URL above all) before relisting, or an
+      // edited wallpaper keeps showing the picture it replaced.
+      invalidate(saved.key);
+      await get().load();
+      const { activeTheme, previewTheme } = get();
+      if (activeTheme?.key === saved.key || previewTheme?.key === saved.key) {
+        await get().refreshFromDisk([saved.key]);
+      }
+      return saved;
+    },
+
+    openStudio: (key = null) => {
+      if (!get().loaded && !get().loading) void get().load();
+      previewSeq++;
+      set({ studioOpen: true, studioKey: key, pickerOpen: false, previewTheme: null });
+      apply();
+    },
+
+    closeStudio: (reopenPicker = true) => {
+      set({ studioOpen: false, studioKey: null, pickerOpen: reopenPicker });
     },
 
     closePicker: () => {

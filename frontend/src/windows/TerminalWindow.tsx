@@ -15,6 +15,7 @@ import { FindBar } from '@/components/terminal/FindBar';
 import { TerminalThemeRoot } from '@/components/terminal/theme/TerminalThemeLayer';
 import { BetaBadge } from '@/components/ui/BetaBadge';
 import { ThemePicker } from '@/components/terminal/theme/ThemePicker';
+import { ThemeStudio } from '@/components/terminal/theme/ThemeStudio';
 import { TerminalSettingsView } from '@/components/terminal/settings/TerminalSettingsView';
 import { OPEN_TERMINAL_SETTINGS_EVENT, openTerminalSettingsPanel } from '@/components/terminal/settings/meta';
 import { flushTerminalSettings } from '@/components/terminal/settings/useTerminalSettings';
@@ -402,6 +403,7 @@ export function TerminalWindow() {
       </TerminalThemeRoot>
       <TerminalPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <ThemePicker />
+      <ThemeStudio />
       <FindBar />
       <DetachDropHint />
       <Toaster position="bottom-right" />

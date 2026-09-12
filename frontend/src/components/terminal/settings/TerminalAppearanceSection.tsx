@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ThemePicker, ThemeSwatches } from '@/components/terminal/theme/ThemePicker';
+import { ThemeStudio } from '@/components/terminal/theme/ThemeStudio';
 import { MarkedLabel, ResetCard, ResetSetting } from './controls';
 import type { TerminalSettingKey } from './terminalDefaults';
 import { useTerminalThemeStore } from '@/stores/terminalThemeStore';
@@ -663,6 +664,10 @@ export function TerminalAppearanceSection({ value, onChange }: TerminalAppearanc
         onChoose={(key, slot) => onChange({ [slot]: key })}
         onFollowsChange={(v) => onChange({ themeFollowsApp: v })}
       />
+      {/* Mounted beside the picker rather than inside it: the studio outlives
+          the picker (opening it closes the picker, closing it brings the
+          picker back), so it cannot be a child of what it replaces. */}
+      <ThemeStudio />
     </Card>
   );
 }

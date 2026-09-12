@@ -9,7 +9,7 @@
  * opening the picker with 40 imported themes does not inline 40 images.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Check, Image as ImageIcon, Moon, Sun } from 'lucide-react';
+import { Check, Copy, Image as ImageIcon, Moon, Pencil, Sun } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { themeAccentCss, themeCanvasCss } from '@/lib/terminalTheme';
 import { loadThemeImage, useTerminalThemeStore } from '@/stores/terminalThemeStore';
@@ -62,6 +62,12 @@ export interface ThemeCardProps {
   /** Hover / focus: live-preview this theme (no-op where preview is off). */
   onHover?: () => void;
   onLeave?: () => void;
+  /**
+   * Open the studio on this theme. A bundled theme cannot be written to, so
+   * the button offers to duplicate it instead of failing on Save — which is
+   * why the caller is told which of the two the user asked for.
+   */
+  onEdit?: (mode: 'edit' | 'duplicate') => void;
 }
 
 /**
@@ -70,8 +76,13 @@ export interface ThemeCardProps {
  * that path is a trap. The themes are plain files — the picker's "Themes
  * folder" button opens them, and a file removed there disappears from the
  * gallery straight away (the folder is watched).
+ *
+ * Editing is a different matter and does live here: it is not destructive,
+ * it is the only place the theme you are looking at is identified, and the
+ * alternative was finding the yaml by hand. It appears on hover so the
+ * gallery still reads as a gallery.
  */
-export function ThemeCard({ theme, selected, usedElsewhere, onPick, onHover, onLeave }: ThemeCardProps) {
+export function ThemeCard({ theme, selected, usedElsewhere, onPick, onHover, onLeave, onEdit }: ThemeCardProps) {
   const ref = useRef<HTMLDivElement>(null);
   const near = useNearViewport(ref);
   const image = useThemeImage(theme.key, near && theme.hasImage);
@@ -80,8 +91,24 @@ export function ThemeCard({ theme, selected, usedElsewhere, onPick, onHover, onL
   // The theme's own wallpaper opacity, so the card looks like the window will.
   const imageOpacity = Math.max(0, Math.min(100, theme.imageOpacity ?? 100)) / 100;
 
+  const bundled = theme.source === 'bundled';
+
   return (
     <div ref={ref} className="group relative" onMouseEnter={onHover} onMouseLeave={onLeave}>
+      {onEdit && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(bundled ? 'duplicate' : 'edit');
+          }}
+          title={bundled ? 'Duplicate this theme and edit the copy' : 'Edit this theme'}
+          aria-label={bundled ? `Duplicate ${theme.name}` : `Edit ${theme.name}`}
+          className="absolute right-1.5 top-1.5 z-10 grid size-6 place-items-center rounded-[6px] border border-border-strong bg-[var(--bg-glass)] text-foreground opacity-0 backdrop-blur transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          {bundled ? <Copy className="size-3" /> : <Pencil className="size-3" />}
+        </button>
+      )}
       <button
         type="button"
         data-theme-card={theme.key}

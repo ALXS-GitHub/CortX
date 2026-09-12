@@ -26,7 +26,6 @@
 import { useMemo, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -39,6 +38,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Switch } from '@/components/ui/switch';
+import { ColorField } from '@/components/ui/ColorField';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Code, Field, Section } from '@/components/settings/SettingsPrimitives';
 import { Group, MarkedLabel, NumberField, ResetCard, ResetSetting, SettingField, SettingToggle, TextField } from './controls';
@@ -56,6 +56,7 @@ import {
   fontFamilyResolves,
 } from '@/lib/terminalSessions';
 import { resolveTabDisplay } from '@/components/terminal/model';
+import { useCurrentTerminalTheme } from '@/stores/terminalThemeStore';
 import { redactCommandHistory, type RedactionReport } from '@/lib/tauri';
 import type {
   MacOptionAsMeta,
@@ -195,6 +196,24 @@ export function IntegratedTerminalSection() {
   const suggestions = terminal?.inlineSuggestions ?? true;
   const tabDisplay = resolveTabDisplay(terminal?.tabDisplay);
   const platform = getPlatform();
+
+  // The colour you want for a selection is almost always one already in the
+  // theme, at an opacity — so the picker opens with the theme's own palette
+  // rather than a generic row of primaries.
+  const currentTheme = useCurrentTerminalTheme();
+  const selectionSwatches = useMemo(() => {
+    if (!currentTheme) return undefined;
+    const c = currentTheme.terminal_colors;
+    return [
+      currentTheme.accent,
+      currentTheme.foreground,
+      currentTheme.background,
+      c?.normal.blue,
+      c?.normal.magenta,
+      c?.normal.cyan,
+      c?.bright.black,
+    ].filter((x): x is string => typeof x === 'string' && x.length > 0);
+  }, [currentTheme]);
 
   // Issue 34: a family CSS cannot resolve falls back to the default stack in
   // silence — `Hack NF` is a real family on Windows and on no Mac at all.
@@ -387,24 +406,23 @@ export function IntegratedTerminalSection() {
           <SettingField
             k="selectionColor"
             label="Selection colour"
-            htmlFor="terminal-selection-color"
-            hint="Any CSS colour; empty = the theme's."
+            hint="Empty = the theme's own. A selection is a wash, so it wants an opacity."
           >
-            <div className="flex items-center gap-2">
-              <Input
-                id="terminal-selection-color"
-                value={selectionColor}
-                placeholder="theme"
-                onChange={(e) => patch({ selectionColor: e.target.value.trim() || undefined })}
-                className="w-32 font-mono text-[12px]"
-                disabled={!terminal}
-              />
-              <span
-                aria-hidden
-                className="size-6 shrink-0 rounded-[var(--rad-xs)] border border-border"
-                style={{ background: selectionColor.trim() || 'var(--terminal-selection, transparent)' }}
-              />
-            </div>
+            {/* A selection is the one colour in the app that is *meant* to be
+                see-through, which is why this field is the one that offers
+                the alpha rail. It used to be a text box you had to know a hex
+                string to use. */}
+            <ColorField
+              value={selectionColor}
+              onChange={(hex) => patch({ selectionColor: hex || undefined })}
+              allowAlpha
+              clearable
+              placeholder="theme"
+              swatches={selectionSwatches}
+              disabled={!terminal}
+              aria-label="Selection colour"
+              className="w-44"
+            />
           </SettingField>
         </div>
 

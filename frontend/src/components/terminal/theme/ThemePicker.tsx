@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FolderOpen, FileDown, FolderSymlink, Loader2, Moon, Palette, Search, Sun } from 'lucide-react';
+import { FolderOpen, FileDown, FolderSymlink, Loader2, Moon, Palette, Plus, Search, Sun } from 'lucide-react';
 import { toast } from 'sonner';
 import { open } from '@tauri-apps/plugin-dialog';
 import { exists } from '@tauri-apps/plugin-fs';
@@ -93,6 +93,7 @@ export function ThemePicker({ onChoose, onFollowsChange, config }: ThemePickerPr
   const closePicker = useTerminalThemeStore((s) => s.closePicker);
   const importFile = useTerminalThemeStore((s) => s.importFile);
   const importFolder = useTerminalThemeStore((s) => s.importFolder);
+  const openStudio = useTerminalThemeStore((s) => s.openStudio);
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
 
@@ -240,6 +241,9 @@ export function ThemePicker({ onChoose, onFollowsChange, config }: ThemePickerPr
               onPick={() => void choose(t.key, target, onChoose)}
               onHover={() => onHover(t.key)}
               onLeave={onLeave}
+              // A bundled theme opens as a copy: its file is compiled in and
+              // saving over it would be undone by the next materialisation.
+              onEdit={(mode) => openStudio(mode === 'duplicate' ? `copy:${t.key}` : t.key)}
             />
           ))}
         </div>
@@ -321,6 +325,10 @@ export function ThemePicker({ onChoose, onFollowsChange, config }: ThemePickerPr
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--footer-border)] bg-[var(--footer-bg)] px-5 py-3">
+          <Button variant="ghost" size="xs" onClick={() => openStudio(null)}>
+            <Plus />
+            New theme…
+          </Button>
           <Button variant="ghost" size="xs" onClick={() => void doImportFile()} disabled={busy}>
             <FileDown />
             Import file…
