@@ -8,11 +8,25 @@ import { adjustTerminalZoom } from '@/lib/terminalSessions';
 /** Actions that must also work while a text field (palette, find, rename) has focus. */
 const ALWAYS_ON: ReadonlySet<KeybindingActionId> = new Set<KeybindingActionId>(['window.palette', 'terminal.find']);
 
-/** A text field that is not xterm's hidden textarea. */
-function isTextFieldOutsideXterm(target: EventTarget | null): boolean {
+/**
+ * A text field that belongs to the window's chrome rather than to a terminal:
+ * the palette's search box, the find bar, a tab being renamed. Those keep
+ * their keys; a terminal never does.
+ *
+ * The test is the *session container* (`.cortx-xterm`), not xterm's own root
+ * (`.xterm`). Since the universal input editor (ticket #15) the thing holding
+ * the focus while you type at a prompt is a real `<textarea>` of ours
+ * (`.cortx-uinput-field`), and it is a **sibling** of `.xterm` inside that
+ * container — so every shortcut but the palette and the find bar was silently
+ * dropped the moment the caret was in a session, which is where it is
+ * essentially all the time. Ctrl+Shift+T only worked with a tab focused, and
+ * Ctrl+Shift+D never worked at all, since splitting is something you ask for
+ * from inside the pane you are splitting.
+ */
+function isTextFieldOutsideTerminal(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const field = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-  return field && !target.closest('.xterm');
+  return field && !target.closest('.cortx-xterm');
 }
 
 /** While Control is held, the rail / strip show their tab numbers (`html[data-ctrl-held]`). */
@@ -107,7 +121,7 @@ export function useTerminalWindowShortcuts() {
       if (!combo) return;
       const actionId = bindings.get(combo);
       if (!actionId) return;
-      if (!ALWAYS_ON.has(actionId) && isTextFieldOutsideXterm(e.target)) return;
+      if (!ALWAYS_ON.has(actionId) && isTextFieldOutsideTerminal(e.target)) return;
       if (runAction(actionId)) {
         e.preventDefault();
         // Also silences the older listeners of the same window (palette).
