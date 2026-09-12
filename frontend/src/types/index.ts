@@ -126,6 +126,11 @@ export interface TerminalConfig {
   /** What Ctrl+Tab walks: the tab list, or the order you last used the tabs in
    *  (issue 45b). Default `sequential`. */
   ctrlTabBehavior?: TerminalCtrlTabBehavior;
+  /** A tab whose shells `cd` into another project's root moves to that
+   *  project's group in the rail, and to "No project" when it leaves every
+   *  root. Off leaves a tab in the group it was opened in. Default true.
+   *  A tab moved by hand stops following until it is set back to Automatic. */
+  followProjectOnCd?: boolean;
   /** Ask before closing a terminal — or quitting CortX — while a command is
    *  running in it (nothing running = closes straight away). Default true. */
   confirmCloseRunning?: boolean;

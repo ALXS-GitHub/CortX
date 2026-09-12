@@ -1,17 +1,21 @@
 import { useMemo, useRef } from 'react';
 import {
   AppWindow,
+  Check,
   Columns2,
   Copy,
   CopyPlus,
   ExternalLink,
+  FolderMinus,
   FolderOpen,
+  FolderTree,
   Palette,
   Pencil,
   Pin,
   PinOff,
   Plug,
   Sparkles,
+  Wand2,
   X,
   XCircle,
 } from 'lucide-react';
@@ -200,6 +204,7 @@ interface TabContextMenuProps {
 export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose, pane }: TabContextMenuProps) {
   const togglePinTab = useTerminalLayoutStore((s) => s.togglePinTab);
   const setTabColor = useTerminalLayoutStore((s) => s.setTabColor);
+  const setTabProject = useTerminalLayoutStore((s) => s.setTabProject);
   const keybindings = useAppStore((s) => s.settings?.terminal.keybindings);
   const projects = useAppStore((s) => s.projects);
   const leaf = pane?.leaf ?? activeLeafOf(tab);
@@ -313,6 +318,45 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
             ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        {/* Which group of the rail the tab sits in. A tab normally follows its
+            own shells (`terminal.followProjectOnCd`); picking a project here
+            says otherwise and pins it, and "Automatic" hands it back. */}
+        {!pane && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <FolderTree />
+                Project
+                <span className="ml-auto max-w-28 truncate pl-2 text-xs opacity-70">{groupName}</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-80 min-w-52 overflow-y-auto">
+                <DropdownMenuItem onClick={() => setTabProject(tab.id, undefined)}>
+                  <Wand2 />
+                  Automatic
+                  {!tab.workspacePinned && <Check className="ml-auto size-3.5" />}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setTabProject(tab.id, null)}>
+                  <FolderMinus />
+                  <span className="truncate">{NO_PROJECT_GROUP_NAME}</span>
+                  {tab.workspacePinned && tab.workspaceId === FREE_WORKSPACE_ID && (
+                    <Check className="ml-auto size-3.5" />
+                  )}
+                </DropdownMenuItem>
+                {projects.map((p) => (
+                  <DropdownMenuItem key={p.id} onClick={() => setTabProject(tab.id, p.id)}>
+                    <FolderOpen />
+                    <span className="truncate">{p.name}</span>
+                    {tab.workspacePinned && tab.workspaceId === `project:${p.id}` && (
+                      <Check className="ml-auto size-3.5" />
+                    )}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          </>
+        )}
         {/* Several Terminal windows (ticket #20): the shell keeps running,
             the tab is simply redrawn in the window it lands in. A *pane* has
             no such move — the layout document moves tabs, not leaves. */}

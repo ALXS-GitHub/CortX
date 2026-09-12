@@ -54,6 +54,7 @@ import { getTerminalSession } from '@/lib/terminalSessions';
 import { useAppStore } from '@/stores/appStore';
 import { inputEditorOwnsLine } from '@/lib/terminalInputEditor';
 import { boundaryLine } from '@/lib/terminalBlockModel';
+import { projectIdForPath } from '@/lib/terminalLayout';
 import {
   acceptanceFor,
   aliasHintFor,
@@ -127,17 +128,7 @@ function decodeCommandParam(data: string): string | null {
 
 /** Longest project root that contains `cwd` (the terminal's project). */
 function projectIdFor(cwd: string | null): string | null {
-  if (!cwd) return null;
-  const needle = cwd.replace(/\\/g, '/').toLowerCase();
-  let best: { id: string; len: number } | null = null;
-  for (const p of useAppStore.getState().projects) {
-    const root = p.rootPath?.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-    if (!root) continue;
-    if (needle === root || needle.startsWith(`${root}/`)) {
-      if (!best || root.length > best.len) best = { id: p.id, len: root.length };
-    }
-  }
-  return best?.id ?? null;
+  return projectIdForPath(cwd, useAppStore.getState().projects);
 }
 
 interface InputStart {

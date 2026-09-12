@@ -88,6 +88,12 @@ export interface TerminalTab {
   /** `project:<projectId>` or `free`. */
   workspaceId: string;
   /**
+   * The user put this tab in that workspace by hand, so it stays there even
+   * when its shells `cd` somewhere else (`terminal.followProjectOnCd`).
+   * Cleared by picking "Automatic" again in the tab's Project menu.
+   */
+  workspacePinned?: boolean;
+  /**
    * Tauri label of the Terminal window showing this tab. Absent = the first
    * one (`PRIMARY_TERMINAL_WINDOW`), which is what every tab of a document
    * written before ticket #20 is.
@@ -326,6 +332,63 @@ export function workspaceIdForProject(projectId?: string | null): string {
 
 export function projectIdOfWorkspace(workspaceId: string): string | null {
   return workspaceId.startsWith('project:') ? workspaceId.slice('project:'.length) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Which project a directory belongs to
+// ---------------------------------------------------------------------------
+
+/** The little a project has to be for the functions below to place a path. */
+export interface ProjectRoot {
+  id: string;
+  rootPath?: string | null;
+}
+
+/**
+ * The project whose root contains `path`, or null for a directory that is in
+ * none of them.
+ *
+ * *Longest* root wins, so a project checked out inside another one (a
+ * sub-repo, a workspace member) claims its own directories rather than
+ * leaving them to the parent. Separators and case are normalised because the
+ * shell reports whatever the OS gave it — `C:\Users\…` from PowerShell,
+ * `/c/Users/…` from a Git Bash — and Windows compares paths case-blind.
+ */
+export function projectIdForPath(path: string | null | undefined, projects: readonly ProjectRoot[]): string | null {
+  if (!path) return null;
+  const needle = path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  if (!needle) return null;
+  let best: { id: string; length: number } | null = null;
+  for (const project of projects) {
+    const root = project.rootPath?.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    if (!root) continue;
+    if (needle !== root && !needle.startsWith(`${root}/`)) continue;
+    if (!best || root.length > best.length) best = { id: project.id, length: root.length };
+  }
+  return best?.id ?? null;
+}
+
+/**
+ * The workspace a tab's shells say it belongs to, or null when they do not
+ * agree — `terminal.followProjectOnCd`, the tab that follows the `cd`.
+ *
+ * Every pane votes with its own cwd and the answer has to be unanimous: a
+ * split with one pane in each of two projects has no single right group, and
+ * shuffling it into whichever pane last printed a prompt would make the rail
+ * jump under the pointer. A pane that has not reported a directory yet (a
+ * restored session before its first prompt, a shell without integration)
+ * abstains rather than voting "no project" — it knows nothing, and a tab must
+ * not leave its group because of a pane that has not spoken.
+ */
+export function workspaceFromCwds(tab: TerminalTab, projects: readonly ProjectRoot[]): string | null {
+  let vote: string | undefined;
+  for (const leaf of collectLeaves(tab.layout)) {
+    if (!leaf.cwd) continue;
+    const workspaceId = workspaceIdForProject(projectIdForPath(leaf.cwd, projects));
+    if (vote === undefined) vote = workspaceId;
+    else if (vote !== workspaceId) return null;
+  }
+  return vote ?? null;
 }
 
 export function scopeEquals(a: TerminalScope, b: TerminalScope): boolean {

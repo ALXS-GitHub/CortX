@@ -24,10 +24,12 @@ import {
   terminalWindowIdOf,
   withLocalWindow,
   workspaceIdForProject,
+  workspaceFromCwds,
   PRIMARY_TERMINAL_WINDOW,
   type TerminalLayoutDoc,
   type TerminalScope,
   type TerminalTab,
+  type TerminalWindowLayout,
   type SplitDirection,
   type LayoutNode,
   mapLeaves,
@@ -126,6 +128,12 @@ interface TerminalLayoutState {
   setActiveLeaf: (tabId: string, leafId: string) => void;
   renameTab: (tabId: string, title: string | null) => void;
   setTabColor: (tabId: string, color: string | null) => void;
+  /**
+   * Put a tab in another project's group — `null` for "No project",
+   * `undefined` for "Automatic", which hands it back to
+   * `terminal.followProjectOnCd`. Anything else pins it there.
+   */
+  setTabProject: (tabId: string, projectId: string | null | undefined) => void;
   togglePinTab: (tabId: string) => void;
   reorderTabs: (orderedTabIds: string[]) => void;
   setSplitSizes: (tabId: string, splitId: string, sizes: number[]) => void;
@@ -356,6 +364,41 @@ function ownsLeafWrites(doc: TerminalLayoutDoc, terminalId: string): boolean {
   return !(windowId === PRIMARY_TERMINAL_WINDOW && doc.windowOpen === true);
 }
 
+/**
+ * A tab follows its shells: `cd` into another project's root and the tab moves
+ * to that project's group in the rail; leave every root and it lands in "No
+ * project". `terminal.followProjectOnCd`, on by default.
+ *
+ * Called with the terminals whose cwd just changed, from the same debounced
+ * commit that writes those directories — the vote (`workspaceFromCwds`) is
+ * therefore taken on the layout that already has them.
+ *
+ * Two tabs never move: one the user placed by hand (`workspacePinned`, the
+ * Project menu's "Automatic" gives it back), and one whose panes are in
+ * different projects, which has no single right answer.
+ */
+function followProjects(layout: TerminalWindowLayout, terminalIds: readonly string[]): TerminalWindowLayout {
+  const app = useAppStore.getState();
+  if (app.settings?.terminal.followProjectOnCd === false) return layout;
+  const projects = app.projects;
+  if (projects.length === 0) return layout;
+  const touched = new Set<string>();
+  for (const id of terminalIds) {
+    const tab = tabContainingTerminal(layout, id);
+    if (tab && !tab.workspacePinned) touched.add(tab.id);
+  }
+  if (touched.size === 0) return layout;
+  let changed = false;
+  const tabs = layout.tabs.map((tab) => {
+    if (!touched.has(tab.id)) return tab;
+    const workspaceId = workspaceFromCwds(tab, projects);
+    if (!workspaceId || workspaceId === tab.workspaceId) return tab;
+    changed = true;
+    return { ...tab, workspaceId };
+  });
+  return changed ? { ...layout, tabs } : layout;
+}
+
 export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => ({
   doc: emptyLayoutDoc(),
   revision: 0,
@@ -443,6 +486,32 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
       ...doc,
       window: { ...doc.window, tabs: doc.window.tabs.map((t) => (t.id === tabId ? { ...t, color } : t)) },
     })),
+
+  setTabProject: (tabId, projectId) =>
+    get().commit((doc) => {
+      const tab = doc.window.tabs.find((t) => t.id === tabId);
+      if (!tab) return doc;
+      // `undefined` is "automatic": the tab goes back to following its shells,
+      // and lands straight away wherever they already are rather than waiting
+      // for the next `cd` to notice.
+      const automatic = projectId === undefined;
+      const workspaceId = automatic
+        ? workspaceFromCwds(tab, useAppStore.getState().projects) ?? tab.workspaceId
+        : workspaceIdForProject(projectId);
+      const wasPinned = tab.workspacePinned === true;
+      if (workspaceId === tab.workspaceId && wasPinned === !automatic) return doc;
+      const moved: TerminalTab = { ...tab, workspaceId };
+      if (automatic) delete moved.workspacePinned;
+      else moved.workspacePinned = true;
+      const tabs = doc.window.tabs.map((t) => (t.id === tabId ? moved : t));
+      const next = { ...doc, window: { ...doc.window, tabs } };
+      // A tab moved out of the project this window is scoped to would vanish
+      // on the spot; widen the window rather than lose sight of it.
+      if (!tabInScope(moved, doc.window.scope)) {
+        return { ...next, window: { ...next.window, scope: 'global' as TerminalScope } };
+      }
+      return next;
+    }),
 
   togglePinTab: (tabId) =>
     get().commit((doc) => ({
@@ -723,7 +792,9 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
       get().commit((d) => {
         let win = d.window;
         for (const [id, dir] of updates) win = setLeafCwd(win, id, dir);
-        return win === d.window ? d : { ...d, window: win };
+        if (win === d.window) return d;
+        win = followProjects(win, updates.map(([id]) => id));
+        return { ...d, window: win };
       });
     }, 500);
   },

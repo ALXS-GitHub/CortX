@@ -409,6 +409,12 @@ pub struct TerminalConfig {
     #[serde(default)]
     #[serde(deserialize_with = "lenient_enum")]
     pub ctrl_tab_behavior: CtrlTabBehavior,
+    /// A tab whose shells `cd` into another project's root moves to that
+    /// project's group in the sessions rail, and to "No project" once they are
+    /// outside every root. A tab placed by hand stays where it was put. Only
+    /// the frontend reads this.
+    #[serde(default = "default_true")]
+    pub follow_project_on_cd: bool,
     /// Font of every terminal (dock and window). None = bundled default stack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
@@ -1191,6 +1197,7 @@ impl Default for TerminalConfig {
             notify_muted_commands: None,
             tabs_placement: TabsPlacement::default(),
             ctrl_tab_behavior: CtrlTabBehavior::default(),
+            follow_project_on_cd: true,
             font_family: None,
             font_size: None,
             line_height: None,

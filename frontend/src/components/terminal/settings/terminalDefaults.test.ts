@@ -132,6 +132,7 @@ const BACKEND_DEFAULTS = {
   confirmCloseRunning: true,
   copyOnSelect: true,
   ctrlTabBehavior: 'sequential',
+  followProjectOnCd: true,
   cursorBlink: true,
   cursorInactiveStyle: 'outline',
   cursorStyle: 'bar',

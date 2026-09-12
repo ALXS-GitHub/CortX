@@ -1007,6 +1007,20 @@ export function IntegratedTerminalSection() {
           </Select>
         </SettingField>
 
+        <SettingToggle
+          k="followProjectOnCd"
+          id="follow-project-on-cd"
+          label="Tabs follow the working directory"
+          hint="A tab opens in the project you asked it from and then keeps up: `cd` into another project's root and it moves to that project's group, `cd` outside every root and it lands in No project. A tab you place yourself with its Project menu stays put until you set it back to Automatic, and a split whose panes are in two different projects never moves."
+        >
+          <Switch
+            id="follow-project-on-cd"
+            checked={terminal?.followProjectOnCd ?? true}
+            onCheckedChange={(v) => patch({ followProjectOnCd: v })}
+            disabled={!terminal}
+          />
+        </SettingToggle>
+
         {/* Five switches on one row, so the marker and the reset belong to
             each switch rather than to the row: `tabDisplay` is one object in
             the file, but it is five decisions on screen and nobody thinks of
