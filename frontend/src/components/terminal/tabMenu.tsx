@@ -251,7 +251,13 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="min-w-52"
+        // The max width is what makes the `truncate` below it work. A menu
+        // sizes to its content, and `truncate` sets `white-space: nowrap`, so
+        // a long line contributes its *whole* width to that measurement and
+        // the ellipsis never appears — the cwd of a deep checkout was widening
+        // the entire menu to fit a path nobody reads in full. 18rem holds the
+        // longest entry ("Shell integration here") with room to spare.
+        className="min-w-52 max-w-72"
         onCloseAutoFocus={(e) => e.preventDefault()}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
@@ -330,7 +336,9 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
                 Project
                 <span className="ml-auto max-w-28 truncate pl-2 text-xs opacity-70">{groupName}</span>
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-80 min-w-52 overflow-y-auto">
+              {/* Same reason as the parent: a project named at length would
+                  otherwise stretch the list rather than ellipsise inside it. */}
+              <DropdownMenuSubContent className="max-h-80 min-w-52 max-w-64 overflow-y-auto">
                 <DropdownMenuItem onClick={() => setTabProject(tab.id, undefined)}>
                   <Wand2 />
                   Automatic
@@ -373,7 +381,7 @@ export function TabContextMenu({ tab, open, onOpenChange, pos, onRename, onClose
                   <AppWindow />
                   Move to window
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="min-w-44">
+                <DropdownMenuSubContent className="min-w-44 max-w-64">
                   {otherWindows.map((w) => (
                     <DropdownMenuItem key={w.id} onClick={() => void moveTabToWindow(tab.id, w.id)}>
                       <AppWindow />
