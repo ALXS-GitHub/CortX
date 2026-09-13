@@ -177,6 +177,7 @@ const BACKEND_DEFAULTS = {
   wallpaperDim: 0,
   windowEffect: 'none',
   windowOpacity: 100,
+  windowZoom: 0,
 } as Record<string, unknown>;
 
 /** The app store does this once at startup; every test below assumes it. */

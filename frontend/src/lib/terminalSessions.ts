@@ -62,6 +62,7 @@ import {
   refreshBlocks,
 } from '@/lib/terminalBlocks';
 import { openTerminalSettingsPanel } from '@/components/terminal/settings/meta';
+import { patchTerminalSettings } from '@/components/terminal/settings/useTerminalSettings';
 import { decideCommandNotification } from '@/components/terminal/settings/notificationPolicy';
 
 /** One queued piece of output, plus the callback owed to whoever wrote it. */
@@ -653,7 +654,7 @@ export function snapFontSize(fontFamily: string, fontSize: number, renderer: str
 /** Push family, size (with the window zoom), line height and letter spacing to one terminal. */
 function applyFontMetrics(term: Terminal, font: ReturnType<typeof terminalFontOptions>) {
   const renderer = useAppStore.getState().settings?.terminal.renderer ?? 'canvas';
-  const size = snapFontSize(font.fontFamily, Math.max(6, font.fontSize + zoomDelta), renderer);
+  const size = snapFontSize(font.fontFamily, Math.max(6, font.fontSize + zoomDelta()), renderer);
   term.options.fontFamily = font.fontFamily;
   term.options.fontSize = size;
   term.options.lineHeight = font.lineHeight;
@@ -763,7 +764,9 @@ function ensureSettingsSubscription() {
   if (settingsSubscribed) return;
   settingsSubscribed = true;
   applyTerminalPadding();
-  let lastFont = JSON.stringify(terminalFontOptions());
+  // The zoom is part of the key: it is a setting too, and a level changed in
+  // another Terminal window reaches this one through the settings reload.
+  let lastFont = JSON.stringify([terminalFontOptions(), zoomDelta()]);
   let lastCursor = JSON.stringify(terminalCursorOptions());
   let lastPadding = terminalPadding();
   let lastSmoothScroll = smoothScrollDuration();
@@ -778,7 +781,7 @@ function ensureSettingsSubscription() {
   let lastScreenReader = screenReaderModeEnabled();
   useAppStore.subscribe(() => {
     const font = terminalFontOptions();
-    const fontKey = JSON.stringify(font);
+    const fontKey = JSON.stringify([font, zoomDelta()]);
     if (fontKey !== lastFont) {
       lastFont = fontKey;
       for (const s of sessions.values()) {
@@ -1156,7 +1159,7 @@ function createSession(id: string): TerminalSession {
     fontFamily: font.fontFamily,
     fontSize: snapFontSize(
       font.fontFamily,
-      Math.max(6, font.fontSize + zoomDelta),
+      Math.max(6, font.fontSize + zoomDelta()),
       useAppStore.getState().settings?.terminal.renderer ?? 'canvas'
     ),
     lineHeight: font.lineHeight,
@@ -1810,60 +1813,90 @@ const serializers = new Map<string, SerializeAddon>();
 // Zoom: Ctrl+= / Ctrl+- / Ctrl+0 and Ctrl+wheel
 // ---------------------------------------------------------------------------
 
-const ZOOM_MIN = -6;
-const ZOOM_MAX = 12;
-// One level per window (the dock and the Terminal window each keep their
-// own), remembered across restarts: Settings owns the base font size, this
-// is the offset the user dialled on top of it and expects to find again.
-const ZOOM_KEY = `cortx-terminal-zoom:${IS_TERMINAL_WINDOW ? 'terminal' : 'main'}`;
+export const ZOOM_MIN = -6;
+export const ZOOM_MAX = 12;
 
-function readStoredZoom(): number {
-  try {
-    const raw = localStorage.getItem(ZOOM_KEY);
-    if (raw === null) return 0;
-    const n = Math.round(Number(raw));
-    if (!Number.isFinite(n)) return 0;
-    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, n));
-  } catch {
-    // localStorage can be unavailable; the zoom is simply not remembered.
-    return 0;
-  }
+function clampZoom(n: number): number {
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(n)));
 }
 
-function storeZoom() {
-  try {
-    if (zoomDelta === 0) localStorage.removeItem(ZOOM_KEY);
-    else localStorage.setItem(ZOOM_KEY, String(zoomDelta));
-  } catch {
-    // see readStoredZoom
-  }
+/**
+ * The px the user dialled on top of Settings' font size. Only the Terminal
+ * window (and the windows a tab was detached into) zooms; the dock has no
+ * gesture for it and stays at the base size.
+ *
+ * Kept in `settings.terminal.windowZoom`, not in localStorage as it used to
+ * be: the webview's storage is per origin, so the dev build
+ * (`localhost:12321`) and the installed app (`tauri.localhost`) each
+ * remembered a level of their own, and switching from one to the other
+ * looked like the zoom being forgotten.
+ */
+function zoomDelta(): number {
+  if (!IS_TERMINAL_WINDOW) return 0;
+  const raw = useAppStore.getState().settings?.terminal.windowZoom;
+  return typeof raw === 'number' && Number.isFinite(raw) ? clampZoom(raw) : 0;
 }
 
-let zoomDelta = readStoredZoom();
-
-function applyZoomToAll() {
-  const font = terminalFontOptions();
-  for (const s of sessions.values()) {
-    applyFontMetrics(s.term, font);
-    if (s.container.isConnected) fitTerminal(s.id);
-  }
+/**
+ * Write a level. `patchTerminalSettings` updates the store at once, so the
+ * settings subscription resizes every terminal straight away; the file
+ * write is debounced, which keeps a wheel burst from rewriting it per notch.
+ */
+function setZoom(next: number) {
+  patchTerminalSettings({ windowZoom: clampZoom(next) });
 }
 
 /** Grow / shrink every terminal of this window by `step` px. Returns the resulting font size. */
 export function adjustTerminalZoom(step: number): number {
-  zoomDelta = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomDelta + step));
-  storeZoom();
-  applyZoomToAll();
-  return terminalFontOptions().fontSize + zoomDelta;
+  const next = clampZoom(zoomDelta() + step);
+  setZoom(next);
+  return terminalFontOptions().fontSize + next;
 }
 
 export function resetTerminalZoom(): number {
-  zoomDelta = 0;
-  storeZoom();
-  applyZoomToAll();
+  setZoom(0);
   return terminalFontOptions().fontSize;
 }
 
 export function currentTerminalZoomDelta(): number {
-  return zoomDelta;
+  return zoomDelta();
 }
+
+/**
+ * One-off: carry a level stored by an older version (localStorage, one key
+ * per window kind) over to the settings, then drop the key. A level already
+ * in the settings wins — another origin got there first.
+ */
+function migrateLegacyZoom() {
+  const key = `cortx-terminal-zoom:${IS_TERMINAL_WINDOW ? 'terminal' : 'main'}`;
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(key);
+  } catch {
+    return;
+  }
+  if (raw === null) return;
+  let done = false;
+  const run = () => {
+    const terminal = useAppStore.getState().settings?.terminal;
+    if (done || !terminal) return;
+    done = true;
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // nothing to clean up then
+    }
+    const n = Number(raw);
+    if (IS_TERMINAL_WINDOW && !terminal.windowZoom && Number.isFinite(n) && clampZoom(n) !== 0) {
+      setZoom(n);
+    }
+  };
+  run();
+  if (done) return;
+  const unsubscribe = useAppStore.subscribe(() => {
+    run();
+    if (done) unsubscribe();
+  });
+}
+
+migrateLegacyZoom();

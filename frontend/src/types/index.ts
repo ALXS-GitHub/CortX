@@ -138,6 +138,9 @@ export interface TerminalConfig {
   fontFamily?: string;
   /** Font size in px. Default 12. */
   fontSize?: number;
+  /** Zoom of the Terminal window (Ctrl+wheel, Ctrl+= / Ctrl+-), in px on top
+   *  of `fontSize`, -6..12. Default 0. The dock has no zoom. */
+  windowZoom?: number;
   /** Line height multiplier 1.0–2.0. Default 1.2. */
   lineHeight?: number;
   /** Extra space between glyphs in px. Undefined = automatic. */

@@ -421,6 +421,14 @@ pub struct TerminalConfig {
     /// Font size in px. None = 12.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size: Option<u16>,
+    /// Zoom of the Terminal window (Ctrl+wheel, Ctrl+= / Ctrl+-), in px on
+    /// top of `font_size`. Kept here rather than in the webview's
+    /// localStorage, which is per origin: the dev build and the installed app
+    /// each had their own, and a zoom seemed to be forgotten on every switch.
+    /// Clamped to -6..12 by the frontend, the only reader. The dock has no
+    /// zoom.
+    #[serde(default)]
+    pub window_zoom: i32,
     /// Line height multiplier, 1.0–2.0. None = 1.2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_height: Option<f32>,
@@ -1200,6 +1208,7 @@ impl Default for TerminalConfig {
             follow_project_on_cd: true,
             font_family: None,
             font_size: None,
+            window_zoom: 0,
             line_height: None,
             letter_spacing: None,
             font_weight: None,

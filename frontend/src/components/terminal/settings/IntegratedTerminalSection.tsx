@@ -53,6 +53,8 @@ import {
   MAX_SCROLLBACK_LINES,
   MIN_SCROLLBACK_LINES,
   SCROLLBACK_WARN_LINES,
+  ZOOM_MAX,
+  ZOOM_MIN,
   fontFamilyResolves,
 } from '@/lib/terminalSessions';
 import { resolveTabDisplay } from '@/components/terminal/model';
@@ -273,7 +275,7 @@ export function IntegratedTerminalSection() {
       </Group>
 
       <Group title="Text" group="text">
-        <div className="grid gap-4 sm:grid-cols-[1fr_auto_auto]">
+        <div className="grid gap-4 sm:grid-cols-[1fr_auto_auto_auto]">
           <TextField
             k="fontFamily"
             id="terminal-font"
@@ -356,6 +358,21 @@ export function IntegratedTerminalSection() {
             max={2}
             step={0.05}
             onCommit={(v) => patch({ lineHeight: v ?? defaultLineHeight })}
+            className="w-24"
+            disabled={!terminal}
+          />
+          <NumberField
+            k="windowZoom"
+            id="terminal-window-zoom"
+            label="Window zoom"
+            hint={`Ctrl+wheel in the Terminal window, in px on top of the size (${
+              (terminal?.fontSize ?? DEFAULT_FONT_SIZE) + (terminal?.windowZoom ?? 0)
+            } px there). The dock is not zoomed.`}
+            value={terminal?.windowZoom ?? 0}
+            min={ZOOM_MIN}
+            max={ZOOM_MAX}
+            step={1}
+            onCommit={(v) => patch({ windowZoom: Math.round(v ?? 0) })}
             className="w-24"
             disabled={!terminal}
           />

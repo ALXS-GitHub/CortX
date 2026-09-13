@@ -378,6 +378,7 @@ export const TERMINAL_SETTINGS = {
   // --- Text ----------------------------------------------------------------
   fontFamily: { label: 'Font', group: 'text', fallback: undefined },
   fontSize: { label: 'Font size', group: 'text', fallback: DEFAULT_FONT_SIZE },
+  windowZoom: { label: 'Terminal window zoom', group: 'text', fallback: FROM_RUST },
   // The one default that is not a constant: the browser renderer needs a line
   // box of exactly 1 or powerline separators show a hairline between rows.
   // Mirrors `defaultLineHeight` in `lib/terminalSessions.ts`.
