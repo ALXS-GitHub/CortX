@@ -703,6 +703,8 @@ pub fn run() {
             commands::open_in_explorer,
             commands::open_in_vscode,
             commands::open_in_editor,
+            commands::open_terminal_path,
+            commands::reveal_in_file_manager,
             commands::validate_path,
             // Environment file commands
             commands::discover_env_files,

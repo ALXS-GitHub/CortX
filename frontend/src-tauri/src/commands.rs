@@ -892,8 +892,10 @@ pub fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
 pub fn open_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        // explorer.exe does not understand `/`: handed `C:epo/assets` it
+        // opens the Documents folder instead.
         std::process::Command::new("explorer")
-            .arg(&path)
+            .arg(cortx_core::terminal::open_path::native_path(&path))
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -910,6 +912,94 @@ pub fn open_in_explorer(path: String) -> Result<(), String> {
     {
         std::process::Command::new("xdg-open")
             .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+/// Show the folder holding `path`, with `path` selected in it.
+#[tauri::command]
+pub fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // `/select,` must reach explorer as one token with the path quoted
+        // inside it; `arg` would quote the whole thing and explorer would
+        // ignore it. A Windows path cannot contain `"`, so this is safe.
+        let native = cortx_core::terminal::open_path::native_path(&path);
+        std::process::Command::new("explorer")
+            .raw_arg(format!("/select,\"{native}\""))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // No portable "select this file"; the folder is the next best thing.
+        let parent = Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or(path);
+        std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+/// "Open" on a path clicked in the terminal: the editor for text or a
+/// position, the OS's default application for the rest (an image opens in
+/// the image viewer, not as bytes in VS Code). See
+/// `cortx_core::terminal::open_path` for the rule.
+#[tauri::command]
+pub fn open_terminal_path(path: String, line: Option<u32>, column: Option<u32>) -> Result<(), String> {
+    use cortx_core::terminal::open_path::{native_path, open_action, OpenAction};
+    let native = native_path(&path);
+    match open_action(Path::new(&native), line.is_some()) {
+        OpenAction::Directory => open_in_explorer(native),
+        OpenAction::Editor => open_in_editor(native, line, column),
+        OpenAction::Reveal => reveal_in_file_manager(native),
+        OpenAction::DefaultApp => open_with_default_app(&native),
+    }
+}
+
+/// Open a file with the application the OS associates with it.
+fn open_with_default_app(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        // explorer.exe opens a file with its associated program, and unlike
+        // `cmd /C start` it takes the path as a plain argument, so a folder
+        // named `R&D` cannot be read as a second command.
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
             .spawn()
             .map_err(|e| e.to_string())?;
     }

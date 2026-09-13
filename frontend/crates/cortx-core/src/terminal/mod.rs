@@ -20,6 +20,7 @@ pub mod complete;
 pub mod history;
 pub mod launch;
 pub mod layout;
+pub mod open_path;
 pub mod osc;
 pub mod redact;
 pub mod snapshot;

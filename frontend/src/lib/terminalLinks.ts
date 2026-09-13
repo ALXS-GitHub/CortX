@@ -17,10 +17,10 @@
  *
  * ## What opens a link (zorg #43)
  *
- * **Ctrl+click** (⌘+click on macOS) opens the file in the editor CortX already
- * uses elsewhere (`open_in_editor`, at the line the output pointed at); a
- * directory opens in the file manager, and holding Alt as well reveals the
- * containing folder instead.
+ * **Ctrl+click** (⌘+click on macOS) opens the path: a text file or a position
+ * in the editor CortX already uses elsewhere (at the line the output pointed
+ * at), any other file with the OS's default program, a directory in the file
+ * manager. Holding Alt as well reveals it in its folder instead.
  *
  * A **plain click opens nothing**. In a terminal the left button belongs to
  * the text: it places the caret and drags out a selection, and that is true of
@@ -77,7 +77,7 @@
  * up on the same hover names the gesture.
  */
 import type { IDisposable, ILink, ILinkProvider, Terminal } from '@xterm/xterm';
-import { exists, readDir } from '@tauri-apps/plugin-fs';
+import { exists } from '@tauri-apps/plugin-fs';
 import { toast } from 'sonner';
 import { homeDir } from '@tauri-apps/api/path';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
@@ -311,16 +311,27 @@ export function parseCandidate(text: string, index: number): ParsedPath | null {
   return { raw, line, column, index: start, length: raw.length + suffix.length };
 }
 
+/**
+ * One separator on Windows. `assets/logo.png` printed in a shell whose cwd is
+ * `C:\repo` used to resolve to `C:\repo\assets/logo.png`: the filesystem takes
+ * it, but the panel showed it half and half and `explorer.exe` refused it.
+ * Only a drive or UNC path is rewritten — a Git Bash `/c/repo` is left alone.
+ */
+function nativeSeparators(path: string): string {
+  if (!IS_WINDOWS || !(/^[A-Za-z]:/.test(path) || /^[\\/]{2}[^\\/]/.test(path))) return path;
+  return path.replace(/\//g, '\\');
+}
+
 /** Absolute path a candidate points at, or null when it cannot be resolved. */
 export async function resolveCandidate(raw: string, cwd: string | undefined): Promise<string | null> {
   if (raw.startsWith('~')) {
     const h = await home();
     if (!h) return null;
-    return raw.length === 1 ? h : joinPath(h, raw.slice(2));
+    return nativeSeparators(raw.length === 1 ? h : joinPath(h, raw.slice(2)));
   }
-  if (isAbsolute(raw)) return raw;
+  if (isAbsolute(raw)) return nativeSeparators(raw);
   if (!cwd) return null;
-  return joinPath(cwd, raw.replace(/^\.[\\/]/, ''));
+  return nativeSeparators(joinPath(cwd, raw.replace(/^\.[\\/]/, '')));
 }
 
 /**
@@ -363,29 +374,19 @@ function activationKey(path: string, reveal: boolean): string {
 }
 
 /**
- * Open what was clicked. A file goes to the editor **at the line the output
- * pointed at** — landing on line 1 would throw away the very information that
- * made `src/main.rs:42:7` worth clicking. A directory opens in the file
- * manager, and `reveal` (Alt / Shift, or the "Open folder" button) shows the
- * parent folder instead.
+ * Open what was clicked. A position (`src/main.rs:42:7`) goes to the editor
+ * **at that line** — landing on line 1 would throw away the very information
+ * that made the link worth clicking. Without one, a text file still goes to
+ * the editor, anything else (an image, a PDF) to the program the OS opens it
+ * with, and a directory to the file manager: the backend decides, see
+ * `cortx_core::terminal::open_path`. `reveal` (Ctrl+Alt+click, or the "Open
+ * folder" button) shows the containing folder with the item selected.
  */
 async function activate(path: string, reveal: boolean, line?: number, column?: number) {
   lastActivation = { key: activationKey(path, reveal), at: Date.now() };
   try {
-    if (reveal) {
-      const parent = path.replace(/[\\/][^\\/]*$/, '');
-      await api.openInExplorer(parent || path);
-      return;
-    }
-    let directory = false;
-    try {
-      await readDir(path);
-      directory = true;
-    } catch {
-      directory = false;
-    }
-    if (directory) await api.openInExplorer(path);
-    else await api.openInEditor(path, line, column);
+    if (reveal) await api.revealInFileManager(path);
+    else await api.openTerminalPath(path, line, column);
   } catch (err) {
     // A click that opens nothing and says nothing is indistinguishable from a
     // dead link — which is exactly how ticket #31 was reported. The Rust side

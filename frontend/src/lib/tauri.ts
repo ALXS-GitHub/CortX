@@ -206,6 +206,20 @@ export async function openInEditor(path: string, line?: number, column?: number)
   return invoke('open_in_editor', { path, line, column });
 }
 
+/** Show the folder holding `path`, with `path` selected in it. */
+export async function revealInFileManager(path: string): Promise<void> {
+  return invoke('reveal_in_file_manager', { path });
+}
+
+/**
+ * "Open" on a path clicked in the terminal: the editor for text or when a line
+ * is given, the OS's default application otherwise, an executable's folder
+ * rather than the executable.
+ */
+export async function openTerminalPath(path: string, line?: number, column?: number): Promise<void> {
+  return invoke('open_terminal_path', { path, line, column });
+}
+
 export async function validatePath(path: string): Promise<boolean> {
   return invoke('validate_path', { path });
 }
