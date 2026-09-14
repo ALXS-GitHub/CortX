@@ -75,7 +75,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             id: 'open',
             label: 'Open',
             shortcut: SHORTCUTS.primary,
-            run: () => openTerminalWindow(),
+            run: () => openTerminalWindow(undefined, { revealSiblings: true }),
           },
         ],
       },

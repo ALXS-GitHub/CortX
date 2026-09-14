@@ -1,6 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
+import { emitTo } from '@tauri-apps/api/event';
 import { getAllWebviewWindows } from '@tauri-apps/api/webviewWindow';
-import { PRIMARY_TERMINAL_WINDOW } from '@/lib/terminalLayout';
+import {
+  PRIMARY_TERMINAL_WINDOW,
+  terminalWindowIdOf,
+  terminalWindowNumber,
+  type TerminalTab,
+} from '@/lib/terminalLayout';
 import { restoreTerminalSessions } from '@/lib/terminalRestore';
 
 /**
@@ -26,6 +32,27 @@ export interface OpenTerminalWindowOptions {
    * screen. Ignored when the window already exists.
    */
   position?: { x: number; y: number } | null;
+  /**
+   * "Open the Terminal", as opposed to raising a window to put a tab in it:
+   * every other Terminal window that holds a tab comes up as well, so none of
+   * them keeps running where nobody can see it. Only for the first window.
+   */
+  revealSiblings?: boolean;
+}
+
+/**
+ * Sent to the first Terminal window to bring its siblings up. The first
+ * window does it rather than the caller, because it is also what the backend
+ * opens for `cortx terminal` and the global shortcut, and because only a
+ * window that is already there can put itself back in front afterwards.
+ */
+export const REVEAL_SIBLINGS_EVENT = 'terminal-reveal-siblings';
+
+/** Detached Terminal windows (`terminal-2`…) that hold at least one tab, in number order. */
+export function siblingWindowsWithTabs(tabs: readonly TerminalTab[]): string[] {
+  const labels = new Set(tabs.map(terminalWindowIdOf));
+  labels.delete(PRIMARY_TERMINAL_WINDOW);
+  return [...labels].sort((a, b) => terminalWindowNumber(a) - terminalWindowNumber(b));
 }
 
 /**
@@ -57,6 +84,11 @@ export async function openTerminalWindow(
     // still be opened the way it always was; a detached one cannot.
     if (label !== PRIMARY_TERMINAL_WINDOW) throw error;
     await invoke('open_terminal_window', { projectId, launch });
+  }
+  if (options.revealSiblings && label === PRIMARY_TERMINAL_WINDOW) {
+    // A window that was just created is not listening yet; it brings its
+    // siblings up on boot instead (see `TerminalWindow`).
+    await emitTo(PRIMARY_TERMINAL_WINDOW, REVEAL_SIBLINGS_EVENT).catch(() => {});
   }
 }
 

@@ -349,10 +349,19 @@ export function TerminalPanel() {
 
   const allTerminals = useTerminalItems();
 
-  // Filter `allTerminals` using the canonical Terminal entity visibility.
+  // The dock and the Terminal windows are separate surfaces: what lives in a
+  // window (`terminalSurfaces`, ticket #37) is neither open, hidden nor
+  // running *here*. Counting it made an empty dock say "0 open · 5 running".
+  const terminalSurfaces = useAppStore((s) => s.terminalSurfaces);
+  const dockTerminals = useMemo(
+    () => allTerminals.filter((item) => terminalSurfaces[item.id] !== 'window'),
+    [allTerminals, terminalSurfaces]
+  );
+
+  // Filter the dock's terminals using the canonical Terminal entity visibility.
   const visibleTerminals = useMemo(() => {
-    return allTerminals.filter((item) => terminals.get(item.id)?.visibility === 'visible');
-  }, [allTerminals, terminals]);
+    return dockTerminals.filter((item) => terminals.get(item.id)?.visibility === 'visible');
+  }, [dockTerminals, terminals]);
 
   // Get the project ID of the currently active terminal
   const activeProjectId = useMemo(() => {
@@ -363,19 +372,19 @@ export function TerminalPanel() {
 
   // Get hidden terminals (filter by active project) — these populate the "hidden tray".
   const hiddenTerminals = useMemo(() => {
-    return allTerminals.filter((item) => {
+    return dockTerminals.filter((item) => {
       const t = terminals.get(item.id);
       if (t?.visibility !== 'hidden') return false;
       const sameProject = !activeProjectId || item.projectId === activeProjectId;
       return sameProject;
     });
-  }, [allTerminals, terminals, activeProjectId]);
+  }, [dockTerminals, terminals, activeProjectId]);
 
   // Total active count (visible + hidden)
   const totalActiveCount = visibleTerminals.length + hiddenTerminals.length;
   const runningCount = useMemo(
-    () => allTerminals.filter((t) => t.status === 'running' && terminals.get(t.id)?.visibility !== 'closed').length,
-    [allTerminals, terminals]
+    () => dockTerminals.filter((t) => t.status === 'running' && terminals.get(t.id)?.visibility !== 'closed').length,
+    [dockTerminals, terminals]
   );
 
   // Resolve terminal kind + runtimeKey from the prefixed terminal ID.
@@ -444,7 +453,7 @@ export function TerminalPanel() {
 
   // Dedicated Terminal window (DEV-13 P1)
   const handleOpenWindow = useCallback(() => {
-    openTerminalWindow().catch((error) => toast.error(`Failed to open the terminal window: ${String(error)}`));
+    openTerminalWindow(undefined, { revealSiblings: true }).catch((error) => toast.error(`Failed to open the terminal window: ${String(error)}`));
   }, []);
 
   const handleSendCurrentToWindow = useCallback(() => {

@@ -73,7 +73,13 @@ pub const TERMINAL_WINDOW_LABEL: &str = "terminal";
 /// frontend picks the terminal root. A project scope travels in the URL on
 /// creation, or as the `terminal-scope` event when the window is already up.
 pub fn open_terminal_window(app: &AppHandle, project_id: Option<&str>, launch: Option<&str>) -> Result<(), String> {
-    open_terminal_window_labelled(app, TERMINAL_WINDOW_LABEL, project_id, launch, None)
+    open_terminal_window_labelled(app, TERMINAL_WINDOW_LABEL, project_id, launch, None)?;
+    // "Open the Terminal" brings every Terminal window holding a tab back up,
+    // not only the first one. The first window does the opening (see
+    // `REVEAL_SIBLINGS_EVENT` in `terminalWindows.ts`); a window created just
+    // now is not listening yet and does it on boot.
+    let _ = app.emit_to(TERMINAL_WINDOW_LABEL, "terminal-reveal-siblings", ());
+    Ok(())
 }
 
 /// Is this a Terminal window? The first one keeps the bare label; a window a

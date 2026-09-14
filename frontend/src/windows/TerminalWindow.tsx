@@ -26,10 +26,11 @@ import { useTerminalFileDrop, useTerminalWheelZoom, useTerminalWindowShortcuts }
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import { useTerminalLayoutStore, TERMINAL_WINDOW_ID } from '@/stores/terminalLayoutStore';
 import { useAppStore } from '@/stores/appStore';
-import { collectLeaves, findLeaf, PRIMARY_TERMINAL_WINDOW, tabIsLocal, tabsInScope, terminalWindowIdOf, terminalWindowName } from '@/lib/terminalLayout';
+import { collectLeaves, findLeaf, PRIMARY_TERMINAL_WINDOW, tabIsLocal, tabsInScope, terminalWindowName } from '@/lib/terminalLayout';
 import { fitTerminal, focusTerminal, listTerminalSessionIds } from '@/lib/terminalSessions';
 import { cn } from '@/lib/utils';
-import { openTerminalWindow } from '@/components/terminal/terminalWindows';
+import { openTerminalWindow, REVEAL_SIBLINGS_EVENT, siblingWindowsWithTabs } from '@/components/terminal/terminalWindows';
+import { OtherWindowsMenu } from '@/components/terminal/OtherWindowsMenu';
 import { DetachDropHint } from '@/components/terminal/DetachDropHint';
 import { SubshellBanner } from '@/components/terminal/SubshellBanner';
 import { bootstrapThemeStyle } from '@/lib/theme';
@@ -139,26 +140,42 @@ export function TerminalWindow() {
     // `windowOpen` is a dependency on purpose: see the repair below.
   }, [loaded, windowOpen]);
 
-  // The first window brings its detached siblings back with it. It boots
-  // after session restore has respawned the shells (restore is what opens
-  // it), so the siblings never attach to terminals that are already gone.
+  // The first window brings its detached siblings up with it: on boot, and
+  // every time the Terminal is opened again (`REVEAL_SIBLINGS_EVENT`). It
+  // boots after session restore has respawned the shells (restore is what
+  // opens it), so the siblings never attach to terminals that are gone.
   //
-  // Only the siblings that still hold a tab (ticket #37). `openWindows`
-  // remembers a window that was up, not a window that has anything in it, so
-  // one you detached a tab into and later emptied came back at every start —
-  // blank, and offered as a destination for the rest of the session. An empty
-  // detached window closes itself a moment later anyway (see `hasOwnTabs`
-  // below); not opening it is the same answer without the flicker.
-  const reopenedSiblings = useRef(false);
+  // Every sibling that holds a tab, whether or not it was up last time: a
+  // window closed with its X only hides, its shells keep running, and it used
+  // to stay out of sight for the rest of the run. Only those with a tab
+  // (ticket #37) — an emptied one would come back blank, and closes itself a
+  // moment later anyway (see `hasOwnTabs` below).
+  const revealedAtBoot = useRef(false);
   useEffect(() => {
-    if (!loaded || !IS_PRIMARY_WINDOW || reopenedSiblings.current) return;
-    reopenedSiblings.current = true;
-    const { doc } = useTerminalLayoutStore.getState();
-    for (const label of doc.openWindows ?? []) {
-      if (label === PRIMARY_TERMINAL_WINDOW) continue;
-      if (!doc.window.tabs.some((t) => terminalWindowIdOf(t) === label)) continue;
-      openTerminalWindow(label).catch((e) => console.warn(`Could not reopen ${label}`, e));
+    if (!loaded || !IS_PRIMARY_WINDOW) return;
+    const reveal = async () => {
+      const labels = siblingWindowsWithTabs(useTerminalLayoutStore.getState().doc.window.tabs);
+      if (labels.length === 0) return;
+      for (const label of labels) {
+        await openTerminalWindow(label).catch((e) => console.warn(`Could not reopen ${label}`, e));
+      }
+      // Each sibling took the focus as it came up; the Terminal that was
+      // asked for is this one.
+      await openTerminalWindow(PRIMARY_TERMINAL_WINDOW).catch(() => {});
+    };
+    if (!revealedAtBoot.current) {
+      revealedAtBoot.current = true;
+      void reveal();
     }
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void getCurrentWindow()
+      .listen(REVEAL_SIBLINGS_EVENT, () => void reveal())
+      .then((u) => (cancelled ? u() : (unlisten = u)));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [loaded]);
 
   // Everything that asks for the settings — the palette entry, the title bar
@@ -320,6 +337,7 @@ export function TerminalWindow() {
           center={loaded ? <ScopeSwitcher /> : undefined}
           trailing={
             <>
+              {IS_PRIMARY_WINDOW && loaded && <OtherWindowsMenu />}
               <Button variant="ghost" size="xs" onClick={() => setPaletteOpen(true)} title="Command palette (Ctrl+K)">
                 <Search />
                 <span className="kbd">Ctrl K</span>
