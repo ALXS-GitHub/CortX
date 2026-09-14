@@ -220,6 +220,11 @@ export async function openTerminalPath(path: string, line?: number, column?: num
   return invoke('open_terminal_path', { path, line, column });
 }
 
+/** Write the windows' size and position to disk now (before an update relaunches the app). */
+export async function saveWindowState(): Promise<void> {
+  return invoke('save_window_state');
+}
+
 export async function validatePath(path: string): Promise<boolean> {
   return invoke('validate_path', { path });
 }

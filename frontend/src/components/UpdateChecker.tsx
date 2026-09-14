@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { saveWindowState } from '@/lib/tauri';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,6 +49,9 @@ export function UpdateChecker() {
     setDownloadProgress(0);
 
     try {
+      // The installer ends this process without the save done on a normal
+      // quit; keep the window sizes it is about to throw away.
+      await saveWindowState().catch((err) => console.error('Failed to save the window state:', err));
       await update.downloadAndInstall((event) => {
         switch (event.event) {
           case 'Started':

@@ -39,3 +39,5 @@ tokio = { version = "1", features = ["full"] }
 walkdir = "2.4"
 # Terminal window backdrop effects (acrylic / mica on Windows, vibrancy on macOS) — DEV-13 P3
 window-vibrancy = "0.6"
+# Size, position and maximized state of every window, kept between launches.
+tauri-plugin-window-state = "2"

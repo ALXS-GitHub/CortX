@@ -892,7 +892,7 @@ pub fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
 pub fn open_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        // explorer.exe does not understand `/`: handed `C:epo/assets` it
+        // explorer.exe does not understand `/`: handed a mixed path it
         // opens the Documents folder instead.
         std::process::Command::new("explorer")
             .arg(cortx_core::terminal::open_path::native_path(&path))
@@ -1005,6 +1005,13 @@ fn open_with_default_app(path: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Write the windows' size and position to disk now — before an update
+/// installs and relaunches the app, which skips the save done on exit.
+#[tauri::command]
+pub fn save_window_state(app: tauri::AppHandle) {
+    crate::save_window_state(&app);
 }
 
 #[tauri::command]

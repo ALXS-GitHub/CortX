@@ -16,8 +16,26 @@ use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags, WindowExt};
 
 pub const DEFAULT_GLOBAL_HOTKEY: &str = "CmdOrCtrl+Shift+Space";
+
+/// What is remembered of every window between launches: its size, where it
+/// was, and whether it was maximized. Visibility is left out on purpose —
+/// which windows come up is decided by the tray, `cortx terminal` and
+/// `windowOpen`, not by how the last session ended.
+pub fn window_state_flags() -> StateFlags {
+    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED
+}
+
+/// Write every window's size and position to disk now. The plugin only does
+/// it on `RunEvent::Exit`, which a relaunch after an update, a killed dev
+/// build or a crash never reach.
+pub fn save_window_state(app: &AppHandle) {
+    if let Err(e) = app.save_window_state(window_state_flags()) {
+        log::warn!("Window size and position not saved: {}", e);
+    }
+}
 
 /// Show / unminimize / focus the main window. No-op if it's missing.
 fn show_main_window(app: &AppHandle) {
@@ -127,6 +145,11 @@ pub fn open_terminal_window_labelled(
         None => builder,
     };
     let window = builder.build().map_err(|e| e.to_string())?;
+    // The window-state plugin put back the size and position this label had
+    // last time. A tab dropped somewhere asked for *that* spot, so it wins.
+    if let Some((x, y)) = position {
+        let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+    }
     // Backdrop effect + opacity from the settings, before the first paint.
     if let Some(state) = app.try_state::<AppState>() {
         let terminal = state.storage.get_settings().terminal;
@@ -326,6 +349,16 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(window_state_flags())
+                // Restored by hand in `setup`, once its decorations are gone:
+                // restoring the inner size of the still-decorated window and
+                // then dropping the title bar would grow it by that bar on
+                // every launch.
+                .skip_initial_state("main")
+                .build(),
+        )
+        .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
                     use tauri_plugin_global_shortcut::ShortcutState;
@@ -371,6 +404,16 @@ pub fn run() {
                 #[cfg(any(target_os = "windows", target_os = "linux"))]
                 {
                     let _ = main.set_decorations(false);
+                }
+                // Maximizing shows the window on Windows, and on a `cortx
+                // terminal` cold start the main window has to stay in the tray.
+                let flags = if terminal_launch {
+                    window_state_flags() - StateFlags::MAXIMIZED
+                } else {
+                    window_state_flags()
+                };
+                if let Err(e) = main.restore_state(flags) {
+                    log::warn!("Main window size and position not restored: {}", e);
                 }
                 // `cortx terminal` on a cold start: only the Terminal window
                 // comes up; the main window waits in the tray.
@@ -556,6 +599,9 @@ pub fn run() {
                 // active. Services stay running.
                 if !is_quitting {
                     api.prevent_close();
+                    // Before hiding: a hidden window is where the next
+                    // launch starts from if this process never exits cleanly.
+                    save_window_state(&app_handle);
                     let _ = window.hide();
                     // `windowOpen` says "reopen a Terminal window next time",
                     // so it may only be cleared once the *last* one is gone —
@@ -611,6 +657,9 @@ pub fn run() {
                         state.process_manager.stop_all();
                         log::info!("All services stopped, closing window...");
                     }
+                    // While every window still exists: once they are destroyed
+                    // the plugin can no longer ask whether one was maximized.
+                    save_window_state(&app_handle);
                     let _ = window_clone.destroy();
                     app_handle.exit(0);
                 });
@@ -704,6 +753,7 @@ pub fn run() {
             commands::open_in_vscode,
             commands::open_in_editor,
             commands::open_terminal_path,
+            commands::save_window_state,
             commands::reveal_in_file_manager,
             commands::validate_path,
             // Environment file commands
