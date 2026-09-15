@@ -185,6 +185,9 @@ pub struct ProcessManager {
     global_scripts: Arc<Mutex<HashMap<String, ProcessInfo>>>,
     /// Interactive shells are GUI-only and never enter the runtime store.
     shells: Arc<Mutex<HashMap<String, ShellEntry>>>,
+    /// Session restore: the shell spawned for each saved terminal id
+    /// (`restore_from`) during this run. See `spawn_shell`.
+    restored_shells: Arc<Mutex<HashMap<String, String>>>,
     /// PTY master + writer per terminal id (`service:<id>`, `shell:<id>`, ...).
     ptys: Arc<Mutex<HashMap<String, PtyIo>>>,
     terminal_hub: Arc<TerminalHub>,
@@ -205,6 +208,7 @@ impl ProcessManager {
             scripts: Arc::new(Mutex::new(HashMap::new())),
             global_scripts: Arc::new(Mutex::new(HashMap::new())),
             shells: Arc::new(Mutex::new(HashMap::new())),
+            restored_shells: Arc::new(Mutex::new(HashMap::new())),
             ptys: Arc::new(Mutex::new(HashMap::new())),
             terminal_hub: Arc::new(TerminalHub::new()),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
@@ -977,6 +981,21 @@ impl ProcessManager {
             return Err(format!("Directory does not exist: {}", cwd));
         }
 
+        // Restoring the same saved terminal twice hands back the shell the
+        // first request spawned. Every webview restores on its own (the main
+        // window when it opens the Terminal, a Terminal window when it boots
+        // without being opened from the main window — `cortx terminal`), and
+        // each keeps its own "once per run" guard; two restores in flight
+        // must not give one tab two shells. The lock is held through the
+        // spawn so the second request waits for the first one's answer.
+        let restore_key = request.restore_from.clone();
+        let mut restored = restore_key.as_ref().map(|_| self.restored_shells.lock());
+        if let (Some(map), Some(old_id)) = (restored.as_ref(), restore_key.as_ref()) {
+            if let Some(existing) = map.get(old_id).and_then(|id| self.shells.lock().get(id).map(|e| e.info.clone())) {
+                return Ok(existing);
+            }
+        }
+
         let shell_id = uuid::Uuid::new_v4().to_string();
         let tid = terminal_id(TerminalKind::Shell, &shell_id);
 
@@ -1064,6 +1083,10 @@ impl ProcessManager {
                 info: info.clone(),
             },
         );
+        if let (Some(map), Some(old_id)) = (restored.as_mut(), restore_key) {
+            map.insert(old_id, shell_id.clone());
+        }
+        drop(restored);
 
         let exit_id = shell_id.clone();
         watch_exit(

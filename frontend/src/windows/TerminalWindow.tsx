@@ -31,6 +31,7 @@ import { fitTerminal, focusTerminal, listTerminalSessionIds } from '@/lib/termin
 import { cn } from '@/lib/utils';
 import { openTerminalWindow, REVEAL_SIBLINGS_EVENT, siblingWindowsWithTabs } from '@/components/terminal/terminalWindows';
 import { OtherWindowsMenu } from '@/components/terminal/OtherWindowsMenu';
+import { restoreTerminalSessions } from '@/lib/terminalRestore';
 import { DetachDropHint } from '@/components/terminal/DetachDropHint';
 import { SubshellBanner } from '@/components/terminal/SubshellBanner';
 import { bootstrapThemeStyle } from '@/lib/theme';
@@ -73,6 +74,26 @@ export function TerminalWindow() {
   useTerminalWheelZoom();
   useTerminalFileDrop();
   const loaded = useTerminalLayoutStore((s) => s.loaded);
+  // Session restore from the window itself (ticket #45). The main window
+  // restores before it opens this one, but `cortx terminal` opens it from the
+  // backend and nothing restored: every tab pointed at a shell of the previous
+  // run and showed "Terminal not found". The call is shared with
+  // `openTerminalWindow` (once per webview), shells that are alive are
+  // skipped, and the backend hands back the same shell when two webviews
+  // restore the same terminal. Tabs are drawn once it is done, so none mounts
+  // a shell about to be replaced.
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+    void restoreTerminalSessions().then(() => {
+      if (!cancelled) setRestored(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loaded]);
+  const ready = loaded && restored;
   const setScope = useTerminalLayoutStore((s) => s.setScope);
   const win = useTerminalLayoutStore((s) => s.doc.window);
   const items = useItemMap();
@@ -152,7 +173,7 @@ export function TerminalWindow() {
   // moment later anyway (see `hasOwnTabs` below).
   const revealedAtBoot = useRef(false);
   useEffect(() => {
-    if (!loaded || !IS_PRIMARY_WINDOW) return;
+    if (!ready || !IS_PRIMARY_WINDOW) return;
     const reveal = async () => {
       const labels = siblingWindowsWithTabs(useTerminalLayoutStore.getState().doc.window.tabs);
       if (labels.length === 0) return;
@@ -176,7 +197,7 @@ export function TerminalWindow() {
       cancelled = true;
       unlisten?.();
     };
-  }, [loaded]);
+  }, [ready]);
 
   // Everything that asks for the settings — the palette entry, the title bar
   // button, the OSC 52 toast — goes through this one event, so none of them
@@ -252,7 +273,7 @@ export function TerminalWindow() {
   // Launch configuration requested at creation (`cortx terminal --layout`,
   // a project's "open a dev session"), then any pushed while open.
   useEffect(() => {
-    if (!loaded) return;
+    if (!ready) return;
     let cancelled = false;
     const run = async (launchId: string) => {
       const config = await getLaunchConfig(launchId);
@@ -277,7 +298,7 @@ export function TerminalWindow() {
       cancelled = true;
       unlisten?.();
     };
-  }, [loaded]);
+  }, [ready]);
 
   // Scope pushed while the window is already open.
   useEffect(() => {
@@ -308,7 +329,7 @@ export function TerminalWindow() {
   // moving its last tab elsewhere means, and it is what a browser does.
   const autoOpenedRef = useRef(false);
   useEffect(() => {
-    if (!loaded) return;
+    if (!ready) return;
     if (activeTab) {
       autoOpenedRef.current = false;
       return;
@@ -325,7 +346,7 @@ export function TerminalWindow() {
     autoOpenedRef.current = true;
     const timer = window.setTimeout(() => void openNewTerminal(), 150);
     return () => window.clearTimeout(timer);
-  }, [loaded, activeTab, hasOwnTabs]);
+  }, [ready, activeTab, hasOwnTabs]);
 
   return (
     <TooltipProvider>
@@ -334,10 +355,10 @@ export function TerminalWindow() {
         <TitleBar
           title={WINDOW_NAME}
           badge={<BetaBadge />}
-          center={loaded ? <ScopeSwitcher /> : undefined}
+          center={ready ? <ScopeSwitcher /> : undefined}
           trailing={
             <>
-              {IS_PRIMARY_WINDOW && loaded && <OtherWindowsMenu />}
+              {IS_PRIMARY_WINDOW && ready && <OtherWindowsMenu />}
               <Button variant="ghost" size="xs" onClick={() => setPaletteOpen(true)} title="Command palette (Ctrl+K)">
                 <Search />
                 <span className="kbd">Ctrl K</span>
@@ -366,7 +387,7 @@ export function TerminalWindow() {
             void getCurrentWindow().close();
           }}
         />
-        {!loaded ? (
+        {!ready ? (
           <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-xs text-faint">
             <Loader2 className="size-3.5 animate-spin" />
             Loading terminals…

@@ -10,7 +10,8 @@
  * window puts a terminal in front of someone who opened the cockpit. So boot
  * does nothing but tidy snapshots; the window and its shells both come back on
  * the first `openTerminalWindow`, which awaits `restoreTerminalSessions` once
- * per run. `restoreSessions` therefore means "your tabs are where you left
+ * per run — or, when the backend opened the window itself (`cortx terminal`),
+ * when that window boots (ticket #45). `restoreSessions` therefore means "your tabs are where you left
  * them *when you open terminal mode*", not "open terminal mode for me".
  */
 import * as api from '@/lib/tauri';
