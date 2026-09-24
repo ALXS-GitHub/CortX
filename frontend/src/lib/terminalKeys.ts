@@ -185,6 +185,30 @@ export function macOptionMetaSequence(
 }
 
 /**
+ * ⌥← / ⌥→ on macOS: `ESC b` / `ESC f`, as Terminal.app sends them, or null to
+ * leave the event to xterm.
+ *
+ * xterm encodes them `ESC[1;3D` / `ESC[1;3C`, which no default zsh keymap
+ * binds: the line editor gives up on the `ESC[` and prints the rest, `;3D`
+ * (ticket #46). `ESC b` / `ESC f` are readline's word moves, understood by
+ * zsh, bash, fish and Claude Code alike. Only on the normal buffer: a
+ * full-screen program (vim, tmux, htop) is on the alternate one and gets the
+ * xterm sequence it may have bound. Every `macOptionAsMeta` mode — an arrow
+ * has no glyph on the ⌥ layer, so there is nothing for macOS to compose.
+ */
+export function macOptionArrowSequence(
+  e: KeyboardEvent,
+  alternateBuffer: boolean,
+  isMac: boolean = IS_MAC
+): string | null {
+  if (!isMac || alternateBuffer || e.type !== 'keydown') return null;
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null;
+  if (e.key === 'ArrowLeft') return '\x1bb';
+  if (e.key === 'ArrowRight') return '\x1bf';
+  return null;
+}
+
+/**
  * The bytes to send for a key xterm.js would encode ambiguously, or null to
  * let xterm handle the event as usual.
  *

@@ -37,6 +37,7 @@ import {
   copyOnSelectEnabled,
   macOptionIsMetaOption,
   macOptionMetaSequence,
+  macOptionArrowSequence,
   overrideKeySequence,
   smoothScrollDuration,
 } from '@/lib/terminalKeys';
@@ -1318,6 +1319,15 @@ function createSession(id: string): TerminalSession {
     if (meta !== null) {
       e.preventDefault();
       term.input(meta, true);
+      return false;
+    }
+
+    // macOS: ⌥← / ⌥→ move by word at a shell prompt instead of printing
+    // `;3D` / `;3C` (ticket #46).
+    const arrow = macOptionArrowSequence(e, term.buffer.active.type === 'alternate');
+    if (arrow !== null) {
+      e.preventDefault();
+      term.input(arrow, true);
       return false;
     }
 
