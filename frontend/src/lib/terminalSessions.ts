@@ -875,6 +875,10 @@ function ensureSettingsSubscription() {
       for (const s of sessions.values()) s.term.options.screenReaderMode = screenReader;
     }
   });
+  // Here and not at module load (ticket #47): appStore and this module import
+  // each other, so in the production bundle the store may not exist yet when
+  // this module is evaluated, and reading it there kills the whole window.
+  migrateLegacyZoom();
 }
 
 export function applyThemeToAll() {
@@ -1898,5 +1902,3 @@ function migrateLegacyZoom() {
     if (done) unsubscribe();
   });
 }
-
-migrateLegacyZoom();
