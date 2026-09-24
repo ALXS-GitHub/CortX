@@ -501,6 +501,100 @@ test('Cmd (macOS) and Ctrl+V leave the platform’s copy / paste alone', () => {
   assert.deepEqual(type(m, 'c', { ctrl: true, shift: true }), { type: 'none' });
 });
 
+// ---------------------------------------------------------------------------
+// ⌥ on macOS (ticket #46) — a third-level shift, not Meta
+// ---------------------------------------------------------------------------
+
+/** A machine at a prompt on a Mac, `macOptionAsMeta` set to `mode`. */
+function onMac(text: string, mode: 'never' | 'wordKeys' | 'always' = 'wordKeys'): TerminalInputMachine {
+  const m = editing(text);
+  m.macOption = mode;
+  return m;
+}
+
+test('⌥8 typing `\\` on a French-PC Mac stays in the editor (ticket #46)', () => {
+  // What WebKit reports for ⌥8 on French-PC: the composed glyph, Alt only.
+  const m = onMac('ls ');
+  assert.deepEqual(type(m, '\\', { alt: true, code: 'Digit8' }), { type: 'none' }, 'the textarea types it');
+  assert.equal(m.phase, 'editing', 'no hand-off: the block must not flash away');
+  assert.equal(m.text, 'ls ', 'and nothing was flushed to the shell');
+  // The same goes for every symbol those layouts keep on ⌥.
+  for (const [glyph, code] of [
+    ['|', 'Digit6'],
+    ['[', 'Digit5'],
+    ['{', 'Digit4'],
+    ['@', 'Digit0'],
+    ['~', 'KeyN'],
+  ]) {
+    assert.deepEqual(type(m, glyph, { alt: true, code }), { type: 'none' }, glyph);
+  }
+  assert.equal(m.phase, 'editing');
+});
+
+test('after ⌥8 the editor is still the one reading ⌥← / ⌥→ (no `;3D` / `;3C`)', () => {
+  const m = onMac('cd one two');
+  type(m, '\\', { alt: true, code: 'Digit8' });
+  // The textarea inserted the `\`; the caller reads it back like any input.
+  m.setText('cd one two\\', 11);
+  assert.deepEqual(type(m, 'ArrowLeft', { alt: true, code: 'ArrowLeft' }), { type: 'edit' });
+  assert.equal(m.caret, 7);
+  assert.deepEqual(type(m, 'ArrowRight', { alt: true, code: 'ArrowRight' }), { type: 'edit' });
+  assert.equal(m.caret, 11);
+});
+
+test('wordKeys: ⌥B / ⌥F / ⌥D / ⌥V are Meta, read on the physical key', () => {
+  // `key` is the glyph macOS composed; ESC + `∫` would mean nothing to readline.
+  for (const [glyph, code, letter] of [
+    ['∫', 'KeyB', 'b'],
+    ['ƒ', 'KeyF', 'f'],
+    ['∂', 'KeyD', 'd'],
+    ['√', 'KeyV', 'v'],
+  ]) {
+    assert.deepEqual(
+      type(onMac('echo hi'), glyph, { alt: true, code }),
+      { type: 'handoff', flush: 'echo hi', data: '\x1b' + letter },
+      code
+    );
+  }
+  // ⌥⇧B is readline's `M-B`.
+  assert.deepEqual(type(onMac(''), 'ı', { alt: true, shift: true, code: 'KeyB' }), {
+    type: 'handoff',
+    flush: '',
+    data: '\x1bB',
+  });
+  // ⌥⌫ still kills a word locally, whatever the mode.
+  const m = onMac('git commit --amend');
+  type(m, 'Backspace', { alt: true, code: 'Backspace' });
+  assert.equal(m.text, 'git commit ');
+});
+
+test('never: ⌥ only composes, even on the word keys', () => {
+  assert.deepEqual(type(onMac('x', 'never'), '∫', { alt: true, code: 'KeyB' }), { type: 'none' });
+  assert.deepEqual(type(onMac('x', 'never'), '\\', { alt: true, code: 'Digit8' }), { type: 'none' });
+});
+
+test('always: every ⌥ chord is Meta, as xterm’s macOptionIsMeta sends it', () => {
+  assert.deepEqual(type(onMac('x', 'always'), '\\', { alt: true, code: 'Digit8' }), {
+    type: 'handoff',
+    flush: 'x',
+    data: '\x1b8',
+  });
+  assert.deepEqual(type(onMac('x', 'always'), '∫', { alt: true, code: 'KeyB' }), {
+    type: 'handoff',
+    flush: 'x',
+    data: '\x1bb',
+  });
+});
+
+test('off a Mac, a bare Alt chord is still Meta — AltGr is Ctrl+Alt there', () => {
+  assert.deepEqual(type(editing('x'), 'b', { alt: true, code: 'KeyB' }), {
+    type: 'handoff',
+    flush: 'x',
+    data: '\x1bb',
+  });
+  assert.deepEqual(type(editing('x'), '\\', { ctrl: true, alt: true, code: 'Digit8' }), { type: 'none' });
+});
+
 test('PageUp / PageDown scroll the grid instead of being swallowed', () => {
   assert.deepEqual(type(editing('x'), 'PageUp'), { type: 'scroll', pages: -1 });
   assert.deepEqual(type(editing('x'), 'PageDown'), { type: 'scroll', pages: 1 });

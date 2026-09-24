@@ -41,11 +41,39 @@ export type InputPhase = 'classic' | 'editing';
 /** The parts of a `KeyboardEvent` the machine looks at. */
 export interface KeyDescriptor {
   key: string;
+  /**
+   * `KeyboardEvent.code`, the physical key. Only read for a ⌥ chord on macOS,
+   * where `key` is already the glyph macOS composed (`⌥B` is `∫`).
+   */
+  code?: string;
   ctrl: boolean;
   alt: boolean;
   shift: boolean;
   meta: boolean;
 }
+
+/** How ⌥ reads on macOS — `terminal.macOptionAsMeta`, see `terminalKeys.ts`. */
+export type MacOptionMode = 'never' | 'wordKeys' | 'always';
+
+/**
+ * The five chords `wordKeys` reserves, by `KeyboardEvent.code`, and what each
+ * one sends after the `ESC`. Fixed on purpose — see `terminalKeys.ts` for why
+ * this is not a per-layout dead-key table. Lives here, in the pure module, so
+ * the grid (`terminalKeys.macOptionMetaSequence`) and the editor read the
+ * very same list.
+ *
+ * `⌥⌫` is readline's `backward-kill-word`, which is `ESC` + DEL (0x7f), not
+ * `ESC` + BS. ⌥B / ⌥F are `backward-word` / `forward-word`, ⌥D is
+ * `kill-word`; ⌥V is what Claude Code reads for "paste the image on the
+ * clipboard" (zorg #28), and in a plain shell it is `yank-nth-arg`.
+ */
+export const MAC_OPTION_WORD_KEYS: Readonly<Record<string, string>> = {
+  KeyB: 'b',
+  KeyD: 'd',
+  KeyF: 'f',
+  KeyV: 'v',
+  Backspace: '\x7f',
+};
 
 /** Where the shell said its input line starts (`baseY + cursorY`, `cursorX`). */
 export interface InputAnchor {
@@ -194,6 +222,20 @@ export class TerminalInputMachine {
    * being swallowed and leaves Tab to the shell.
    */
   completionMenu: CompletionMenuKey = 'ctrlSpace';
+
+  /**
+   * How ⌥ reads on macOS (`terminal.macOptionAsMeta`), or null anywhere else.
+   * Refreshed by the caller before each key, like {@link handoffEnabled}.
+   *
+   * Off a Mac, a bare Alt chord is Meta and nothing else: a character that
+   * needs a third level comes through AltGr, which reports Ctrl+Alt and falls
+   * through to the textarea. On a Mac there is no AltGr — ⌥ *is* the third
+   * level, and on French-PC, Swiss or ABC-AZERTY layouts `\ | [ ] { } @ # ~`
+   * are all typed with it. Reading ⌥8 as Meta handed the line off as `ESC \`
+   * (ticket #46): the block vanished, nothing was typed, and the rest of the
+   * line was the bare shell's — where ⌥← / ⌥→ print `;3D` / `;3C`.
+   */
+  macOption: MacOptionMode | null = null;
 
   /**
    * Text parked across a prompt redraw. `133;A` fires far more often than one
@@ -408,11 +450,43 @@ export class TerminalInputMachine {
         return { type: 'edit' };
       }
       default: {
-        if (k.key.length === 1) return this.handoff('\x1b' + k.key);
+        if (k.key.length === 1) {
+          const meta = this.optionMeta(k);
+          // A character macOS composed with ⌥: the textarea types it.
+          return meta === null ? { type: 'none' } : this.handoff('\x1b' + meta);
+        }
         const seq = FUNCTION_KEYS[k.key];
         return seq ? this.handoff('\x1b' + seq) : { type: 'none' };
       }
     }
+  }
+
+  /**
+   * The key a printable Alt / ⌥ chord stands for as Meta, or null when it is
+   * a character to type — the same rule the grid follows
+   * (`terminalKeys.macOptionMetaSequence`, xterm's `macOptionIsMeta`):
+   *
+   * - not a Mac: Alt is Meta, `key` as it comes;
+   * - `never`: ⌥ only ever composes;
+   * - `wordKeys`: Meta for the closed list of {@link MAC_OPTION_WORD_KEYS},
+   *   read on the physical key since `key` holds the composed glyph (`∫`);
+   * - `always`: Meta for every chord, again from the physical key when it is
+   *   a letter or a digit.
+   */
+  optionMeta(k: KeyDescriptor): string | null {
+    if (this.macOption === null) return k.key;
+    if (this.macOption === 'never') return null;
+    const code = k.code ?? '';
+    if (this.macOption === 'wordKeys') {
+      const word = MAC_OPTION_WORD_KEYS[code];
+      // Backspace never gets here (it is not printable, and edits locally).
+      if (word === undefined || word.length !== 1) return null;
+      return k.shift ? word.toUpperCase() : word;
+    }
+    const letter = /^Key([A-Z])$/.exec(code)?.[1];
+    if (letter) return k.shift ? letter : letter.toLowerCase();
+    const digit = /^Digit(\d)$/.exec(code)?.[1];
+    return digit ?? k.key;
   }
 
   plainKey(k: KeyDescriptor): InputAction {

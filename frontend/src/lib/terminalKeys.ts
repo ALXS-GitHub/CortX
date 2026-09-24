@@ -64,6 +64,7 @@
  */
 import { useAppStore } from '@/stores/appStore';
 import { IS_MAC } from '@/lib/keybindings';
+import { MAC_OPTION_WORD_KEYS } from '@/lib/terminalInputState';
 import type { MacOptionAsMeta, ShiftEnterKey } from '@/types';
 
 /** ESC + CR: "new line, do not submit" for Claude Code, zsh and fish. */
@@ -154,22 +155,11 @@ export function macOptionIsMetaOption(): boolean {
 }
 
 /**
- * The five chords `wordKeys` reserves, by `KeyboardEvent.code`, and what each
- * one sends. Fixed on purpose — see the module header for why this is not a
- * per-layout dead-key table.
- *
- * `⌥⌫` is readline's `backward-kill-word`, which is `ESC` + DEL (0x7f), not
- * `ESC` + BS. ⌥B / ⌥F are `backward-word` / `forward-word`, ⌥D is
- * `kill-word`; ⌥V is what Claude Code reads for "paste the image on the
- * clipboard" (zorg #28), and in a plain shell it is `yank-nth-arg`.
+ * The five chords `wordKeys` reserves, by `KeyboardEvent.code`. Defined in the
+ * pure `terminalInputState.ts` so the universal input editor honours the same
+ * list as the grid (ticket #46).
  */
-export const MAC_OPTION_WORD_KEYS: Readonly<Record<string, string>> = {
-  KeyB: 'b',
-  KeyD: 'd',
-  KeyF: 'f',
-  KeyV: 'v',
-  Backspace: '\x7f',
-};
+export { MAC_OPTION_WORD_KEYS };
 
 /**
  * What a ⌥ chord should send on macOS, or null to leave the event alone —

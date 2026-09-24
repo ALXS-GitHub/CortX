@@ -110,7 +110,8 @@ import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { toast } from 'sonner';
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
-import { copyOnSelectEnabled } from '@/lib/terminalKeys';
+import { IS_MAC } from '@/lib/keybindings';
+import { copyOnSelectEnabled, macOptionAsMetaMode } from '@/lib/terminalKeys';
 import {
   TerminalInputMachine,
   type CompletionMenuKey,
@@ -254,7 +255,7 @@ function suggestFor(terminalId: string, line: string): string | null {
 // ---------------------------------------------------------------------------
 
 function describe(e: KeyboardEvent): KeyDescriptor {
-  return { key: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
+  return { key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
 }
 
 /** The part of a suggestion Ctrl+→ accepts: one word, separator included. */
@@ -511,7 +512,27 @@ class InputEditorController {
         // the field. Only stop it when the machine actually claimed it, so
         // an app shortcut the editor ignores still reaches xterm.
         this.onKeyDown(e);
-        if (e.defaultPrevented) e.stopImmediatePropagation();
+        if (e.defaultPrevented) {
+          e.stopImmediatePropagation();
+          return;
+        }
+        // …except a character composed with a modifier the machine left to
+        // the textarea — ⌥8 → `\` on a Mac, AltGr (Ctrl+Alt) elsewhere. The
+        // textarea is not the one receiving this event, so the character
+        // would land in the grid and go to the PTY behind the editor's back.
+        if (
+          e.key.length === 1 &&
+          e.altKey &&
+          !e.metaKey &&
+          !(IS_MAC && e.ctrlKey) &&
+          !e.isComposing &&
+          this.machine.isEditing
+        ) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          this.machine.insert(e.key);
+          this.syncOut();
+        }
       },
       true
     );
@@ -1214,6 +1235,11 @@ class InputEditorController {
 
   onKeyDown(e: KeyboardEvent) {
     if (!this.machine.isEditing) return;
+    // A key that belongs to a composition in progress — a dead key (⌥N, ⌥E on
+    // a Mac, `^` on AZERTY), an IME — is the textarea's: the text it produces
+    // arrives through `input`, and an Enter confirming a candidate must never
+    // submit the line.
+    if (e.isComposing || e.keyCode === 229) return;
     // A grid selection keeps the copy conventions of `terminalSessions.ts`,
     // which never sees these events: our field has the focus, not xterm's.
     // Ctrl+Shift+C always copies; Ctrl+C only copies while copy-on-select is
@@ -1249,6 +1275,9 @@ class InputEditorController {
     }
     this.machine.handoffEnabled = handoffEnabled();
     this.machine.completionMenu = completionMenuKey();
+    // ⌥ composes on macOS (⌥8 is `\` on French-PC): only the chords the
+    // `macOptionAsMeta` setting names are Meta here, exactly as in the grid.
+    this.machine.macOption = IS_MAC ? macOptionAsMetaMode() : null;
     const action = this.machine.key(describe(e));
     switch (action.type) {
       case 'none':
