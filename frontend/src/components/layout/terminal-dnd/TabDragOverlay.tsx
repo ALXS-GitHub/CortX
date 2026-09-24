@@ -1,4 +1,4 @@
-import { StatusDot } from '@/components/ui/StatusDot';
+import { TerminalItemDot } from '@/components/terminal/TerminalStatusGlyph';
 import { TerminalTypeIcon } from './TerminalTypeIcon';
 import type { TerminalItem } from './types';
 
@@ -13,7 +13,7 @@ export function TabDragOverlay({ terminal }: TabDragOverlayProps) {
   return (
     <div className="glass-strong flex h-9 cursor-grabbing items-center gap-2 rounded-sm border border-border-strong bg-card px-3 text-xs text-foreground shadow-pop">
       <TerminalTypeIcon type={terminal.type} className="size-3.5 shrink-0 text-faint" />
-      <StatusDot status={terminal.status} size={7} />
+      <TerminalItemDot item={terminal} />
       <span className="max-w-[160px] truncate">{terminal.name}</span>
       {terminal.type === 'service' && terminal.detectedPorts.length > 0 && (
         <span className="shrink-0 rounded-full bg-primary/15 px-1.5 font-mono text-[10px] leading-4 text-primary">

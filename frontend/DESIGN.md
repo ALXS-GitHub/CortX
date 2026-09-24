@@ -27,7 +27,7 @@ correct.
 | Text | `text-foreground`, `text-muted-foreground`, `text-faint` | never pure black/white |
 | Accent | `bg-primary`, `text-primary`, `bg-accent` (12–16 % tint), `border-accent-border` | |
 | Borders | `border-border` (hairline), `border-border-strong` (menus, dialogs, dashed empty states) | |
-| Status | `text-st-done` (green-teal), `text-st-progress` (amber), `text-st-blocked` (coral), `text-st-open` (sky) | also `success` / `warning` / `info` / `destructive` |
+| Status | `text-st-done` (green-teal), `text-st-progress` (amber), `text-st-blocked` (coral), `text-st-open` (sky), `text-st-agent` (violet — an agent at work, nothing else) | also `success` / `warning` / `info` / `destructive` |
 | Shadows | `shadow-soft` (cards), `shadow-pop` (floating panels, hover lift) | |
 | Radii | `rounded-sm` ≈10 px (buttons, inputs, chips, menu items), `rounded-lg` ≈16 px (cards), `rounded-xl` ≈22 px (dialogs, large panels) | scale with `--radius` |
 | Fonts | `font-display` (Outfit — headings, titles), default sans (Plus Jakarta Sans), `font-mono` (JetBrains Mono — paths, commands, ports) | |
@@ -53,6 +53,12 @@ correct.
   `TagBadge` / `StatusBadge` which wrap it with the user's definitions.
 - **`ui/StatusDot`** — runtime dot: `status="running"` pulses, `starting` is
   half, `completed` filled green, `failed` filled coral, idle outlined.
+  Agents and terminals (ticket #48): `tone="agent"` pulses violet (an agent
+  working), `warning` is solid amber (an agent waiting for you), `ready` is a
+  solid grey dot (a shell alive at its prompt — at rest, no motion). Draw them
+  through `AgentStateDot` / `TerminalStatusGlyph` (`AGENT_DOT_TONE` in
+  `agents/agentUtils.ts`), never by hand, so the same state looks the same
+  in the Agents section, the Terminal window and the dock.
 - **`ui/Segmented`** — iOS-style segmented control (view modes, small option
   sets). `ui/tabs` with `variant="line"` for page sections, `default` for a
   segmented look inside a card. `TabsCount` shows a count next to a tab label.

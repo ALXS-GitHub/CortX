@@ -90,6 +90,7 @@
   --color-st-progress: var(--st-progress);
   --color-st-blocked: var(--st-blocked);
   --color-st-done: var(--st-done);
+  --color-st-agent: var(--st-agent);
 
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);

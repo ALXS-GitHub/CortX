@@ -1,19 +1,11 @@
-import { StatusDot, type DotTone } from '@/components/ui/StatusDot';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { AgentState } from '@/types';
-import { STATE_LABEL } from './agentUtils';
-
-/** running pulses green, waiting is a solid amber dot, stopped / unknown are outlined. */
-const TONE: Record<AgentState, DotTone> = {
-  running: 'running',
-  waiting: 'warning',
-  stopped: 'idle',
-  unknown: 'idle',
-};
+import { AGENT_DOT_TONE, STATE_LABEL } from './agentUtils';
 
 const LABEL_CLASS: Record<AgentState, string> = {
-  running: 'text-st-done',
+  running: 'text-st-agent',
   waiting: 'text-st-progress',
   stopped: 'text-muted-foreground',
   unknown: 'text-muted-foreground',
@@ -30,7 +22,7 @@ interface AgentStateDotProps {
 export function AgentStateDot({ state, withLabel = false, size = 9, className }: AgentStateDotProps) {
   const dot = (
     <StatusDot
-      tone={TONE[state]}
+      tone={AGENT_DOT_TONE[state]}
       size={size}
       title={STATE_LABEL[state]}
       className={cn(state === 'unknown' && 'opacity-50', className)}

@@ -43,6 +43,7 @@ export function leafLiveState(item: TerminalItem | undefined): TabLiveState {
     running: item?.shell?.phase === 'running',
     attention: item?.attention,
     status: item?.status,
+    type: item?.type,
     agent: item?.agent,
   };
 }

@@ -19,7 +19,7 @@ import { useTerminalItems } from '@/hooks/useTerminalItems';
 import { useTerminalAgentsStore } from './agentsStore';
 import { PROVIDER_LABEL, STATE_LABEL } from '@/components/agents/agentUtils';
 import { useAppStore } from '@/stores/appStore';
-import type { TerminalItem } from '@/components/layout/terminal-dnd/types';
+import type { TerminalItem, TerminalType } from '@/components/layout/terminal-dnd/types';
 import type { TerminalAttention } from '@/stores/appStore';
 import type { Project, TerminalAgentInfo, TerminalTabDisplay } from '@/types';
 
@@ -84,6 +84,9 @@ export interface TabLiveState {
   attention?: TerminalAttention;
   /** Runtime status of the active leaf, for the status dot. */
   status?: string;
+  /** Kind of the active leaf: a shell alive at its prompt draws a quiet dot,
+   *  a running service keeps its green pulse (ticket #48). */
+  type?: TerminalType;
   /** Agent running in the tab, with its own state (working / waiting). */
   agent?: TerminalAgentInfo;
 }
@@ -98,7 +101,8 @@ export function tabLiveState(tab: TerminalTab, items: ItemMap): TabLiveState {
     if (item.shell?.phase === 'running') running = true;
     if (!attention && item.attention) attention = item.attention;
   }
-  return { running, attention, status: tabItem(tab, items)?.status, agent: tabAgent(tab, items) };
+  const active = tabItem(tab, items);
+  return { running, attention, status: active?.status, type: active?.type, agent: tabAgent(tab, items) };
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Check, Loader2, X } from 'lucide-react';
 import { TerminalTypeIcon } from './TerminalTypeIcon';
 import { cn } from '@/lib/utils';
-import { StatusDot } from '@/components/ui/StatusDot';
+import { TerminalItemDot } from '@/components/terminal/TerminalStatusGlyph';
 import { formatDuration } from '@/lib/terminalNames';
 import type { TerminalItem } from './types';
 
@@ -91,10 +91,12 @@ export function SortableTerminalTab({
     >
       {isActive && <span className="pointer-events-none absolute inset-x-0 top-0 h-0.5 rounded-b-full bg-primary" />}
       <TerminalTypeIcon type={terminal.type} className="pointer-events-none size-3.5 shrink-0 text-faint" />
-      {running ? (
+      {/* An agent keeps `claude` running for its whole session: its own
+          state (working / waiting) says more than the spinner would. */}
+      {running && !terminal.agent ? (
         <Loader2 className="pointer-events-none size-3 shrink-0 animate-spin text-primary" aria-label="Command running" />
       ) : (
-        <StatusDot status={terminal.status} size={7} className="pointer-events-none" />
+        <TerminalItemDot item={terminal} className="pointer-events-none" />
       )}
       <span className="pointer-events-none truncate" title={describe(terminal)}>{terminal.name}</span>
       {terminal.type === 'service' && terminal.detectedPorts.length > 0 && (

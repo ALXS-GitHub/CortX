@@ -123,7 +123,7 @@ export function AgentsView({ projectId }: AgentsViewProps) {
       </div>
       {agentsLoaded && scoped.length > 0 && (
         <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-          {runningCount > 0 && <span className="text-st-done">{runningCount} running</span>}
+          {runningCount > 0 && <span className="text-st-agent">{runningCount} working</span>}
           {runningCount > 0 && waitingCount > 0 && ' · '}
           {waitingCount > 0 && <span className="text-st-progress">{waitingCount} waiting</span>}
           {(runningCount > 0 || waitingCount > 0) && ' · '}
@@ -242,7 +242,7 @@ export function AgentsView({ projectId }: AgentsViewProps) {
             </h2>
             <p className="text-xs text-muted-foreground">
               {agentsLoaded
-                ? `${scoped.length} session${scoped.length !== 1 ? 's' : ''}${runningCount > 0 ? ` · ${runningCount} running` : ''}`
+                ? `${scoped.length} session${scoped.length !== 1 ? 's' : ''}${runningCount > 0 ? ` · ${runningCount} working` : ''}`
                 : 'Loading…'}
             </p>
           </div>

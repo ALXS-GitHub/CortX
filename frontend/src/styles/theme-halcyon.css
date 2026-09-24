@@ -53,6 +53,9 @@
   --st-progress: #f0a517;
   --st-blocked: #fb6f8e;
   --st-done: #1bb89a;
+  /* An agent at work (ticket #48): its own hue, so it never reads as a
+     live-but-idle shell or a running service (both green). */
+  --st-agent: #7c5cf0;
 
   --shadow-color: 176 67% 18%;
 
@@ -181,6 +184,7 @@
   --st-progress: #f5b73a;
   --st-blocked: #ff8aa0;
   --st-done: #2dd4bf;
+  --st-agent: #a78bfa;
 
   --shadow-color: 196 60% 2%;
 

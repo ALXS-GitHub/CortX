@@ -39,6 +39,7 @@ import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortabl
 import { useDroppable } from '@dnd-kit/core';
 import { SortableTerminalTab } from './terminal-dnd/SortableTerminalTab';
 import { useDockTheme } from '@/components/terminal/theme/DockThemeLayer';
+import { TerminalItemDot } from '@/components/terminal/TerminalStatusGlyph';
 import { TerminalTypeIcon } from './terminal-dnd/TerminalTypeIcon';
 
 /** Height of the collapsed dock strip. */
@@ -675,7 +676,7 @@ export function TerminalPanel() {
                     return (
                       <DropdownMenuItem key={item.id} onClick={() => handleShowTerminal(item)}>
                         <TerminalTypeIcon type={item.type} className="size-3.5" />
-                        <StatusDot status={item.status} size={7} />
+                        <TerminalItemDot item={item} />
                         <span className="truncate">
                           {item.name}
                           {item.projectName && (

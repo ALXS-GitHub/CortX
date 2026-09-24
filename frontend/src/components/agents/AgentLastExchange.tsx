@@ -20,7 +20,7 @@ export function AgentLastExchange({ session, className, lines = 1 }: AgentLastEx
   }
   if (kind === 'tool') {
     return (
-      <span className={cn('inline-flex min-w-0 items-center gap-1 text-xs text-st-done', className)}>
+      <span className={cn('inline-flex min-w-0 items-center gap-1 text-xs text-st-agent', className)}>
         <Loader2 className="size-3 shrink-0 animate-spin" />
         <span className="truncate">{text}…</span>
       </span>

@@ -27,6 +27,9 @@ const badgeVariants = cva(
           "border-[color-mix(in_srgb,var(--warning)_36%,var(--border))] bg-warning/14 text-[color-mix(in_srgb,var(--warning)_72%,var(--foreground))]",
         info:
           "border-[color-mix(in_srgb,var(--info)_36%,var(--border))] bg-info/14 text-[color-mix(in_srgb,var(--info)_72%,var(--foreground))]",
+        /* An agent at work (ticket #48), the hue of its dot. */
+        agent:
+          "border-[color-mix(in_srgb,var(--st-agent)_36%,var(--border))] bg-st-agent/14 text-[color-mix(in_srgb,var(--st-agent)_72%,var(--foreground))]",
         outline:
           "border-border-strong bg-transparent text-muted-foreground",
         ghost:

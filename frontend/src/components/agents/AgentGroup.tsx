@@ -30,7 +30,7 @@ export function AgentGroup({ group, collapsed, onToggle, onCreateProject, creati
           <span className="truncate font-display text-sm font-semibold tracking-tight">{group.name}</span>
           <Badge variant="secondary" className="tabular-nums">{group.sessions.length}</Badge>
           {group.runningCount > 0 && (
-            <Badge variant="success" className="whitespace-nowrap">{group.runningCount} running</Badge>
+            <Badge variant="agent" className="whitespace-nowrap">{group.runningCount} working</Badge>
           )}
           {group.subtitle && (
             <span className="hidden min-w-0 truncate font-mono text-[11px] font-normal text-faint lg:inline" title={group.subtitle}>

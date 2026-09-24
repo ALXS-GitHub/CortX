@@ -54,6 +54,7 @@
   --st-progress: #eab308;
   --st-blocked: #ef4444;
   --st-done: #22c55e;
+  --st-agent: #8b5cf6;
 
   --shadow-color: 0 0% 0%;
 
@@ -169,6 +170,7 @@
   --st-progress: #facc15;
   --st-blocked: #f87171;
   --st-done: #4ade80;
+  --st-agent: #a78bfa;
 
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
