@@ -117,6 +117,18 @@ export interface TerminalWindowLayout {
   activeTabId: string | null;
   /** Every tab of every Terminal window (filter with `tabsInScope`). */
   tabs: TerminalTab[];
+  /**
+   * The order the user dragged the rail's project sections into (ticket #50):
+   * workspace ids, absent until the first drag. Shared like `tabs`, not kept
+   * per window like `scope` — it is an order of *projects*, so every Terminal
+   * window draws it and every way of counting tabs (Ctrl+1…9, Ctrl+Tab, the
+   * palette) reads it. How a list that mentions only some sections is read
+   * lives in `components/terminal/sectionOrder.ts`.
+   *
+   * No version bump: an older build drops the key on its next write and the
+   * rail falls back to sidebar order, which is all it ever knew.
+   */
+  sectionOrder?: string[];
 }
 
 /** What a Terminal window keeps for itself; the tabs live in `window.tabs`. */
@@ -293,6 +305,11 @@ export function normaliseLayoutDoc(raw: unknown): TerminalLayoutDoc {
       scope: local.scope,
       activeTabId: local.activeTabId,
       tabs: Array.isArray(win.tabs) ? win.tabs.slice() : [],
+      // Rebuilt key by key like the rest, so it has to be carried by name or
+      // the first broadcast would forget the order the user dragged in.
+      ...(Array.isArray(win.sectionOrder)
+        ? { sectionOrder: win.sectionOrder.filter((id): id is string => typeof id === 'string' && id.length > 0) }
+        : {}),
     },
     windows,
     windowOpen: doc.windowOpen === true,

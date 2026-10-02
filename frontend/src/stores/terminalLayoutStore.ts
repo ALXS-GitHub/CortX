@@ -26,6 +26,7 @@ import {
   workspaceIdForProject,
   workspaceFromCwds,
   PRIMARY_TERMINAL_WINDOW,
+  FREE_WORKSPACE_ID,
   type TerminalLayoutDoc,
   type TerminalScope,
   type TerminalTab,
@@ -136,6 +137,11 @@ interface TerminalLayoutState {
   setTabProject: (tabId: string, projectId: string | null | undefined) => void;
   togglePinTab: (tabId: string) => void;
   reorderTabs: (orderedTabIds: string[]) => void;
+  /**
+   * Save the order of the rail's project sections (ticket #50): workspace ids,
+   * as `moveSection` computed them. Shared by every Terminal window.
+   */
+  setSectionOrder: (workspaceIds: string[]) => void;
   setSplitSizes: (tabId: string, splitId: string, sizes: number[]) => void;
   /** Show one leaf alone in its tab; call again (or with null) to restore the split. */
   toggleMaximizeLeaf: (tabId: string, leafId: string | null) => void;
@@ -532,6 +538,21 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
           tabs: doc.window.tabs.map((t) => (order.has(t.id) ? { ...t, order: order.get(t.id)! } : t)),
         },
       };
+    }),
+
+  setSectionOrder: (workspaceIds) =>
+    get().commit((doc) => {
+      // The list keeps sections no rail shows right now, on purpose (see
+      // `sectionOrder.ts`) — but only while something can still answer to
+      // them: a project that exists, a tab still filed under it, or the free
+      // workspace. A deleted project's id is dropped at the next drag rather
+      // than carried in `sessions.json` forever.
+      const projects = new Set(useAppStore.getState().projects.map((p) => workspaceIdForProject(p.id)));
+      const filed = new Set(doc.window.tabs.map((t) => t.workspaceId));
+      const sectionOrder = workspaceIds.filter(
+        (id, i) => workspaceIds.indexOf(id) === i && (id === FREE_WORKSPACE_ID || projects.has(id) || filed.has(id))
+      );
+      return { ...doc, window: { ...doc.window, sectionOrder } };
     }),
 
   setSplitSizes: (tabId, splitId, sizes) =>

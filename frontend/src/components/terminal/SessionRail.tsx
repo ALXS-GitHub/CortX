@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DraggableSyntheticListeners,
+} from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers';
@@ -51,6 +59,7 @@ import {
   unfoldSection,
   type ActiveTabRef,
 } from './sectionFold';
+import { moveSection } from './sectionOrder';
 import { TabContextMenu, TabRenameInput } from './tabMenu';
 import { TabRowBody } from './TabRow';
 import { PaneGroupBranch } from './PaneTabs';
@@ -476,6 +485,15 @@ function SessionGroupRows({
  * - `onContextMenu` calls `preventDefault`, so the fold button's own
  *   activation (click, Enter, Space) is the only thing that folds.
  *
+ * Since ticket #50 the row is also the section's **drag handle**: the
+ * sortable's listeners sit on the wrapper, so a press anywhere on the header
+ * — the fold button included — can move the whole section. Neither of the
+ * above is stolen: the drag only starts past the same 6 px a tab row waits
+ * for, so a click still folds; dnd-kit swallows the click that ends a real
+ * drag, so a drop never folds; it ignores the right button, so the menu still
+ * opens; and the "…" button keeps its press to itself, as a row's X does.
+ *
+
  * Folded, the header is all that is left of the section, so it says more:
  * the count it always carried, the glyph of whatever inside is asking for you
  * (`loudestLive` — an agent waiting, a command that failed), and, when the
@@ -490,6 +508,7 @@ function SessionGroupHeader({
   contentId,
   holdsActive,
   signal,
+  dragHandle,
 }: {
   group: WorkspaceGroup;
   folded: boolean;
@@ -500,6 +519,8 @@ function SessionGroupHeader({
   holdsActive: boolean;
   /** Live state of the loudest tab inside, when folding would hide it. */
   signal: TabLiveState | null;
+  /** The section's sortable listeners (ticket #50): pressing the header drags the section. */
+  dragHandle?: DraggableSyntheticListeners;
 }) {
   const [open, setOpen] = useState(false);
   // What "Close all" is really about to take. Since ticket #37 it reaches
@@ -527,11 +548,12 @@ function SessionGroupHeader({
     .join(' · ');
   return (
     <div
-      className="group/gh flex items-center gap-1 pb-1 pl-1 pr-2 pt-1.5"
+      className="group/gh flex select-none items-center gap-1 pb-1 pl-1 pr-2 pt-1.5"
       onContextMenu={(e) => {
         e.preventDefault();
         setOpen(true);
       }}
+      {...dragHandle}
     >
       <button
         type="button"
@@ -570,6 +592,10 @@ function SessionGroupHeader({
             type="button"
             aria-label={`${group.name} actions`}
             title={`${group.name} actions`}
+            // The menu opens on press; a press that also armed the section's
+            // drag would let a twitch of the hand carry the section away
+            // under an open menu.
+            onPointerDown={(e) => e.stopPropagation()}
             className="grid size-4 shrink-0 place-items-center rounded-[4px] text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/gh:opacity-100 aria-expanded:opacity-100"
           >
             <MoreHorizontal className="size-3" />
@@ -587,6 +613,43 @@ function SessionGroupHeader({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+    </div>
+  );
+}
+
+/**
+ * One project section of the expanded rail, sortable among the others by its
+ * header (ticket #50) — the header gets the listeners through `children`, the
+ * box gets the node, so the whole section travels with it.
+ *
+ * Sections nest a drag inside a drag: each one's rows have their own
+ * `DndContext` (`SessionGroupRows`), and this one lives in the rail's. They
+ * never fight over a press, because they never share an element: a row is
+ * not inside its header, so a press on a row only ever reaches the rows'
+ * context — which is also the only one wired to detach a tab past the window
+ * edge — and a press on a header only ever reaches the sections'. Moving a
+ * tab cannot move a section, and a section is never torn off into a window.
+ *
+ * `CSS.Translate` for the same reason as a row's: sections are of very
+ * different heights (a folded one is its header alone), and the scale a
+ * sorting strategy hands back would stretch them mid-drag.
+ */
+function SortableSection({
+  workspaceId,
+  children,
+}: {
+  workspaceId: string;
+  children: (dragHandle: DraggableSyntheticListeners) => ReactNode;
+}) {
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: workspaceId });
+  const style: CSSProperties = { transform: CSS.Translate.toString(transform), transition };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn('mb-2', isDragging && 'relative z-10 cursor-grabbing opacity-60')}
+    >
+      {children(listeners)}
     </div>
   );
 }
@@ -659,6 +722,8 @@ function SessionIcon({
  * Left rail of the Terminal window: every tab of the current scope, grouped
  * by workspace (project or "Free"), with the dock's status language.
  * Collapsible to an icon strip (Ctrl+B), drag-resizable when expanded.
+ * Sections fold by a click on their header (ticket #40) and move by dragging
+ * it (ticket #50).
  */
 export function SessionRail() {
   const items = useItemMap();
@@ -678,7 +743,26 @@ export function SessionRail() {
   // One id per rail, so a header can name the list of rows it opens.
   const railId = useId();
 
-  const groups = useMemo(() => groupTabsByWorkspace(scopedTabs, projects), [scopedTabs, projects]);
+  // Sections come in the order the user dragged them into (ticket #50) — read
+  // off the layout, the same list `visibleTabOrder` reads, so the numbers
+  // below, Ctrl+1…9 and Ctrl+Tab all count down the rail as drawn.
+  const sectionOrder = win.sectionOrder;
+  const setSectionOrder = useTerminalLayoutStore((s) => s.setSectionOrder);
+  const groups = useMemo(
+    () => groupTabsByWorkspace(scopedTabs, projects, sectionOrder),
+    [scopedTabs, projects, sectionOrder]
+  );
+  const sectionIds = useMemo(() => groups.map((g) => g.workspaceId), [groups]);
+  // Same threshold as a tab row's: a click on a header has to stay a fold.
+  const sectionSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const onSectionDragEnd = useCallback(
+    (e: DragEndEvent) => {
+      const { active, over } = e;
+      if (!over || active.id === over.id) return;
+      setSectionOrder(moveSection(sectionOrder, sectionIds, String(active.id), String(over.id)));
+    },
+    [sectionOrder, sectionIds, setSectionOrder]
+  );
   // Where each group's numbering starts (Ctrl+N counts across groups).
   const groupOffsets = useMemo(() => {
     const out: number[] = [];
@@ -807,66 +891,88 @@ export function SessionRail() {
         {groups.length === 0 && !collapsed && (
           <p className="px-2 py-3 text-xs text-faint">No terminal in this scope.</p>
         )}
-        {groups.map((g, gi) => {
-          // Folding is an expanded-rail affair: the icon strip has no header
-          // to click, and a hairline between two runs of icons is already all
-          // the section it can show.
-          const shut = !collapsed && isFolded(folded, g.workspaceId);
-          const contentId = `${railId}-${gi}`;
-          return (
+        {collapsed ? (
+          // Folding and reordering are expanded-rail affairs: the icon strip
+          // has no header to click or drag, and a hairline between two runs
+          // of icons is already all the section it can show. It still draws
+          // the sections in the saved order — `groups` carries it.
+          groups.map((g) => (
             <div key={g.workspaceId} className="mb-2">
-              {collapsed ? (
-                <div className="mx-auto mb-1.5 h-px w-5 bg-border first:hidden" />
-              ) : (
-                <SessionGroupHeader
-                  group={g}
-                  folded={shut}
-                  onToggle={() => toggleFold(g.workspaceId)}
-                  contentId={contentId}
-                  holdsActive={g.tabs.some((t) => t.id === activeTabId)}
-                  signal={
-                    shut && display.status ? loudestLive(g.tabs.map((t) => tabLiveState(t, items))) : null
-                  }
-                />
-              )}
-              {collapsed ? (
-                <div className="flex flex-col items-center gap-1">
-                  {g.tabs.map((tab) => (
-                    <SessionIcon
-                      key={tab.id}
-                      tab={tab}
-                      items={items}
-                      active={tab.id === activeTabId}
-                      display={display}
-                      onSelect={() => setActiveTab(tab.id)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                // The rows are unmounted while folded rather than hidden: a
-                // fold is meant to buy back the space *and* the work — a
-                // hidden `DndContext` still measures, and dnd-kit measuring a
-                // `display:none` list is how a drop lands in the wrong place.
-                // The box itself stays, so `aria-controls` always points at
-                // something and the group keeps its name.
-                <div id={contentId} role="group" aria-label={g.name} hidden={shut}>
-                  {!shut && (
-                    <SessionGroupRows
-                      group={g}
-                      items={items}
-                      activeTabId={activeTabId}
-                      firstIndex={groupOffsets[gi] ?? 1}
-                      total={scopedTabs.length}
-                      display={display}
-                      onSelect={setActiveTab}
-                      onReorder={reorderGroup}
-                    />
-                  )}
-                </div>
-              )}
+              <div className="mx-auto mb-1.5 h-px w-5 bg-border first:hidden" />
+              <div className="flex flex-col items-center gap-1">
+                {g.tabs.map((tab) => (
+                  <SessionIcon
+                    key={tab.id}
+                    tab={tab}
+                    items={items}
+                    active={tab.id === activeTabId}
+                    display={display}
+                    onSelect={() => setActiveTab(tab.id)}
+                  />
+                ))}
+              </div>
             </div>
-          );
-        })}
+          ))
+        ) : (
+          // The sections' own drag context (ticket #50), around the rows'
+          // ones — see `SortableSection` for why the two never collide.
+          <DndContext
+            sensors={sectionSensors}
+            collisionDetection={closestCenter}
+            modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+            onDragEnd={onSectionDragEnd}
+          >
+            <SortableContext items={sectionIds} strategy={verticalListSortingStrategy}>
+              <div>
+                {groups.map((g, gi) => {
+                  const shut = isFolded(folded, g.workspaceId);
+                  const contentId = `${railId}-${gi}`;
+                  return (
+                    <SortableSection key={g.workspaceId} workspaceId={g.workspaceId}>
+                      {(dragHandle) => (
+                        <>
+                          <SessionGroupHeader
+                            group={g}
+                            folded={shut}
+                            onToggle={() => toggleFold(g.workspaceId)}
+                            contentId={contentId}
+                            holdsActive={g.tabs.some((t) => t.id === activeTabId)}
+                            signal={
+                              shut && display.status ? loudestLive(g.tabs.map((t) => tabLiveState(t, items))) : null
+                            }
+                            dragHandle={dragHandle}
+                          />
+                          {/* The rows are unmounted while folded rather than
+                              hidden: a fold is meant to buy back the space
+                              *and* the work — a hidden `DndContext` still
+                              measures, and dnd-kit measuring a `display:none`
+                              list is how a drop lands in the wrong place. The
+                              box itself stays, so `aria-controls` always
+                              points at something and the group keeps its
+                              name. */}
+                          <div id={contentId} role="group" aria-label={g.name} hidden={shut}>
+                            {!shut && (
+                              <SessionGroupRows
+                                group={g}
+                                items={items}
+                                activeTabId={activeTabId}
+                                firstIndex={groupOffsets[gi] ?? 1}
+                                total={scopedTabs.length}
+                                display={display}
+                                onSelect={setActiveTab}
+                                onReorder={reorderGroup}
+                              />
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </SortableSection>
+                  );
+                })}
+              </div>
+            </SortableContext>
+          </DndContext>
+        )}
       </nav>
 
       {/* Footer */}

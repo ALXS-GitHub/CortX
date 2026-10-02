@@ -527,10 +527,19 @@ function ctrlTabBehavior(): TerminalCtrlTabBehavior {
   return useAppStore.getState().settings?.terminal.ctrlTabBehavior ?? 'sequential';
 }
 
-/** Jump to the next / previous tab **in the tab list** (the default Ctrl+Tab). */
+/**
+ * Jump to the next / previous tab **in the tab list** (the default Ctrl+Tab).
+ *
+ * "The tab list" is the one on screen — `orderedTabs`, the list Ctrl+1…9
+ * counts — not the raw `order` of the document. The two used to agree often
+ * enough to pass for one, but the rail draws its tabs by section, pinned first
+ * in each, and since ticket #50 in whatever order the user dragged the
+ * sections into: walking `order` there would hop between sections in an order
+ * nobody can see.
+ */
 function cycleTabSequential(delta: 1 | -1): void {
   const layout = useTerminalLayoutStore.getState();
-  const tabs = layout.scopedTabs();
+  const tabs = orderedTabs();
   if (tabs.length < 2) return;
   const current = tabs.findIndex((t) => t.id === layout.doc.window.activeTabId);
   const next = tabs[(current + delta + tabs.length) % tabs.length];

@@ -17,6 +17,7 @@ import {
 } from '@/lib/terminalLayout';
 import { useTerminalItems } from '@/hooks/useTerminalItems';
 import { useTerminalAgentsStore } from './agentsStore';
+import { orderSections } from './sectionOrder';
 import { PROVIDER_LABEL, STATE_LABEL } from '@/components/agents/agentUtils';
 import { useAppStore } from '@/stores/appStore';
 import type { TerminalItem, TerminalType } from '@/components/layout/terminal-dnd/types';
@@ -309,9 +310,16 @@ export interface WorkspaceGroup {
 /**
  * The scoped tabs grouped by workspace the way the sessions rail shows them:
  * projects in sidebar order, the project-less group last, pinned tabs first
- * in each group.
+ * in each group — then, once the user has dragged a section (ticket #50), in
+ * the order they dragged them into (`sectionOrder`, the layout's own
+ * `window.sectionOrder`). The sidebar order is still what places a section
+ * the saved order has never heard of.
  */
-export function groupTabsByWorkspace(scopedTabs: TerminalTab[], projects: Project[]): WorkspaceGroup[] {
+export function groupTabsByWorkspace(
+  scopedTabs: TerminalTab[],
+  projects: Project[],
+  sectionOrder?: readonly string[]
+): WorkspaceGroup[] {
   const byWorkspace = new Map<string, TerminalTab[]>();
   for (const tab of scopedTabs) {
     const list = byWorkspace.get(tab.workspaceId) ?? [];
@@ -329,7 +337,7 @@ export function groupTabsByWorkspace(scopedTabs: TerminalTab[], projects: Projec
       tabs: sortTabs(tabs),
     });
   }
-  return out.sort((a, b) => {
+  out.sort((a, b) => {
     if (a.workspaceId === FREE_WORKSPACE_ID) return 1;
     if (b.workspaceId === FREE_WORKSPACE_ID) return -1;
     return (
@@ -337,6 +345,7 @@ export function groupTabsByWorkspace(scopedTabs: TerminalTab[], projects: Projec
       projects.findIndex((p) => `project:${p.id}` === b.workspaceId)
     );
   });
+  return orderSections(out, sectionOrder);
 }
 
 /**
@@ -373,12 +382,14 @@ export function useAgentTabCount(win: TerminalWindowLayout): number {
 
 /**
  * The tabs in the order the user sees them — the rail groups by workspace,
- * the tab strip does not — so "go to tab N" and the faint numbers agree.
+ * the tab strip does not — so "go to tab N" and the faint numbers agree. The
+ * rail's sections come in the order the user dragged them into (ticket #50),
+ * read off the same `win` the rail draws from, so the two cannot disagree.
  */
 export function visibleTabOrder(win: TerminalWindowLayout, projects: Project[], placement: 'sidebar' | 'top'): TerminalTab[] {
   const scoped = tabsInScope(win, win.scope);
   if (placement === 'top') return sortTabs(scoped);
-  return groupTabsByWorkspace(scoped, projects).flatMap((g) => g.tabs);
+  return groupTabsByWorkspace(scoped, projects, win.sectionOrder).flatMap((g) => g.tabs);
 }
 
 /** The splits above a leaf, root first, with the index of the branch that leads to it. */
