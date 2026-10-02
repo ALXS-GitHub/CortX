@@ -7,10 +7,12 @@
  * `./scripts/build.ts` — and those are what you actually want to click.
  *
  * How it stays cheap: the underline is an xterm **link provider**, so it only
- * ever looks at the one logical line under the pointer, never at the buffer.
- * The only disk access is an `exists()` per distinct candidate, memoised for a
- * few seconds — a path that does not resolve is not underlined at all, which
- * is what keeps every word with a slash in it from becoming a link.
+ * ever looks at the few lines around the row under the pointer, never at the
+ * buffer. The only disk access is an `exists()` per distinct candidate,
+ * memoised for a few seconds — a path that does not resolve is not underlined
+ * at all, which is what keeps every word with a slash in it from becoming a
+ * link. Finding the candidates — paths with a space in them and paths a
+ * program cut over two rows included (zorg #49) — is `terminalPathScan.ts`.
  *
  * Relative paths are resolved against the terminal's live directory, which
  * shell integration reports over OSC 7 (`TerminalShellState.cwd`).
@@ -86,6 +88,7 @@ import '@/styles/terminal-links.css';
 import * as api from '@/lib/tauri';
 import { IS_MAC } from '@/lib/keybindings';
 import { useAppStore } from '@/stores/appStore';
+import { pathCandidates, pickPathLinks, type FoundPath, type ScanLine } from '@/lib/terminalPathScan';
 import type { TerminalConfig } from '@/types';
 
 /**
@@ -140,24 +143,21 @@ function watchOpenModifier(): void {
   window.addEventListener('blur', () => sync(false));
 }
 
-/** A run of non-space characters holding at least one separator. */
-const CANDIDATE = /[^\s"'`<>|]*[\\/][^\s"'`<>|]*/g;
 /**
  * URLs, the same shape `WebLinksAddon` underlines (its `strictUrlRegex`, with
  * `g` so the whole line can be scanned). Kept in step on purpose: the panel
  * must appear on exactly what the addon made clickable, never on more.
  */
 const URL_CANDIDATE = /(?:https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\^<>`]*[^\s"':,.!?{}|\\^~[\]`()<>]/g;
-/** The position compilers and linters append: `:12`, `:12:34`, `:12,34`, `(12,34)`. */
-const POSITION = /[:(](\d+)(?:[:,](\d+))?\)?$/;
-/** Trailing punctuation that belongs to the sentence, not to the path. */
-const TRAILING = /[.,;:!?'"`)\]}>]+$/;
-const LEADING = /^[('"`[{<]+/;
-
 const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
 
-/** Longest candidate we bother checking (a base64 blob is not a path). */
-const MAX_PATH = 512;
+/**
+ * Logical lines read on each side of the hovered one. A path a program cut
+ * over several rows can start above the pointer, or go on below it.
+ */
+const CONTEXT_LINES = 3;
+/** Paths looked up per row, each costing up to a dozen `exists()` calls. */
+const MAX_CANDIDATES = 24;
 const CACHE_TTL_MS = 8000;
 const CACHE_MAX = 500;
 
@@ -188,19 +188,29 @@ const ACTIVATION_DEDUP_MS = 600;
 
 const existsCache = new Map<string, { at: number; ok: boolean }>();
 
+/**
+ * Lookups still on their way. The underline and the hover panel scan the same
+ * rows at the same moment, and since #49 each path is asked about in several
+ * lengths: without this, every one of them crossed the IPC bridge twice.
+ */
+const existsInFlight = new Map<string, Promise<boolean>>();
+
 async function pathExists(path: string): Promise<boolean> {
   const now = Date.now();
   const hit = existsCache.get(path);
   if (hit && now - hit.at < CACHE_TTL_MS) return hit.ok;
-  let ok = false;
-  try {
-    ok = await exists(path);
-  } catch {
-    ok = false;
-  }
-  if (existsCache.size >= CACHE_MAX) existsCache.clear();
-  existsCache.set(path, { at: now, ok });
-  return ok;
+  const pending = existsInFlight.get(path);
+  if (pending) return pending;
+  const lookup = exists(path)
+    .catch(() => false)
+    .then((ok) => {
+      existsInFlight.delete(path);
+      if (existsCache.size >= CACHE_MAX) existsCache.clear();
+      existsCache.set(path, { at: now, ok });
+      return ok;
+    });
+  existsInFlight.set(path, lookup);
+  return lookup;
 }
 
 let homeDirCache: string | null = null;
@@ -255,62 +265,6 @@ function joinPath(base: string, rel: string): string {
   return `${base.replace(/[\\/]+$/, '')}${sep}${rel}`;
 }
 
-export interface ParsedPath {
-  /** The path as written, without the `:line:col` suffix. */
-  raw: string;
-  line?: number;
-  column?: number;
-  /** Offset and length of the whole match (path + position) inside the line. */
-  index: number;
-  length: number;
-}
-
-/**
- * Split one candidate into the path and the position a compiler appended.
- * Exported for the tests in `scripts/`.
- */
-export function parseCandidate(text: string, index: number): ParsedPath | null {
-  let raw = text;
-  let start = index;
-  const lead = LEADING.exec(raw);
-  if (lead) {
-    raw = raw.slice(lead[0].length);
-    start += lead[0].length;
-  }
-  if (!raw || raw.length > MAX_PATH) return null;
-  // A URL is the WebLinksAddon's job, and `--flag/x` is not a path.
-  if (raw.includes('://') || raw.startsWith('-')) return null;
-
-  // Peel one trailing punctuation mark at a time until a position suffix
-  // shows up (`main.cpp(12,5):` has to lose its colon before `(12,5)` can be
-  // seen) or there is nothing left to peel.
-  let line: number | undefined;
-  let column: number | undefined;
-  let suffix = '';
-  for (let guard = 0; guard < 4; guard++) {
-    const pos = POSITION.exec(raw);
-    if (pos) {
-      line = Number(pos[1]);
-      column = pos[2] === undefined ? undefined : Number(pos[2]);
-      suffix = raw.slice(pos.index);
-      raw = raw.slice(0, pos.index);
-      break;
-    }
-    if (!TRAILING.test(raw.slice(-1))) break;
-    raw = raw.slice(0, -1);
-  }
-  raw = raw.replace(TRAILING, '');
-
-  // `C:\x` keeps its drive colon; anything else with a colon left in it is
-  // not a path we can trust (`http:`, `key:value/other`).
-  const afterDrive = /^[A-Za-z]:/.test(raw) ? raw.slice(2) : raw;
-  if (afterDrive.includes(':')) return null;
-  if (!raw || !/[\\/]/.test(raw)) return null;
-  // Bare `/` or `//` — not worth a link.
-  if (/^[\\/]+$/.test(raw)) return null;
-  return { raw, line, column, index: start, length: raw.length + suffix.length };
-}
-
 /**
  * One separator on Windows. `assets/logo.png` printed in a shell whose cwd is
  * `C:\repo` used to resolve to `C:\repo\assets/logo.png`: the filesystem takes
@@ -340,7 +294,7 @@ export async function resolveCandidate(raw: string, cwd: string | undefined): Pr
  * what keeps the ranges right on a line holding a wide glyph, whose second
  * cell contributes no character.
  */
-function logicalLine(term: Terminal, y: number): { text: string; cells: { x: number; y: number }[] } | null {
+function logicalLine(term: Terminal, y: number): (ScanLine & { startY: number; endY: number }) | null {
   const buffer = term.buffer.active;
   let startY = y;
   while (startY > 0 && buffer.getLine(startY)?.isWrapped) startY--;
@@ -360,7 +314,49 @@ function logicalLine(term: Terminal, y: number): { text: string; cells: { x: num
       text += chars;
     }
   }
-  return { text, cells };
+  return { text, cells, startY, endY };
+}
+
+/**
+ * The logical line holding row `y`, with `CONTEXT_LINES` more on each side:
+ * a path cut by a hard line break is in pieces across them (zorg #49).
+ */
+function scanWindow(term: Terminal, y: number): ScanLine[] {
+  const middle = logicalLine(term, y);
+  if (!middle) return [];
+  const lines: ScanLine[] = [middle];
+  let above = middle.startY;
+  for (let i = 0; i < CONTEXT_LINES && above > 0; i++) {
+    const line = logicalLine(term, above - 1);
+    if (!line) break;
+    lines.unshift(line);
+    above = line.startY;
+  }
+  let below = middle.endY;
+  for (let i = 0; i < CONTEXT_LINES && below + 1 < term.buffer.active.length; i++) {
+    const line = logicalLine(term, below + 1);
+    if (!line) break;
+    lines.push(line);
+    below = line.endY;
+  }
+  return lines;
+}
+
+/**
+ * Every existing path that crosses buffer row `row`, resolved. The one scan
+ * both the underline and the hover panel go through, so they never disagree
+ * about where a path starts and ends.
+ */
+async function pathLinksOn(term: Terminal, terminalId: string, row: number): Promise<FoundPath[]> {
+  // Same ceiling as before #49: a screenful of `ls` is not worth 200 lookups.
+  const candidates = pathCandidates(scanWindow(term, row), term.cols, row).slice(0, MAX_CANDIDATES);
+  if (!candidates.length) return [];
+  const cwd = terminalDirectory(terminalId);
+  const found = await pickPathLinks(candidates, async (raw) => {
+    const resolved = await resolveCandidate(raw, cwd);
+    return resolved && (await pathExists(resolved)) ? resolved : null;
+  });
+  return found.filter((f) => f.cells.some((c) => c.y === row));
 }
 
 /**
@@ -727,7 +723,7 @@ class LinkHover {
 
   // -- what is under the pointer ------------------------------------------
 
-  private findToken(col: number, row: number, wantPaths: boolean): RawToken | null {
+  private findUrl(col: number, row: number): RawToken | null {
     const logical = logicalLine(this.term, row);
     if (!logical) return null;
     // Index in the logical text of the character in that cell. `<=` rather
@@ -750,28 +746,23 @@ class LinkHover {
       return { kind: 'url', text: m[0], row, ...span };
     }
 
-    if (!wantPaths) return null;
-    CANDIDATE.lastIndex = 0;
-    for (let m = CANDIDATE.exec(logical.text); m; m = CANDIDATE.exec(logical.text)) {
-      if (!m[0]) {
-        CANDIDATE.lastIndex++;
-        continue;
-      }
-      const parsed = parseCandidate(m[0], m.index);
-      if (!parsed) continue;
-      if (index < parsed.index || index >= parsed.index + parsed.length) continue;
-      const span = spanOnRow(logical.cells, parsed.index, parsed.index + parsed.length, row);
-      if (!span) return null;
-      return { kind: 'path', text: parsed.raw, line: parsed.line, column: parsed.column, row, ...span };
-    }
     return null;
   }
 
-  private async resolveToken(token: RawToken): Promise<ResolvedToken | null> {
-    if (token.kind === 'url') return { ...token, target: token.text };
-    const resolved = await resolveCandidate(token.text, terminalDirectory(this.terminalId));
-    if (!resolved || !(await pathExists(resolved))) return null;
-    return { ...token, target: resolved };
+  /**
+   * The link under a cell, with its real destination: a URL as printed, or a
+   * path once the disk has confirmed it (see `pathLinksOn`).
+   */
+  private async findLink(col: number, row: number, wantPaths: boolean): Promise<ResolvedToken | null> {
+    const url = this.findUrl(col, row);
+    if (url) return { ...url, target: url.text };
+    if (!wantPaths) return null;
+    for (const found of await pathLinksOn(this.term, this.terminalId, row)) {
+      const span = spanOnRow(found.cells, 0, found.cells.length, row);
+      if (!span || col < span.startX || col > span.endX) continue;
+      return { kind: 'path', text: found.raw, line: found.line, column: found.column, row, ...span, target: found.target };
+    }
+    return null;
   }
 
   // -- pointer ------------------------------------------------------------
@@ -830,10 +821,8 @@ class LinkHover {
     if (this.term.hasSelection() && this.term.getSelection().trim()) return;
     const reveal = wantsReveal(e);
     void (async () => {
-      const token = this.findToken(cell.col, cell.row, true);
-      if (!token || token.kind !== 'path') return;
-      const resolved = await this.resolveToken(token);
-      if (!resolved) return;
+      const resolved = await this.findLink(cell.col, cell.row, true);
+      if (!resolved || resolved.kind !== 'path') return;
       if (
         Date.now() - lastActivation.at < ACTIVATION_DEDUP_MS &&
         lastActivation.key === activationKey(resolved.target, reveal)
@@ -852,17 +841,12 @@ class LinkHover {
     // a cell the pointer merely passed over on the way there does not get to
     // move it or take it away.
     if (this.pointerOnPanel()) return;
-    const token = this.findToken(col, row, filePathLinksEnabled());
+    const resolved = await this.findLink(col, row, filePathLinksEnabled());
+    if (generation !== this.generation) return;
+    if (this.pointerOnPanel()) return;
     // A cell with no link is not a reason to tear the panel down on the spot —
     // that is what made the buttons unreachable. Arm the grace period instead
     // and let it re-check where the pointer actually ended up.
-    if (!token) {
-      this.scheduleClose();
-      return;
-    }
-    const resolved = await this.resolveToken(token);
-    if (generation !== this.generation) return;
-    if (this.pointerOnPanel()) return;
     if (!resolved) {
       this.scheduleClose();
       return;
@@ -986,36 +970,14 @@ export function registerFileLinkProvider(term: Terminal, terminalId: string): ID
         callback(undefined);
         return;
       }
-      const logical = logicalLine(term, bufferLineNumber - 1);
-      if (!logical) {
-        callback(undefined);
-        return;
-      }
-      const cwd = terminalDirectory(terminalId);
-      const candidates: ParsedPath[] = [];
-      CANDIDATE.lastIndex = 0;
-      for (let m = CANDIDATE.exec(logical.text); m; m = CANDIDATE.exec(logical.text)) {
-        if (!m[0]) {
-          CANDIDATE.lastIndex++;
-          continue;
-        }
-        const parsed = parseCandidate(m[0], m.index);
-        if (parsed) candidates.push(parsed);
-        if (candidates.length >= 24) break;
-      }
-      if (!candidates.length) {
-        callback(undefined);
-        return;
-      }
-      void Promise.all(
-        candidates.map(async (candidate) => {
-          const resolved = await resolveCandidate(candidate.raw, cwd);
-          if (!resolved || !(await pathExists(resolved))) return null;
-          const first = logical.cells[candidate.index];
-          const last = logical.cells[candidate.index + candidate.length - 1];
-          if (!first || !last) return null;
-          const link: ILink = {
-            text: resolved,
+      void pathLinksOn(term, terminalId, bufferLineNumber - 1).then((found) => {
+        const links = found.map((path): ILink => {
+          const first = path.cells[0];
+          const last = path.cells[path.cells.length - 1];
+          return {
+            text: path.target,
+            // A path cut over two rows is one range: xterm's ranges run in
+            // reading order from `start` to `end`, across rows.
             range: {
               start: { x: first.x + 1, y: first.y + 1 },
               end: { x: last.x + 1, y: last.y + 1 },
@@ -1025,14 +987,11 @@ export function registerFileLinkProvider(term: Terminal, terminalId: string): ID
             // ever meant to put the caret down (zorg #43).
             activate: (event) => {
               if (!isLinkOpenClick(event)) return;
-              void activate(resolved, wantsReveal(event), candidate.line, candidate.column);
+              void activate(path.target, wantsReveal(event), path.line, path.column);
             },
           };
-          return link;
-        })
-      ).then((links) => {
-        const found = links.filter((l): l is ILink => l !== null);
-        callback(found.length ? found : undefined);
+        });
+        callback(links.length ? links : undefined);
       });
     },
   };
