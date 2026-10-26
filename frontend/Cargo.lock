@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "cortx-app"
-version = "0.15.10"
+version = "0.15.11"
 dependencies = [
  "chrono",
  "cortx-core",
@@ -913,7 +913,7 @@ dependencies = [
 
 [[package]]
 name = "cortx-core"
-version = "0.15.10"
+version = "0.15.11"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -941,7 +941,7 @@ dependencies = [
 
 [[package]]
 name = "cortx-mcp"
-version = "0.15.10"
+version = "0.15.11"
 dependencies = [
  "anyhow",
  "cortx-core",
@@ -956,11 +956,11 @@ dependencies = [
 
 [[package]]
 name = "cortx-shim"
-version = "0.15.10"
+version = "0.15.11"
 
 [[package]]
 name = "cortx-tui"
-version = "0.15.10"
+version = "0.15.11"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
