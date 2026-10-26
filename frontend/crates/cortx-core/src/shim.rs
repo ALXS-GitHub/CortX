@@ -7,9 +7,18 @@
 //! on disk in a directory that the user adds to PATH once — after that, toggling
 //! a shim on/off is instant (write/delete a file), no shell restart required.
 //!
-//! On Windows we emit TWO files per shimmed alias so every shell resolves it:
+//! On Windows, when the `cortx-shim` launcher ships next to the running CortX
+//! binary (it is a sidecar of the app, installed beside `cortx.exe`), a shim is
+//!   - `<name>.exe`   — a copy of the launcher, which every shell and every
+//!                      program can start, Git Bash included
+//!   - `<name>.shim`  — the command it runs, one argument per line
+//! and the arguments reach the target untouched. Without the launcher (a dev
+//! build, or a command the launcher cannot express — see `split_command`), it
+//! falls back to TWO scripts:
 //!   - `<name>`      — POSIX `sh` script (shebang, LF endings) for Git Bash / agents
 //!   - `<name>.cmd`  — batch launcher for PowerShell / cmd.exe (found via PATHEXT)
+//! The `.cmd` is the reason the launcher exists: cmd.exe cuts its arguments at
+//! the first newline and expands `%`, `^`, `&`, `!` on the way.
 //! On Unix we emit a single executable `<name>` script.
 //!
 //! Only `function`-type aliases are shimmable: `script`/`init` aliases inject
@@ -23,8 +32,29 @@ use std::path::{Path, PathBuf};
 
 /// Marker line embedded in every generated shim so we can safely identify and
 /// clean up our own files without ever touching unrelated files in the bin dir.
+/// It is also the first line of a `.shim` file, where the launcher checks it.
 const SH_MARKER: &str = "# cortx-shim";
 const CMD_MARKER: &str = ":: cortx-shim";
+
+/// File name of the launcher next to the CortX binaries.
+const LAUNCHER_FILE: &str = "cortx-shim.exe";
+
+/// Suffix of a shim `.exe` moved aside because it was running when it had to
+/// be replaced or removed (Windows refuses to overwrite or delete a running
+/// executable, but lets it be renamed). Swept by `sync_all`.
+const OLD_SUFFIX: &str = ".cortx-old";
+
+/// The `cortx-shim` launcher shipped beside the running binary — the app and
+/// the `cortx` CLI are installed in the same folder, so either finds it. `None`
+/// outside Windows, where a `sh` script already passes arguments untouched.
+pub fn bundled_launcher() -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let launcher = exe.parent()?.join(LAUNCHER_FILE);
+    launcher.is_file().then_some(launcher)
+}
 
 /// Platform default shim directory: `%LOCALAPPDATA%\CortX\bin` on Windows,
 /// `~/.local/share/CortX/bin` (or `$XDG_DATA_HOME/CortX/bin`) on Linux,
@@ -56,8 +86,123 @@ fn shim_files(dir: &Path, name: &str) -> Vec<PathBuf> {
     let mut v = vec![dir.join(name)];
     if cfg!(windows) {
         v.push(dir.join(format!("{name}.cmd")));
+        v.extend(exe_shim_files(dir, name));
     }
     v
+}
+
+/// The two files of a launcher shim: the `.exe` copy and its `.shim` spec.
+fn exe_shim_files(dir: &Path, name: &str) -> [PathBuf; 2] {
+    [dir.join(format!("{name}.exe")), dir.join(format!("{name}.shim"))]
+}
+
+/// The alias command as program + arguments, for the launcher's `.shim` file.
+///
+/// Splits on whitespace; double or single quotes group words and are dropped,
+/// and backslashes are literal (Windows paths). `None` when the command is not
+/// a plain command line — a shell operator (`&`, `|`, `;`, redirections), a
+/// variable (`%X%`, `$x`), a newline or an unbalanced quote — because only a
+/// shell can run those; such an alias keeps the script shims.
+pub(crate) fn split_command(command: &str) -> Option<Vec<String>> {
+    let mut argv = Vec::new();
+    let mut word = String::new();
+    let mut in_word = false;
+    let mut quote: Option<char> = None;
+    for c in command.trim().chars() {
+        if matches!(c, '\n' | '\r' | '%' | '$' | '`') {
+            return None;
+        }
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => word.push(c),
+            None => match c {
+                '"' | '\'' => {
+                    quote = Some(c);
+                    in_word = true;
+                }
+                '&' | '|' | ';' | '<' | '>' | '(' | ')' => return None,
+                c if c.is_whitespace() => {
+                    if in_word {
+                        argv.push(std::mem::take(&mut word));
+                        in_word = false;
+                    }
+                }
+                c => {
+                    word.push(c);
+                    in_word = true;
+                }
+            },
+        }
+    }
+    if quote.is_some() {
+        return None;
+    }
+    if in_word {
+        argv.push(word);
+    }
+    (!argv.is_empty()).then_some(argv)
+}
+
+/// `.shim` content: the marker, then one argument per line.
+fn spec_content(argv: &[String]) -> String {
+    let mut s = format!("{SH_MARKER}\n");
+    for arg in argv {
+        s.push_str(arg);
+        s.push('\n');
+    }
+    s
+}
+
+/// A free name to move a busy file to: `<file>.<n>.cortx-old`.
+fn aside_path(path: &Path) -> Option<PathBuf> {
+    let file = path.file_name()?.to_string_lossy().to_string();
+    (0..100)
+        .map(|i| path.with_file_name(format!("{file}.{i}{OLD_SUFFIX}")))
+        .find(|p| !p.exists() || fs::remove_file(p).is_ok())
+}
+
+/// Write `bytes` to `path`, moving a running executable out of the way first
+/// if Windows refuses to overwrite it.
+fn replace_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    match fs::write(path, bytes) {
+        Ok(()) => Ok(()),
+        Err(e) if path.exists() => {
+            let aside = aside_path(path).ok_or(e)?;
+            fs::rename(path, &aside)?;
+            fs::write(path, bytes)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Delete `path` if present; a running executable is renamed aside instead,
+/// which takes it off PATH all the same.
+fn remove_file_lenient(path: &Path) -> io::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let aside = aside_path(path).ok_or(e)?;
+            fs::rename(path, &aside)?;
+            let _ = fs::remove_file(&aside);
+            Ok(())
+        }
+    }
+}
+
+/// Copy the launcher to `<name>.exe` and write its `<name>.shim` spec. The
+/// copy is skipped when the bytes already match, so a sync never touches a
+/// shim that is running.
+fn write_exe_shim(dir: &Path, name: &str, launcher: &Path, argv: &[String]) -> io::Result<()> {
+    let [exe, spec] = exe_shim_files(dir, name);
+    fs::write(&spec, spec_content(argv))?;
+    let bytes = fs::read(launcher)?;
+    if fs::read(&exe).map_or(true, |current| current != bytes) {
+        replace_file(&exe, &bytes)?;
+    }
+    Ok(())
 }
 
 /// The command as it must appear in a POSIX `sh` shim. On Windows the command
@@ -85,7 +230,29 @@ fn cmd_content(command: &str) -> String {
 
 /// Write the shim file(s) for `alias` into `dir`, creating `dir` if needed.
 pub fn write_shim(dir: &Path, alias: &ShellAlias) -> io::Result<()> {
+    write_shim_with(dir, alias, bundled_launcher().as_deref())
+}
+
+fn write_shim_with(dir: &Path, alias: &ShellAlias, launcher: Option<&Path>) -> io::Result<()> {
     fs::create_dir_all(dir)?;
+
+    if let (Some(launcher), Some(argv)) = (launcher, split_command(&alias.command)) {
+        write_exe_shim(dir, &alias.name, launcher, &argv)?;
+        // The scripts it replaces would still be found: the `.cmd` by cmd.exe
+        // (PATHEXT puts .EXE first, but not every caller goes through it) and
+        // the extensionless one by Git Bash, ahead of the `.exe`.
+        remove_file_lenient(&dir.join(&alias.name))?;
+        remove_file_lenient(&dir.join(format!("{}.cmd", alias.name)))?;
+        return Ok(());
+    }
+
+    // A launcher shim left from before (the command changed into something
+    // only a shell can run): an `.exe` would shadow the `.cmd` written below.
+    if cfg!(windows) {
+        for p in exe_shim_files(dir, &alias.name) {
+            remove_file_lenient(&p)?;
+        }
+    }
 
     // Extensionless POSIX shim (used by bash/zsh and Windows Git Bash / agents).
     let sh_path = dir.join(&alias.name);
@@ -113,9 +280,7 @@ pub fn write_shim(dir: &Path, alias: &ShellAlias) -> io::Result<()> {
 /// Remove the shim file(s) for `name` from `dir` (no-op if absent).
 pub fn remove_shim(dir: &Path, name: &str) -> io::Result<()> {
     for p in shim_files(dir, name) {
-        if p.exists() {
-            fs::remove_file(&p)?;
-        }
+        remove_file_lenient(&p)?;
     }
     Ok(())
 }
@@ -143,6 +308,14 @@ pub struct SyncReport {
 /// (files bearing our marker whose alias no longer exists or is no longer
 /// shimmed). Files that don't carry our marker are never touched.
 pub fn sync_all(dir: &Path, aliases: &[ShellAlias]) -> io::Result<SyncReport> {
+    sync_all_with(dir, aliases, bundled_launcher().as_deref())
+}
+
+fn sync_all_with(
+    dir: &Path,
+    aliases: &[ShellAlias],
+    launcher: Option<&Path>,
+) -> io::Result<SyncReport> {
     let mut report = SyncReport::default();
 
     let desired: HashSet<String> = aliases
@@ -152,7 +325,7 @@ pub fn sync_all(dir: &Path, aliases: &[ShellAlias]) -> io::Result<SyncReport> {
         .collect();
 
     for a in aliases.iter().filter(|a| is_shimmable(a)) {
-        write_shim(dir, a)?;
+        write_shim_with(dir, a, launcher)?;
         report.written.push(a.name.clone());
     }
 
@@ -167,7 +340,21 @@ pub fn sync_all(dir: &Path, aliases: &[ShellAlias]) -> io::Result<SyncReport> {
                 Some(f) => f.to_string(),
                 None => continue,
             };
-            let stem = fname.strip_suffix(".cmd").unwrap_or(&fname).to_string();
+            // A shim that was running when it was replaced: gone once it exits.
+            if fname.ends_with(OLD_SUFFIX) {
+                let _ = fs::remove_file(&path);
+                continue;
+            }
+            // A launcher copy carries no marker of its own: it goes with its
+            // `.shim`, below.
+            if fname.ends_with(".exe") {
+                continue;
+            }
+            let stem = fname
+                .strip_suffix(".cmd")
+                .or_else(|| fname.strip_suffix(".shim"))
+                .unwrap_or(&fname)
+                .to_string();
             if desired.contains(&stem) {
                 continue;
             }
@@ -175,6 +362,9 @@ pub fn sync_all(dir: &Path, aliases: &[ShellAlias]) -> io::Result<SyncReport> {
             if let Ok(content) = fs::read_to_string(&path) {
                 if content.contains(SH_MARKER) || content.contains(CMD_MARKER) {
                     let _ = fs::remove_file(&path);
+                    if fname.ends_with(".shim") {
+                        let _ = remove_file_lenient(&dir.join(format!("{stem}.exe")));
+                    }
                     if !report.removed.contains(&stem) {
                         report.removed.push(stem);
                     }
@@ -404,5 +594,110 @@ mod tests {
         assert!(!tmp.join("uttool").exists());
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    fn words(v: &[&str]) -> Option<Vec<String>> {
+        Some(v.iter().map(|s| s.to_string()).collect())
+    }
+
+    #[test]
+    fn split_command_handles_the_commands_people_alias() {
+        assert_eq!(split_command("zorg.exe"), words(&["zorg.exe"]));
+        assert_eq!(
+            split_command("\"C:\\Program Files\\Zorg\\zorg.exe\""),
+            words(&["C:\\Program Files\\Zorg\\zorg.exe"])
+        );
+        assert_eq!(
+            split_command("bun run \"C:/Users/A B/cli/src/index.ts\""),
+            words(&["bun", "run", "C:/Users/A B/cli/src/index.ts"])
+        );
+        assert_eq!(
+            split_command("  git   -C 'D:/my repo'  status "),
+            words(&["git", "-C", "D:/my repo", "status"])
+        );
+        assert_eq!(split_command("tool --name \"\""), words(&["tool", "--name", ""]));
+    }
+
+    #[test]
+    fn split_command_leaves_shell_syntax_to_the_scripts() {
+        for cmd in [
+            "cd C:/x && bun dev",
+            "tool | more",
+            "a; b",
+            "tool > out.txt",
+            "%LOCALAPPDATA%\\x.exe",
+            "$env:USERPROFILE\\x.exe",
+            "\"C:\\unterminated",
+            "   ",
+        ] {
+            assert_eq!(split_command(cmd), None, "{cmd}");
+        }
+        // Operators inside quotes are plain characters.
+        assert_eq!(split_command("echo \"a & b\""), words(&["echo", "a & b"]));
+    }
+
+    #[cfg(windows)]
+    fn ut_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cortx-shim-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn launcher_shim_replaces_the_scripts_and_back() {
+        let root = ut_dir("exe");
+        let bin = root.join("bin");
+        let launcher = root.join(LAUNCHER_FILE);
+        fs::write(&launcher, b"MZ launcher").unwrap();
+
+        // An alias shimmed by an older CortX: the two scripts.
+        let a = func_alias("uttool", "bun run \"C:/My Tools/x.ts\"", true);
+        write_shim_with(&bin, &a, None).unwrap();
+        assert!(bin.join("uttool.cmd").exists() && bin.join("uttool").exists());
+
+        // With the launcher: an .exe and its spec, and no scripts left.
+        write_shim_with(&bin, &a, Some(&launcher)).unwrap();
+        assert_eq!(fs::read(bin.join("uttool.exe")).unwrap(), b"MZ launcher");
+        assert_eq!(
+            fs::read_to_string(bin.join("uttool.shim")).unwrap(),
+            "# cortx-shim\nbun\nrun\nC:/My Tools/x.ts\n"
+        );
+        assert!(!bin.join("uttool.cmd").exists());
+        assert!(!bin.join("uttool").exists());
+
+        // A command only a shell can run goes back to the scripts.
+        let piped = func_alias("uttool", "bun run x.ts | more", true);
+        write_shim_with(&bin, &piped, Some(&launcher)).unwrap();
+        assert!(bin.join("uttool.cmd").exists());
+        assert!(!bin.join("uttool.exe").exists());
+        assert!(!bin.join("uttool.shim").exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn sync_removes_an_orphan_launcher_shim_and_spares_other_exes() {
+        let root = ut_dir("orphan");
+        let bin = root.join("bin");
+        let launcher = root.join(LAUNCHER_FILE);
+        fs::write(&launcher, b"MZ launcher").unwrap();
+
+        write_shim_with(&bin, &func_alias("uttool", "uttool-real.exe", true), Some(&launcher))
+            .unwrap();
+        fs::write(bin.join("someone-else.exe"), b"MZ other").unwrap();
+        fs::write(bin.join("uttool.exe.0.cortx-old"), b"MZ old").unwrap();
+
+        let off = func_alias("uttool", "uttool-real.exe", false);
+        let report = sync_all_with(&bin, std::slice::from_ref(&off), Some(&launcher)).unwrap();
+        assert_eq!(report.removed, vec!["uttool".to_string()]);
+        assert!(!bin.join("uttool.exe").exists());
+        assert!(!bin.join("uttool.shim").exists());
+        assert!(!bin.join("uttool.exe.0.cortx-old").exists());
+        assert!(bin.join("someone-else.exe").exists());
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

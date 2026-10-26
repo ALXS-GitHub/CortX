@@ -451,6 +451,18 @@ pub fn run() {
             // Keep watcher alive for the lifetime of the app
             app.manage(watcher_handle);
 
+            // Alias shims are only rewritten when an alias changes, so the ones
+            // an older CortX wrote would stay as they were — `.cmd` scripts that
+            // cut multi-line arguments — until someone edited each alias. One
+            // sync per launch brings them to what this build writes; it skips
+            // a launcher that is already up to date.
+            let shim_storage = state.storage.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = shim_storage.sync_all_shims() {
+                    log::warn!("Alias shims not re-synced at startup: {}", e);
+                }
+            });
+
             // Terminal themes: a `.yaml` (or a wallpaper) dropped into
             // `data/terminal/themes/` shows up in the picker of every window
             // without a restart. `ThemeStore::list()` first, so the folder the

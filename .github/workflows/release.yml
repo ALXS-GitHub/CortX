@@ -77,15 +77,16 @@ jobs:
           cp "target/${{ matrix.target }}/release/cortx-mcp${{ matrix.sidecar_ext }}" \
              "src-tauri/binaries/cortx-mcp-${{ matrix.target }}${{ matrix.sidecar_ext }}"
 
-      - name: Build cortx sidecars (TUI + MCP) — Windows
+      - name: Build cortx sidecars (TUI + MCP + shim launcher) — Windows
         if: matrix.platform == 'windows-latest'
         working-directory: frontend
         shell: pwsh
         run: |
-          cargo build --release -p cortx-tui -p cortx-mcp
+          cargo build --release -p cortx-tui -p cortx-mcp -p cortx-shim
           New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
           Copy-Item "target/release/cortx.exe" "src-tauri/binaries/cortx-${{ matrix.target }}.exe"
           Copy-Item "target/release/cortx-mcp.exe" "src-tauri/binaries/cortx-mcp-${{ matrix.target }}.exe"
+          Copy-Item "target/release/cortx-shim.exe" "src-tauri/binaries/cortx-shim-${{ matrix.target }}.exe"
 
       - name: Build and release
         uses: tauri-apps/tauri-action@v0

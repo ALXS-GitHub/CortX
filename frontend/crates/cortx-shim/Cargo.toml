@@ -1,0 +1,12 @@
+[package]
+name = "cortx-shim"
+version.workspace = true
+description = "CortX shim launcher - the .exe behind every alias shim on Windows"
+edition.workspace = true
+rust-version.workspace = true
+
+# No dependencies on purpose: one copy of this binary is written per shimmed
+# alias, so it has to stay small, and it must never link cortx-core.
+[[bin]]
+name = "cortx-shim"
+path = "src/main.rs"

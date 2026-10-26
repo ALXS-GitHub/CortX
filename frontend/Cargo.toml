@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/cortx-core", "crates/cortx-tui", "crates/cortx-mcp", "src-tauri"]
+members = ["crates/cortx-core", "crates/cortx-tui", "crates/cortx-mcp", "crates/cortx-shim", "src-tauri"]
 
 [workspace.package]
 version = "0.15.10"

@@ -87,7 +87,12 @@ console.log(
   }`
 );
 
-// Both crates in one invocation: cargo resolves the shared dependency graph
+// The alias shim launcher is a Windows-only sidecar: elsewhere a `sh` script
+// already passes arguments untouched. It is listed in `externalBin` by
+// `tauri.windows.conf.json` alone, which replaces the array of the base config.
+const sidecars = ['cortx', 'cortx-mcp', ...(exe ? ['cortx-shim'] : [])];
+
+// All crates in one invocation: cargo resolves the shared dependency graph
 // (they both pull in cortx-core) once instead of twice. `--target` is passed
 // only when it differs from the host, so a local build keeps writing to
 // `target/release` and keeps its cache — cargo moves the output under
@@ -100,6 +105,7 @@ run('cargo', [
   'cortx-tui',
   '-p',
   'cortx-mcp',
+  ...(exe ? ['-p', 'cortx-shim'] : []),
 ]);
 
 const releaseDir = cross
@@ -109,7 +115,7 @@ const releaseDir = cross
 const outDir = join(frontendDir, 'src-tauri', 'binaries');
 mkdirSync(outDir, { recursive: true });
 
-for (const name of ['cortx', 'cortx-mcp']) {
+for (const name of sidecars) {
   const from = join(releaseDir, `${name}${exe}`);
   const to = join(outDir, `${name}-${target}${exe}`);
   copyFileSync(from, to);

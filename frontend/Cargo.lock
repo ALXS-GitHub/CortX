@@ -955,6 +955,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortx-shim"
+version = "0.15.10"
+
+[[package]]
 name = "cortx-tui"
 version = "0.15.10"
 dependencies = [
