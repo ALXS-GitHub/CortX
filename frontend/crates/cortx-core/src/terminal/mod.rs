@@ -116,6 +116,10 @@ pub type SinkFn = Box<dyn Fn(&[u8]) -> bool + Send + Sync>;
 struct Entry {
     scrollback: Vec<u8>,
     sinks: Vec<(u64, SinkFn)>,
+    /// When the program last wrote anything. An agent waiting on a
+    /// permission prompt draws it once and goes quiet, while one at work
+    /// keeps animating its spinner — see `output_idle`.
+    last_output: Option<std::time::Instant>,
 }
 
 impl Entry {
@@ -123,6 +127,7 @@ impl Entry {
         Self {
             scrollback: Vec::new(),
             sinks: Vec::new(),
+            last_output: None,
         }
     }
 }
@@ -189,12 +194,19 @@ impl TerminalHub {
             .entry(id.to_string())
             .or_insert_with(Entry::new);
         entry.scrollback.extend_from_slice(data);
+        entry.last_output = Some(std::time::Instant::now());
         let cap = self.max_bytes.load(Ordering::Relaxed);
         if entry.scrollback.len() > cap {
             let excess = entry.scrollback.len() - trim_target(cap);
             entry.scrollback.drain(..excess);
         }
         entry.sinks.retain(|(_, sink)| sink(data));
+    }
+
+    /// How long the terminal has written nothing; `None` before its first
+    /// byte or for an unknown id. Read-only observation of the output stream.
+    pub fn output_idle(&self, id: &str) -> Option<std::time::Duration> {
+        self.entries.lock().get(id)?.last_output.map(|t| t.elapsed())
     }
 
     /// Register a live sink. The current scrollback is delivered through the

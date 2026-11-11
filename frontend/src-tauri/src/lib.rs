@@ -549,7 +549,9 @@ pub fn run() {
             std::thread::Builder::new()
                 .name("cortx-terminal-agents".into())
                 .spawn(move || loop {
-                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    // 3 s: a permission prompt is only recognised by the
+                    // agent going quiet, so this poll is what notices it.
+                    std::thread::sleep(std::time::Duration::from_secs(3));
                     emit_terminal_agents(&ta_app, &ta_poll);
                 })
                 .ok();

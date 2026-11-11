@@ -151,6 +151,87 @@ pub struct TerminalAgent {
     /// Claude Code `kind` (`interactive`, …).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// What the session is at, read from its transcript (Claude Code).
+    #[serde(flatten, default)]
+    pub details: AgentDetails,
+    /// The agent is stopped on you: a question, a plan to approve, or a
+    /// permission prompt. See [`mark_needs_input`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_input: Option<NeedsInput>,
+}
+
+/// What a live session is doing, from the files the agent writes itself —
+/// CortX only reads them, it never sends the agent anything.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDetails {
+    /// Last `tool_use` that has no `tool_result` yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_tool: Option<String>,
+    /// Last thing you asked (one line, shortened).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_prompt: Option<String>,
+    /// Last text the agent answered (one line, shortened).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_reply: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Epoch millis of the last transcript entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity: Option<i64>,
+}
+
+/// Why an agent is waiting on you.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NeedsInput {
+    /// It asked you something (`AskUserQuestion`) or wants a plan approved
+    /// (`ExitPlanMode`).
+    Question,
+    /// A tool call is waiting for your permission.
+    Permission,
+}
+
+/// Tools that, when pending, are by nature a question to you.
+const QUESTION_TOOLS: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
+
+/// How long an agent with a pending tool call has to stay silent before it
+/// counts as stopped on a permission prompt. A tool that is running keeps the
+/// agent's spinner (and its timer) redrawing several times a second; a prompt
+/// is drawn once.
+pub const PERMISSION_SILENCE: std::time::Duration = std::time::Duration::from_millis(2500);
+
+/// Decide, for each agent, whether it is stopped on you. `output_idle` gives
+/// how long a terminal has printed nothing (`None` = unknown).
+///
+/// - a pending question tool: a question, straight away;
+/// - turn reported idle with a tool call still pending: a permission prompt;
+/// - turn running, a tool call pending, and the terminal silent for
+///   [`PERMISSION_SILENCE`]: a permission prompt.
+///
+/// Pure observation — nothing here writes to the agent or its files.
+pub fn mark_needs_input(agents: &mut [TerminalAgent], output_idle: impl Fn(&str) -> Option<std::time::Duration>) {
+    for agent in agents.iter_mut() {
+        agent.needs_input = None;
+        let Some(tool) = agent.details.pending_tool.as_deref() else {
+            continue;
+        };
+        if QUESTION_TOOLS.contains(&tool) {
+            agent.needs_input = Some(NeedsInput::Question);
+            continue;
+        }
+        match agent.state {
+            AgentState::Waiting => agent.needs_input = Some(NeedsInput::Permission),
+            AgentState::Running => {
+                if output_idle(&agent.terminal_id).is_some_and(|d| d >= PERMISSION_SILENCE) {
+                    agent.needs_input = Some(NeedsInput::Permission);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// One agent process, before it is attached to a terminal.
@@ -163,6 +244,7 @@ pub struct AgentCandidate {
     pub name: Option<String>,
     pub cwd: Option<String>,
     pub kind: Option<String>,
+    pub details: AgentDetails,
 }
 
 /// Minimal view of the OS process table: parent links and executable names.
@@ -403,6 +485,8 @@ pub fn correlate(
             name: c.name.clone(),
             cwd: c.cwd.clone(),
             kind: c.kind.clone(),
+            details: c.details.clone(),
+            needs_input: None,
         })
         .collect();
     // Stable order so the GUI can compare two payloads for equality.
@@ -454,6 +538,7 @@ mod tests {
             name: Some("Terminal agents".into()),
             cwd: Some("C:/code/cortx".into()),
             kind: Some("interactive".into()),
+            details: AgentDetails::default(),
         }
     }
 
@@ -466,6 +551,7 @@ mod tests {
             name: None,
             cwd: None,
             kind: None,
+            details: AgentDetails::default(),
         }
     }
 
@@ -674,5 +760,61 @@ mod tests {
             out.iter().map(|a| a.terminal_id.as_str()).collect::<Vec<_>>(),
             vec!["shell:a", "shell:b"]
         );
+    }
+
+    fn live_agent(state: AgentState, tool: Option<&str>) -> TerminalAgent {
+        TerminalAgent {
+            terminal_id: "shell:a".into(),
+            provider: AgentProvider::ClaudeCode,
+            state,
+            pid: 1,
+            session_id: None,
+            name: None,
+            cwd: None,
+            kind: None,
+            details: AgentDetails { pending_tool: tool.map(Into::into), ..Default::default() },
+            needs_input: None,
+        }
+    }
+
+    fn needs(agent: TerminalAgent, idle_ms: Option<u64>) -> Option<NeedsInput> {
+        let mut agents = vec![agent];
+        mark_needs_input(&mut agents, |_| idle_ms.map(std::time::Duration::from_millis));
+        agents[0].needs_input
+    }
+
+    #[test]
+    fn a_pending_question_needs_you_at_once() {
+        assert_eq!(needs(live_agent(AgentState::Running, Some("AskUserQuestion")), Some(0)), Some(NeedsInput::Question));
+        assert_eq!(needs(live_agent(AgentState::Running, Some("ExitPlanMode")), None), Some(NeedsInput::Question));
+    }
+
+    #[test]
+    fn a_tool_call_waits_for_permission_once_the_terminal_goes_quiet() {
+        // Spinner still redrawing: the tool is running.
+        assert_eq!(needs(live_agent(AgentState::Running, Some("Bash")), Some(300)), None);
+        // Silent: the prompt is drawn and waits.
+        assert_eq!(needs(live_agent(AgentState::Running, Some("Bash")), Some(4000)), Some(NeedsInput::Permission));
+        // Turn reported idle with the call still pending.
+        assert_eq!(needs(live_agent(AgentState::Waiting, Some("Edit")), None), Some(NeedsInput::Permission));
+    }
+
+    #[test]
+    fn nothing_pending_needs_nothing() {
+        assert_eq!(needs(live_agent(AgentState::Running, None), Some(60_000)), None);
+        assert_eq!(needs(live_agent(AgentState::Waiting, None), None), None);
+        assert_eq!(needs(live_agent(AgentState::Unknown, Some("Bash")), Some(60_000)), None);
+    }
+
+    #[test]
+    fn details_ride_along_in_camel_case() {
+        let mut a = live_agent(AgentState::Running, Some("Bash"));
+        a.details.last_prompt = Some("fix it".into());
+        a.needs_input = Some(NeedsInput::Permission);
+        let json = serde_json::to_value(&a).unwrap();
+        assert_eq!(json["pendingTool"], "Bash");
+        assert_eq!(json["lastPrompt"], "fix it");
+        assert_eq!(json["needsInput"], "permission");
+        assert!(json.get("model").is_none());
     }
 }

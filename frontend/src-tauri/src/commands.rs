@@ -2903,7 +2903,12 @@ pub fn compute_terminal_agents(
     state: &AppState,
 ) -> Vec<cortx_core::agents::terminal_link::TerminalAgent> {
     let terminals = state.process_manager.pty_processes();
-    state.agents.terminal_agents(&terminals)
+    let mut agents = state.agents.terminal_agents(&terminals);
+    // Stopped on a question or a permission prompt? Read off the transcript
+    // and the terminal's own output — nothing is ever sent to the agent.
+    let hub = state.process_manager.terminal_hub();
+    cortx_core::agents::terminal_link::mark_needs_input(&mut agents, |id| hub.output_idle(id));
+    agents
 }
 
 /// Bring the main window up and ask it to open a session in the Agents

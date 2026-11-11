@@ -975,6 +975,7 @@ impl AgentIndex {
             let live = self.live.read();
             if !live.is_empty() {
                 let titles = self.claude_live_titles(&live);
+                let mut details = self.claude_live_details(&live);
                 for (id, entry) in live.iter() {
                     let name = entry
                         .custom_name()
@@ -988,6 +989,7 @@ impl AgentIndex {
                         name,
                         cwd: Some(display_path(&entry.cwd)).filter(|c| !c.is_empty()),
                         kind: entry.kind.clone(),
+                        details: details.remove(id).unwrap_or_default(),
                     });
                 }
             }
@@ -1005,6 +1007,7 @@ impl AgentIndex {
                     name: None,
                     cwd: None,
                     kind: None,
+                    details: Default::default(),
                 });
             }
         }
@@ -1067,6 +1070,49 @@ impl AgentIndex {
             if let Some(title) = title {
                 out.insert(id, title);
             }
+        }
+        out
+    }
+
+    /// What each live Claude session is at, from its transcript summary (the
+    /// same scan the Agents section reads): pending tool, last exchange,
+    /// branch, model, last activity.
+    fn claude_live_details(
+        &self,
+        live: &HashMap<String, claude_code::LiveEntry>,
+    ) -> HashMap<String, terminal_link::AgentDetails> {
+        const LINE: usize = 160;
+        let cache = self.cache.read();
+        let mut out = HashMap::new();
+        for (path, entry) in cache.iter(AgentProvider::ClaudeCode) {
+            let s = &entry.summary;
+            let id = match s.session_id.clone().or_else(|| {
+                Path::new(path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+            }) {
+                Some(id) => id,
+                None => continue,
+            };
+            if !live.contains_key(&id) {
+                continue;
+            }
+            let line = |t: &Option<String>| {
+                t.as_deref()
+                    .map(|t| single_line(t, LINE))
+                    .filter(|t| !t.is_empty())
+            };
+            out.insert(
+                id,
+                terminal_link::AgentDetails {
+                    pending_tool: s.current_tool.clone(),
+                    last_prompt: line(&s.last_prompt),
+                    last_reply: line(&s.last_assistant_text),
+                    git_branch: s.git_branch.clone().filter(|b| !b.is_empty()),
+                    model: s.model.clone().filter(|m| !m.is_empty()),
+                    last_activity: s.last_timestamp.map(|t| t.timestamp_millis()),
+                },
+            );
         }
         out
     }
