@@ -133,6 +133,7 @@ const BACKEND_DEFAULTS = {
   copyOnSelect: true,
   ctrlTabBehavior: 'sequential',
   followProjectOnCd: true,
+  gridTilesInteractive: true,
   cursorBlink: true,
   cursorInactiveStyle: 'outline',
   cursorStyle: 'bar',

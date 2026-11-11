@@ -131,6 +131,10 @@ export interface TerminalConfig {
    *  root. Off leaves a tab in the group it was opened in. Default true.
    *  A tab moved by hand stops following until it is set back to Automatic. */
   followProjectOnCd?: boolean;
+  /** Grid view (ticket #55): type, select and scroll inside a tile without
+   *  opening it — the tile's header opens it. Off, a click anywhere on a tile
+   *  only opens it, so nothing reaches an agent you are watching. Default true. */
+  gridTilesInteractive?: boolean;
   /** Ask before closing a terminal — or quitting CortX — while a command is
    *  running in it (nothing running = closes straight away). Default true. */
   confirmCloseRunning?: boolean;

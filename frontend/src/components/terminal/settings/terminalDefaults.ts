@@ -435,6 +435,7 @@ export const TERMINAL_SETTINGS = {
   tabsPlacement: { label: 'Terminal window tabs', group: 'tabs', fallback: FROM_RUST },
   ctrlTabBehavior: { label: 'Ctrl+Tab goes to', group: 'tabs', fallback: FROM_RUST },
   followProjectOnCd: { label: 'Tabs follow the working directory', group: 'tabs', fallback: FROM_RUST },
+  gridTilesInteractive: { label: 'Type into grid tiles', group: 'tabs', fallback: FROM_RUST },
   'tabDisplay.cwd': tabDisplayMeta('cwd', 'Tab shows the directory'),
   'tabDisplay.command': tabDisplayMeta('command', 'Tab shows the running command'),
   'tabDisplay.status': tabDisplayMeta('status', 'Tab shows the status'),

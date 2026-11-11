@@ -415,6 +415,12 @@ pub struct TerminalConfig {
     /// the frontend reads this.
     #[serde(default = "default_true")]
     pub follow_project_on_cd: bool,
+    /// Grid view of the Terminal window (ticket #55): the tiles take the
+    /// keyboard and the mouse, so you can type into one without opening it
+    /// (its header opens it). Off, a click anywhere on a tile only opens it.
+    /// Only the frontend reads this.
+    #[serde(default = "default_true")]
+    pub grid_tiles_interactive: bool,
     /// Font of every terminal (dock and window). None = bundled default stack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
@@ -1206,6 +1212,7 @@ impl Default for TerminalConfig {
             tabs_placement: TabsPlacement::default(),
             ctrl_tab_behavior: CtrlTabBehavior::default(),
             follow_project_on_cd: true,
+            grid_tiles_interactive: true,
             font_family: None,
             font_size: None,
             window_zoom: 0,

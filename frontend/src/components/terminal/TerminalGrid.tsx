@@ -34,9 +34,13 @@ import {
  * tab's split tree exactly as the usual view does (the xterm instances
  * outlive any component, see `XtermView`), so output keeps streaming in. The
  * pane is resized to its tile like any pane, which is what lets an agent's
- * interface reflow to it. A tile does not take the keyboard or the mouse —
- * a transparent layer over it turns every click into "open this one", so a
- * stray click can never type into, select in or scroll an agent you are only
+ * interface reflow to it.
+ *
+ * Whether a tile takes the keyboard and the mouse is a setting,
+ * `terminal.gridTilesInteractive` (on by default). On, a tile is a working
+ * terminal — click into it to type, select or scroll — and its header opens
+ * it. Off, a transparent layer over the whole tile turns every click into
+ * "open this one", so a stray click can never reach an agent you are only
  * watching.
  */
 export function TerminalGrid({ tabs, items, showProject }: { tabs: TerminalTab[]; items: ItemMap; showProject: boolean }) {
@@ -54,6 +58,7 @@ export function TerminalGrid({ tabs, items, showProject }: { tabs: TerminalTab[]
   }, []);
   const { columns, rows } = gridShape(tabs.length, size.width, size.height);
   const activeTabId = useTerminalLayoutStore((s) => s.doc.window.activeTabId);
+  const interactive = useAppStore((s) => s.settings?.terminal.gridTilesInteractive ?? true);
 
   return (
     <div ref={ref} className="min-h-0 min-w-0 flex-1 overflow-y-auto p-2">
@@ -65,7 +70,14 @@ export function TerminalGrid({ tabs, items, showProject }: { tabs: TerminalTab[]
         }}
       >
         {tabs.map((tab) => (
-          <GridTile key={tab.id} tab={tab} items={items} current={tab.id === activeTabId} showProject={showProject} />
+          <GridTile
+            key={tab.id}
+            tab={tab}
+            items={items}
+            current={tab.id === activeTabId}
+            showProject={showProject}
+            interactive={interactive}
+          />
         ))}
       </div>
     </div>
@@ -78,7 +90,20 @@ function openTile(tabId: string) {
   useTerminalGridStore.getState().zoom();
 }
 
-function GridTile({ tab, items, current, showProject }: { tab: TerminalTab; items: ItemMap; current: boolean; showProject: boolean }) {
+function GridTile({
+  tab,
+  items,
+  current,
+  showProject,
+  interactive,
+}: {
+  tab: TerminalTab;
+  items: ItemMap;
+  current: boolean;
+  showProject: boolean;
+  /** The tile takes the keyboard and the mouse; only its header opens it. */
+  interactive: boolean;
+}) {
   const projects = useAppStore((s) => s.projects);
   const display = useTabDisplay();
   const markTerminalSeen = useAppStore((s) => s.markTerminalSeen);
@@ -136,14 +161,19 @@ function GridTile({ tab, items, current, showProject }: { tab: TerminalTab; item
       <div className="relative flex min-h-0 flex-1">
         <SplitTree tab={tab} items={items} isActiveTab={false} />
       </div>
-      {/* Over the whole tile, header included: one click opens it, whatever
-          it lands on, and nothing underneath ever gets the event. */}
+      {/* Interactive tiles: over the header only, so the terminal below takes
+          its clicks and keys and the header opens the tile. Watch-only tiles:
+          over the whole tile — one click opens it, whatever it lands on, and
+          nothing underneath ever gets the event. */}
       <button
         type="button"
         onClick={open}
         aria-label={`Open ${title}`}
         title={`Open ${title}`}
-        className="absolute inset-0 z-30 cursor-zoom-in rounded-[var(--rad-sm)] bg-transparent transition-colors hover:bg-foreground/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        className={cn(
+          'absolute inset-x-0 top-0 z-30 cursor-zoom-in bg-transparent transition-colors hover:bg-foreground/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+          interactive ? 'h-7 rounded-t-[var(--rad-sm)]' : 'bottom-0 rounded-[var(--rad-sm)]'
+        )}
       />
     </div>
   );
