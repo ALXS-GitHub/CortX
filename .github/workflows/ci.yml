@@ -68,9 +68,15 @@ jobs:
       # bare runner. Same list as `release.yml` installs for ubuntu-22.04 —
       # deliberately copied rather than reasoned about again.
       - name: Install Linux build deps
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          # Same mirror switch as release.yml: Azure's Ubuntu mirror can stop
+          # answering and hang the step for hours.
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+          sudo apt-get $APT update
+          sudo apt-get $APT install -y \
             libwebkit2gtk-4.1-dev \
             librsvg2-dev \
             patchelf \

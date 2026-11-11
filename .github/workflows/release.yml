@@ -7,7 +7,54 @@ on:
   workflow_dispatch:
 
 jobs:
+  # One job creates the release (or finds it), then every build uploads into
+  # that one. Letting each build create it raced: two of them found no release
+  # for the tag at the same moment and each made its own draft, so a version
+  # ended up split over two releases (0.15.9, 0.15.12). Publishing a draft
+  # pushes its tag and runs this workflow again: the release is found, not
+  # created twice.
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or find the release of this version
+        id: release
+        uses: actions/github-script@v7
+        with:
+          result-encoding: string
+          script: |
+            const fs = require('fs');
+            const { version } = JSON.parse(fs.readFileSync('frontend/src-tauri/tauri.conf.json', 'utf8'));
+            const tag = `v${version}`;
+            const { owner, repo } = context.repo;
+            const releases = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 });
+            // A published release of the tag first, then a draft one.
+            const mine = releases.filter((r) => r.tag_name === tag).sort((a, b) => Number(a.draft) - Number(b.draft));
+            if (mine.length > 0) {
+              core.info(`Uploading into the existing release ${mine[0].name} (${mine[0].draft ? 'draft' : 'published'}).`);
+              return String(mine[0].id);
+            }
+            const { data } = await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              target_commitish: context.sha,
+              name: `CortX ${tag}`,
+              body: 'See the assets to download and install this version.',
+              draft: true,
+              prerelease: false,
+            });
+            core.info(`Created the draft release ${data.name}.`);
+            return String(data.id);
+
   publish-tauri:
+    needs: create-release
+    timeout-minutes: 60
     permissions:
       contents: write
 
@@ -39,9 +86,17 @@ jobs:
 
       - name: Install Linux build deps
         if: matrix.platform == 'ubuntu-22.04'
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          # The runners point apt at Azure's mirror of Ubuntu, which sometimes
+          # stops answering: every package then times out one after the other
+          # and the step hangs for hours (0.15.12). The main archive instead,
+          # with retries and a short timeout so a bad mirror fails fast.
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+          sudo apt-get $APT update
+          sudo apt-get $APT install -y \
             libwebkit2gtk-4.1-dev \
             librsvg2-dev \
             patchelf \
@@ -97,9 +152,6 @@ jobs:
         with:
           projectPath: frontend
           tauriScript: bunx tauri
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           tagName: v__VERSION__
-          releaseName: 'CortX v__VERSION__'
-          releaseBody: 'See the assets to download and install this version.'
-          releaseDraft: true
-          prerelease: false
           args: ${{ matrix.args }}
