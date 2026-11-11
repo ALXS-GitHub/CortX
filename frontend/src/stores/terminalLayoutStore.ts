@@ -16,6 +16,7 @@ import {
   tabContainingTerminal,
   tabsInScope,
   tabInScope,
+  scopeFollowingTab,
   tabIsLocal,
   insertTabAfter,
   nextTabOrder,
@@ -395,14 +396,23 @@ function followProjects(layout: TerminalWindowLayout, terminalIds: readonly stri
   }
   if (touched.size === 0) return layout;
   let changed = false;
+  let active: TerminalTab | null = null;
   const tabs = layout.tabs.map((tab) => {
     if (!touched.has(tab.id)) return tab;
     const workspaceId = workspaceFromCwds(tab, projects);
     if (!workspaceId || workspaceId === tab.workspaceId) return tab;
     changed = true;
-    return { ...tab, workspaceId };
+    const moved = { ...tab, workspaceId };
+    if (tab.id === layout.activeTabId && tabIsLocal(tab)) active = moved;
+    return moved;
   });
-  return changed ? { ...layout, tabs } : layout;
+  if (!changed) return layout;
+  // The tab on screen took the window's project with it (ticket #54): a window
+  // scoped to the project you left would otherwise drop the very tab you are
+  // typing in. Only the window showing it does this — `doc.window.scope` is
+  // that window's own, and only the window that shows a pane writes its cwd.
+  const scope = active ? scopeFollowingTab(layout.scope, active) : null;
+  return scope ? { ...layout, tabs, scope } : { ...layout, tabs };
 }
 
 export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => ({
@@ -813,9 +823,15 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
       get().commit((d) => {
         let win = d.window;
         for (const [id, dir] of updates) win = setLeafCwd(win, id, dir);
-        if (win === d.window) return d;
+        // The vote is taken on every report, not only when a directory
+        // changed (ticket #54). The shell repeats its cwd at each prompt, so a
+        // move that could not be made when the `cd` landed — the projects not
+        // loaded yet, a write from another window landing on top, a project
+        // added or re-rooted since — is made at the next prompt instead of
+        // waiting for the next `cd`. Nothing moved: `followProjects` returns
+        // the same layout and nothing is written.
         win = followProjects(win, updates.map(([id]) => id));
-        return { ...d, window: win };
+        return win === d.window ? d : { ...d, window: win };
       });
     }, 500);
   },

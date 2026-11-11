@@ -362,6 +362,22 @@ export interface ProjectRoot {
 }
 
 /**
+ * A path in the one spelling `projectIdForPath` compares: forward slashes, no
+ * trailing slash, lower case, and a drive written `c:` however the shell put
+ * it — Git Bash and MSYS say `/c/Users/…`, Cygwin `/cygdrive/c/…`, WSL
+ * `/mnt/c/…`, while a project's root is stored as `C:\Users\…`. Both sides go
+ * through it, so a Unix path that merely looks like one is still compared
+ * with itself.
+ */
+function comparablePath(path: string): string {
+  return path
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .toLowerCase()
+    .replace(/^\/(?:cygdrive\/|mnt\/)?([a-z])(?=\/|$)/, '$1:');
+}
+
+/**
  * The project whose root contains `path`, or null for a directory that is in
  * none of them.
  *
@@ -373,11 +389,11 @@ export interface ProjectRoot {
  */
 export function projectIdForPath(path: string | null | undefined, projects: readonly ProjectRoot[]): string | null {
   if (!path) return null;
-  const needle = path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const needle = comparablePath(path);
   if (!needle) return null;
   let best: { id: string; length: number } | null = null;
   for (const project of projects) {
-    const root = project.rootPath?.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    const root = project.rootPath ? comparablePath(project.rootPath) : '';
     if (!root) continue;
     if (needle !== root && !needle.startsWith(`${root}/`)) continue;
     if (!best || root.length > best.length) best = { id: project.id, length: root.length };
@@ -406,6 +422,23 @@ export function workspaceFromCwds(tab: TerminalTab, projects: readonly ProjectRo
     else if (vote !== workspaceId) return null;
   }
   return vote ?? null;
+}
+
+/**
+ * The scope a window should show once its active tab has followed a `cd` into
+ * another group (ticket #54): the window is on a project, the tab it is
+ * showing now belongs to another one — so the window goes with it, to that
+ * project, or to Global when the tab left every project. Without this the tab
+ * you are typing in moved to a group the window does not show.
+ *
+ * Only a project scope moves: Global already shows the tab, and the Agents
+ * scope is not about projects. `null` = keep the scope as it is.
+ */
+export function scopeFollowingTab(scope: TerminalScope, tab: TerminalTab): TerminalScope | null {
+  if (typeof scope === 'string' || isAgentsScope(scope)) return null;
+  if (tab.workspaceId === workspaceIdForProject(scope.projectId)) return null;
+  const projectId = projectIdOfWorkspace(tab.workspaceId);
+  return projectId ? { projectId } : 'global';
 }
 
 export function scopeEquals(a: TerminalScope, b: TerminalScope): boolean {
