@@ -20,7 +20,7 @@ import { TerminalSettingsView } from '@/components/terminal/settings/TerminalSet
 import { OPEN_TERMINAL_SETTINGS_EVENT, openTerminalSettingsPanel } from '@/components/terminal/settings/meta';
 import { flushTerminalSettings } from '@/components/terminal/settings/useTerminalSettings';
 import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
-import { TERMINAL_EVENTS, openNewTerminal } from '@/components/terminal/actions';
+import { TERMINAL_EVENTS, closeTabs, openNewTerminal } from '@/components/terminal/actions';
 import { useItemMap } from '@/components/terminal/model';
 import { useTerminalFileDrop, useTerminalWheelZoom, useTerminalWindowShortcuts } from '@/components/terminal/useTerminalWindowShortcuts';
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
@@ -29,7 +29,12 @@ import { useAppStore } from '@/stores/appStore';
 import { collectLeaves, findLeaf, PRIMARY_TERMINAL_WINDOW, tabIsLocal, tabsInScope, terminalWindowName } from '@/lib/terminalLayout';
 import { fitTerminal, focusTerminal, listTerminalSessionIds } from '@/lib/terminalSessions';
 import { cn } from '@/lib/utils';
-import { openTerminalWindow, REVEAL_SIBLINGS_EVENT, siblingWindowsWithTabs } from '@/components/terminal/terminalWindows';
+import {
+  hideTerminalWindow,
+  openTerminalWindow,
+  REVEAL_SIBLINGS_EVENT,
+  siblingWindowsWithTabs,
+} from '@/components/terminal/terminalWindows';
 import { OtherWindowsMenu } from '@/components/terminal/OtherWindowsMenu';
 import { restoreTerminalSessions } from '@/lib/terminalRestore';
 import { DetachDropHint } from '@/components/terminal/DetachDropHint';
@@ -62,6 +67,33 @@ const WINDOW_NAME = terminalWindowName(TERMINAL_WINDOW_ID);
  * if a detached one is still up.
  */
 const hidden = { self: false };
+
+/**
+ * The X of this window, the title bar's or the system's (Alt+F4, the red
+ * button on a Mac).
+ *
+ * The first window only hides: its shells keep running, and it is where the
+ * Terminal comes back. A detached one (`terminal-2`…) really closes (ticket
+ * #53): its own tabs go with it — behind the usual confirmation when a
+ * command runs in one of them — and the window is hidden once they are gone.
+ * It used to hide with its tabs still in it, so it showed as open everywhere
+ * and came back every time the Terminal was opened, with no way to be rid of
+ * it short of closing its tabs one by one.
+ */
+async function closeThisWindow(): Promise<void> {
+  if (!IS_PRIMARY_WINDOW) {
+    const own = useTerminalLayoutStore.getState().doc.window.tabs.filter(tabIsLocal).map((t) => t.id);
+    const subject =
+      own.length === 1 ? `Close ${WINDOW_NAME} and its terminal` : `Close ${WINDOW_NAME} and its ${own.length} terminals`;
+    if (own.length > 0 && !(await closeTabs(own, subject))) return;
+  }
+  // Recorded before the window goes: `openWindows` is what the next start
+  // reads to decide which Terminal windows to bring back.
+  hidden.self = true;
+  useTerminalLayoutStore.getState().markWindowClosed(TERMINAL_WINDOW_ID);
+  if (IS_PRIMARY_WINDOW) await getCurrentWindow().close();
+  else await hideTerminalWindow();
+}
 
 /**
  * Root of a Terminal window (DEV-13 P1). Since ticket #20 there can be
@@ -146,9 +178,14 @@ export function TerminalWindow() {
       })
       .then((u) => (cancelled ? u() : (unlistenFocus = u)));
     // Raw listener on purpose: `onCloseRequested` destroys the window when the
-    // handler does not prevent it, and CortX only ever hides it.
+    // handler does not prevent it, and CortX only ever hides it. The backend
+    // has already hidden the first window; a detached one it leaves to us.
     win
       .listen('tauri://close-requested', () => {
+        if (!IS_PRIMARY_WINDOW) {
+          void closeThisWindow();
+          return;
+        }
         hidden.self = true;
         useTerminalLayoutStore.getState().markWindowClosed(TERMINAL_WINDOW_ID);
       })
@@ -335,11 +372,7 @@ export function TerminalWindow() {
       return;
     }
     if (!IS_PRIMARY_WINDOW && !hasOwnTabs) {
-      const timer = window.setTimeout(() => {
-        hidden.self = true;
-        useTerminalLayoutStore.getState().markWindowClosed(TERMINAL_WINDOW_ID);
-        void getCurrentWindow().close();
-      }, 150);
+      const timer = window.setTimeout(() => void closeThisWindow(), 150);
       return () => window.clearTimeout(timer);
     }
     if (autoOpenedRef.current) return;
@@ -378,14 +411,8 @@ export function TerminalWindow() {
               </Button>
             </>
           }
-          closeLabel="Close window"
-          onClose={() => {
-            // Recorded before the window goes: `openWindows` is what the next
-            // start reads to decide which Terminal windows to bring back.
-            hidden.self = true;
-            useTerminalLayoutStore.getState().markWindowClosed(TERMINAL_WINDOW_ID);
-            void getCurrentWindow().close();
-          }}
+          closeLabel={IS_PRIMARY_WINDOW ? 'Close window' : 'Close this window and its terminals'}
+          onClose={() => void closeThisWindow()}
         />
         {!ready ? (
           <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-xs text-faint">

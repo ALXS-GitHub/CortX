@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { emitTo } from '@tauri-apps/api/event';
 import { getAllWebviewWindows } from '@tauri-apps/api/webviewWindow';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   PRIMARY_TERMINAL_WINDOW,
   terminalWindowIdOf,
@@ -89,6 +90,21 @@ export async function openTerminalWindow(
     // A window that was just created is not listening yet; it brings its
     // siblings up on boot instead (see `TerminalWindow`).
     await emitTo(PRIMARY_TERMINAL_WINDOW, REVEAL_SIBLINGS_EVENT).catch(() => {});
+  }
+}
+
+/**
+ * Hide the calling Terminal window the way its X does, through the backend
+ * (which also keeps `windowOpen` true while another Terminal window is up).
+ * A detached window calls it once its own tabs are gone (ticket #53): the
+ * backend leaves those up on a close request so that the webview can ask
+ * first. An older binary without the command still hides it on `close()`.
+ */
+export async function hideTerminalWindow(): Promise<void> {
+  try {
+    await invoke('hide_terminal_window');
+  } catch {
+    await getCurrentWindow().close();
   }
 }
 

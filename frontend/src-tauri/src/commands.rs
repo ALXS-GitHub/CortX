@@ -1014,6 +1014,18 @@ pub fn save_window_state(app: tauri::AppHandle) {
     crate::save_window_state(&app);
 }
 
+/// Hide the Terminal window that calls it, exactly as its X would. A detached
+/// window calls it once its own tabs are closed (ticket #53): the backend no
+/// longer hides those on a close request, so the webview can ask first.
+#[tauri::command]
+pub fn hide_terminal_window(app: tauri::AppHandle, window: tauri::Window) -> Result<(), String> {
+    if !crate::is_terminal_window_label(window.label()) {
+        return Err(format!("Not a Terminal window: {}", window.label()));
+    }
+    crate::hide_window(&app, &window);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn validate_path(path: String) -> bool {
     Path::new(&path).exists()

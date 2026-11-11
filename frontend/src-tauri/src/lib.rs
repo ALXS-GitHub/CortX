@@ -88,6 +88,32 @@ pub fn is_terminal_window_label(label: &str) -> bool {
     label == TERMINAL_WINDOW_LABEL || label.starts_with("terminal-")
 }
 
+/// A Terminal window a tab was detached into (`terminal-2`…), not the first.
+pub fn is_detached_terminal_window_label(label: &str) -> bool {
+    label != TERMINAL_WINDOW_LABEL && is_terminal_window_label(label)
+}
+
+/// What the X does when the app is not quitting: hide the window, which keeps
+/// its webview and its shells. The tray icon keeps the app alive and the
+/// hotkey active; services stay running.
+pub fn hide_window(app: &AppHandle, window: &tauri::Window) {
+    // Before hiding: a hidden window is where the next launch starts from if
+    // this process never exits cleanly.
+    save_window_state(app);
+    let _ = window.hide();
+    // `windowOpen` says "reopen a Terminal window next time", so it may only
+    // be cleared once the *last* one is gone — a tab detached into
+    // `terminal-2` still counts.
+    if is_terminal_window_label(window.label()) {
+        let still_open = app.webview_windows().iter().any(|(l, w)| {
+            l != window.label() && is_terminal_window_label(l) && w.is_visible().unwrap_or(false)
+        });
+        if !still_open {
+            set_terminal_window_open(app, false);
+        }
+    }
+}
+
 /// Open, or focus, one Terminal window. `position` (logical screen pixels)
 /// places a brand-new window where a dragged tab was dropped.
 pub fn open_terminal_window_labelled(
@@ -617,26 +643,19 @@ pub fn run() {
                 // active. Services stay running.
                 if !is_quitting {
                     api.prevent_close();
-                    // Before hiding: a hidden window is where the next
-                    // launch starts from if this process never exits cleanly.
-                    save_window_state(&app_handle);
-                    let _ = window.hide();
-                    // `windowOpen` says "reopen a Terminal window next time",
-                    // so it may only be cleared once the *last* one is gone —
-                    // a tab detached into `terminal-2` still counts.
-                    if is_terminal_window_label(window.label()) {
-                        let still_open = app_handle
-                            .webview_windows()
-                            .iter()
-                            .any(|(l, w)| {
-                                l != window.label()
-                                    && is_terminal_window_label(l)
-                                    && w.is_visible().unwrap_or(false)
-                            });
-                        if !still_open {
-                            set_terminal_window_open(&app_handle, false);
-                        }
+                    // A detached Terminal window (`terminal-2`…) that is
+                    // closed really closes: its own tabs go with it, behind
+                    // the usual confirmation when something runs (ticket
+                    // #53). That is the webview's call — it knows the tabs
+                    // and shows the dialog — so the window stays up here and
+                    // the webview, which receives `tauri://close-requested`
+                    // too, hides it through `hide_terminal_window` once the
+                    // tabs are gone. Only the first one keeps its shells
+                    // running behind a plain hide.
+                    if is_detached_terminal_window_label(window.label()) {
+                        return;
                     }
+                    hide_window(&app_handle, window);
                     return;
                 }
 
@@ -772,6 +791,7 @@ pub fn run() {
             commands::open_in_editor,
             commands::open_terminal_path,
             commands::save_window_state,
+            commands::hide_terminal_window,
             commands::reveal_in_file_manager,
             commands::validate_path,
             // Environment file commands
