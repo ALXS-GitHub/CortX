@@ -23,8 +23,9 @@ use ratatui::prelude::*;
 
 use cortx_core::file_watcher;
 use cortx_core::models::{
-    App as CoreApp, GlobalScript, ImportOptions, Project,
-    Script, Service, ShellAlias, StatusDefinition, TagDefinition, Tool,
+    opt_text, opt_text_patch, App as CoreApp, AppSettings, GlobalScript, ImportOptions,
+    ParameterPreset, Project, Script, ScriptParameter, Service, ShellAlias, StatusDefinition,
+    TagDefinition, Tool,
 };
 use cortx_core::process_manager::{ProcessManager, RuntimeMeta};
 use cortx_core::runtime_state::{
@@ -329,8 +330,24 @@ enum ScriptAction {
         /// Status
         #[arg(long)]
         status: Option<String>,
+        /// Environment variables as KEY=VALUE pairs (repeatable)
+        #[arg(long)]
+        env: Option<Vec<String>>,
+        /// Parameters as a JSON array of parameter objects, e.g.
+        /// '[{"name":"input","paramType":"path","longFlag":"--input","required":true}]'.
+        /// paramType: string, bool, number, enum, path.
+        #[arg(long, conflicts_with = "detect_params")]
+        parameters: Option<String>,
+        /// Auto-detect parameters by running `<command> --help` and parsing its output
+        #[arg(long)]
+        detect_params: bool,
+        /// Parameter presets as a JSON array, e.g.
+        /// '[{"name":"fast","values":{"n":"5"}}]'. `id` is generated when omitted.
+        #[arg(long)]
+        presets: Option<String>,
     },
-    /// Update an existing global script
+    /// Update an existing global script. An empty value clears an optional
+    /// field, e.g. `--dir ""` or `--tag ""`.
     Update {
         /// Script name or ID
         name_or_id: String,
@@ -340,24 +357,51 @@ enum ScriptAction {
         /// New command
         #[arg(long)]
         command: Option<String>,
-        /// Working directory
+        /// Working directory ("" clears)
         #[arg(long)]
         dir: Option<String>,
-        /// Absolute path to the script file
+        /// Absolute path to the script file ("" clears)
         #[arg(long)]
         script_path: Option<String>,
-        /// Display color (hex like "#eab308")
+        /// Display color (hex like "#eab308"; "" clears)
         #[arg(long)]
         color: Option<String>,
-        /// Tags (replaces all)
+        /// Tags (replaces all; --tag "" clears)
         #[arg(long)]
         tag: Option<Vec<String>>,
-        /// Description
+        /// Description ("" clears)
         #[arg(long)]
         description: Option<String>,
-        /// Status
+        /// Status ("" clears)
         #[arg(long)]
         status: Option<String>,
+        /// Environment variables as KEY=VALUE pairs (replaces all; --env "" clears)
+        #[arg(long)]
+        env: Option<Vec<String>>,
+        /// Parameters as a JSON array (replaces all; "" or "[]" clears). See `script create --help`.
+        #[arg(long, conflicts_with = "detect_params")]
+        parameters: Option<String>,
+        /// Re-detect parameters by running `<command> --help` (replaces all)
+        #[arg(long)]
+        detect_params: bool,
+        /// Parameter presets as a JSON array (replaces all; "" or "[]" clears)
+        #[arg(long)]
+        presets: Option<String>,
+        /// Default preset, by name or ID ("" clears)
+        #[arg(long)]
+        default_preset: Option<String>,
+        /// Mark/unmark as favorite (e.g. --favorite true)
+        #[arg(long)]
+        favorite: Option<bool>,
+    },
+    /// Detect a command's CLI parameters by running it with `--help`.
+    /// Prints what it finds; saves nothing (use `--detect-params` on create/update to save).
+    DetectParams {
+        /// Command to inspect. Use {{SCRIPT_FILE}} as a placeholder for --script-path.
+        command: String,
+        /// Absolute path to the script file, substituted into {{SCRIPT_FILE}}
+        #[arg(long)]
+        script_path: Option<String>,
     },
     /// Delete a global script
     Delete {
@@ -412,11 +456,16 @@ enum ProjectAction {
         /// Status
         #[arg(long)]
         status: Option<String>,
-        /// Toolbox documentation URL
+        /// Toolbox documentation URL (a path starting with "/" is joined to
+        /// the `toolboxBaseUrl` setting)
         #[arg(long)]
         toolbox_url: Option<String>,
+        /// Path to the project's image/logo
+        #[arg(long)]
+        image_path: Option<String>,
     },
-    /// Update an existing project
+    /// Update an existing project. An empty value clears an optional field,
+    /// e.g. `--toolbox-url ""`.
     Update {
         /// Project name or ID
         name_or_id: String,
@@ -426,18 +475,30 @@ enum ProjectAction {
         /// New root path
         #[arg(long)]
         path: Option<String>,
-        /// Description
+        /// Description ("" clears)
         #[arg(long)]
         description: Option<String>,
-        /// Tags (replaces all)
+        /// Tags (replaces all; --tag "" clears)
         #[arg(long)]
         tag: Option<Vec<String>>,
-        /// Status
+        /// Status ("" clears)
         #[arg(long)]
         status: Option<String>,
-        /// Toolbox documentation URL
+        /// Toolbox documentation URL ("" clears)
         #[arg(long)]
         toolbox_url: Option<String>,
+        /// Path to the project's image/logo ("" clears)
+        #[arg(long)]
+        image_path: Option<String>,
+        /// Mark/unmark as favorite (e.g. --favorite true)
+        #[arg(long)]
+        favorite: Option<bool>,
+    },
+    /// Manage the scripts of a project (list, add, update, delete).
+    /// Run them with `cortx project run`.
+    Script {
+        #[command(subcommand)]
+        action: ProjectScriptAction,
     },
     /// Delete a project
     Delete {
@@ -480,6 +541,82 @@ enum ProjectAction {
 }
 
 // ---------------------------------------------------------------------------
+// Project script subcommands
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum ProjectScriptAction {
+    /// List the scripts of a project
+    List {
+        /// Project name or ID
+        project: String,
+    },
+    /// Add a script to a project
+    Add {
+        /// Project name or ID
+        project: String,
+        /// Script name
+        name: String,
+        /// Command to run. Use {{SCRIPT_FILE}} as a placeholder substituted
+        /// by --script-path.
+        command: String,
+        /// Working directory, relative to the project root (default: ".")
+        #[arg(long)]
+        dir: Option<String>,
+        /// Description
+        #[arg(long)]
+        description: Option<String>,
+        /// Absolute path to the script file (substituted into {{SCRIPT_FILE}})
+        #[arg(long)]
+        script_path: Option<String>,
+        /// Color hex (e.g. "#eab308")
+        #[arg(long)]
+        color: Option<String>,
+        /// Service of the same project to link, by name or ID (repeatable)
+        #[arg(long)]
+        link_service: Option<Vec<String>>,
+    },
+    /// Update a project script. An empty value clears an optional field.
+    Update {
+        /// Project name or ID
+        project: String,
+        /// Script name or ID (within the project)
+        script: String,
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+        /// New command
+        #[arg(long)]
+        command: Option<String>,
+        /// Working directory, relative to the project root ("" = project root)
+        #[arg(long)]
+        dir: Option<String>,
+        /// Description ("" clears)
+        #[arg(long)]
+        description: Option<String>,
+        /// Absolute path to the script file ("" clears)
+        #[arg(long)]
+        script_path: Option<String>,
+        /// Color hex ("" clears)
+        #[arg(long)]
+        color: Option<String>,
+        /// Linked services, by name or ID (replaces all; --link-service "" clears)
+        #[arg(long)]
+        link_service: Option<Vec<String>>,
+    },
+    /// Delete a project script
+    Delete {
+        /// Project name or ID
+        project: String,
+        /// Script name or ID (within the project)
+        script: String,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Service subcommands
 // ---------------------------------------------------------------------------
 
@@ -506,14 +643,27 @@ enum ServiceAction {
         /// Default mode name
         #[arg(long)]
         default_mode: Option<String>,
+        /// Extra arguments appended to the command
+        #[arg(long, allow_hyphen_values = true)]
+        extra_args: Option<String>,
+        /// Arg preset definitions as name=args pairs (repeatable)
+        #[arg(long)]
+        arg_preset: Option<Vec<String>>,
+        /// Default arg preset name
+        #[arg(long)]
+        default_arg_preset: Option<String>,
         /// Port number
         #[arg(long)]
         port: Option<u16>,
         /// Color hex
         #[arg(long)]
         color: Option<String>,
+        /// Environment variables as KEY=VALUE pairs (repeatable)
+        #[arg(long)]
+        env: Option<Vec<String>>,
     },
-    /// Update a service
+    /// Update a service. An empty value clears an optional field, e.g.
+    /// `--port ""` or `--mode ""`.
     Update {
         /// Service ID
         id: String,
@@ -526,25 +676,28 @@ enum ServiceAction {
         /// Working directory
         #[arg(long)]
         dir: Option<String>,
-        /// Mode definitions as name=cmd pairs (replaces all modes)
+        /// Mode definitions as name=cmd pairs (replaces all modes; --mode "" clears)
         #[arg(long)]
         mode: Option<Vec<String>>,
-        /// Default mode name
+        /// Default mode name ("" clears)
         #[arg(long)]
         default_mode: Option<String>,
-        /// Arg preset definitions as name=args pairs (replaces all presets)
+        /// Extra arguments appended to the command ("" clears)
+        #[arg(long, allow_hyphen_values = true)]
+        extra_args: Option<String>,
+        /// Arg preset definitions as name=args pairs (replaces all presets; --arg-preset "" clears)
         #[arg(long)]
         arg_preset: Option<Vec<String>>,
-        /// Default arg preset name
+        /// Default arg preset name ("" clears)
         #[arg(long)]
         default_arg_preset: Option<String>,
-        /// Port number
-        #[arg(long)]
-        port: Option<u16>,
-        /// Color hex (e.g. "#eab308")
+        /// Port number ("" clears)
+        #[arg(long, value_parser = parse_clearable::<u16>)]
+        port: Option<Clearable<u16>>,
+        /// Color hex (e.g. "#eab308"; "" clears)
         #[arg(long)]
         color: Option<String>,
-        /// Environment variables as KEY=VALUE pairs (replaces all)
+        /// Environment variables as KEY=VALUE pairs (replaces all; --env "" clears)
         #[arg(long)]
         env: Option<Vec<String>>,
     },
@@ -647,32 +800,66 @@ enum ToolAction {
         /// Config paths as "label=path" or "label=path:dir" for directories
         #[arg(long)]
         config_path: Option<Vec<String>>,
+        /// Toolbox documentation link: a full URL, or a path starting with "/"
+        /// that is joined to the `toolboxBaseUrl` setting (e.g. /tools/dev/cli/fd)
+        #[arg(long)]
+        toolbox_url: Option<String>,
+        /// Free-form notes
+        #[arg(long)]
+        notes: Option<String>,
+        /// Tool that replaces this one, by name or ID (e.g. for a Deprecated tool)
+        #[arg(long)]
+        replaced_by: Option<String>,
     },
-    /// Update an existing tool
+    /// Update an existing tool. An empty value clears an optional field,
+    /// e.g. `--toolbox-url ""`.
     Update {
         /// Tool name or ID
         name_or_id: String,
         /// New name
         #[arg(long)]
         name: Option<String>,
-        /// Description
+        /// Description ("" clears)
         #[arg(long)]
         description: Option<String>,
-        /// Tags (replaces all)
+        /// Tags (replaces all; --tag "" clears)
         #[arg(long)]
         tag: Option<Vec<String>>,
-        /// Status
+        /// Status ("" clears)
         #[arg(long)]
         status: Option<String>,
-        /// Version string
+        /// Install method, e.g. scoop, choco, winget, manual ("" clears)
+        #[arg(long)]
+        install_method: Option<String>,
+        /// Install location path ("" clears)
+        #[arg(long)]
+        install_location: Option<String>,
+        /// Version string ("" clears)
         #[arg(long)]
         version: Option<String>,
-        /// Homepage URL
+        /// Homepage URL ("" clears)
         #[arg(long)]
         homepage: Option<String>,
-        /// Config paths as "label=path" or "label=path:dir" for directories (replaces all)
+        /// Color hex ("" clears)
+        #[arg(long)]
+        color: Option<String>,
+        /// Config paths as "label=path" or "label=path:dir" for directories
+        /// (replaces all; --config-path "" clears)
         #[arg(long)]
         config_path: Option<Vec<String>>,
+        /// Toolbox documentation link: a full URL, or a path starting with "/"
+        /// joined to the `toolboxBaseUrl` setting ("" clears)
+        #[arg(long)]
+        toolbox_url: Option<String>,
+        /// Free-form notes ("" clears)
+        #[arg(long)]
+        notes: Option<String>,
+        /// Tool that replaces this one, by name or ID ("" clears)
+        #[arg(long)]
+        replaced_by: Option<String>,
+        /// Mark/unmark as favorite (e.g. --favorite true)
+        #[arg(long)]
+        favorite: Option<bool>,
     },
     /// Delete a tool
     Delete {
@@ -719,7 +906,7 @@ enum AliasCommand {
         /// Per-shell script content as shell=code (for script/init types)
         #[arg(long)]
         script: Option<Vec<String>>,
-        /// Tool UUID to link
+        /// Tool to link, by name or ID
         #[arg(long)]
         tool_id: Option<String>,
         /// Also generate a shim so the alias is callable from any process
@@ -727,8 +914,18 @@ enum AliasCommand {
         /// Only applies to function-type aliases. See `cortx shim`.
         #[arg(long)]
         shim: bool,
+        /// Tags
+        #[arg(long)]
+        tag: Option<Vec<String>>,
+        /// Status
+        #[arg(long)]
+        status: Option<String>,
+        /// Execution order for init script (lower runs first)
+        #[arg(long)]
+        execution_order: Option<u32>,
     },
-    /// Update an existing alias
+    /// Update an existing alias. An empty value clears an optional field,
+    /// e.g. `--tool-id ""` or `--execution-order ""`.
     Update {
         /// Alias name or ID
         name_or_id: String,
@@ -738,21 +935,36 @@ enum AliasCommand {
         /// New command
         #[arg(long)]
         command: Option<String>,
-        /// Description
-        #[arg(long)]
+        /// Description ("" clears)
+        #[arg(short, long)]
         description: Option<String>,
-        /// Alias type
+        /// Alias type: function, script, init
         #[arg(short = 't', long = "type")]
         alias_type: Option<String>,
-        /// Execution order for init script
-        #[arg(long)]
-        execution_order: Option<u32>,
-        /// Tags (replaces all)
+        /// Execution order for init script ("" clears)
+        #[arg(long, value_parser = parse_clearable::<u32>)]
+        execution_order: Option<Clearable<u32>>,
+        /// Tags (replaces all; --tag "" clears)
         #[arg(long)]
         tag: Option<Vec<String>>,
         /// Enable/disable shim generation for this alias (e.g. --shim true).
         #[arg(long)]
         shim: Option<bool>,
+        /// Status ("" clears)
+        #[arg(long)]
+        status: Option<String>,
+        /// Per-shell setup code as shell=code (replaces all; --setup "" clears)
+        #[arg(long)]
+        setup: Option<Vec<String>>,
+        /// Per-shell script content as shell=code (replaces all; --script "" clears)
+        #[arg(long)]
+        script: Option<Vec<String>>,
+        /// Tool to link, by name or ID ("" unlinks)
+        #[arg(long)]
+        tool_id: Option<String>,
+        /// Mark/unmark as favorite (e.g. --favorite true)
+        #[arg(long)]
+        favorite: Option<bool>,
     },
     /// Remove an alias by name
     Remove {
@@ -814,7 +1026,7 @@ enum AppAction {
         #[arg(long)]
         homepage: Option<String>,
         /// Launch arguments
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         launch_args: Option<String>,
         /// Color hex
         #[arg(long)]
@@ -822,32 +1034,62 @@ enum AppAction {
         /// Config paths as "label=path" or "label=path:dir" for directories
         #[arg(long)]
         config_path: Option<Vec<String>>,
+        /// Version string
+        #[arg(long)]
+        version: Option<String>,
+        /// Toolbox documentation link: a full URL, or a path starting with "/"
+        /// that is joined to the `toolboxBaseUrl` setting
+        #[arg(long)]
+        toolbox_url: Option<String>,
+        /// Free-form notes
+        #[arg(long)]
+        notes: Option<String>,
     },
-    /// Update an existing app
+    /// Update an existing app. An empty value clears an optional field,
+    /// e.g. `--toolbox-url ""`.
     Update {
         /// App name or ID
         name_or_id: String,
         /// New name
         #[arg(long)]
         name: Option<String>,
-        /// Description
+        /// Description ("" clears)
         #[arg(long)]
         description: Option<String>,
-        /// Path to executable
+        /// Path to executable ("" clears)
         #[arg(long)]
         executable: Option<String>,
-        /// Tags (replaces all)
+        /// Tags (replaces all; --tag "" clears)
         #[arg(long)]
         tag: Option<Vec<String>>,
-        /// Status
+        /// Status ("" clears)
         #[arg(long)]
         status: Option<String>,
-        /// Homepage URL
+        /// Homepage URL ("" clears)
         #[arg(long)]
         homepage: Option<String>,
-        /// Config paths as "label=path" or "label=path:dir" for directories (replaces all)
+        /// Config paths as "label=path" or "label=path:dir" for directories
+        /// (replaces all; --config-path "" clears)
         #[arg(long)]
         config_path: Option<Vec<String>>,
+        /// Launch arguments ("" clears)
+        #[arg(long, allow_hyphen_values = true)]
+        launch_args: Option<String>,
+        /// Color hex ("" clears)
+        #[arg(long)]
+        color: Option<String>,
+        /// Version string ("" clears)
+        #[arg(long)]
+        version: Option<String>,
+        /// Toolbox documentation link ("" clears)
+        #[arg(long)]
+        toolbox_url: Option<String>,
+        /// Free-form notes ("" clears)
+        #[arg(long)]
+        notes: Option<String>,
+        /// Mark/unmark as favorite (e.g. --favorite true)
+        #[arg(long)]
+        favorite: Option<bool>,
     },
     /// Delete an app
     Delete {
@@ -883,19 +1125,20 @@ enum TagAction {
         #[arg(long)]
         order: Option<u32>,
     },
-    /// Update a tag definition
+    /// Update a tag definition. An empty value clears an optional field,
+    /// e.g. `--color ""`.
     Update {
         /// Current tag name
         name: String,
         /// New name
         #[arg(long = "name")]
         new_name: Option<String>,
-        /// Color hex
+        /// Color hex ("" clears)
         #[arg(long)]
         color: Option<String>,
-        /// Sort order
-        #[arg(long)]
-        order: Option<u32>,
+        /// Sort order ("" clears)
+        #[arg(long, value_parser = parse_clearable::<u32>)]
+        order: Option<Clearable<u32>>,
     },
     /// Delete a tag definition
     Delete {
@@ -936,19 +1179,20 @@ enum StatusAction {
         #[arg(long)]
         order: Option<u32>,
     },
-    /// Update a status definition
+    /// Update a status definition. An empty value clears an optional field,
+    /// e.g. `--color ""`.
     Update {
         /// Current status name
         name: String,
         /// New name
         #[arg(long = "name")]
         new_name: Option<String>,
-        /// Color hex
+        /// Color hex ("" clears)
         #[arg(long)]
         color: Option<String>,
-        /// Sort order
-        #[arg(long)]
-        order: Option<u32>,
+        /// Sort order ("" clears)
+        #[arg(long, value_parser = parse_clearable::<u32>)]
+        order: Option<Clearable<u32>>,
     },
     /// Delete a status definition
     Delete {
@@ -970,11 +1214,15 @@ enum StatusAction {
 enum SettingsAction {
     /// Display all settings
     Get,
-    /// Set a settings value
+    /// Set a settings value. Any key from `cortx settings get --json` works,
+    /// as a dotted camelCase path (e.g. terminal.fontSize, agents.recentDays).
+    /// The value is read as JSON when it parses (true, 14, null, ["a"]),
+    /// otherwise as a string; "" or null clears an optional setting.
     Set {
-        /// Setting key path (e.g. terminal.preset, toolboxBaseUrl)
+        /// Setting key path (e.g. terminal.preset, toolboxBaseUrl, terminal.fontFamily)
         key: String,
         /// Value to set
+        #[arg(allow_hyphen_values = true)]
         value: String,
     },
 }
@@ -1039,6 +1287,118 @@ fn parse_config_paths(entries: &[String]) -> Vec<cortx_core::models::ToolConfigP
     }).collect()
 }
 
+// ============================================================================
+// Optional fields: create values and clearing on update
+// ============================================================================
+//
+// Same rule as the app and the MCP server (`cortx_core::models::opt_text_patch`):
+// on `update`, an absent flag leaves the field alone and an empty value clears
+// it (`--toolbox-url ""` → no link). On `create`, a blank value is no value.
+
+/// Create-side optional text: trimmed, blank → `None`.
+fn create_text(value: Option<&str>) -> Option<String> {
+    opt_text(value.map(str::to_string))
+}
+
+/// Update-side optional text: absent → no change, `""` → `None`, text → trimmed.
+fn patch_text(target: &mut Option<String>, value: &Option<String>) {
+    if let Some(v) = opt_text_patch(value.clone()) {
+        *target = v;
+    }
+}
+
+/// A repeatable list flag (`--tag`, `--link-service`): entries are trimmed and
+/// blank ones dropped, so `--tag ""` clears the list.
+fn clean_list(entries: &[String]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|e| e.trim())
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// A `KEY=VALUE` map flag (`--env`, `--mode`, `--setup`…): an empty map
+/// (e.g. `--env ""`) means "no map".
+fn map_or_none(entries: &[String]) -> Option<std::collections::HashMap<String, String>> {
+    let map = parse_shell_map(entries);
+    if map.is_empty() { None } else { Some(map) }
+}
+
+/// A number flag on `update` that can be cleared with `""`. Parsed by
+/// [`parse_clearable`]; the alias keeps clap from treating the flag's
+/// `Option<Option<T>>` as "value optional".
+type Clearable<T> = Option<T>;
+
+fn parse_clearable<T>(s: &str) -> Result<Clearable<T>, String>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    let s = s.trim();
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        s.parse::<T>().map(Some).map_err(|e| e.to_string())
+    }
+}
+
+/// Resolve a tool reference (name or ID) given to `--replaced-by` / `--tool-id`
+/// to the tool's ID. `""` → `Some(None)` (clear), absent → `None` (no change).
+fn resolve_tool_ref(storage: &Storage, value: Option<&str>) -> anyhow::Result<Option<Option<String>>> {
+    match opt_text_patch(value.map(str::to_string)) {
+        None => Ok(None),
+        Some(None) => Ok(Some(None)),
+        Some(Some(r)) => {
+            let tools = storage.get_all_tools();
+            let tool = resolve_by_name_or_id(&tools, &r, "tool", |t| &t.id, |t| &t.name)?;
+            Ok(Some(Some(tool.id.clone())))
+        }
+    }
+}
+
+/// `--parameters <JSON>`: a JSON array of `ScriptParameter`. `""` → empty list.
+fn parse_parameters_json(value: &str) -> anyhow::Result<Vec<ScriptParameter>> {
+    if value.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str(value).map_err(|e| {
+        CortxError::invalid_argument(format!(
+            "--parameters must be a JSON array of parameters ({}). Example: \
+             '[{{\"name\":\"input\",\"paramType\":\"path\",\"longFlag\":\"--input\",\"required\":true}}]'",
+            e
+        ))
+        .into()
+    })
+}
+
+/// `--presets <JSON>`: a JSON array of `ParameterPreset`; a missing `id` is
+/// generated. `""` → empty list.
+fn parse_presets_json(value: &str) -> anyhow::Result<Vec<ParameterPreset>> {
+    if value.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let invalid = |e: String| -> anyhow::Error {
+        CortxError::invalid_argument(format!(
+            "--presets must be a JSON array of presets ({}). Example: \
+             '[{{\"name\":\"fast\",\"values\":{{\"n\":\"5\"}}}}]'",
+            e
+        ))
+        .into()
+    };
+    let mut items: Vec<serde_json::Value> =
+        serde_json::from_str(value).map_err(|e| invalid(e.to_string()))?;
+    for item in items.iter_mut() {
+        if let Some(obj) = item.as_object_mut() {
+            let has_id = obj.get("id").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty());
+            if !has_id {
+                obj.insert("id".into(), serde_json::Value::String(uuid::Uuid::new_v4().to_string()));
+            }
+        }
+    }
+    serde_json::from_value(serde_json::Value::Array(items)).map_err(|e| invalid(e.to_string()))
+}
+
 fn confirm_delete(entity: &str, name: &str, skip: bool) -> bool {
     if skip {
         return true;
@@ -1087,11 +1447,14 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
                 cmd_script_list(&storage, tag.as_deref(), name.as_deref(), json)
             }
             ScriptAction::Get { name_or_id } => cmd_script_get(&storage, &name_or_id, json),
-            ScriptAction::Create { name, command, dir, script_path, color, tag, description, status } => {
-                cmd_script_create(&storage, &name, &command, dir.as_deref(), script_path.as_deref(), color.as_deref(), tag, description.as_deref(), status.as_deref(), json)
+            ScriptAction::Create { name, command, dir, script_path, color, tag, description, status, env, parameters, detect_params, presets } => {
+                cmd_script_create(&storage, &name, &command, dir.as_deref(), script_path.as_deref(), color.as_deref(), tag, description.as_deref(), status.as_deref(), env, parameters.as_deref(), detect_params, presets.as_deref(), json)
             }
-            ScriptAction::Update { name_or_id, name, command, dir, script_path, color, tag, description, status } => {
-                cmd_script_update(&storage, &name_or_id, name, command, dir, script_path, color, tag, description, status, json)
+            ScriptAction::Update { name_or_id, name, command, dir, script_path, color, tag, description, status, env, parameters, detect_params, presets, default_preset, favorite } => {
+                cmd_script_update(&storage, &name_or_id, name, command, dir, script_path, color, tag, description, status, env, parameters, detect_params, presets, default_preset, favorite, json)
+            }
+            ScriptAction::DetectParams { command, script_path } => {
+                cmd_script_detect_params(&command, script_path.as_deref(), json)
             }
             ScriptAction::Delete { name_or_id, yes } => cmd_script_delete(&storage, &name_or_id, yes),
         },
@@ -1107,12 +1470,24 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
                 json,
             ),
             ProjectAction::Get { name_or_id } => cmd_project_get(&storage, &name_or_id, json),
-            ProjectAction::Create { name, path, description, tag, status, toolbox_url } => {
-                cmd_project_create(&storage, &name, &path, description.as_deref(), tag, status.as_deref(), toolbox_url.as_deref(), json)
+            ProjectAction::Create { name, path, description, tag, status, toolbox_url, image_path } => {
+                cmd_project_create(&storage, &name, &path, description.as_deref(), tag, status.as_deref(), toolbox_url.as_deref(), image_path.as_deref(), json)
             }
-            ProjectAction::Update { name_or_id, name, path, description, tag, status, toolbox_url } => {
-                cmd_project_update(&storage, &name_or_id, name, path, description, tag, status, toolbox_url, json)
+            ProjectAction::Update { name_or_id, name, path, description, tag, status, toolbox_url, image_path, favorite } => {
+                cmd_project_update(&storage, &name_or_id, name, path, description, tag, status, toolbox_url, image_path, favorite, json)
             }
+            ProjectAction::Script { action } => match action {
+                ProjectScriptAction::List { project } => cmd_project_script_list(&storage, &project, json),
+                ProjectScriptAction::Add { project, name, command, dir, description, script_path, color, link_service } => {
+                    cmd_project_script_add(&storage, &project, &name, &command, dir.as_deref(), description.as_deref(), script_path.as_deref(), color.as_deref(), link_service, json)
+                }
+                ProjectScriptAction::Update { project, script, name, command, dir, description, script_path, color, link_service } => {
+                    cmd_project_script_update(&storage, &project, &script, name, command, dir, description, script_path, color, link_service, json)
+                }
+                ProjectScriptAction::Delete { project, script, yes } => {
+                    cmd_project_script_delete(&storage, &project, &script, yes)
+                }
+            },
             ProjectAction::Delete { name_or_id, yes } => cmd_project_delete(&storage, &name_or_id, yes),
             ProjectAction::Run { project, script, args } => {
                 cmd_project_run(&storage, &project, &script, &args, json)
@@ -1131,11 +1506,11 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
         // Service group
         Some(Command::Service { action }) => match action {
             ServiceAction::List { project } => cmd_service_list(&storage, &project, json),
-            ServiceAction::Add { project, name, dir, command, mode, default_mode, port, color } => {
-                cmd_service_add(&storage, &project, &name, &dir, &command, mode, default_mode, port, color, json)
+            ServiceAction::Add { project, name, dir, command, mode, default_mode, extra_args, arg_preset, default_arg_preset, port, color, env } => {
+                cmd_service_add(&storage, &project, &name, &dir, &command, mode, default_mode, extra_args, arg_preset, default_arg_preset, port, color, env, json)
             }
-            ServiceAction::Update { id, name, command, dir, mode, default_mode, arg_preset, default_arg_preset, port, color, env } => {
-                cmd_service_update(&storage, &id, name, command, dir, mode, default_mode, arg_preset, default_arg_preset, port, color, env, json)
+            ServiceAction::Update { id, name, command, dir, mode, default_mode, extra_args, arg_preset, default_arg_preset, port, color, env } => {
+                cmd_service_update(&storage, &id, name, command, dir, mode, default_mode, extra_args, arg_preset, default_arg_preset, port, color, env, json)
             }
             ServiceAction::Delete { id, yes } => cmd_service_delete(&storage, &id, yes),
             ServiceAction::Start { project, service, mode, arg_preset } => {
@@ -1158,11 +1533,11 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
                 cmd_tool_list(&storage, tag.as_deref(), name.as_deref(), scan, json)
             }
             ToolAction::Get { name_or_id } => cmd_tool_get(&storage, &name_or_id, json),
-            ToolAction::Create { name, description, tag, status, install_method, install_location, version, homepage, color, config_path } => {
-                cmd_tool_create(&storage, &name, description.as_deref(), tag, status.as_deref(), install_method.as_deref(), install_location.as_deref(), version.as_deref(), homepage.as_deref(), color.as_deref(), config_path, json)
+            ToolAction::Create { name, description, tag, status, install_method, install_location, version, homepage, color, config_path, toolbox_url, notes, replaced_by } => {
+                cmd_tool_create(&storage, &name, description.as_deref(), tag, status.as_deref(), install_method.as_deref(), install_location.as_deref(), version.as_deref(), homepage.as_deref(), color.as_deref(), config_path, toolbox_url.as_deref(), notes.as_deref(), replaced_by.as_deref(), json)
             }
-            ToolAction::Update { name_or_id, name, description, tag, status, version, homepage, config_path } => {
-                cmd_tool_update(&storage, &name_or_id, name, description, tag, status, version, homepage, config_path, json)
+            ToolAction::Update { name_or_id, name, description, tag, status, install_method, install_location, version, homepage, color, config_path, toolbox_url, notes, replaced_by, favorite } => {
+                cmd_tool_update(&storage, &name_or_id, name, description, tag, status, install_method, install_location, version, homepage, color, config_path, toolbox_url, notes, replaced_by, favorite, json)
             }
             ToolAction::Delete { name_or_id, yes } => cmd_tool_delete(&storage, &name_or_id, yes),
         },
@@ -1171,11 +1546,11 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
         Some(Command::Alias { command: alias_cmd }) => match alias_cmd {
             AliasCommand::List { name } => cmd_alias_list(&storage, name.as_deref(), json),
             AliasCommand::Get { name } => cmd_alias_get(&storage, &name, json),
-            AliasCommand::Add { name, command, description, alias_type, setup, script, tool_id, shim } => {
-                cmd_alias_add(&storage, &name, &command, description.as_deref(), alias_type.as_deref(), setup, script, tool_id, shim)
+            AliasCommand::Add { name, command, description, alias_type, setup, script, tool_id, shim, tag, status, execution_order } => {
+                cmd_alias_add(&storage, &name, &command, description.as_deref(), alias_type.as_deref(), setup, script, tool_id, shim, tag, status.as_deref(), execution_order)
             }
-            AliasCommand::Update { name_or_id, name, command, description, alias_type, execution_order, tag, shim } => {
-                cmd_alias_update(&storage, &name_or_id, name, command, description, alias_type, execution_order, tag, shim, json)
+            AliasCommand::Update { name_or_id, name, command, description, alias_type, execution_order, tag, shim, status, setup, script, tool_id, favorite } => {
+                cmd_alias_update(&storage, &name_or_id, name, command, description, alias_type, execution_order, tag, shim, status, setup, script, tool_id, favorite, json)
             }
             AliasCommand::Remove { name } => cmd_alias_remove(&storage, &name),
         },
@@ -1192,11 +1567,11 @@ fn run(cli: Cli, json: bool) -> anyhow::Result<()> {
         Some(Command::App { action }) => match action {
             AppAction::List { name } => cmd_app_list(&storage, name.as_deref(), json),
             AppAction::Get { name_or_id } => cmd_app_get(&storage, &name_or_id, json),
-            AppAction::Create { name, description, executable, tag, status, homepage, launch_args, color, config_path } => {
-                cmd_app_create(&storage, &name, description.as_deref(), executable.as_deref(), tag, status.as_deref(), homepage.as_deref(), launch_args.as_deref(), color.as_deref(), config_path, json)
+            AppAction::Create { name, description, executable, tag, status, homepage, launch_args, color, config_path, version, toolbox_url, notes } => {
+                cmd_app_create(&storage, &name, description.as_deref(), executable.as_deref(), tag, status.as_deref(), homepage.as_deref(), launch_args.as_deref(), color.as_deref(), config_path, version.as_deref(), toolbox_url.as_deref(), notes.as_deref(), json)
             }
-            AppAction::Update { name_or_id, name, description, executable, tag, status, homepage, config_path } => {
-                cmd_app_update(&storage, &name_or_id, name, description, executable, tag, status, homepage, config_path, json)
+            AppAction::Update { name_or_id, name, description, executable, tag, status, homepage, config_path, launch_args, color, version, toolbox_url, notes, favorite } => {
+                cmd_app_update(&storage, &name_or_id, name, description, executable, tag, status, homepage, config_path, launch_args, color, version, toolbox_url, notes, favorite, json)
             }
             AppAction::Delete { name_or_id, yes } => cmd_app_delete(&storage, &name_or_id, yes),
             AppAction::Launch { name } => cmd_app_launch(&storage, &name),
@@ -1407,17 +1782,32 @@ fn cmd_script_create(
     tags: Option<Vec<String>>,
     description: Option<&str>,
     status: Option<&str>,
+    env: Option<Vec<String>>,
+    parameters: Option<&str>,
+    detect_params: bool,
+    presets: Option<&str>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let mut script = GlobalScript::new(name.to_string(), command.to_string(), dir.map(|s| s.to_string()));
-    script.description = description.map(|s| s.to_string());
-    script.script_path = script_path.map(|s| s.to_string());
-    script.color = color.map(|s| s.to_string());
+    let mut script = GlobalScript::new(name.to_string(), command.to_string(), create_text(dir));
+    script.description = create_text(description);
+    script.script_path = create_text(script_path);
+    script.color = create_text(color);
     if let Some(tags) = tags {
-        script.tags = tags;
+        script.tags = clean_list(&tags);
     }
-    script.status = status.map(|s| s.to_string());
-
+    script.status = create_text(status);
+    if let Some(entries) = env {
+        script.env_vars = map_or_none(&entries);
+    }
+    if let Some(p) = parameters {
+        script.parameters = parse_parameters_json(p)?;
+    } else if detect_params {
+        script.parameters = cortx_core::help_parser::detect_parameters(command, script.script_path.as_deref())
+            .map_err(|e| anyhow::anyhow!("Parameter detection failed: {}", e))?;
+    }
+    if let Some(p) = presets {
+        script.parameter_presets = parse_presets_json(p)?;
+    }
     let created = storage.create_global_script(script).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -1439,21 +1829,63 @@ fn cmd_script_update(
     tags: Option<Vec<String>>,
     description: Option<String>,
     status: Option<String>,
+    env: Option<Vec<String>>,
+    parameters: Option<String>,
+    detect_params: bool,
+    presets: Option<String>,
+    default_preset: Option<String>,
+    favorite: Option<bool>,
     json: bool,
 ) -> anyhow::Result<()> {
     let scripts = storage.get_all_global_scripts();
     let existing = resolve_by_name_or_id(&scripts, name_or_id, "global_script", |s| &s.id, |s| &s.name)?;
     let id = existing.id.clone();
 
+    // Everything that can fail is worked out before the write.
+    let new_parameters = match parameters {
+        Some(ref p) => Some(parse_parameters_json(p)?),
+        None if detect_params => {
+            let cmd = command.clone().unwrap_or_else(|| existing.command.clone());
+            let mut sp = existing.script_path.clone();
+            patch_text(&mut sp, &script_path);
+            Some(
+                cortx_core::help_parser::detect_parameters(&cmd, sp.as_deref())
+                    .map_err(|e| anyhow::anyhow!("Parameter detection failed: {}", e))?,
+            )
+        }
+        None => None,
+    };
+    let new_presets = presets.as_deref().map(parse_presets_json).transpose()?;
+    let new_default_preset = match opt_text_patch(default_preset) {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(r)) => {
+            let pool = new_presets.as_ref().unwrap_or(&existing.parameter_presets);
+            let preset = resolve_by_name_or_id(pool, &r, "preset", |p| &p.id, |p| &p.name)?;
+            Some(Some(preset.id.clone()))
+        }
+    };
+
     let updated = storage.update_global_script(&id, |s| {
         if let Some(ref n) = name { s.name = n.clone(); }
         if let Some(ref c) = command { s.command = c.clone(); }
-        if let Some(ref d) = dir { s.working_dir = Some(d.clone()); }
-        if let Some(ref p) = script_path { s.script_path = Some(p.clone()); }
-        if let Some(ref col) = color { s.color = Some(col.clone()); }
-        if let Some(ref t) = tags { s.tags = t.clone(); }
-        if let Some(ref d) = description { s.description = Some(d.clone()); }
-        if let Some(ref st) = status { s.status = Some(st.clone()); }
+        patch_text(&mut s.working_dir, &dir);
+        patch_text(&mut s.script_path, &script_path);
+        patch_text(&mut s.color, &color);
+        if let Some(ref t) = tags { s.tags = clean_list(t); }
+        patch_text(&mut s.description, &description);
+        patch_text(&mut s.status, &status);
+        if let Some(ref e) = env { s.env_vars = map_or_none(e); }
+        if let Some(p) = new_parameters { s.parameters = p; }
+        if let Some(p) = new_presets {
+            // A default that no longer exists would point nowhere.
+            if let Some(ref d) = s.default_preset_id {
+                if !p.iter().any(|x| &x.id == d) { s.default_preset_id = None; }
+            }
+            s.parameter_presets = p;
+        }
+        if let Some(d) = new_default_preset { s.default_preset_id = d; }
+        if let Some(f) = favorite { s.favorite = f; }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -1461,6 +1893,36 @@ fn cmd_script_update(
     } else {
         println!("Script '{}' updated.", updated.name);
     }
+    Ok(())
+}
+
+fn cmd_script_detect_params(command: &str, script_path: Option<&str>, json: bool) -> anyhow::Result<()> {
+    let params = cortx_core::help_parser::detect_parameters(command, script_path)
+        .map_err(|e| anyhow::anyhow!("Parameter detection failed: {}", e))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&params)?);
+        return Ok(());
+    }
+    if params.is_empty() {
+        println!("No parameters detected.");
+        return Ok(());
+    }
+    println!("{:<24} {:<8} {:<24} {}", "NAME", "TYPE", "FLAGS", "DESCRIPTION");
+    println!("{}", "-".repeat(80));
+    for p in &params {
+        let flags = [p.short_flag.as_deref(), p.long_flag.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ty = serde_json::to_value(&p.param_type)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        println!("{:<24} {:<8} {:<24} {}", p.name, ty, flags, p.description.as_deref().unwrap_or(""));
+    }
+    println!("\n{} parameter(s). Save them with `cortx script update <name> --detect-params`.", params.len());
     Ok(())
 }
 
@@ -1684,15 +2146,17 @@ fn cmd_project_create(
     tags: Option<Vec<String>>,
     status: Option<&str>,
     toolbox_url: Option<&str>,
+    image_path: Option<&str>,
     json: bool,
 ) -> anyhow::Result<()> {
     let mut project = Project::new(name.to_string(), path.to_string());
-    project.description = description.map(|s| s.to_string());
+    project.description = create_text(description);
     if let Some(tags) = tags {
-        project.tags = tags;
+        project.tags = clean_list(&tags);
     }
-    project.status = status.map(|s| s.to_string());
-    project.toolbox_url = toolbox_url.map(|s| s.to_string());
+    project.status = create_text(status);
+    project.toolbox_url = create_text(toolbox_url);
+    project.image_path = create_text(image_path);
 
     let created = storage.create_project(project).map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -1713,6 +2177,8 @@ fn cmd_project_update(
     tags: Option<Vec<String>>,
     status: Option<String>,
     toolbox_url: Option<String>,
+    image_path: Option<String>,
+    favorite: Option<bool>,
     json: bool,
 ) -> anyhow::Result<()> {
     let projects = storage.get_all_projects();
@@ -1722,10 +2188,12 @@ fn cmd_project_update(
     let updated = storage.update_project(&id, |p| {
         if let Some(ref n) = name { p.name = n.clone(); }
         if let Some(ref pa) = path { p.root_path = pa.clone(); }
-        if let Some(ref d) = description { p.description = Some(d.clone()); }
-        if let Some(ref t) = tags { p.tags = t.clone(); }
-        if let Some(ref s) = status { p.status = Some(s.clone()); }
-        if let Some(ref u) = toolbox_url { p.toolbox_url = Some(u.clone()); }
+        patch_text(&mut p.description, &description);
+        if let Some(ref t) = tags { p.tags = clean_list(t); }
+        patch_text(&mut p.status, &status);
+        patch_text(&mut p.toolbox_url, &toolbox_url);
+        patch_text(&mut p.image_path, &image_path);
+        if let Some(f) = favorite { p.favorite = f; }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -1733,6 +2201,138 @@ fn cmd_project_update(
     } else {
         println!("Project '{}' updated.", updated.name);
     }
+    Ok(())
+}
+
+// ----- Project scripts -----------------------------------------------------
+
+/// Resolve `--link-service` entries (names or IDs) to service IDs of `project`.
+/// Blank entries are dropped, so `--link-service ""` clears the links.
+fn resolve_linked_services(project: &Project, entries: &[String]) -> anyhow::Result<Vec<String>> {
+    clean_list(entries)
+        .iter()
+        .map(|r| {
+            resolve_by_name_or_id(&project.services, r, "service", |s| &s.id, |s| &s.name)
+                .map(|s| s.id.clone())
+                .map_err(Into::into)
+        })
+        .collect()
+}
+
+fn cmd_project_script_list(storage: &Storage, project_ref: &str, json: bool) -> anyhow::Result<()> {
+    let projects = storage.get_all_projects();
+    let project = resolve_by_name_or_id(&projects, project_ref, "project", |p| &p.id, |p| &p.name)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&project.scripts)?);
+        return Ok(());
+    }
+
+    if project.scripts.is_empty() {
+        println!("No scripts in project '{}'.", project.name);
+        return Ok(());
+    }
+
+    println!("Scripts in '{}' ({}):\n", project.name, project.id);
+    println!("{:<30} {:<50} {}", "NAME", "COMMAND", "DIR");
+    println!("{}", "-".repeat(90));
+    for s in &project.scripts {
+        let display_cmd = util::format_command_display(&s.command, s.script_path.as_deref());
+        let dir = if s.working_dir.trim().is_empty() { "." } else { s.working_dir.as_str() };
+        println!("{:<30} {:<50} {}", s.name, display_cmd, dir);
+    }
+    println!("\n{} script(s)", project.scripts.len());
+    Ok(())
+}
+
+fn cmd_project_script_add(
+    storage: &Storage,
+    project_ref: &str,
+    name: &str,
+    command: &str,
+    dir: Option<&str>,
+    description: Option<&str>,
+    script_path: Option<&str>,
+    color: Option<&str>,
+    link_service: Option<Vec<String>>,
+    json: bool,
+) -> anyhow::Result<()> {
+    let projects = storage.get_all_projects();
+    let project = resolve_by_name_or_id(&projects, project_ref, "project", |p| &p.id, |p| &p.name)?;
+
+    let mut script = Script::new(
+        name.to_string(),
+        create_text(dir).unwrap_or_else(|| ".".to_string()),
+        command.to_string(),
+    );
+    script.description = create_text(description);
+    script.script_path = create_text(script_path);
+    script.color = create_text(color);
+    if let Some(entries) = link_service {
+        script.linked_service_ids = resolve_linked_services(project, &entries)?;
+    }
+    script.order = project.scripts.len() as u32;
+
+    let created = storage.add_script(&project.id, script).map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&created)?);
+    } else {
+        println!("Script '{}' added to project '{}' (ID: {}).", created.name, project.name, created.id);
+    }
+    Ok(())
+}
+
+fn cmd_project_script_update(
+    storage: &Storage,
+    project_ref: &str,
+    script_ref: &str,
+    name: Option<String>,
+    command: Option<String>,
+    dir: Option<String>,
+    description: Option<String>,
+    script_path: Option<String>,
+    color: Option<String>,
+    link_service: Option<Vec<String>>,
+    json: bool,
+) -> anyhow::Result<()> {
+    let (project, script) = resolve_project_script(storage, project_ref, script_ref)?;
+    let linked = link_service
+        .map(|entries| resolve_linked_services(&project, &entries))
+        .transpose()?;
+
+    let updated = storage.update_script(&script.id, |s| {
+        if let Some(ref n) = name { s.name = n.clone(); }
+        if let Some(ref c) = command { s.command = c.clone(); }
+        // working_dir is required on a project script: "" means the project root.
+        if let Some(ref d) = dir {
+            let d = d.trim();
+            s.working_dir = if d.is_empty() { ".".to_string() } else { d.to_string() };
+        }
+        patch_text(&mut s.description, &description);
+        patch_text(&mut s.script_path, &script_path);
+        patch_text(&mut s.color, &color);
+        if let Some(l) = linked { s.linked_service_ids = l; }
+    }).map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&updated)?);
+    } else {
+        println!("Script '{}' updated.", updated.name);
+    }
+    Ok(())
+}
+
+fn cmd_project_script_delete(storage: &Storage, project_ref: &str, script_ref: &str, yes: bool) -> anyhow::Result<()> {
+    let (project, script) = resolve_project_script(storage, project_ref, script_ref)?;
+
+    if !confirm_delete("script", &script.name, yes) {
+        println!("Cancelled.");
+        return Ok(());
+    }
+
+    storage.delete_script(&script.id).map_err(|e| anyhow::anyhow!("{}", e))?;
+    println!("Script '{}' deleted from project '{}'.", script.name, project.name);
     Ok(())
 }
 
@@ -1788,8 +2388,12 @@ fn cmd_service_add(
     command: &str,
     modes: Option<Vec<String>>,
     default_mode: Option<String>,
+    extra_args: Option<String>,
+    arg_presets: Option<Vec<String>>,
+    default_arg_preset: Option<String>,
     port: Option<u16>,
     color: Option<String>,
+    env: Option<Vec<String>>,
     json: bool,
 ) -> anyhow::Result<()> {
     let projects = storage.get_all_projects();
@@ -1798,14 +2402,19 @@ fn cmd_service_add(
 
     let mut service = Service::new(name.to_string(), dir.to_string(), command.to_string());
     if let Some(mode_entries) = modes {
-        let map = parse_shell_map(&mode_entries);
-        if !map.is_empty() {
-            service.modes = Some(map);
-        }
+        service.modes = map_or_none(&mode_entries);
     }
-    service.default_mode = default_mode;
+    service.default_mode = opt_text(default_mode);
+    service.extra_args = opt_text(extra_args);
+    if let Some(entries) = arg_presets {
+        service.arg_presets = map_or_none(&entries);
+    }
+    service.default_arg_preset = opt_text(default_arg_preset);
     service.port = port;
-    service.color = color;
+    service.color = opt_text(color);
+    if let Some(entries) = env {
+        service.env_vars = map_or_none(&entries);
+    }
 
     let created = storage.add_service(&project_id, service).map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -1825,35 +2434,26 @@ fn cmd_service_update(
     dir: Option<String>,
     mode: Option<Vec<String>>,
     default_mode: Option<String>,
+    extra_args: Option<String>,
     arg_preset: Option<Vec<String>>,
     default_arg_preset: Option<String>,
-    port: Option<u16>,
+    port: Option<Clearable<u16>>,
     color: Option<String>,
     env: Option<Vec<String>>,
     json: bool,
 ) -> anyhow::Result<()> {
-    // Pre-parse the shell-map style args before entering the update closure.
-    let modes_map = mode.map(|entries| parse_shell_map(&entries));
-    let arg_presets_map = arg_preset.map(|entries| parse_shell_map(&entries));
-    let env_map = env.map(|entries| parse_shell_map(&entries));
-
     let updated = storage.update_service(id, |s| {
         if let Some(ref n) = name { s.name = n.clone(); }
         if let Some(ref c) = command { s.command = c.clone(); }
         if let Some(ref d) = dir { s.working_dir = d.clone(); }
-        if let Some(ref m) = modes_map {
-            s.modes = if m.is_empty() { None } else { Some(m.clone()) };
-        }
-        if let Some(ref dm) = default_mode { s.default_mode = Some(dm.clone()); }
-        if let Some(ref ap) = arg_presets_map {
-            s.arg_presets = if ap.is_empty() { None } else { Some(ap.clone()) };
-        }
-        if let Some(ref dap) = default_arg_preset { s.default_arg_preset = Some(dap.clone()); }
-        if let Some(p) = port { s.port = Some(p); }
-        if let Some(ref col) = color { s.color = Some(col.clone()); }
-        if let Some(ref e) = env_map {
-            s.env_vars = if e.is_empty() { None } else { Some(e.clone()) };
-        }
+        if let Some(ref m) = mode { s.modes = map_or_none(m); }
+        patch_text(&mut s.default_mode, &default_mode);
+        patch_text(&mut s.extra_args, &extra_args);
+        if let Some(ref ap) = arg_preset { s.arg_presets = map_or_none(ap); }
+        patch_text(&mut s.default_arg_preset, &default_arg_preset);
+        if let Some(p) = port { s.port = p; }
+        patch_text(&mut s.color, &color);
+        if let Some(ref e) = env { s.env_vars = map_or_none(e); }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -2725,6 +3325,19 @@ fn cmd_tool_get(storage: &Storage, name_or_id: &str, json: bool) -> anyhow::Resu
     if let Some(ref h) = tool.homepage {
         println!("Homepage:        {}", h);
     }
+    if let Some(ref u) = tool.toolbox_url {
+        println!("Toolbox URL:     {}", u);
+    }
+    if let Some(ref r) = tool.replaced_by {
+        let label = tools.iter().find(|t| &t.id == r).map(|t| t.name.as_str()).unwrap_or(r.as_str());
+        println!("Replaced by:     {}", label);
+    }
+    if let Some(ref c) = tool.color {
+        println!("Color:           {}", c);
+    }
+    if let Some(ref n) = tool.notes {
+        println!("Notes:           {}", n);
+    }
     if !tool.config_paths.is_empty() {
         println!("Config paths:");
         for cp in &tool.config_paths {
@@ -2748,21 +3361,29 @@ fn cmd_tool_create(
     homepage: Option<&str>,
     color: Option<&str>,
     config_path: Option<Vec<String>>,
+    toolbox_url: Option<&str>,
+    notes: Option<&str>,
+    replaced_by: Option<&str>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let mut tool = Tool::new(name.to_string(), status.unwrap_or("Active").to_string());
-    tool.description = description.map(|s| s.to_string());
+    let replaced_by = resolve_tool_ref(storage, replaced_by)?.flatten();
+
+    let mut tool = Tool::new(name.to_string(), create_text(status).unwrap_or_else(|| "Active".to_string()));
+    tool.description = create_text(description);
     if let Some(tags) = tags {
-        tool.tags = tags;
+        tool.tags = clean_list(&tags);
     }
-    tool.install_method = install_method.map(|s| s.to_string());
-    tool.install_location = install_location.map(|s| s.to_string());
-    tool.version = version.map(|s| s.to_string());
-    tool.homepage = homepage.map(|s| s.to_string());
-    tool.color = color.map(|s| s.to_string());
+    tool.install_method = create_text(install_method);
+    tool.install_location = create_text(install_location);
+    tool.version = create_text(version);
+    tool.homepage = create_text(homepage);
+    tool.color = create_text(color);
     if let Some(entries) = config_path {
         tool.config_paths = parse_config_paths(&entries);
     }
+    tool.toolbox_url = create_text(toolbox_url);
+    tool.notes = create_text(notes);
+    tool.replaced_by = replaced_by;
 
     let created = storage.create_tool(tool).map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -2781,24 +3402,43 @@ fn cmd_tool_update(
     description: Option<String>,
     tags: Option<Vec<String>>,
     status: Option<String>,
+    install_method: Option<String>,
+    install_location: Option<String>,
     version: Option<String>,
     homepage: Option<String>,
+    color: Option<String>,
     config_path: Option<Vec<String>>,
+    toolbox_url: Option<String>,
+    notes: Option<String>,
+    replaced_by: Option<String>,
+    favorite: Option<bool>,
     json: bool,
 ) -> anyhow::Result<()> {
     let tools = storage.get_all_tools();
     let existing = resolve_by_name_or_id(&tools, name_or_id, "tool", |t| &t.id, |t| &t.name)?;
     let id = existing.id.clone();
 
+    let replaced_by = resolve_tool_ref(storage, replaced_by.as_deref())?;
+    if replaced_by.as_ref().is_some_and(|r| r.as_deref() == Some(id.as_str())) {
+        return Err(CortxError::invalid_argument("A tool cannot be replaced by itself.").into());
+    }
     let parsed_configs = config_path.map(|entries| parse_config_paths(&entries));
     let updated = storage.update_tool(&id, |t| {
         if let Some(ref n) = name { t.name = n.clone(); }
-        if let Some(ref d) = description { t.description = Some(d.clone()); }
-        if let Some(ref tg) = tags { t.tags = tg.clone(); }
-        if let Some(ref s) = status { t.status = s.clone(); }
-        if let Some(ref v) = version { t.version = Some(v.clone()); }
-        if let Some(ref h) = homepage { t.homepage = Some(h.clone()); }
+        patch_text(&mut t.description, &description);
+        if let Some(ref tg) = tags { t.tags = clean_list(tg); }
+        // Tool.status is a plain String: clearing it means "no status" (as in the app and MCP).
+        if let Some(s) = opt_text_patch(status.clone()) { t.status = s.unwrap_or_default(); }
+        patch_text(&mut t.install_method, &install_method);
+        patch_text(&mut t.install_location, &install_location);
+        patch_text(&mut t.version, &version);
+        patch_text(&mut t.homepage, &homepage);
+        patch_text(&mut t.color, &color);
         if let Some(ref cp) = parsed_configs { t.config_paths = cp.clone(); }
+        patch_text(&mut t.toolbox_url, &toolbox_url);
+        patch_text(&mut t.notes, &notes);
+        if let Some(r) = replaced_by { t.replaced_by = r; }
+        if let Some(f) = favorite { t.favorite = f; }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -2918,6 +3558,9 @@ fn cmd_alias_get(storage: &Storage, name: &str, json: bool) -> anyhow::Result<()
     if !alias.tags.is_empty() {
         println!("Tags:            {}", alias.tags.join(", "));
     }
+    if let Some(ref status) = alias.status {
+        println!("Status:          {}", status);
+    }
     if let Some(ref tool_id) = alias.tool_id {
         println!("Linked Tool ID:  {}", tool_id);
     }
@@ -2965,6 +3608,9 @@ fn cmd_alias_add(
     script: Option<Vec<String>>,
     tool_id: Option<String>,
     shim: bool,
+    tags: Option<Vec<String>>,
+    status: Option<&str>,
+    execution_order: Option<u32>,
 ) -> anyhow::Result<()> {
     // Validate name
     cortx_core::shell_init::validate_alias_name(name)
@@ -2986,25 +3632,26 @@ fn cmd_alias_add(
         return Err(CortxError::already_exists("alias", name).into());
     }
 
+    let tool_id = resolve_tool_ref(storage, tool_id.as_deref())?.flatten();
+
     let mut alias = ShellAlias::new(name.to_string(), command.to_string());
-    alias.description = description.map(|s| s.to_string());
+    alias.description = create_text(description);
     if let Some(at) = alias_type {
         alias.alias_type = at.to_string();
     }
     if let Some(entries) = setup {
-        let map = parse_shell_map(&entries);
-        if !map.is_empty() {
-            alias.setup = Some(map);
-        }
+        alias.setup = map_or_none(&entries);
     }
     if let Some(entries) = script {
-        let map = parse_shell_map(&entries);
-        if !map.is_empty() {
-            alias.script = Some(map);
-        }
+        alias.script = map_or_none(&entries);
     }
     alias.tool_id = tool_id;
     alias.shim = shim;
+    if let Some(tags) = tags {
+        alias.tags = clean_list(&tags);
+    }
+    alias.status = create_text(status);
+    alias.execution_order = execution_order;
 
     let is_function = alias.alias_type == "function";
     storage.create_alias(alias).map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -3024,23 +3671,42 @@ fn cmd_alias_update(
     command: Option<String>,
     description: Option<String>,
     alias_type: Option<String>,
-    execution_order: Option<u32>,
+    execution_order: Option<Clearable<u32>>,
     tags: Option<Vec<String>>,
     shim: Option<bool>,
+    status: Option<String>,
+    setup: Option<Vec<String>>,
+    script: Option<Vec<String>>,
+    tool_id: Option<String>,
+    favorite: Option<bool>,
     json: bool,
 ) -> anyhow::Result<()> {
     let aliases = storage.get_all_aliases();
     let existing = resolve_by_name_or_id(&aliases, name_or_id, "alias", |a| &a.id, |a| &a.name)?;
     let id = existing.id.clone();
 
+    // Same checks as the app and the MCP server.
+    if let Some(ref n) = name {
+        cortx_core::shell_init::validate_alias_name(n).map_err(|e| anyhow::anyhow!(e))?;
+    }
+    if let Some(ref at) = alias_type {
+        cortx_core::shell_init::validate_alias_type(at).map_err(|e| anyhow::anyhow!(e))?;
+    }
+    let tool_id = resolve_tool_ref(storage, tool_id.as_deref())?;
+
     let updated = storage.update_alias(&id, |a| {
         if let Some(ref n) = name { a.name = n.clone(); }
         if let Some(ref c) = command { a.command = c.clone(); }
-        if let Some(ref d) = description { a.description = Some(d.clone()); }
+        patch_text(&mut a.description, &description);
         if let Some(ref at) = alias_type { a.alias_type = at.clone(); }
-        if let Some(eo) = execution_order { a.execution_order = Some(eo); }
-        if let Some(ref t) = tags { a.tags = t.clone(); }
+        if let Some(eo) = execution_order { a.execution_order = eo; }
+        if let Some(ref t) = tags { a.tags = clean_list(t); }
         if let Some(s) = shim { a.shim = s; }
+        patch_text(&mut a.status, &status);
+        if let Some(ref e) = setup { a.setup = map_or_none(e); }
+        if let Some(ref e) = script { a.script = map_or_none(e); }
+        if let Some(t) = tool_id { a.tool_id = t; }
+        if let Some(f) = favorite { a.favorite = f; }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -3255,6 +3921,18 @@ fn cmd_app_get(storage: &Storage, name_or_id: &str, json: bool) -> anyhow::Resul
     if let Some(ref hp) = app.homepage {
         println!("Homepage:    {}", hp);
     }
+    if let Some(ref v) = app.version {
+        println!("Version:     {}", v);
+    }
+    if let Some(ref u) = app.toolbox_url {
+        println!("Toolbox URL: {}", u);
+    }
+    if let Some(ref c) = app.color {
+        println!("Color:       {}", c);
+    }
+    if let Some(ref n) = app.notes {
+        println!("Notes:       {}", n);
+    }
     if !app.config_paths.is_empty() {
         println!("Config paths:");
         for cp in &app.config_paths {
@@ -3277,21 +3955,27 @@ fn cmd_app_create(
     launch_args: Option<&str>,
     color: Option<&str>,
     config_path: Option<Vec<String>>,
+    version: Option<&str>,
+    toolbox_url: Option<&str>,
+    notes: Option<&str>,
     json: bool,
 ) -> anyhow::Result<()> {
     let mut app = CoreApp::new(name.to_string());
-    app.description = description.map(|s| s.to_string());
-    app.executable_path = executable.map(|s| s.to_string());
+    app.description = create_text(description);
+    app.executable_path = create_text(executable);
     if let Some(tags) = tags {
-        app.tags = tags;
+        app.tags = clean_list(&tags);
     }
-    app.status = status.map(|s| s.to_string());
-    app.homepage = homepage.map(|s| s.to_string());
-    app.launch_args = launch_args.map(|s| s.to_string());
-    app.color = color.map(|s| s.to_string());
+    app.status = create_text(status);
+    app.homepage = create_text(homepage);
+    app.launch_args = create_text(launch_args);
+    app.color = create_text(color);
     if let Some(entries) = config_path {
         app.config_paths = parse_config_paths(&entries);
     }
+    app.version = create_text(version);
+    app.toolbox_url = create_text(toolbox_url);
+    app.notes = create_text(notes);
 
     let created = storage.create_app(app).map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -3313,6 +3997,12 @@ fn cmd_app_update(
     status: Option<String>,
     homepage: Option<String>,
     config_path: Option<Vec<String>>,
+    launch_args: Option<String>,
+    color: Option<String>,
+    version: Option<String>,
+    toolbox_url: Option<String>,
+    notes: Option<String>,
+    favorite: Option<bool>,
     json: bool,
 ) -> anyhow::Result<()> {
     let apps = storage.get_all_apps();
@@ -3322,12 +4012,18 @@ fn cmd_app_update(
     let parsed_configs = config_path.map(|entries| parse_config_paths(&entries));
     let updated = storage.update_app(&id, |a| {
         if let Some(ref n) = name { a.name = n.clone(); }
-        if let Some(ref d) = description { a.description = Some(d.clone()); }
-        if let Some(ref e) = executable { a.executable_path = Some(e.clone()); }
-        if let Some(ref t) = tags { a.tags = t.clone(); }
-        if let Some(ref s) = status { a.status = Some(s.clone()); }
-        if let Some(ref h) = homepage { a.homepage = Some(h.clone()); }
+        patch_text(&mut a.description, &description);
+        patch_text(&mut a.executable_path, &executable);
+        if let Some(ref t) = tags { a.tags = clean_list(t); }
+        patch_text(&mut a.status, &status);
+        patch_text(&mut a.homepage, &homepage);
         if let Some(ref cp) = parsed_configs { a.config_paths = cp.clone(); }
+        patch_text(&mut a.launch_args, &launch_args);
+        patch_text(&mut a.color, &color);
+        patch_text(&mut a.version, &version);
+        patch_text(&mut a.toolbox_url, &toolbox_url);
+        patch_text(&mut a.notes, &notes);
+        if let Some(f) = favorite { a.favorite = f; }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -3480,11 +4176,11 @@ fn cmd_tag_create(storage: &Storage, name: &str, color: Option<&str>, order: Opt
     Ok(())
 }
 
-fn cmd_tag_update(storage: &Storage, name: &str, new_name: Option<String>, color: Option<String>, order: Option<u32>, json: bool) -> anyhow::Result<()> {
+fn cmd_tag_update(storage: &Storage, name: &str, new_name: Option<String>, color: Option<String>, order: Option<Clearable<u32>>, json: bool) -> anyhow::Result<()> {
     let updated = storage.update_tag_definition(name, |d| {
         if let Some(ref n) = new_name { d.name = n.clone(); }
-        if let Some(ref c) = color { d.color = Some(c.clone()); }
-        if let Some(o) = order { d.order = Some(o); }
+        patch_text(&mut d.color, &color);
+        if let Some(o) = order { d.order = o; }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -3580,11 +4276,11 @@ fn cmd_status_create(storage: &Storage, name: &str, color: Option<&str>, order: 
     Ok(())
 }
 
-fn cmd_status_update(storage: &Storage, name: &str, new_name: Option<String>, color: Option<String>, order: Option<u32>, json: bool) -> anyhow::Result<()> {
+fn cmd_status_update(storage: &Storage, name: &str, new_name: Option<String>, color: Option<String>, order: Option<Clearable<u32>>, json: bool) -> anyhow::Result<()> {
     let updated = storage.update_status_definition(name, |d| {
         if let Some(ref n) = new_name { d.name = n.clone(); }
-        if let Some(ref c) = color { d.color = Some(c.clone()); }
-        if let Some(o) = order { d.order = Some(o); }
+        patch_text(&mut d.color, &color);
+        if let Some(o) = order { d.order = o; }
     }).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if json {
@@ -3648,7 +4344,7 @@ fn cmd_settings_set(storage: &Storage, key: &str, value: &str) -> anyhow::Result
             settings.toolbox_base_url = value.to_string();
         }
         "backupRepoPath" | "backup_repo_path" => {
-            settings.backup_repo_path = Some(value.to_string());
+            settings.backup_repo_path = create_text(Some(value));
         }
         "defaults.launchMethod" | "defaults.launch_method" => {
             let method = match value.to_lowercase().as_str() {
@@ -3668,17 +4364,105 @@ fn cmd_settings_set(storage: &Storage, key: &str, value: &str) -> anyhow::Result
             };
             settings.appearance.theme = theme;
         }
+        // Every other key: a dotted path into the settings JSON, so the CLI can
+        // change anything the app's Settings screen and the MCP server can.
         _ => {
-            return Err(anyhow::anyhow!(
-                "Unknown setting key '{}'. Valid keys: terminal.preset, toolboxBaseUrl, backupRepoPath, defaults.launchMethod, appearance.theme",
-                key
-            ));
+            settings = set_settings_path(&settings, key, value)?;
         }
     }
 
     storage.update_settings(settings).map_err(|e| anyhow::anyhow!("{}", e))?;
     println!("Setting '{}' updated to '{}'.", key, value);
     Ok(())
+}
+
+/// `snake_case` → `camelCase`, so `terminal.font_size` works like `terminal.fontSize`.
+fn snake_to_camel(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    let mut upper = false;
+    for c in segment.chars() {
+        if c == '_' {
+            upper = true;
+        } else if upper {
+            out.extend(c.to_uppercase());
+            upper = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Set `key` (a dotted camelCase path, e.g. `terminal.fontSize`) to `value` in
+/// a copy of `settings`. The value is read as JSON when that gives a valid
+/// setting (`true`, `14`, `["-l"]`, `null`), else as a plain string; `""`
+/// clears an optional setting. Fails on an unknown key or an invalid value,
+/// instead of letting serde drop it silently.
+fn set_settings_path(settings: &AppSettings, key: &str, value: &str) -> anyhow::Result<AppSettings> {
+    use serde_json::Value;
+
+    let segments: Vec<String> = key.split('.').map(snake_to_camel).collect();
+    if segments.iter().any(|s| s.is_empty()) {
+        return Err(CortxError::invalid_argument(format!("Invalid setting key '{}'.", key)).into());
+    }
+    let base = serde_json::to_value(settings)?;
+
+    let mut candidates: Vec<Value> = Vec::new();
+    if value.trim().is_empty() {
+        candidates.push(Value::Null);
+    } else if let Ok(v) = serde_json::from_str::<Value>(value) {
+        candidates.push(v);
+    }
+    candidates.push(Value::String(value.to_string()));
+
+    let lookup = |root: &Value| -> Option<Value> {
+        let mut cur = root;
+        for seg in &segments {
+            cur = cur.as_object()?.get(seg)?;
+        }
+        Some(cur.clone())
+    };
+    // The value read back after a round trip must be the one we wrote,
+    // otherwise the key does not exist (serde ignored it) or was coerced.
+    let same = |wanted: &Value, got: Option<&Value>| -> bool {
+        match (wanted, got) {
+            (Value::Null, None) | (Value::Null, Some(Value::Null)) => true,
+            (Value::Number(a), Some(Value::Number(b))) => {
+                let (a, b) = (a.as_f64().unwrap_or(f64::NAN), b.as_f64().unwrap_or(f64::NAN));
+                (a - b).abs() <= 1e-4 * a.abs().max(1.0)
+            }
+            (Value::String(a), Some(Value::String(b))) => a.eq_ignore_ascii_case(b),
+            (Value::Object(_) | Value::Array(_), Some(got)) => !got.is_null(),
+            (a, Some(b)) => a == b,
+            _ => false,
+        }
+    };
+
+    for candidate in candidates {
+        let mut doc = base.clone();
+        let Some((leaf, parents)) = segments.split_last() else { break };
+        let parent_ptr: String = parents
+            .iter()
+            .map(|s| format!("/{}", s.replace('~', "~0").replace('/', "~1")))
+            .collect();
+        // The parent must be an existing section; only the leaf may be new
+        // (optional settings are omitted from the JSON while unset).
+        let Some(obj) = doc.pointer_mut(&parent_ptr).and_then(|v| v.as_object_mut()) else { break };
+        obj.insert(leaf.clone(), candidate.clone());
+
+        let Ok(parsed) = serde_json::from_value::<AppSettings>(doc) else { continue };
+        let round = serde_json::to_value(&parsed)?;
+        if same(&candidate, lookup(&round).as_ref()) {
+            return Ok(parsed);
+        }
+    }
+
+    Err(CortxError::invalid_argument(format!(
+        "Cannot set '{}' to '{}': unknown setting key or invalid value. \
+         Run `cortx settings get --json` to see every key and its current value.",
+        key, value
+    ))
+    .into())
 }
 
 // ============================================================================
@@ -4333,5 +5117,137 @@ fn handle_event(app: &mut App, ev: event::Event) {
             app.refresh_data();
         }
         event::Event::Tick => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(std::iter::once("cortx").chain(args.iter().copied()))
+            .unwrap_or_else(|e| panic!("{:?} should parse: {}", args, e))
+    }
+
+    #[test]
+    fn cli_definition_is_valid() {
+        // Catches bad `conflicts_with` names, duplicate flags, short-flag clashes.
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn tool_update_takes_toolbox_url_and_the_other_tool_fields() {
+        let cli = parse(&[
+            "tool", "update", "fd",
+            "--toolbox-url", "/tools/dev/cli/fd",
+            "--replaced-by", "find", "--notes", "n", "--install-method", "scoop",
+            "--install-location", "/opt/fd", "--color", "#fff", "--favorite", "true",
+        ]);
+        match cli.command {
+            Some(Command::Tool { action: ToolAction::Update {
+                toolbox_url, replaced_by, notes, install_method, install_location, color, favorite, ..
+            } }) => {
+                assert_eq!(toolbox_url.as_deref(), Some("/tools/dev/cli/fd"));
+                assert_eq!(replaced_by.as_deref(), Some("find"));
+                assert_eq!(notes.as_deref(), Some("n"));
+                assert_eq!(install_method.as_deref(), Some("scoop"));
+                assert_eq!(install_location.as_deref(), Some("/opt/fd"));
+                assert_eq!(color.as_deref(), Some("#fff"));
+                assert_eq!(favorite, Some(true));
+            }
+            _ => panic!("expected tool update"),
+        }
+    }
+
+    #[test]
+    fn tool_create_takes_toolbox_url() {
+        match parse(&["tool", "create", "fd", "--toolbox-url", "/tools/dev/cli/fd"]).command {
+            Some(Command::Tool { action: ToolAction::Create { toolbox_url, .. } }) => {
+                assert_eq!(toolbox_url.as_deref(), Some("/tools/dev/cli/fd"));
+            }
+            _ => panic!("expected tool create"),
+        }
+    }
+
+    #[test]
+    fn empty_string_reaches_the_command_so_it_can_clear() {
+        match parse(&["tool", "update", "fd", "--toolbox-url", ""]).command {
+            Some(Command::Tool { action: ToolAction::Update { toolbox_url, .. } }) => {
+                assert_eq!(toolbox_url.as_deref(), Some(""));
+            }
+            _ => panic!("expected tool update"),
+        }
+    }
+
+    #[test]
+    fn clearable_number_flags() {
+        let port = |args: &[&str]| match parse(args).command {
+            Some(Command::Service { action: ServiceAction::Update { port, .. } }) => port,
+            _ => panic!("expected service update"),
+        };
+        assert_eq!(port(&["service", "update", "id"]), None);
+        assert_eq!(port(&["service", "update", "id", "--port", ""]), Some(None));
+        assert_eq!(port(&["service", "update", "id", "--port", "8080"]), Some(Some(8080)));
+        assert!(Cli::try_parse_from(["cortx", "service", "update", "id", "--port", "x"]).is_err());
+    }
+
+    #[test]
+    fn project_script_subcommands_parse() {
+        match parse(&["project", "script", "add", "web", "build", "npm run build", "--link-service", "api"]).command {
+            Some(Command::Project { action: ProjectAction::Script { action: ProjectScriptAction::Add {
+                project, name, command, link_service, dir, ..
+            } } }) => {
+                assert_eq!((project.as_str(), name.as_str(), command.as_str()), ("web", "build", "npm run build"));
+                assert_eq!(link_service, Some(vec!["api".to_string()]));
+                assert_eq!(dir, None);
+            }
+            _ => panic!("expected project script add"),
+        }
+    }
+
+    #[test]
+    fn patch_text_follows_the_core_rule() {
+        let mut v = Some("old".to_string());
+        patch_text(&mut v, &None);
+        assert_eq!(v.as_deref(), Some("old"), "absent flag: no change");
+        patch_text(&mut v, &Some("  new ".to_string()));
+        assert_eq!(v.as_deref(), Some("new"), "text: set, trimmed");
+        patch_text(&mut v, &Some(String::new()));
+        assert_eq!(v, None, "empty: cleared");
+        assert_eq!(create_text(Some("  ")), None);
+    }
+
+    #[test]
+    fn blank_list_entries_are_dropped() {
+        assert!(clean_list(&["".to_string()]).is_empty());
+        assert_eq!(clean_list(&[" a ".to_string(), " ".to_string()]), vec!["a".to_string()]);
+        assert_eq!(map_or_none(&["".to_string()]), None);
+    }
+
+    #[test]
+    fn presets_json_gets_ids() {
+        let presets = parse_presets_json(r#"[{"name":"fast","values":{"n":"5"}},{"id":"keep","name":"b","values":{}}]"#).unwrap();
+        assert_eq!(presets.len(), 2);
+        assert!(!presets[0].id.is_empty());
+        assert_eq!(presets[1].id, "keep");
+        assert!(parse_presets_json("").unwrap().is_empty());
+        assert!(parse_presets_json("nope").is_err());
+    }
+
+    #[test]
+    fn settings_path_setter() {
+        let base = AppSettings::default();
+        let s = set_settings_path(&base, "terminal.fontSize", "15").unwrap();
+        assert_eq!(s.terminal.font_size, Some(15));
+        let s = set_settings_path(&s, "terminal.font_size", "").unwrap();
+        assert_eq!(s.terminal.font_size, None, "snake_case works and \"\" clears");
+        let s = set_settings_path(&s, "shimDir", "/tmp/shims").unwrap();
+        assert_eq!(s.shim_dir.as_deref(), Some("/tmp/shims"));
+        let s = set_settings_path(&s, "terminal.cursorBlink", "false").unwrap();
+        assert!(!s.terminal.cursor_blink);
+        assert!(set_settings_path(&s, "terminal.nope", "1").is_err(), "unknown key");
+        assert!(set_settings_path(&s, "terminal.fontSize", "big").is_err(), "invalid value");
+        assert!(set_settings_path(&s, "nope.deeper", "1").is_err(), "unknown section");
     }
 }

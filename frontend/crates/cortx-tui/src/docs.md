@@ -52,6 +52,9 @@ CortX manages ten types of entities:
 
 - **Global flag `--json`**: Available on every command. Outputs structured JSON to stdout instead of human-readable tables. Use for scripting or LLM piping.
 - **`--yes` on delete commands**: Skips the interactive confirmation prompt. Always pass `--yes` when calling from an agent/script.
+- **Clearing a field on `update`**: an omitted flag leaves the field untouched; an **empty value clears it** — `--toolbox-url ""`, `--notes ""`, `--port ""`, `--execution-order ""`. For list and map flags the empty value empties the list/map: `--tag ""`, `--env ""`, `--mode ""`, `--config-path ""`, `--link-service ""`. Same rule as the app and the MCP server.
+- **`--favorite true|false`** on `update` (projects, scripts, tools, apps, aliases) pins or unpins the item, like the star in the app.
+- **Everything the app and the MCP server can edit is editable here.** If a field seems missing, check `cortx <domain> <command> --help`.
 - **Backward compat shortcuts**:
   - `cortx scripts` = `cortx script list`
   - `cortx tools` = `cortx tool list`
@@ -81,11 +84,15 @@ CortX manages ten types of entities:
 |---|---|
 | `script list` | `[--tag X]` filter by tag |
 | `script get <name_or_id>` | Show full details (command, description, tags, parameters, presets) |
-| `script create <name> <command>` | `[--dir X] [--tag X...] [--description X] [--status X]` |
-| `script update <name_or_id>` | `[--name X] [--command X] [--dir X] [--tag X...] [--description X] [--status X]` |
+| `script create <name> <command>` | `[--dir X] [--script-path X] [--color X] [--tag X...] [--description X] [--status X] [--env KEY=VALUE...] [--parameters JSON \| --detect-params] [--presets JSON]` |
+| `script update <name_or_id>` | Same flags as create + `[--name X] [--command X] [--default-preset NAME_OR_ID] [--favorite true\|false]`. `--tag`, `--env`, `--parameters`, `--presets` replace all. |
 | `script delete <name_or_id>` | `[--yes]` |
+| `script detect-params <command>` | `[--script-path X]` — runs `<command> --help` and prints the parameters it finds (saves nothing) |
 
-Scripts can have CLI parameters (e.g. `--input`, `-n 5`) that get auto-detected by the GUI/MCP via `--help` parsing. The CLI does not expose parameter creation — use the MCP or GUI for that.
+Scripts can have CLI parameters (e.g. `--input`, `-n 5`) and named presets of parameter values:
+- `--detect-params` runs `<command> --help`, parses it, and saves the parameters (what the app's auto-detect does).
+- `--parameters '[{"name":"input","paramType":"path","longFlag":"--input","required":true}]'` sets them by hand. `paramType`: `string`, `bool`, `number`, `enum` (+ `enumValues`), `path`. Optional: `shortFlag`, `description`, `defaultValue`, `nargs`.
+- `--presets '[{"name":"fast","values":{"n":"5"}}]'` sets the presets (`id` is generated when omitted; optional `description`, `enabled`). `--default-preset fast` picks the default. Run one with `cortx run <name> --preset fast`.
 
 ### `cortx project` — projects
 
@@ -93,17 +100,27 @@ Scripts can have CLI parameters (e.g. `--input`, `-n 5`) that get auto-detected 
 |---|---|
 | `project list` | `[--tag X]` |
 | `project get <name_or_id>` | Shows services + scripts count |
-| `project create <name> <path>` | `[--description X] [--tag X...] [--status X] [--toolbox-url X]` |
-| `project update <name_or_id>` | `[--name X] [--path X] [--description X] [--tag X...] [--status X] [--toolbox-url X]` |
+| `project create <name> <path>` | `[--description X] [--tag X...] [--status X] [--toolbox-url X] [--image-path X]` |
+| `project update <name_or_id>` | `[--name X] [--path X] [--description X] [--tag X...] [--status X] [--toolbox-url X] [--image-path X] [--favorite true\|false]` |
 | `project delete <name_or_id>` | `[--yes]`. Deletes project AND all its services/scripts. |
+| `project run <project> <script> [args]` | Run a project script detached (returns the PID). `project stop/status/logs <project> <script>` control it. |
+
+### `cortx project script` — scripts within a project
+
+| Command | Args / Flags |
+|---|---|
+| `project script list <project>` | |
+| `project script add <project> <name> <command>` | `[--dir X] [--description X] [--script-path X] [--color X] [--link-service NAME_OR_ID...]` — `--dir` is relative to the project root (default `.`) |
+| `project script update <project> <script>` | `[--name X] [--command X] [--dir X] [--description X] [--script-path X] [--color X] [--link-service NAME_OR_ID...]` — `--link-service` replaces all links |
+| `project script delete <project> <script>` | `[--yes]` |
 
 ### `cortx service` — services within a project
 
 | Command | Args / Flags |
 |---|---|
 | `service list <project>` | Project name or ID |
-| `service add <project> <name> <dir> <command>` | `[--mode name=cmd...] [--default-mode X] [--port N] [--color X]` |
-| `service update <id>` | `[--name X] [--command X] [--dir X]` — takes service ID only |
+| `service add <project> <name> <dir> <command>` | `[--mode name=cmd...] [--default-mode X] [--extra-args X] [--arg-preset name=args...] [--default-arg-preset X] [--port N] [--color X] [--env KEY=VALUE...]` |
+| `service update <id>` | Same flags as add + `[--name X] [--command X] [--dir X]` — takes service ID only (see `cortx project get <p> --json`). `--mode`, `--arg-preset`, `--env` replace all. |
 | `service delete <id>` | `[--yes]` |
 
 The `--mode` flag is repeatable: `--mode dev="npm run dev" --mode prod="npm start"`. Paired with `--default-mode dev`.
@@ -114,11 +131,15 @@ The `--mode` flag is repeatable: `--mode dev="npm run dev" --mode prod="npm star
 |---|---|
 | `tool list` | `[--tag X] [--scan]` — `--scan` auto-discovers from Scoop/Chocolatey |
 | `tool get <name_or_id>` | |
-| `tool create <name>` | `[--description X] [--tag X...] [--status X] [--install-method X] [--install-location X] [--version X] [--homepage X] [--color X] [--config-path label=path[:dir]...]` |
-| `tool update <name_or_id>` | Same flags as create + `[--name X]`. `--config-path` replaces all paths. |
+| `tool create <name>` | `[--description X] [--tag X...] [--status X] [--install-method X] [--install-location X] [--version X] [--homepage X] [--color X] [--config-path label=path[:dir]...] [--toolbox-url X] [--notes X] [--replaced-by TOOL]` |
+| `tool update <name_or_id>` | Same flags as create + `[--name X] [--favorite true\|false]`. `--tag` and `--config-path` replace all. |
 | `tool delete <name_or_id>` | `[--yes]` |
 
 `--config-path` format: `"label=path"` for files, `"label=path:dir"` for directories. Example: `--config-path "config=C:/Users/me/.config/fastfetch:dir"`.
+
+`--toolbox-url` is the tool's documentation link: a full URL, or a path starting with `/` that the app joins to the `toolboxBaseUrl` setting. Example: `cortx tool update fd --toolbox-url /tools/dev/cli/fd`; `--toolbox-url ""` removes it.
+
+`--replaced-by` takes another tool's name or ID (stored as its ID), typically for a tool whose status is Deprecated.
 
 ### `cortx app` — GUI apps registry
 
@@ -126,8 +147,8 @@ The `--mode` flag is repeatable: `--mode dev="npm run dev" --mode prod="npm star
 |---|---|
 | `app list` | |
 | `app get <name_or_id>` | |
-| `app create <name>` | `[--description X] [--executable X] [--tag X...] [--status X] [--homepage X] [--launch-args X] [--color X] [--config-path ...]` |
-| `app update <name_or_id>` | Same flags as create + `[--name X]`. |
+| `app create <name>` | `[--description X] [--executable X] [--tag X...] [--status X] [--version X] [--homepage X] [--launch-args X] [--color X] [--config-path ...] [--toolbox-url X] [--notes X]` |
+| `app update <name_or_id>` | Same flags as create + `[--name X] [--favorite true\|false]`. `--tag` and `--config-path` replace all. |
 | `app delete <name_or_id>` | `[--yes]` |
 | `app launch <name>` | Launch the app's executable (case-insensitive partial match on name) |
 
@@ -137,8 +158,8 @@ The `--mode` flag is repeatable: `--mode dev="npm run dev" --mode prod="npm star
 |---|---|
 | `alias list` | |
 | `alias get <name>` | |
-| `alias add <name> <command>` | `[-d DESC] [-t TYPE] [--setup shell=code...] [--script shell=code...] [--tool-id UUID] [--shim]` |
-| `alias update <name_or_id>` | `[--name X] [--command X] [--description X] [-t TYPE] [--execution-order N] [--tag X...] [--shim true|false]` |
+| `alias add <name> <command>` | `[-d DESC] [-t TYPE] [--setup shell=code...] [--script shell=code...] [--tool-id TOOL] [--shim] [--tag X...] [--status X] [--execution-order N]` |
+| `alias update <name_or_id>` | `[--name X] [--command X] [-d DESC] [-t TYPE] [--setup shell=code...] [--script shell=code...] [--tool-id TOOL] [--execution-order N] [--tag X...] [--status X] [--shim true\|false] [--favorite true\|false]` — `--setup`/`--script`/`--tag` replace all; `--tool-id ""` unlinks |
 | `alias remove <name>` | No confirmation — removes directly |
 
 Alias types:
@@ -171,7 +192,7 @@ Only `function` aliases are shimmable (`script`/`init` inject shell state and ca
 |---|---|
 | `tag list` | |
 | `tag create <name>` | `[--color #hex] [--order N]` |
-| `tag update <name>` | `[--name NEW_NAME] [--color X] [--order N]` |
+| `tag update <name>` | `[--name NEW_NAME] [--color X] [--order N]` — `--color ""` / `--order ""` clear |
 | `tag delete <name>` | `[--yes]` — items keep the tag string but lose color/order |
 
 ### `cortx status` — status definitions
@@ -185,12 +206,16 @@ Same shape as tag. `create/update/delete` with `--color` and `--order`.
 | `settings get` | Print all settings |
 | `settings set <key> <value>` | Set a setting value by key path |
 
-Settable keys:
+**Any** key shown by `cortx settings get --json` can be set, as a dotted camelCase path (snake_case also works): `terminal.fontSize 14`, `terminal.cursorBlink false`, `terminal.customArgs '["-NoLogo"]'`, `scriptsConfig.mainFolder D:/scripts`, `agents.recentDays 14`, `shimDir D:/bin`, `globalHotkey "Alt+F1"`. The value is read as JSON when that gives a valid setting (`true`, `14`, `null`, `["a"]`), otherwise as a plain string. `""` (or `null`) clears an optional setting. An unknown key or an invalid value is rejected.
+
+Keys with friendly values:
 - `terminal.preset` — `windowsterminal`, `powershell`, `cmd`, `warp`, `macterminal`, `iterm2`, `custom`
 - `appearance.theme` — `light`, `dark`, `system`
 - `defaults.launchMethod` — `clipboard`, `external`, `integrated`
-- `toolboxBaseUrl` — URL prefix for tool `toolbox_url` fields starting with `/`
-- `backupRepoPath` — local path to a git repo for `cortx backup`
+- `toolboxBaseUrl` — URL prefix for `toolbox_url` fields (tools, apps, projects) starting with `/`
+- `backupRepoPath` — local path to a git repo for `cortx backup` (`""` clears)
+
+A running app picks up a changed `globalHotkey` the next time it starts.
 
 ## Common workflows
 
@@ -248,7 +273,6 @@ cortx import /tmp/cortx.json --all
 **MCP is preferred for:**
 - Interactive agent sessions where you want type-safe structured calls
 - Complex parameter parsing (nested objects, env var maps)
-- Features not yet exposed in the CLI (script parameter detection, preset management)
 
 The CLI and MCP share the same backend — changes via one are immediately visible via the other.
 
