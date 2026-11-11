@@ -20,6 +20,7 @@ jobs:
     outputs:
       release_id: ${{ fromJSON(steps.release.outputs.result).id }}
       skip: ${{ fromJSON(steps.release.outputs.result).skip }}
+      tag: ${{ fromJSON(steps.release.outputs.result).tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,10 +44,10 @@ jobs:
               // release a failed job left incomplete.
               if (!found.draft && context.eventName === 'push') {
                 core.info(`${found.name} is already published: nothing to build.`);
-                return { id: String(found.id), skip: 'true' };
+                return { id: String(found.id), skip: 'true', tag };
               }
               core.info(`Uploading into the existing release ${found.name} (${found.draft ? 'draft' : 'published'}).`);
-              return { id: String(found.id), skip: 'false' };
+              return { id: String(found.id), skip: 'false', tag };
             }
             const { data } = await github.rest.repos.createRelease({
               owner,
@@ -59,7 +60,7 @@ jobs:
               prerelease: false,
             });
             core.info(`Created the draft release ${data.name}.`);
-            return { id: String(data.id), skip: 'false' };
+            return { id: String(data.id), skip: 'false', tag };
 
   publish-tauri:
     needs: create-release
@@ -146,5 +147,8 @@ jobs:
           projectPath: frontend
           tauriScript: bunx tauri
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          tagName: v__VERSION__
+          # The real tag, not `v__VERSION__`: given a releaseId, tauri-action
+          # does not replace the placeholder, and every url of latest.json
+          # pointed at /download/v__VERSION__/ (0.15.13 could not update).
+          tagName: ${{ needs.create-release.outputs.tag }}
           args: ${{ matrix.args }}
