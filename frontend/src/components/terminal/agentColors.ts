@@ -8,7 +8,7 @@
  * - working   — violet, pulsing (what agents already were);
  * - needs you — orange, the loudest;
  * - done      — cyan, "finished, you have not looked";
- * - idle      — a muted violet ring.
+ * - idle      — a deep violet ring (a ring, so it never reads as working).
  *
  * Each can be changed (`terminal.agentColor*`). Pure, no imports, so
  * `terminalDefaults.ts` can take the defaults under plain Node.
@@ -17,7 +17,7 @@ export const DEFAULT_AGENT_COLORS = {
   working: '#8b5cf6',
   needsYou: '#f97316',
   done: '#06b6d4',
-  idle: '#8b7fb0',
+  idle: '#7c3aed',
 } as const;
 
 export type AgentColorKey = keyof typeof DEFAULT_AGENT_COLORS;

@@ -101,6 +101,8 @@ export interface TerminalSession {
   draining: boolean;
   /** Size last accepted by the backend PTY, so a lost resize can be retried. */
   sentSize: { cols: number; rows: number } | null;
+  /** A PTY resize waiting for the layout to settle (see `pushTerminalSize`). */
+  resizeTimer: number | null;
   /** Whatever currently answers OSC 52 for this session: the `ClipboardAddon`
    *  when access is granted, the handler that swallows and reports the
    *  sequence when it is denied. Swapped in place when the setting changes
@@ -1285,6 +1287,7 @@ function createSession(id: string): TerminalSession {
     pending: [],
     draining: false,
     sentSize: null,
+    resizeTimer: null,
     osc52: null,
   };
 
@@ -1644,8 +1647,9 @@ async function attach(session: TerminalSession) {
     }
     session.attachToken = token;
     // The PTY exists for sure now: a size that was refused while it was still
-    // spawning (see pushTerminalSize) gets through this time.
-    pushTerminalSize(session);
+    // spawning (see pushTerminalSize) gets through this time — at once: the
+    // program is just starting, nothing is on screen to re-lay out.
+    sendTerminalSize(session);
   } catch (err) {
     console.error(`Failed to attach terminal ${session.id}:`, err);
   }
@@ -1671,6 +1675,34 @@ async function attach(session: TerminalSession) {
  * accepted, and try again on the next fit and right after the attach.
  */
 function pushTerminalSize(session: TerminalSession) {
+  const { cols, rows } = session.term;
+  if (cols < 2 || rows < 2) return;
+  if (session.sentSize?.cols === cols && session.sentSize.rows === rows) {
+    // Back to the size the PTY already has (a drag that came back): nothing
+    // to send, and nothing pending either.
+    if (session.resizeTimer !== null) {
+      window.clearTimeout(session.resizeTimer);
+      session.resizeTimer = null;
+    }
+    return;
+  }
+  // Only the size the layout settles on reaches the program. Every resize
+  // makes a full-screen program redraw at the new width, and some never
+  // redraw what they already printed: Claude Code keeps the lines it laid out
+  // while a window was being dragged narrow, so a drag through every width
+  // on the way left its history squeezed into a column. One resize, once the
+  // drag (or the layout) has stopped, is all it needs.
+  if (session.resizeTimer !== null) window.clearTimeout(session.resizeTimer);
+  session.resizeTimer = window.setTimeout(() => {
+    session.resizeTimer = null;
+    sendTerminalSize(session);
+  }, PTY_RESIZE_SETTLE_MS);
+}
+
+/** How long the layout must hold still before the PTY is told its new size. */
+const PTY_RESIZE_SETTLE_MS = 150;
+
+function sendTerminalSize(session: TerminalSession) {
   const { cols, rows } = session.term;
   if (cols < 2 || rows < 2) return;
   if (session.sentSize?.cols === cols && session.sentSize.rows === rows) return;
@@ -1846,6 +1878,8 @@ export function disposeTerminal(id: string) {
   if (session.bellTimer !== null) window.clearTimeout(session.bellTimer);
   session.bellTimer = null;
   lastBellAt.delete(id);
+  if (session.resizeTimer !== null) window.clearTimeout(session.resizeTimer);
+  session.resizeTimer = null;
   session.webgl?.dispose();
   session.canvas?.dispose();
   session.ligatures?.dispose();

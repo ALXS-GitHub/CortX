@@ -135,6 +135,11 @@ export interface TerminalConfig {
    *  opening it — the tile's header opens it. Off, a click anywhere on a tile
    *  only opens it, so nothing reaches an agent you are watching. Default true. */
   gridTilesInteractive?: boolean;
+  /** Grid tiles show each session at its full-page size, scaled down, rather
+   *  than resizing it to the tile. Default true. */
+  gridTilesKeepSize?: boolean;
+  /** In agent mode, no rail or tab strip at all (not even collapsed). Default false. */
+  agentModeHidesTabs?: boolean;
   /** Grid tile header, besides name and dot. Default `['project', 'activity']`. */
   gridTileInfo?: GridTileInfo[];
   /** Agent dot colours (`#rrggbb`); unset = CortX's own (see `agentColors.ts`). */

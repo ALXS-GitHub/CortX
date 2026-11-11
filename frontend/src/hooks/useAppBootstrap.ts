@@ -5,7 +5,8 @@ import { registerTerminalWindowView, useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { collectLeaves, tabsInScope } from '@/lib/terminalLayout';
 import { decideAgentNotification, decideCommandNotification } from '@/components/terminal/settings/notificationPolicy';
-import { onAgentTransitions } from '@/components/terminal/agentsStore';
+import { onAgentTransitions, useTerminalAgentsStore } from '@/components/terminal/agentsStore';
+import { agentEventOf, shouldAnnounce } from '@/components/terminal/agentPhase';
 import { revealTerminal } from '@/components/terminal/agentInbox';
 import { applyThemeMode } from '@/lib/theme';
 import {
@@ -161,21 +162,29 @@ export function useAppBootstrap() {
     // Agent notifications: an agent stopped on you, or finished its turn.
     // Read off what the agents publish themselves (see agentsStore); one
     // window per terminal speaks, like the command notifications.
+    // The same event of the same terminal, once per cooldown (see shouldAnnounce).
+    const lastAnnounced = new Map<string, number>();
     const unlistenAgentTransitions = onAgentTransitions((transitions, agents) => {
       const store = useAppStore.getState();
       const cfg = store.settings?.terminal;
+      const { readyAt, firstSeen } = useTerminalAgentsStore.getState();
+      const now = Date.now();
       for (const t of transitions) {
         // First sight (CortX starting, an agent found mid-session) is no event.
-        if (t.from === null || t.from === 'unknown') continue;
-        const event = t.to === 'needs-you' ? 'needs-you' : t.to === 'rest' ? 'done' : null;
+        const event = agentEventOf(t);
         if (!event) continue;
         if (!ownsTerminal(t.terminalId)) continue;
+        const key = `${t.terminalId}:${event}`;
+        if (!shouldAnnounce(now, { readyAt, firstSeenAt: firstSeen.get(t.terminalId), lastAnnouncedAt: lastAnnounced.get(key) })) {
+          continue;
+        }
         const decision = decideAgentNotification(cfg, {
           event,
           inView: store.isTerminalInView(t.terminalId),
           windowFocused: typeof document === 'undefined' || document.hasFocus(),
         });
         if (!decision) continue;
+        lastAnnounced.set(key, now);
         const agent = agents.get(t.terminalId);
         const { name, projectName } = terminalDisplayName(t.terminalId, store);
         const title = `${agent?.name || name}${projectName ? ` · ${projectName}` : ''}`;

@@ -134,6 +134,8 @@ const BACKEND_DEFAULTS = {
   ctrlTabBehavior: 'sequential',
   followProjectOnCd: true,
   gridTilesInteractive: true,
+  gridTilesKeepSize: true,
+  agentModeHidesTabs: false,
   gridTileInfo: ['project', 'activity'],
   agentNotifyNeedsYou: true,
   agentNotifyDone: true,

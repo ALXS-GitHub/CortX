@@ -439,6 +439,8 @@ export const TERMINAL_SETTINGS = {
   ctrlTabBehavior: { label: 'Ctrl+Tab goes to', group: 'tabs', fallback: FROM_RUST },
   followProjectOnCd: { label: 'Tabs follow the working directory', group: 'tabs', fallback: FROM_RUST },
   gridTilesInteractive: { label: 'Type into grid tiles', group: 'agents', fallback: FROM_RUST },
+  gridTilesKeepSize: { label: 'Tiles keep the session size', group: 'agents', fallback: FROM_RUST },
+  agentModeHidesTabs: { label: 'Agent mode hides the rail', group: 'agents', fallback: FROM_RUST },
   gridTileInfo: { label: 'Grid tiles show', group: 'agents', fallback: FROM_RUST },
   agentColorWorking: { label: 'Agent working', group: 'agents', fallback: DEFAULT_AGENT_COLORS.working },
   agentColorNeedsYou: { label: 'Agent needs you', group: 'agents', fallback: DEFAULT_AGENT_COLORS.needsYou },

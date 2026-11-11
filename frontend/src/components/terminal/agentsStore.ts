@@ -28,6 +28,10 @@ interface TerminalAgentsState {
   unseen: Set<string>;
   /** When each terminal entered its current raw phase (epoch ms). */
   since: Map<string, number>;
+  /** When each terminal's agent was first seen (epoch ms). */
+  firstSeen: Map<string, number>;
+  /** When the first payload arrived (epoch ms), null before. */
+  readyAt: number | null;
   setAgents: (list: TerminalAgentInfo[]) => void;
   /** The user looked at these terminals. */
   markSeen: (terminalIds: Iterable<string>) => void;
@@ -57,6 +61,8 @@ export const useTerminalAgentsStore = create<TerminalAgentsState>()((set, get) =
   raw: new Map(),
   unseen: new Set(),
   since: new Map(),
+  firstSeen: new Map(),
+  readyAt: null,
   setAgents: (list) => {
     const agents = new Map(list.map((a) => [a.terminalId, a]));
     // The scope filter reads this registry through `tabInScope`.
@@ -67,7 +73,9 @@ export const useTerminalAgentsStore = create<TerminalAgentsState>()((set, get) =
     const now = Date.now();
     const since = new Map<string, number>();
     for (const id of raw.keys()) since.set(id, prev.raw.get(id) === raw.get(id) ? prev.since.get(id) ?? now : now);
-    set({ agents, raw, unseen, since, revision: prev.revision + 1 });
+    const firstSeen = new Map<string, number>();
+    for (const id of raw.keys()) firstSeen.set(id, prev.firstSeen.get(id) ?? now);
+    set({ agents, raw, unseen, since, firstSeen, readyAt: prev.readyAt ?? now, revision: prev.revision + 1 });
     if (transitions.length > 0) for (const fn of transitionListeners) fn(transitions, agents);
   },
   markSeen: (terminalIds) => {

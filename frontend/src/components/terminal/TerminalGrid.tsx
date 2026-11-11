@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Maximize2, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeft, ListFilter, Maximize2 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { useTerminalGridStore, type TerminalGridSort } from '@/stores/terminalGridStore';
@@ -29,6 +29,7 @@ import { arrangeGrid, gridShape, MIN_TILE_HEIGHT, type GridTabFacts } from './gr
 import { GRID_TILE_INFO_OPTIONS, resolveGridTileInfo } from './gridTileInfo';
 import { useTerminalAgentsStore } from './agentsStore';
 import { patchTerminalSettings } from './settings/useTerminalSettings';
+import { focusTerminal } from '@/lib/terminalSessions';
 import { agentPhase, type AgentPhase } from './agentPhase';
 import {
   activeLeafOf,
@@ -64,22 +65,25 @@ import {
  * watching.
  *
  * What is shown, in which order and how grouped is the View menu's business
- * (`terminalGridStore.view`, per window): nothing of it is on screen until
- * asked for, the toolbar is one button.
+ * (`GridViewMenu`, in the title bar; `terminalGridStore.view`, per window):
+ * nothing of it takes room in the grid.
+ *
+ * By default a tile does not resize its session (`terminal.gridTilesKeepSize`):
+ * the panes are laid out at the size they have full page — the size of this
+ * very area, less the bar an opened tile has above it — and the tile shows
+ * them scaled down. A program redrawn at a narrow width can keep that width
+ * for good (Claude Code does), so entering the grid must not narrow anyone.
  */
 export function TerminalGrid({ tabs, items, showProject }: { tabs: TerminalTab[]; items: ItemMap; showProject: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect;
-      setSize((s) => (s.width === width && s.height === height ? s : { width, height }));
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const size = useElementSize(ref);
+  const area = useElementSize(rootRef);
+  const keepSize = useAppStore((s) => s.settings?.terminal.gridTilesKeepSize ?? true);
+  // What a pane measures full page: this area, less the bar above an opened tile.
+  const stage = keepSize && area.width > 0 && area.height > ZOOMED_BAR_HEIGHT
+    ? { width: area.width, height: area.height - ZOOMED_BAR_HEIGHT }
+    : null;
   const activeTabId = useTerminalLayoutStore((s) => s.doc.window.activeTabId);
   const interactive = useAppStore((s) => s.settings?.terminal.gridTilesInteractive ?? true);
   const projects = useAppStore((s) => s.projects);
@@ -113,12 +117,11 @@ export function TerminalGrid({ tabs, items, showProject }: { tabs: TerminalTab[]
   const rowHeight = Math.max(MIN_TILE_HEIGHT, rows > 0 ? (usable - GAP * Math.max(rows - 1, 0)) / rows : MIN_TILE_HEIGHT);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <GridToolbar count={total} hidden={tabs.length - total} />
-      <div ref={ref} className="min-h-0 min-w-0 flex-1 overflow-y-auto px-2 pb-2">
+    <div ref={rootRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div ref={ref} className="min-h-0 min-w-0 flex-1 overflow-y-auto p-2">
         {total === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-faint">
-            Nothing to show with these filters — see View.
+            Nothing to show with these filters.
           </div>
         ) : (
           groups.map((group) => (
@@ -148,6 +151,7 @@ export function TerminalGrid({ tabs, items, showProject }: { tabs: TerminalTab[]
                     current={tab.id === activeTabId}
                     showProject={showProject && !grouped}
                     interactive={interactive}
+                    stage={stage}
                   />
                 ))}
               </div>
@@ -182,8 +186,12 @@ const SORT_LABEL: Record<TerminalGridSort, string> = {
   recent: 'Latest activity first',
 };
 
-/** One button, everything behind it: what is shown, in which order, how grouped. */
-function GridToolbar({ count, hidden }: { count: number; hidden: number }) {
+/**
+ * The grid's View menu, in the title bar beside the grid button: what is
+ * shown, in which order, how grouped, what a tile's header says. One icon;
+ * it lights up while a filter hides something.
+ */
+export function GridViewMenu() {
   const view = useTerminalGridStore((s) => s.view);
   const setView = useTerminalGridStore((s) => s.setView);
   const terminal = useAppStore((s) => s.settings?.terminal);
@@ -195,65 +203,132 @@ function GridToolbar({ count, hidden }: { count: number; hidden: number }) {
   const filtered = view.agentsOnly || view.hideIdle;
 
   return (
-    <div className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-[11px] text-faint">
-      <span className="tabular-nums">
-        {count} {count === 1 ? 'tile' : 'tiles'}
-        {hidden > 0 && ` · ${hidden} hidden by the filters`}
-      </span>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="xs" className={cn('ml-auto', filtered && 'text-foreground')}>
-            <SlidersHorizontal />
-            View
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>Sort · {SORT_LABEL[view.sort]}</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuRadioGroup value={view.sort} onValueChange={(v) => setView({ sort: v as TerminalGridSort })}>
-                {(Object.keys(SORT_LABEL) as TerminalGridSort[]).map((s) => (
-                  <DropdownMenuRadioItem key={s} value={s}>
-                    {SORT_LABEL[s]}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>Filter{filtered ? ' · on' : ''}</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuCheckboxItem checked={view.agentsOnly} onCheckedChange={(v) => setView({ agentsOnly: !!v })}>
-                Agents only
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem checked={view.hideIdle} onCheckedChange={(v) => setView({ hideIdle: !!v })}>
-                Hide idle agents
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="font-normal text-faint">A project: the scope switcher, at the top.</DropdownMenuLabel>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>Tile header</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              {GRID_TILE_INFO_OPTIONS.map((o) => (
-                <DropdownMenuCheckboxItem
-                  key={o.value}
-                  checked={info.includes(o.value)}
-                  onCheckedChange={(v) => toggleInfo(o.value, !!v)}
-                  onSelect={(e) => e.preventDefault()}
-                >
-                  {o.label}
-                </DropdownMenuCheckboxItem>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="xs"
+          className={cn(filtered && 'text-[color:var(--agent-working)]')}
+          title={filtered ? 'Grid view (a filter is on)' : 'Grid view: sort, filter, group'}
+          aria-label="Grid view options"
+        >
+          <ListFilter />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Sort · {SORT_LABEL[view.sort]}</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup value={view.sort} onValueChange={(v) => setView({ sort: v as TerminalGridSort })}>
+              {(Object.keys(SORT_LABEL) as TerminalGridSort[]).map((s) => (
+                <DropdownMenuRadioItem key={s} value={s}>
+                  {SORT_LABEL[s]}
+                </DropdownMenuRadioItem>
               ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          <DropdownMenuSeparator />
-          <DropdownMenuCheckboxItem checked={view.groupByProject} onCheckedChange={(v) => setView({ groupByProject: !!v })}>
-            Group by project
-          </DropdownMenuCheckboxItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Filter{filtered ? ' · on' : ''}</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuCheckboxItem checked={view.agentsOnly} onCheckedChange={(v) => setView({ agentsOnly: !!v })}>
+              Agents only
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={view.hideIdle} onCheckedChange={(v) => setView({ hideIdle: !!v })}>
+              Hide idle agents
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="font-normal text-faint">A project: the scope switcher, at the top.</DropdownMenuLabel>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Tile header</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            {GRID_TILE_INFO_OPTIONS.map((o) => (
+              <DropdownMenuCheckboxItem
+                key={o.value}
+                checked={info.includes(o.value)}
+                onCheckedChange={(v) => toggleInfo(o.value, !!v)}
+                onSelect={(e) => e.preventDefault()}
+              >
+                {o.label}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSeparator />
+        <DropdownMenuCheckboxItem checked={view.groupByProject} onCheckedChange={(v) => setView({ groupByProject: !!v })}>
+          Group by project
+        </DropdownMenuCheckboxItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Height of the bar above an opened tile (`ZoomedBar`, `h-8`). */
+const ZOOMED_BAR_HEIGHT = 32;
+
+/** An element's content box, followed as it changes. */
+function useElementSize(ref: React.RefObject<HTMLElement | null>): { width: number; height: number } {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setSize((s) => (s.width === width && s.height === height ? s : { width, height }));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return size;
+}
+
+/**
+ * A tile's panes at their full-page size, scaled down to the tile. Layout
+ * ignores a transform, so the panes measure — and their PTYs keep — exactly
+ * the size they have when the tile is opened: nothing is resized, nothing is
+ * redrawn narrow.
+ *
+ * xterm does not map the mouse through a transform, so the scaled panes take
+ * no pointer events: a click (interactive tiles) focuses the tab's active
+ * pane, and the keyboard goes to it; selecting text is for the opened tile.
+ */
+function ScaledBody({
+  tab,
+  items,
+  stage,
+  interactive,
+}: {
+  tab: TerminalTab;
+  items: ItemMap;
+  stage: { width: number; height: number };
+  interactive: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const box = useElementSize(ref);
+  const scale = box.width > 0 && box.height > 0 ? Math.min(box.width / stage.width, box.height / stage.height, 1) : 0;
+  const focus = () => {
+    if (!interactive) return;
+    const leaf = activeLeafOf(tab);
+    useTerminalLayoutStore.getState().setActiveLeaf(tab.id, leaf.id);
+    useAppStore.getState().markTerminalSeen(leaf.terminalId);
+    // After the click's own focus handling, or the tile would take it back.
+    window.setTimeout(() => focusTerminal(leaf.terminalId), 0);
+  };
+  return (
+    <div ref={ref} className="relative min-h-0 flex-1 overflow-hidden" onMouseDown={focus}>
+      <div
+        className="pointer-events-none absolute left-0 top-0 flex origin-top-left"
+        style={{
+          width: stage.width,
+          height: stage.height,
+          transform: `scale(${scale || 0.0001})`,
+          visibility: scale > 0 ? 'visible' : 'hidden',
+        }}
+      >
+        <SplitTree tab={tab} items={items} isActiveTab={false} />
+      </div>
     </div>
   );
 }
@@ -279,6 +354,7 @@ function GridTile({
   current,
   showProject,
   interactive,
+  stage,
 }: {
   tab: TerminalTab;
   items: ItemMap;
@@ -286,6 +362,8 @@ function GridTile({
   showProject: boolean;
   /** The tile takes the keyboard and the mouse; only its header opens it. */
   interactive: boolean;
+  /** Full-page size to lay the panes out at, shown scaled; null = fit the tile. */
+  stage: { width: number; height: number } | null;
 }) {
   const projects = useAppStore((s) => s.projects);
   const terminal = useAppStore((s) => s.settings?.terminal);
@@ -366,9 +444,13 @@ function GridTile({
           ))}
         </div>
       )}
-      <div className="relative flex min-h-0 flex-1">
-        <SplitTree tab={tab} items={items} isActiveTab={false} />
-      </div>
+      {stage ? (
+        <ScaledBody tab={tab} items={items} stage={stage} interactive={interactive} />
+      ) : (
+        <div className="relative flex min-h-0 flex-1">
+          <SplitTree tab={tab} items={items} isActiveTab={false} />
+        </div>
+      )}
       {/* Interactive tiles: over the header only, so the terminal below takes
           its clicks and keys and the header opens the tile. Watch-only tiles:
           over the whole tile — one click opens it, whatever it lands on, and

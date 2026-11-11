@@ -421,6 +421,15 @@ pub struct TerminalConfig {
     /// Only the frontend reads this.
     #[serde(default = "default_true")]
     pub grid_tiles_interactive: bool,
+    /// Grid tiles show each session at the size it has full page, scaled
+    /// down, instead of resizing it to the tile: a program redrawn at a
+    /// narrow width can keep that width (Claude Code does).
+    #[serde(default = "default_true")]
+    pub grid_tiles_keep_size: bool,
+    /// In agent mode, no sessions rail (or tab strip) at all — not even the
+    /// collapsed icon strip. Off by default.
+    #[serde(default)]
+    pub agent_mode_hides_tabs: bool,
     /// What a grid tile's header shows besides the name and the dot:
     /// `project`, `activity`, `branch`, `model`, `lastPrompt`, `lastReply`.
     #[serde(default = "default_grid_tile_info")]
@@ -1253,6 +1262,8 @@ impl Default for TerminalConfig {
             ctrl_tab_behavior: CtrlTabBehavior::default(),
             follow_project_on_cd: true,
             grid_tiles_interactive: true,
+            grid_tiles_keep_size: true,
+            agent_mode_hides_tabs: false,
             grid_tile_info: default_grid_tile_info(),
             agent_color_working: None,
             agent_color_needs_you: None,

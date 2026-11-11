@@ -3,7 +3,16 @@
  *
  *     bun run test      (node --test "src/**\/*.test.ts")
  */
-import { agentPhase, attentionOrder, foldPhases, rawPhase, type RawPhase } from './agentPhase.ts';
+import {
+  agentEventOf,
+  agentPhase,
+  attentionOrder,
+  foldPhases,
+  rawPhase,
+  shouldAnnounce,
+  STARTUP_GRACE_MS,
+  type RawPhase,
+} from './agentPhase.ts';
 
 const failures: string[] = [];
 let passed = 0;
@@ -82,6 +91,23 @@ test('the inbox lists needs-you first, the longest waiting first', () => {
     order.map((o) => o.id),
     ['ask-old', 'ask-new', 'done-old']
   );
+});
+
+test('only a real change is an event, never a first sight', () => {
+  assert.deepEqual(agentEventOf({ terminalId: 'a', from: null, to: 'needs-you' }), null);
+  assert.deepEqual(agentEventOf({ terminalId: 'a', from: 'working', to: 'needs-you' }), 'needs-you');
+  assert.deepEqual(agentEventOf({ terminalId: 'a', from: 'working', to: 'rest' }), 'done');
+  assert.deepEqual(agentEventOf({ terminalId: 'a', from: 'rest', to: 'working' }), null);
+});
+
+test('nothing is announced while CortX starts, for a new agent, or twice in a row', () => {
+  const t0 = 1_000_000;
+  const ready = { readyAt: t0, firstSeenAt: t0, lastAnnouncedAt: undefined };
+  assert.deepEqual(shouldAnnounce(t0 + 5_000, ready), false, 'starting');
+  assert.deepEqual(shouldAnnounce(t0 + STARTUP_GRACE_MS + 1, ready), true);
+  assert.deepEqual(shouldAnnounce(t0 + 60_000, { ...ready, firstSeenAt: t0 + 58_000 }), false, 'just appeared');
+  assert.deepEqual(shouldAnnounce(t0 + 60_000, { ...ready, lastAnnouncedAt: t0 + 50_000 }), false, 'flicker');
+  assert.deepEqual(shouldAnnounce(t0 + 60_000, { ...ready, readyAt: null }), false, 'no payload yet');
 });
 
 report();

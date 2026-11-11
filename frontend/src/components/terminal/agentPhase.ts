@@ -97,3 +97,42 @@ export function attentionOrder<T extends { phase: AgentPhase; since: number }>(i
     .slice()
     .sort((a, b) => rank(a.phase) - rank(b.phase) || a.since - b.since);
 }
+
+// ---------------------------------------------------------------------------
+// What is worth announcing
+// ---------------------------------------------------------------------------
+
+/** The two moments an agent is announced for. */
+export type AgentEvent = 'needs-you' | 'done';
+
+/** No announcement for this long after CortX first heard about the agents. */
+export const STARTUP_GRACE_MS = 20_000;
+/** Nor for this long after a terminal's agent was first seen. */
+export const NEW_AGENT_GRACE_MS = 8_000;
+/** The same event of the same terminal is announced at most this often. */
+export const ANNOUNCE_COOLDOWN_MS = 30_000;
+
+/** The event a transition is, if any: never the first sight of an agent. */
+export function agentEventOf(t: PhaseTransition): AgentEvent | null {
+  if (t.from === null || t.from === 'unknown') return null;
+  if (t.to === 'needs-you') return 'needs-you';
+  if (t.to === 'rest' && (t.from === 'working' || t.from === 'needs-you')) return 'done';
+  return null;
+}
+
+/**
+ * Should this event be announced now? Not while CortX is starting (the
+ * agents, their transcripts and their terminals all report in over the first
+ * seconds, and each of those first answers is a "change"), not for an agent
+ * that just appeared, and not twice in a row for a terminal flickering
+ * between two states.
+ */
+export function shouldAnnounce(
+  now: number,
+  facts: { readyAt: number | null; firstSeenAt: number | undefined; lastAnnouncedAt: number | undefined }
+): boolean {
+  if (facts.readyAt === null || now - facts.readyAt < STARTUP_GRACE_MS) return false;
+  if (facts.firstSeenAt === undefined || now - facts.firstSeenAt < NEW_AGENT_GRACE_MS) return false;
+  if (facts.lastAnnouncedAt !== undefined && now - facts.lastAnnouncedAt < ANNOUNCE_COOLDOWN_MS) return false;
+  return true;
+}

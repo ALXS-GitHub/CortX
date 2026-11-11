@@ -356,7 +356,7 @@
   --agent-working: #8b5cf6;
   --agent-needs-you: #f97316;
   --agent-done: #06b6d4;
-  --agent-idle: #8b7fb0;
+  --agent-idle: #7c3aed;
 }
 /* Needs you: solid, with a ring that keeps calling. */
 .sdot.needs {

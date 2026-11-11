@@ -143,6 +143,19 @@ export function AgentSettingsSection() {
 
       <Group title="Grid">
         <SettingToggle
+          k="agentModeHidesTabs"
+          id="agent-mode-hides-tabs"
+          label="Hide the rail in agent mode"
+          hint="In agent mode, the sessions rail (or the tab strip) disappears entirely — not even its collapsed icon strip — and the grid takes the whole window. Off, it stays as it is (Ctrl+B still collapses it)."
+        >
+          <Switch
+            id="agent-mode-hides-tabs"
+            checked={terminal?.agentModeHidesTabs ?? false}
+            onCheckedChange={(v) => patch({ agentModeHidesTabs: v })}
+            disabled={disabled}
+          />
+        </SettingToggle>
+        <SettingToggle
           k="gridTilesInteractive"
           id="grid-tiles-interactive"
           label="Type into grid tiles"
@@ -152,6 +165,19 @@ export function AgentSettingsSection() {
             id="grid-tiles-interactive"
             checked={terminal?.gridTilesInteractive ?? true}
             onCheckedChange={(v) => patch({ gridTilesInteractive: v })}
+            disabled={disabled}
+          />
+        </SettingToggle>
+        <SettingToggle
+          k="gridTilesKeepSize"
+          id="grid-tiles-keep-size"
+          label="Tiles keep the session's size"
+          hint="A tile shows its session at the size it has full page, scaled down, so entering or leaving the grid never resizes it. Off, each session is resized to its tile — readable, but a program that lays its text out for the width it is given (Claude Code) keeps what it drew narrow once you open it again."
+        >
+          <Switch
+            id="grid-tiles-keep-size"
+            checked={terminal?.gridTilesKeepSize ?? true}
+            onCheckedChange={(v) => patch({ gridTilesKeepSize: v })}
             disabled={disabled}
           />
         </SettingToggle>

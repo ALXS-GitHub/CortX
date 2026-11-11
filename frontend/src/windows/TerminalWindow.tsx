@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { TitleBar } from '@/components/layout/TitleBar';
 import { ScopeSwitcher } from '@/components/terminal/ScopeSwitcher';
 import { SessionRail } from '@/components/terminal/SessionRail';
+import { CloseConfirmDialog } from '@/components/terminal/CloseConfirmDialog';
 import { WindowTabStrip } from '@/components/terminal/WindowTabStrip';
 import { SplitTree } from '@/components/terminal/SplitTree';
 import { TerminalPalette } from '@/components/terminal/TerminalPalette';
@@ -22,7 +23,7 @@ import { flushTerminalSettings } from '@/components/terminal/settings/useTermina
 import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { TERMINAL_EVENTS, closeTabs, openNewTerminal } from '@/components/terminal/actions';
 import { useItemMap, visibleTabOrder } from '@/components/terminal/model';
-import { TerminalGrid, ZoomedBar } from '@/components/terminal/TerminalGrid';
+import { GridViewMenu, TerminalGrid, ZoomedBar } from '@/components/terminal/TerminalGrid';
 import { AgentInboxMenu } from '@/components/terminal/AgentInboxMenu';
 import { useTerminalGridStore } from '@/stores/terminalGridStore';
 import { useTerminalAgentsStore } from '@/components/terminal/agentsStore';
@@ -375,6 +376,10 @@ export function TerminalWindow() {
   const gridMode = useTerminalGridStore((s) => s.mode);
   const backToGrid = useTerminalGridStore((s) => s.backToGrid);
   const setGridMode = useTerminalGridStore((s) => s.setMode);
+  // Agent mode can take the rail (or the tab strip) away entirely — a
+  // setting, off by default; the plain Terminal always keeps it.
+  const hideTabsSetting = useAppStore((s) => s.settings?.terminal.agentModeHidesTabs ?? false);
+  const hideTabs = hideTabsSetting && gridMode !== 'off';
   const projects = useAppStore((s) => s.projects);
   const gridTabs = useMemo(
     () => (gridMode === 'off' ? [] : visibleTabOrder(win, projects, tabsPlacement)),
@@ -435,6 +440,7 @@ export function TerminalWindow() {
                   the grid, and the way back to it. Off, the Terminal is the
                   plain one — none of this is drawn. */}
               {ready && gridMode !== 'off' && <AgentInboxMenu />}
+              {ready && gridMode === 'grid' && <GridViewMenu />}
               {ready && gridMode !== 'off' && (
                 <Button
                   variant="ghost"
@@ -490,9 +496,12 @@ export function TerminalWindow() {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1">
-            {tabsPlacement === 'sidebar' && <SessionRail />}
+            {tabsPlacement === 'sidebar' && !hideTabs && <SessionRail />}
+            {/* The rail and the strip each mount the close confirmation; with
+                both hidden, a close that asks would wait forever. */}
+            {hideTabs && <CloseConfirmDialog />}
             <div className="flex min-w-0 flex-1 flex-col">
-              {tabsPlacement === 'top' && <WindowTabStrip />}
+              {tabsPlacement === 'top' && !hideTabs && <WindowTabStrip />}
               <div className="terminal-dock relative flex min-h-0 flex-1">
                 {/* Settings take the content area over (ticket #27), but the
                     terminals are only *hidden*: unmounting the tree would take

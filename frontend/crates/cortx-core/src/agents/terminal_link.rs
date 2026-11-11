@@ -206,10 +206,14 @@ pub const PERMISSION_SILENCE: std::time::Duration = std::time::Duration::from_mi
 /// Decide, for each agent, whether it is stopped on you. `output_idle` gives
 /// how long a terminal has printed nothing (`None` = unknown).
 ///
-/// - a pending question tool: a question, straight away;
-/// - turn reported idle with a tool call still pending: a permission prompt;
+/// - turn running and a question tool pending: a question, straight away;
 /// - turn running, a tool call pending, and the terminal silent for
 ///   [`PERMISSION_SILENCE`]: a permission prompt.
+///
+/// Only a turn in progress can be stopped on you. A turn reported idle with a
+/// tool call still pending in its transcript is one that was interrupted (the
+/// call never got its result) — announcing it as "needs you" is what flooded
+/// the notifications every time CortX started.
 ///
 /// Pure observation — nothing here writes to the agent or its files.
 pub fn mark_needs_input(agents: &mut [TerminalAgent], output_idle: impl Fn(&str) -> Option<std::time::Duration>) {
@@ -218,18 +222,13 @@ pub fn mark_needs_input(agents: &mut [TerminalAgent], output_idle: impl Fn(&str)
         let Some(tool) = agent.details.pending_tool.as_deref() else {
             continue;
         };
-        if QUESTION_TOOLS.contains(&tool) {
-            agent.needs_input = Some(NeedsInput::Question);
+        if agent.state != AgentState::Running {
             continue;
         }
-        match agent.state {
-            AgentState::Waiting => agent.needs_input = Some(NeedsInput::Permission),
-            AgentState::Running => {
-                if output_idle(&agent.terminal_id).is_some_and(|d| d >= PERMISSION_SILENCE) {
-                    agent.needs_input = Some(NeedsInput::Permission);
-                }
-            }
-            _ => {}
+        if QUESTION_TOOLS.contains(&tool) {
+            agent.needs_input = Some(NeedsInput::Question);
+        } else if output_idle(&agent.terminal_id).is_some_and(|d| d >= PERMISSION_SILENCE) {
+            agent.needs_input = Some(NeedsInput::Permission);
         }
     }
 }
@@ -787,6 +786,8 @@ mod tests {
     fn a_pending_question_needs_you_at_once() {
         assert_eq!(needs(live_agent(AgentState::Running, Some("AskUserQuestion")), Some(0)), Some(NeedsInput::Question));
         assert_eq!(needs(live_agent(AgentState::Running, Some("ExitPlanMode")), None), Some(NeedsInput::Question));
+        // An idle turn with a question still pending was interrupted.
+        assert_eq!(needs(live_agent(AgentState::Waiting, Some("AskUserQuestion")), None), None);
     }
 
     #[test]
@@ -795,8 +796,8 @@ mod tests {
         assert_eq!(needs(live_agent(AgentState::Running, Some("Bash")), Some(300)), None);
         // Silent: the prompt is drawn and waits.
         assert_eq!(needs(live_agent(AgentState::Running, Some("Bash")), Some(4000)), Some(NeedsInput::Permission));
-        // Turn reported idle with the call still pending.
-        assert_eq!(needs(live_agent(AgentState::Waiting, Some("Edit")), None), Some(NeedsInput::Permission));
+        // Turn reported idle with the call still pending: interrupted, not a prompt.
+        assert_eq!(needs(live_agent(AgentState::Waiting, Some("Edit")), None), None);
     }
 
     #[test]
