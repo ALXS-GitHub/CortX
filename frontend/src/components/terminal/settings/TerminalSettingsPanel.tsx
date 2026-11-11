@@ -16,6 +16,7 @@ import { IntegratedTerminalSection } from './IntegratedTerminalSection';
 import { ShortcutsSection } from './ShortcutsSection';
 import { TerminalAppearanceSection } from './TerminalAppearanceSection';
 import { TerminalNotificationsSection } from './TerminalNotificationsSection';
+import { AgentSettingsSection } from './AgentSettingsSection';
 import { useTerminalSettings } from './useTerminalSettings';
 
 function matches(keywords: string, query: string): boolean {
@@ -56,6 +57,7 @@ export function TerminalSettingsSections({
     matches(k.appearance, q),
     matches(k.notifications, q),
     matches(k.shortcuts, q),
+    matches(k.agents, q),
     externalTerminal && matches(k.external, q),
     launchConfigs && matches(k.launch, q),
   ];
@@ -66,9 +68,10 @@ export function TerminalSettingsSections({
       {shown[0] && <IntegratedTerminalSection />}
       {shown[1] && terminal && <TerminalAppearanceSection value={terminal} onChange={patch} />}
       {shown[2] && <TerminalNotificationsSection />}
+      {shown[4] && <AgentSettingsSection />}
       {shown[3] && <ShortcutsSection value={terminal?.keybindings} onChange={(next) => patch({ keybindings: next })} />}
-      {shown[4] && <ExternalTerminalSection />}
-      {shown[5] && <LaunchConfigsSection />}
+      {shown[5] && <ExternalTerminalSection />}
+      {shown[6] && <LaunchConfigsSection />}
     </>
   );
 }

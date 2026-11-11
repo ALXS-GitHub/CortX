@@ -421,6 +421,33 @@ pub struct TerminalConfig {
     /// Only the frontend reads this.
     #[serde(default = "default_true")]
     pub grid_tiles_interactive: bool,
+    /// What a grid tile's header shows besides the name and the dot:
+    /// `project`, `activity`, `branch`, `model`, `lastPrompt`, `lastReply`.
+    #[serde(default = "default_grid_tile_info")]
+    pub grid_tile_info: Vec<String>,
+    /// Colours of the agent dots (`#rrggbb`). None = CortX's own, which no
+    /// shell, service or script dot ever uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_color_working: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_color_needs_you: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_color_done: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_color_idle: Option<String>,
+    /// Notify when an agent stops on you (a question, a permission prompt).
+    #[serde(default = "default_true")]
+    pub agent_notify_needs_you: bool,
+    /// Notify when an agent finishes its turn.
+    #[serde(default = "default_true")]
+    pub agent_notify_done: bool,
+    /// Only for agents out of sight (another tab, a tile, CortX behind).
+    #[serde(default = "default_true")]
+    pub agent_notify_only_when_hidden: bool,
+    /// What "New agent" types in the new terminal (`claude`, an alias such as
+    /// `cc`, `codex`…). Typed as you would, then Enter — nothing else is sent.
+    #[serde(default = "default_agent_launch_command")]
+    pub agent_launch_command: String,
     /// Font of every terminal (dock and window). None = bundled default stack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
@@ -936,6 +963,14 @@ pub enum SuggestionConfidence {
 /// The title is never optional — a tab needs a name. Everything around it is:
 /// the second line (directory, running command), the status glyph, the agent
 /// running inside, and the Ctrl+N number.
+fn default_grid_tile_info() -> Vec<String> {
+    vec!["project".to_string(), "activity".to_string()]
+}
+
+fn default_agent_launch_command() -> String {
+    "claude".to_string()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalTabDisplay {
@@ -1213,6 +1248,15 @@ impl Default for TerminalConfig {
             ctrl_tab_behavior: CtrlTabBehavior::default(),
             follow_project_on_cd: true,
             grid_tiles_interactive: true,
+            grid_tile_info: default_grid_tile_info(),
+            agent_color_working: None,
+            agent_color_needs_you: None,
+            agent_color_done: None,
+            agent_color_idle: None,
+            agent_notify_needs_you: true,
+            agent_notify_done: true,
+            agent_notify_only_when_hidden: true,
+            agent_launch_command: default_agent_launch_command(),
             font_family: None,
             font_size: None,
             window_zoom: 0,
@@ -2396,6 +2440,10 @@ mod tests {
             "notifyWhen",
             "notifyStyle",
             "notifyMutedCommands",
+            "agentColorWorking",
+            "agentColorNeedsYou",
+            "agentColorDone",
+            "agentColorIdle",
         ] {
             assert!(
                 !written.contains_key(absent),

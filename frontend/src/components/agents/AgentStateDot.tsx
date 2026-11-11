@@ -1,12 +1,26 @@
-import { StatusDot } from '@/components/ui/StatusDot';
+import { AgentPhaseDot } from '@/components/terminal/TerminalStatusGlyph';
+import type { AgentPhase } from '@/components/terminal/agentPhase';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 import type { AgentState } from '@/types';
-import { AGENT_DOT_TONE, STATE_LABEL } from './agentUtils';
+import { STATE_LABEL } from './agentUtils';
+
+/**
+ * A session's state drawn in the agents' own colours (`agentColors.ts`),
+ * like its terminal tab. The registry's `waiting` is a turn that ended — the
+ * agent waits for your next prompt — so it is the idle ring, not an alarm:
+ * "needs you" is kept for a question or a permission prompt, which only the
+ * terminal side can see.
+ */
+const PHASE: Record<AgentState, AgentPhase> = {
+  running: 'working',
+  waiting: 'idle',
+  stopped: 'unknown',
+  unknown: 'unknown',
+};
 
 const LABEL_CLASS: Record<AgentState, string> = {
-  running: 'text-st-agent',
-  waiting: 'text-st-progress',
+  running: 'text-[color:var(--agent-working)]',
+  waiting: 'text-muted-foreground',
   stopped: 'text-muted-foreground',
   unknown: 'text-muted-foreground',
 };
@@ -21,12 +35,7 @@ interface AgentStateDotProps {
 
 export function AgentStateDot({ state, withLabel = false, size = 9, className }: AgentStateDotProps) {
   const dot = (
-    <StatusDot
-      tone={AGENT_DOT_TONE[state]}
-      size={size}
-      title={STATE_LABEL[state]}
-      className={cn(state === 'unknown' && 'opacity-50', className)}
-    />
+    <AgentPhaseDot phase={PHASE[state]} size={size} className={className} />
   );
 
   if (withLabel) {

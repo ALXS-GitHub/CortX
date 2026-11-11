@@ -31,6 +31,7 @@ import type { TerminalBellStyle, TerminalCursorInactiveStyle, TerminalOsc52Acces
 import * as api from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
+import { useTerminalAgentsStore } from '@/components/terminal/agentsStore';
 import { getXtermThemeOverride, isWindowThemeActive, themeToXterm } from '@/lib/terminalTheme';
 import { IS_MAC } from '@/lib/keybindings';
 import {
@@ -910,13 +911,35 @@ async function copySelection(term: Terminal, clear = true): Promise<boolean> {
   return true;
 }
 
-async function pasteFromClipboard(term: Terminal) {
+async function pasteFromClipboard(term: Terminal, terminalId?: string) {
+  let text = '';
   try {
-    const text = await readText();
-    if (text) term.paste(text);
-  } catch (err) {
-    console.error('Clipboard read failed:', err);
+    text = await readText();
+  } catch {
+    // No text on the clipboard (an image, a file) reads as an error here.
   }
+  if (text) term.paste(text);
+  else if (terminalId) pasteImageIntoAgent(terminalId);
+}
+
+/**
+ * A paste with an image and no text, in a terminal Claude Code runs in: send
+ * the key Claude Code itself reads an image from the clipboard on — Alt+V on
+ * Windows, Ctrl+V elsewhere — so it attaches it (`[Image #1]`) as if you had
+ * pressed it. Nothing is written but that one keystroke; a terminal without
+ * Claude Code is left alone. Returns whether it did.
+ */
+function pasteImageIntoAgent(terminalId: string): boolean {
+  if (useTerminalAgentsStore.getState().agents.get(terminalId)?.provider !== 'claude-code') return false;
+  api.writeTerminal(terminalId, IS_WINDOWS ? '\x1bv' : '\x16').catch(() => {});
+  return true;
+}
+
+/** Does a DOM paste carry an image and no text? */
+function isImageOnlyPaste(e: ClipboardEvent): boolean {
+  const data = e.clipboardData;
+  if (!data || data.getData('text/plain')) return false;
+  return Array.from(data.items).some((item) => item.kind === 'file' && item.type.startsWith('image/'));
 }
 
 /**
@@ -946,13 +969,13 @@ function noteWebviewPaste() {
   }
 }
 
-function probeWebviewPaste(term: Terminal) {
+function probeWebviewPaste(term: Terminal, terminalId: string) {
   if (pasteProbe !== null) return;
   pasteProbe = window.setTimeout(() => {
     pasteProbe = null;
     if (webviewPastesOnCtrlV !== null) return;
     webviewPastesOnCtrlV = false;
-    void pasteFromClipboard(term);
+    void pasteFromClipboard(term, terminalId);
   }, PASTE_PROBE_MS);
 }
 
@@ -1364,20 +1387,32 @@ function createSession(id: string): TerminalSession {
       // paste a second time.
       if (e.shiftKey || webviewPastesOnCtrlV === false) {
         e.preventDefault();
-        void pasteFromClipboard(term);
+        void pasteFromClipboard(term, id);
         return false;
       }
       // Plain Ctrl/Cmd+V: leave the paste to the webview. Returning false
       // only keeps xterm from *also* sending ^V to the pty; the DOM `paste`
       // event still fires and xterm's own handler brackets and writes the
       // text — exactly once.
-      if (webviewPastesOnCtrlV === null) probeWebviewPaste(term);
+      if (webviewPastesOnCtrlV === null) probeWebviewPaste(term, id);
       return false;
     }
     return true;
   });
 
   container.addEventListener('paste', noteWebviewPaste, true);
+  // An image with no text: xterm would paste nothing. Claude Code reads the
+  // image from the clipboard itself, on its own key — hand it that key.
+  container.addEventListener(
+    'paste',
+    (e) => {
+      if (isImageOnlyPaste(e) && pasteImageIntoAgent(id)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+    true
+  );
 
   // Right-click: copy the selection if there is one, otherwise paste — except
   // over a command block the user has deliberately selected (#7), which opens
@@ -1388,7 +1423,7 @@ function createSession(id: string): TerminalSession {
     if (term.hasSelection()) {
       void copySelection(term);
     } else if (!openSelectedBlockMenu(id, e.clientX, e.clientY)) {
-      void pasteFromClipboard(term);
+      void pasteFromClipboard(term, id);
     }
   });
 
@@ -1762,6 +1797,18 @@ export function measuredTerminalSize(preferred?: string): { cols: number; rows: 
     if (size && (!best || size.cols * size.rows > best.cols * best.rows)) best = size;
   }
   return best;
+}
+
+/**
+ * Paste text the way a terminal does — bracketed when the program asked for
+ * it — so an agent's prompt takes it as a paste (Claude Code attaches an
+ * image whose path is pasted). False when the terminal has no session here.
+ */
+export function pasteIntoTerminal(id: string, text: string): boolean {
+  const session = sessions.get(id);
+  if (!session?.opened) return false;
+  session.term.paste(text);
+  return true;
 }
 
 export function focusTerminal(id: string) {

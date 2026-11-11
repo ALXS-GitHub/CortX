@@ -135,6 +135,21 @@ export interface TerminalConfig {
    *  opening it — the tile's header opens it. Off, a click anywhere on a tile
    *  only opens it, so nothing reaches an agent you are watching. Default true. */
   gridTilesInteractive?: boolean;
+  /** Grid tile header, besides name and dot. Default `['project', 'activity']`. */
+  gridTileInfo?: GridTileInfo[];
+  /** Agent dot colours (`#rrggbb`); unset = CortX's own (see `agentColors.ts`). */
+  agentColorWorking?: string;
+  agentColorNeedsYou?: string;
+  agentColorDone?: string;
+  agentColorIdle?: string;
+  /** Notify when an agent stops on you. Default true. */
+  agentNotifyNeedsYou?: boolean;
+  /** Notify when an agent finishes its turn. Default true. */
+  agentNotifyDone?: boolean;
+  /** Only for agents out of sight. Default true. */
+  agentNotifyOnlyWhenHidden?: boolean;
+  /** Typed in the terminal "New agent" opens. Default `claude`. */
+  agentLaunchCommand?: string;
   /** Ask before closing a terminal — or quitting CortX — while a command is
    *  running in it (nothing running = closes straight away). Default true. */
   confirmCloseRunning?: boolean;
@@ -453,6 +468,9 @@ export type TerminalNotifyWhen = 'never' | 'failed' | 'failed-or-long' | 'all';
 /** How a terminal notification reaches you. */
 export type TerminalNotifyStyle = 'toast' | 'system' | 'both';
 
+/** What a grid tile's header can show (`terminal.gridTileInfo`). */
+export type GridTileInfo = 'project' | 'activity' | 'branch' | 'model' | 'lastPrompt' | 'lastReply';
+
 // ---------------------------------------------------------------------------
 // Launch configurations (data/terminal/launch/*.yaml)
 // ---------------------------------------------------------------------------
@@ -519,6 +537,16 @@ export interface TerminalAgentInfo {
   name?: string;
   cwd?: string;
   kind?: string;
+  /** Read off the session's transcript (Claude Code). */
+  pendingTool?: string;
+  lastPrompt?: string;
+  lastReply?: string;
+  gitBranch?: string;
+  model?: string;
+  /** Epoch millis of the last transcript entry. */
+  lastActivity?: number;
+  /** Stopped on you: a question / plan to approve, or a permission prompt. */
+  needsInput?: 'question' | 'permission';
 }
 
 /** One line of `runtime/command-history.jsonl`. */

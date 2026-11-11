@@ -3,10 +3,12 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { TERMINAL_WINDOW_ID } from '@/stores/terminalLayoutStore';
 
 /**
- * The grid view of a Terminal window (ticket #55): every tab of the scope as
- * a live tile, to keep an eye on several agents at once.
+ * Agent mode of a Terminal window: the grid view (ticket #55) — every tab of
+ * the scope as a live tile, to keep an eye on several agents at once — with
+ * the agent counter and inbox in the title bar. Opt-in, per window: off, the
+ * Terminal is exactly the plain one.
  *
- * - `off`: the usual view, the active tab filling the content area.
+ * - `off`: agent mode off — the usual view, the active tab filling the content area.
  * - `grid`: the tiles. Clicking one opens it.
  * - `zoomed`: the tile you opened, full size and interactive — it *is* the
  *   active tab, shown the usual way, with a bar to go back to the grid.
@@ -17,6 +19,30 @@ import { TERMINAL_WINDOW_ID } from '@/stores/terminalLayoutStore';
  */
 export type TerminalGridMode = 'off' | 'grid' | 'zoomed';
 
+/** Order of the tiles: the rail's, the ones that want you first, or the latest active first. */
+export type TerminalGridSort = 'rail' | 'attention' | 'recent';
+
+/** How the grid is cut down and laid out (the grid's View menu). */
+export interface TerminalGridView {
+  sort: TerminalGridSort;
+  /** Only the tabs an agent runs in. */
+  agentsOnly: boolean;
+  /** Leave out agents at rest that you have seen. */
+  hideIdle: boolean;
+  /** One section per project, with its name. */
+  groupByProject: boolean;
+  /** The list of every session beside an opened tile. */
+  roster: boolean;
+}
+
+export const DEFAULT_GRID_VIEW: TerminalGridView = {
+  sort: 'rail',
+  agentsOnly: false,
+  hideIdle: false,
+  groupByProject: false,
+  roster: true,
+};
+
 interface TerminalGridState {
   mode: TerminalGridMode;
   /** The grid shortcut and button: into the grid, and back out of it. */
@@ -25,6 +51,9 @@ interface TerminalGridState {
   zoom: () => void;
   /** Back from the opened tile to the grid. */
   backToGrid: () => void;
+  setMode: (mode: TerminalGridMode) => void;
+  view: TerminalGridView;
+  setView: (patch: Partial<TerminalGridView>) => void;
 }
 
 /** Storage that may be missing (private window) or throw (quota): never fatal. */
@@ -61,11 +90,19 @@ export const useTerminalGridStore = create<TerminalGridState>()(
       toggle: () => set((s) => ({ mode: s.mode === 'off' ? 'grid' : s.mode === 'zoomed' ? 'grid' : 'off' })),
       zoom: () => set({ mode: 'zoomed' }),
       backToGrid: () => set({ mode: 'grid' }),
+      setMode: (mode) => set({ mode }),
+      view: DEFAULT_GRID_VIEW,
+      setView: (patch) => set((s) => ({ view: { ...s.view, ...patch } })),
     }),
     {
       name: `cortx-terminal-grid:${TERMINAL_WINDOW_ID}`,
       storage: safeStorage,
-      partialize: (s) => ({ mode: s.mode }),
+      partialize: (s) => ({ mode: s.mode, view: s.view }),
+      // A view saved by an older build lacks the newer keys.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<TerminalGridState>;
+        return { ...current, ...p, view: { ...DEFAULT_GRID_VIEW, ...(p.view ?? {}) } };
+      },
     }
   )
 );

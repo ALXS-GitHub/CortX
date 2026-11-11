@@ -1056,19 +1056,6 @@ export function IntegratedTerminalSection() {
           />
         </SettingToggle>
 
-        <SettingToggle
-          k="gridTilesInteractive"
-          id="grid-tiles-interactive"
-          label="Type into grid tiles"
-          hint="In the grid view (Ctrl+Shift+G), each tile is a working terminal: click into it to type, select or scroll, and click its header to open it full size. Off, the tiles are only watched: a click anywhere on one opens it, and nothing you do in the grid can reach the program running inside."
-        >
-          <Switch
-            id="grid-tiles-interactive"
-            checked={terminal?.gridTilesInteractive ?? true}
-            onCheckedChange={(v) => patch({ gridTilesInteractive: v })}
-            disabled={!terminal}
-          />
-        </SettingToggle>
 
         {/* Five switches on one row, so the marker and the reset belong to
             each switch rather than to the row: `tabDisplay` is one object in

@@ -1,4 +1,3 @@
-import type { DotTone } from '@/components/ui/StatusDot';
 import type { AgentProvider, AgentSession, AgentState, Project, TagDefinition } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -17,23 +16,13 @@ export const STATE_LABEL: Record<AgentState, string> = {
   // "Working", not "Running": a shell is "running" the whole time it is
   // open, an agent only while it is busy (ticket #48).
   running: 'Working',
-  waiting: 'Waiting for you',
+  // The turn ended and the agent waits for your next prompt. "Needs you"
+  // (a question, a permission prompt) is the terminal's to tell.
+  waiting: 'Your turn',
   stopped: 'Stopped',
   unknown: 'Unknown',
 };
 
-/**
- * The agent's dot, the same everywhere it is drawn (Agents section, terminal
- * tabs, rail, dock): pulsing violet = working, solid amber = waiting for you,
- * outlined = stopped / unknown. Violet, not the green of a live shell or a
- * running service, so an agent at work is told apart at a glance (ticket #48).
- */
-export const AGENT_DOT_TONE: Record<AgentState, DotTone> = {
-  running: 'agent',
-  waiting: 'warning',
-  stopped: 'idle',
-  unknown: 'idle',
-};
 
 export const PROVIDER_LABEL: Record<AgentProvider, string> = {
   'claude-code': 'Claude Code',

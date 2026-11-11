@@ -11,6 +11,8 @@ import {
   History,
   Maximize2,
   Minimize2,
+  Bot,
+  Inbox,
   LayoutGrid,
   PanelLeft,
   Pencil,
@@ -234,10 +236,20 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
               Toggle the sessions rail
               <Hint>{combo('window.rail')}</Hint>
             </CommandItem>
-            <CommandItem value="grid view every terminal agents tiles overview" onSelect={() => run(() => void runAction('window.grid'))}>
+            <CommandItem value="agent mode grid view every terminal agents tiles overview" onSelect={() => run(() => void runAction('window.grid'))}>
               <LayoutGrid />
-              Grid view
+              Agent mode (grid)
               <Hint>{combo('window.grid')}</Hint>
+            </CommandItem>
+            <CommandItem value="new agent claude codex launch" onSelect={() => run(() => void runAction('tab.newAgent'))}>
+              <Bot />
+              New agent
+              <Hint>{combo('tab.newAgent')}</Hint>
+            </CommandItem>
+            <CommandItem value="next agent needs you waiting inbox attention" onSelect={() => run(() => void runAction('agents.next'))}>
+              <Inbox />
+              Next agent that needs you
+              <Hint>{combo('agents.next')}</Hint>
             </CommandItem>
           </CommandGroup>
 

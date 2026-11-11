@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react';
+import { AGENT_COLOR_VAR, agentColor, type AgentColorKey } from '@/components/terminal/agentColors';
 import { toast } from 'sonner';
 import { registerTerminalWindowView, useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { collectLeaves, tabsInScope } from '@/lib/terminalLayout';
-import { decideCommandNotification } from '@/components/terminal/settings/notificationPolicy';
+import { decideAgentNotification, decideCommandNotification } from '@/components/terminal/settings/notificationPolicy';
+import { onAgentTransitions } from '@/components/terminal/agentsStore';
+import { revealTerminal } from '@/components/terminal/agentInbox';
 import { applyThemeMode } from '@/lib/theme';
 import {
   onServiceLog,
@@ -155,6 +158,42 @@ export function useAppBootstrap() {
     // Shell (integrated terminal tab) listener
     let unlistenShellExit: (() => void) | undefined;
     let unlistenTerminalState: (() => void) | undefined;
+    // Agent notifications: an agent stopped on you, or finished its turn.
+    // Read off what the agents publish themselves (see agentsStore); one
+    // window per terminal speaks, like the command notifications.
+    const unlistenAgentTransitions = onAgentTransitions((transitions, agents) => {
+      const store = useAppStore.getState();
+      const cfg = store.settings?.terminal;
+      for (const t of transitions) {
+        // First sight (CortX starting, an agent found mid-session) is no event.
+        if (t.from === null || t.from === 'unknown') continue;
+        const event = t.to === 'needs-you' ? 'needs-you' : t.to === 'rest' ? 'done' : null;
+        if (!event) continue;
+        if (!ownsTerminal(t.terminalId)) continue;
+        const decision = decideAgentNotification(cfg, {
+          event,
+          inView: store.isTerminalInView(t.terminalId),
+          windowFocused: typeof document === 'undefined' || document.hasFocus(),
+        });
+        if (!decision) continue;
+        const agent = agents.get(t.terminalId);
+        const { name, projectName } = terminalDisplayName(t.terminalId, store);
+        const title = `${agent?.name || name}${projectName ? ` · ${projectName}` : ''}`;
+        const body =
+          event === 'needs-you'
+            ? agent?.needsInput === 'question'
+              ? 'Asks you something'
+              : `Needs your permission${agent?.pendingTool ? ` · ${agent.pendingTool}` : ''}`
+            : agent?.lastReply || 'Done';
+        if (decision.toast) {
+          (event === 'needs-you' ? toast.warning : toast.message)(title, {
+            description: body,
+            action: { label: 'Open', onClick: () => revealTerminal(t.terminalId) },
+          });
+        }
+        if (decision.system) sendOsNotification(title, body).catch(() => {});
+      }
+    });
     let unlistenTerminalLayout: (() => void) | undefined;
     // Data change listener (file watcher)
     let unlistenDataChanged: (() => void) | undefined;
@@ -315,11 +354,27 @@ export function useAppBootstrap() {
       unlistenGlobalScriptExit?.();
       unlistenShellExit?.();
       unlistenTerminalState?.();
+      unlistenAgentTransitions();
       unlistenTerminalLayout?.();
       unlistenDataChanged?.();
       listenersSetUp.current = false;
     };
   }, []);
+
+  // The agent dot colours (`terminal.agentColor*`), published as CSS custom
+  // properties on :root so every dot in this window follows the settings.
+  const agentColors = useAppStore((s) => {
+    const t = s.settings?.terminal;
+    return `${t?.agentColorWorking ?? ''}|${t?.agentColorNeedsYou ?? ''}|${t?.agentColorDone ?? ''}|${t?.agentColorIdle ?? ''}`;
+  });
+  useEffect(() => {
+    const [working, needsYou, done, idle] = agentColors.split('|');
+    const stored: Record<AgentColorKey, string> = { working, needsYou, done, idle };
+    const root = document.documentElement.style;
+    for (const key of Object.keys(AGENT_COLOR_VAR) as AgentColorKey[]) {
+      root.setProperty(AGENT_COLOR_VAR[key], agentColor(key, stored[key]));
+    }
+  }, [agentColors]);
 
   // Coming back to the window counts as "seen" for the tabs on screen.
   useEffect(() => {

@@ -154,6 +154,8 @@ export const TERMINAL_SECTION_KEYWORDS = {
     'terminal notifications notify toast system desktop long command failed exit code muted commands claude codex vim ssh hidden background password prompt bell BEL 0x07 visual flash audible beep sound ring attention',
   appearance:
     'terminal appearance theme picker wallpaper opacity blur dim cursor padding window opacity effect acrylic mica vibrancy chrome dock theme dock colours dock skin panes only whole dock inactive cursor unfocused pane split focus which pane',
+  agents:
+    'agents agent mode claude code codex grid tiles colours colors dot working needs you question permission done not seen idle notify notification new agent launch command cc alias tile header project branch model last prompt reply',
   shortcuts: 'terminal shortcuts keybindings keyboard combo copy on select shift enter smooth scroll keys selection',
   launch: 'terminal launch configurations dev session yaml tabs layout',
 } as const;

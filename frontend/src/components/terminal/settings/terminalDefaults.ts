@@ -64,6 +64,7 @@ import {
   DEFAULT_MUTED_COMMANDS,
   DEFAULT_NOTIFY_ONLY_WHEN_HIDDEN,
 } from './notificationPolicy.ts';
+import { DEFAULT_AGENT_COLORS } from '../agentColors.ts';
 
 // ---------------------------------------------------------------------------
 // Values a setting can hold
@@ -278,7 +279,7 @@ export const DEFAULT_INPUT_POSITION = 'bottom';
 // ---------------------------------------------------------------------------
 
 /** A settings card. The panel mounts them in this order. */
-export type CardId = 'integrated' | 'appearance' | 'notifications' | 'shortcuts' | 'external';
+export type CardId = 'integrated' | 'appearance' | 'notifications' | 'agents' | 'shortcuts' | 'external';
 
 /** A `Group` heading inside a card (or the card itself, when it has one group). */
 export type GroupId =
@@ -294,6 +295,7 @@ export type GroupId =
   | 'accessibility'
   | 'appearance'
   | 'notifications'
+  | 'agents'
   | 'keys'
   | 'keybindings'
   | 'external';
@@ -311,6 +313,7 @@ const GROUP_CARD: Record<GroupId, CardId> = {
   accessibility: 'integrated',
   appearance: 'appearance',
   notifications: 'notifications',
+  agents: 'agents',
   keys: 'shortcuts',
   keybindings: 'shortcuts',
   external: 'external',
@@ -435,7 +438,16 @@ export const TERMINAL_SETTINGS = {
   tabsPlacement: { label: 'Terminal window tabs', group: 'tabs', fallback: FROM_RUST },
   ctrlTabBehavior: { label: 'Ctrl+Tab goes to', group: 'tabs', fallback: FROM_RUST },
   followProjectOnCd: { label: 'Tabs follow the working directory', group: 'tabs', fallback: FROM_RUST },
-  gridTilesInteractive: { label: 'Type into grid tiles', group: 'tabs', fallback: FROM_RUST },
+  gridTilesInteractive: { label: 'Type into grid tiles', group: 'agents', fallback: FROM_RUST },
+  gridTileInfo: { label: 'Grid tiles show', group: 'agents', fallback: FROM_RUST },
+  agentColorWorking: { label: 'Agent working', group: 'agents', fallback: DEFAULT_AGENT_COLORS.working },
+  agentColorNeedsYou: { label: 'Agent needs you', group: 'agents', fallback: DEFAULT_AGENT_COLORS.needsYou },
+  agentColorDone: { label: 'Agent done, not seen', group: 'agents', fallback: DEFAULT_AGENT_COLORS.done },
+  agentColorIdle: { label: 'Agent idle', group: 'agents', fallback: DEFAULT_AGENT_COLORS.idle },
+  agentNotifyNeedsYou: { label: 'Notify when an agent needs you', group: 'agents', fallback: FROM_RUST },
+  agentNotifyDone: { label: 'Notify when an agent is done', group: 'agents', fallback: FROM_RUST },
+  agentNotifyOnlyWhenHidden: { label: 'Only for agents out of sight', group: 'agents', fallback: FROM_RUST },
+  agentLaunchCommand: { label: 'New agent runs', group: 'agents', fallback: FROM_RUST },
   'tabDisplay.cwd': tabDisplayMeta('cwd', 'Tab shows the directory'),
   'tabDisplay.command': tabDisplayMeta('command', 'Tab shows the running command'),
   'tabDisplay.status': tabDisplayMeta('status', 'Tab shows the status'),
@@ -548,7 +560,7 @@ export const GROUP_KEYS: Record<GroupId, TerminalSettingKey[]> = (() => {
 
 /** Every setting on a card, in table order. */
 export const CARD_KEYS: Record<CardId, TerminalSettingKey[]> = (() => {
-  const out = { integrated: [], appearance: [], notifications: [], shortcuts: [], external: [] } as Record<
+  const out = { integrated: [], appearance: [], notifications: [], agents: [], shortcuts: [], external: [] } as Record<
     CardId,
     TerminalSettingKey[]
   >;

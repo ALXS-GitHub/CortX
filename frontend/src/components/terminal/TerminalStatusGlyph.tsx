@@ -1,29 +1,76 @@
 import { Check, Loader2 } from 'lucide-react';
 import { StatusDot } from '@/components/ui/StatusDot';
-import { AGENT_DOT_TONE, PROVIDER_LABEL, STATE_LABEL } from '@/components/agents/agentUtils';
+import { PROVIDER_LABEL } from '@/components/agents/agentUtils';
 import type { TerminalItem, TerminalType } from '@/components/layout/terminal-dnd/types';
 import { formatDuration } from '@/lib/terminalNames';
 import { cn } from '@/lib/utils';
 import type { TerminalAgentInfo } from '@/types';
 import type { TabLiveState } from './model';
+import { useAgentPhase } from './agentsStore';
+import { AGENT_PHASE_LABEL, type AgentPhase } from './agentPhase';
+import type { CSSProperties } from 'react';
+
+const PHASE_COLOR: Record<AgentPhase, string> = {
+  working: 'var(--agent-working)',
+  'needs-you': 'var(--agent-needs-you)',
+  done: 'var(--agent-done)',
+  idle: 'var(--agent-idle)',
+  unknown: 'var(--agent-idle)',
+};
+
+/**
+ * The dot of an agent, in the agents' own colours (`agentColors.ts`) — none
+ * of them is ever used by a shell, a service or a script dot.
+ *
+ * Pulsing = working, a calling ring = needs you (a question, a permission
+ * prompt), solid = done and not looked at yet, a ring = idle. Codex, which
+ * publishes no live status, gets the idle ring, faded.
+ */
+export function AgentPhaseDot({
+  phase,
+  needsInput,
+  provider,
+  size = 7,
+  className,
+}: {
+  phase: AgentPhase;
+  needsInput?: TerminalAgentInfo['needsInput'];
+  provider?: TerminalAgentInfo['provider'];
+  size?: number;
+  className?: string;
+}) {
+  const label =
+    phase === 'needs-you' && needsInput
+      ? `${AGENT_PHASE_LABEL[phase]} · ${needsInput === 'question' ? 'a question' : 'a permission'}`
+      : AGENT_PHASE_LABEL[phase];
+  const title = provider ? `${PROVIDER_LABEL[provider]} · ${label}` : label;
+  return (
+    <span
+      className={cn(
+        'sdot',
+        phase === 'working' && 'live',
+        phase === 'needs-you' && 'needs',
+        phase === 'done' && 'fill',
+        phase === 'unknown' && 'opacity-50',
+        className
+      )}
+      style={{ width: size, height: size, '--sc': PHASE_COLOR[phase] } as CSSProperties}
+      title={title}
+      aria-label={title}
+    />
+  );
+}
 
 /**
  * What an agent tab shows instead of the plain "a command is running"
  * spinner: `claude` keeps a command running from the moment it starts, so the
- * spinner said nothing about the agent.
- *
- * The grammar is the Agents section's (DEV-11, `AGENT_DOT_TONE`), not a new
- * one: pulsing violet = working, solid amber = waiting for you, faint = at
- * rest or — for Codex, which publishes no live status — unknown.
+ * spinner said nothing about the agent. Its phase comes from `agentsStore`
+ * (whether a finished turn has been seen is this window's to know).
  */
 export function TerminalAgentGlyph({ agent, className }: { agent: TerminalAgentInfo; className?: string }) {
+  const phase = useAgentPhase(agent.terminalId) ?? 'unknown';
   return (
-    <StatusDot
-      tone={AGENT_DOT_TONE[agent.state]}
-      size={7}
-      title={`${PROVIDER_LABEL[agent.provider]} · ${STATE_LABEL[agent.state]}`}
-      className={cn(agent.state === 'unknown' && 'opacity-50', className)}
-    />
+    <AgentPhaseDot phase={phase} needsInput={agent.needsInput} provider={agent.provider} className={className} />
   );
 }
 

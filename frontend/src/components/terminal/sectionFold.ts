@@ -80,7 +80,7 @@ export function groupToReveal(
  */
 export interface FoldSignalLive {
   running: boolean;
-  agent?: { state: string };
+  agent?: { state: string; needsInput?: string | null };
   attention?: { exitCode?: number | null };
 }
 
@@ -95,7 +95,9 @@ export interface FoldSignalLive {
  */
 export function foldSignalRank(live: FoldSignalLive): number {
   if (live.agent) {
-    if (live.agent.state === 'waiting') return 5;
+    // Stopped on you (a question, a permission prompt) beats everything; a
+    // turn that simply ended is the agent's idle ring, nothing to announce.
+    if (live.agent.needsInput) return 5;
     if (live.agent.state === 'running') return 3;
     return 0;
   }

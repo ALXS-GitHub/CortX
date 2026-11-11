@@ -6,7 +6,9 @@ import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore, TERMINAL_WINDOW_ID } from '@/stores/terminalLayoutStore';
 import { useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
 import { useTerminalGridStore } from '@/stores/terminalGridStore';
-import { adjustTerminalZoom, clearTerminal, focusTerminal, resetTerminalZoom } from '@/lib/terminalSessions';
+import { gotoNextAgentAttention } from './agentInbox';
+import { adjustTerminalZoom, clearTerminal, focusTerminal, pasteIntoTerminal, resetTerminalZoom } from '@/lib/terminalSessions';
+import { useTerminalAgentsStore } from './agentsStore';
 import { jumpToBlock } from '@/lib/terminalBlocks';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
 import { basename } from '@/lib/terminalNames';
@@ -93,6 +95,52 @@ export async function openNewTerminal(): Promise<void> {
     console.error('Failed to open a terminal:', error);
     toast.error(`Failed to open terminal: ${String(error)}`);
   }
+}
+
+/** Longest wait for the new shell's first prompt before typing anyway. */
+const AGENT_PROMPT_TIMEOUT_MS = 4000;
+
+/**
+ * "New agent": a new terminal of the current scope, in which the command of
+ * `terminal.agentLaunchCommand` (`claude` by default, or an alias such as
+ * `cc`) is typed and entered once the shell shows its prompt — exactly what
+ * you would type. Nothing else reaches the agent.
+ */
+export async function openNewAgent(): Promise<void> {
+  const command = (useAppStore.getState().settings?.terminal.agentLaunchCommand ?? 'claude').trim() || 'claude';
+  const layout = useTerminalLayoutStore.getState();
+  const { projectId, cwd } = resolveSpawnTarget(layout.activeTab());
+  try {
+    const shellId = await useAppStore.getState().openShell({ projectId, cwd, surface: 'window' });
+    const terminalId = `shell:${shellId}`;
+    useTerminalLayoutStore.getState().addTerminalToWindow(terminalId, { projectId });
+    await shellPrompt(terminalId);
+    await writeTerminal(terminalId, `${command}\r`);
+  } catch (error) {
+    console.error('Failed to open an agent:', error);
+    toast.error(`Failed to start ${command}: ${String(error)}`);
+  }
+}
+
+/**
+ * Resolves once shell integration reports the terminal at its prompt, or
+ * after `AGENT_PROMPT_TIMEOUT_MS` for a shell without integration.
+ */
+function shellPrompt(terminalId: string): Promise<void> {
+  const atPrompt = () => useAppStore.getState().terminalStates.get(terminalId)?.phase === 'idle';
+  if (atPrompt()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      unsubscribe();
+      window.clearTimeout(timer);
+      // One frame more: the prompt string itself is still being drawn.
+      window.setTimeout(resolve, 120);
+    };
+    const unsubscribe = useAppStore.subscribe(() => {
+      if (atPrompt()) done();
+    });
+    const timer = window.setTimeout(done, AGENT_PROMPT_TIMEOUT_MS);
+  });
 }
 
 /**
@@ -922,9 +970,16 @@ export function pasteDroppedPaths(paths: string[], position: { x: number; y: num
   const tab = tabContainingTerminal(useTerminalLayoutStore.getState().doc.window, terminalId);
   const leaf = tab ? collectLeaves(tab.layout).find((l) => l.terminalId === terminalId) : undefined;
   if (tab && leaf) useTerminalLayoutStore.getState().setActiveLeaf(tab.id, leaf.id);
-  writeTerminal(terminalId, paths.map(quotePath).join(' ')).catch((error) => {
-    toast.error(`Failed to paste the path: ${String(error)}`);
-  });
+  const text = paths.map(quotePath).join(' ');
+  // Into an agent's prompt, as a paste: Claude Code turns a pasted image path
+  // into an attached image, where typed characters stay plain text. A shell
+  // keeps getting the path typed, as before.
+  const agent = useTerminalAgentsStore.getState().agents.get(terminalId);
+  if (!(agent && pasteIntoTerminal(terminalId, `${text} `))) {
+    writeTerminal(terminalId, text).catch((error) => {
+      toast.error(`Failed to paste the path: ${String(error)}`);
+    });
+  }
   focusTerminal(terminalId);
   return true;
 }
@@ -1094,6 +1149,11 @@ export function runAction(id: KeybindingActionId): boolean {
       return true;
     case 'window.grid':
       useTerminalGridStore.getState().toggle();
+      return true;
+    case 'agents.next':
+      return gotoNextAgentAttention();
+    case 'tab.newAgent':
+      void openNewAgent();
       return true;
     case 'window.scopeGlobal':
       useTerminalLayoutStore.getState().setScope('global');

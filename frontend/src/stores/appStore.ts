@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { registerAgentInView, useTerminalAgentsStore } from '@/components/terminal/agentsStore';
 import type {
   Project,
   Service,
@@ -1834,6 +1835,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   markTerminalSeen: (id) => {
+    useTerminalAgentsStore.getState().markSeen([id]);
     set((state) => {
       if (!state.terminalAttention.has(id)) return state;
       const terminalAttention = new Map(state.terminalAttention);
@@ -1910,12 +1912,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   markVisibleTerminalsSeen: () => {
     const state = get();
-    if (state.terminalAttention.size === 0) return;
     const onScreen = terminalWindowView
       ? terminalWindowView.visibleIds()
       : state.terminalPanelOpen
         ? state.terminalPanes.map((p) => p.activeTerminalId)
         : [];
+    // A finished agent turn on screen when the window comes back is read.
+    useTerminalAgentsStore.getState().markSeen(onScreen.filter((id): id is string => !!id));
+    if (state.terminalAttention.size === 0) return;
     const seen = onScreen.filter((id): id is string => !!id && state.terminalAttention.has(id));
     if (seen.length === 0) return;
     const terminalAttention = new Map(state.terminalAttention);
@@ -2132,3 +2136,7 @@ export { parseTerminalId };
 if (import.meta.env.DEV) {
   (window as unknown as { __cortxAppStore?: typeof useAppStore }).__cortxAppStore = useAppStore;
 }
+
+// A finished agent turn in front of the user is never "unseen" (see
+// `components/terminal/agentsStore.ts`, which cannot import this store).
+registerAgentInView((id) => useAppStore.getState().isTerminalInView(id));

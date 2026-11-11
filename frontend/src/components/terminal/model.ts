@@ -248,7 +248,8 @@ export function cwdLabel(item: TerminalItem | undefined): string | undefined {
 export interface TabSecondary {
   text: string;
   /**
-   * `waiting` an agent wants you, `command` something runs, `path` the working
+   * `waiting` an agent is stopped on you (a question, a permission prompt),
+   * `command` something runs, `path` the working
    * directory, `count` how many panes a group holds.
    */
   tone: 'waiting' | 'command' | 'path' | 'count';
@@ -279,7 +280,9 @@ export function tabSecondary(
   count?: string
 ): TabSecondary | undefined {
   const agent = display.agent ? live.agent : undefined;
-  if (agent?.state === 'waiting') return { text: STATE_LABEL.waiting, tone: 'waiting' };
+  if (agent?.needsInput) {
+    return { text: agent.needsInput === 'question' ? 'Asks you something' : 'Needs your permission', tone: 'waiting' };
+  }
   if (!agent && display.command && item?.shell?.phase === 'running') {
     return { text: item.shell.command ?? '(command)', tone: 'command' };
   }

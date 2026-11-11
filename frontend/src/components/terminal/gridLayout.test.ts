@@ -6,7 +6,7 @@
  *
  *     bun run test      (node --test "src/**\/*.test.ts")
  */
-import { gridShape, MIN_TILE_HEIGHT, MIN_TILE_WIDTH } from './gridLayout.ts';
+import { arrangeGrid, gridShape, MIN_TILE_HEIGHT, MIN_TILE_WIDTH, type GridTabFacts } from './gridLayout.ts';
 
 // --- a test runner in twenty lines ----------------------------------------
 
@@ -78,6 +78,45 @@ test('too many to fit readably: the rows keep their height and the grid scrolls'
 test('no tile, or no size yet, still answers', () => {
   assert.deepEqual(gridShape(0, ...WIDE), { columns: 1, rows: 0 });
   assert.deepEqual(gridShape(5, 0, 0), { columns: 3, rows: 2 });
+});
+
+const fact = (tab: string, groupKey: string, railIndex: number, phase: GridTabFacts<string>['phase'], lastActivity = 0) => ({
+  tab,
+  groupKey,
+  groupName: groupKey.toUpperCase(),
+  railIndex,
+  phase,
+  lastActivity,
+});
+const FACTS = [
+  fact('shell', 'a', 0, null),
+  fact('busy', 'b', 1, 'working', 30),
+  fact('asks', 'a', 2, 'needs-you', 10),
+  fact('rest', 'b', 3, 'idle', 50),
+  fact('fresh', 'a', 4, 'done', 20),
+];
+const plain = { sort: 'rail', agentsOnly: false, hideIdle: false, groupByProject: false } as const;
+const names = (groups: ReturnType<typeof arrangeGrid<string>>) => groups.map((g) => [g.name, g.tabs]);
+
+test('by default: every tab, in rail order, one block', () => {
+  assert.deepEqual(names(arrangeGrid(FACTS, plain)), [[null, ['shell', 'busy', 'asks', 'rest', 'fresh']]]);
+});
+
+test('attention first, or the latest active first', () => {
+  assert.deepEqual(arrangeGrid(FACTS, { ...plain, sort: 'attention' })[0].tabs, ['asks', 'fresh', 'busy', 'rest', 'shell']);
+  assert.deepEqual(arrangeGrid(FACTS, { ...plain, sort: 'recent' })[0].tabs, ['rest', 'busy', 'fresh', 'asks', 'shell']);
+});
+
+test('agents only, without the idle ones', () => {
+  assert.deepEqual(arrangeGrid(FACTS, { ...plain, agentsOnly: true, hideIdle: true })[0].tabs, ['busy', 'asks', 'fresh']);
+  assert.deepEqual(arrangeGrid([fact('shell', 'a', 0, null)], { ...plain, agentsOnly: true }), [], 'nothing left: no group');
+});
+
+test('by project: sections in rail order, each sorted', () => {
+  assert.deepEqual(names(arrangeGrid(FACTS, { ...plain, groupByProject: true, sort: 'attention' })), [
+    ['A', ['asks', 'fresh', 'shell']],
+    ['B', ['busy', 'rest']],
+  ]);
 });
 
 report();

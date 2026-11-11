@@ -21,6 +21,9 @@ export type KeybindingCategory = 'Tabs' | 'Panes' | 'Terminal' | 'Window';
 export const KEYBINDING_ACTIONS = [
   // --- Tabs
   { id: 'tab.new', label: 'New terminal', category: 'Tabs', defaults: ['ctrl+shift+t'] },
+  // A new terminal that starts the agent command of the settings (`claude`
+  // by default, or an alias such as `cc`).
+  { id: 'tab.newAgent', label: 'New agent', category: 'Tabs', defaults: ['ctrl+shift+a'] },
   { id: 'tab.close', label: 'Close pane (last pane closes the tab)', category: 'Tabs', defaults: ['ctrl+shift+w'] },
   { id: 'tab.next', label: 'Next tab', category: 'Tabs', defaults: ['ctrl+tab'] },
   { id: 'tab.prev', label: 'Previous tab', category: 'Tabs', defaults: ['ctrl+shift+tab'] },
@@ -70,7 +73,8 @@ export const KEYBINDING_ACTIONS = [
   { id: 'window.rail', label: 'Toggle the sessions rail', category: 'Window', defaults: ['ctrl+b'] },
   // Ticket #55. Also the way back from an opened tile to the grid: Esc
   // belongs to the program in the pane (it interrupts Claude Code).
-  { id: 'window.grid', label: 'Grid view (every terminal at once)', category: 'Window', defaults: ['ctrl+shift+g'] },
+  { id: 'window.grid', label: 'Agent mode (grid of every terminal)', category: 'Window', defaults: ['ctrl+shift+g'] },
+  { id: 'agents.next', label: 'Next agent that needs you', category: 'Window', defaults: ['ctrl+shift+j'] },
   { id: 'window.scopeGlobal', label: 'Scope: global', category: 'Window', defaults: [] },
 ] as const satisfies readonly { id: string; label: string; category: KeybindingCategory; defaults: readonly string[] }[];
 

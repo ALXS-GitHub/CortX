@@ -200,3 +200,38 @@ export function decideCommandNotification(
     failed,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Agents (agent mode)
+// ---------------------------------------------------------------------------
+
+/** What an agent just did, as far as a notification is concerned. */
+export type AgentEvent = 'needs-you' | 'done';
+
+export interface AgentEventFacts {
+  event: AgentEvent;
+  /** The terminal is in front of the user right now. */
+  inView: boolean;
+  windowFocused: boolean;
+}
+
+/**
+ * Should an agent that just stopped on you, or just finished its turn, be
+ * announced? Each event has its own switch (`agentNotifyNeedsYou`,
+ * `agentNotifyDone`), "only out of sight" its own too; how it shows (toast,
+ * desktop, both) is the command notifications' `notifyStyle`, so there is one
+ * answer to that question in the app. Null when nothing should be shown.
+ */
+export function decideAgentNotification(
+  cfg: Partial<TerminalConfig> | null | undefined,
+  facts: AgentEventFacts
+): { toast: boolean; system: boolean } | null {
+  const enabled = facts.event === 'needs-you' ? cfg?.agentNotifyNeedsYou ?? true : cfg?.agentNotifyDone ?? true;
+  if (!enabled) return null;
+  if ((cfg?.agentNotifyOnlyWhenHidden ?? true) && facts.inView) return null;
+  const style = resolveNotifyStyle(cfg);
+  return {
+    toast: style !== 'system',
+    system: style === 'system' || (style === 'both' && !facts.windowFocused),
+  };
+}

@@ -118,7 +118,8 @@ test('losing the current tab reveals nothing', () => {
 // --- what a folded header still says ---------------------------------------
 
 test('the rank follows the glyph, agent first', () => {
-  assert.equal(foldSignalRank({ running: true, agent: { state: 'waiting' } }), 5, 'waiting beats everything');
+  assert.equal(foldSignalRank({ running: true, agent: { state: 'running', needsInput: 'permission' } }), 5, 'needs you beats everything');
+  assert.equal(foldSignalRank({ running: true, agent: { state: 'waiting' } }), 0, 'a turn that ended is not news');
   assert.equal(foldSignalRank({ running: true, agent: { state: 'running' } }), 3, 'a working agent is not a spinner');
   assert.equal(foldSignalRank({ running: false, agent: { state: 'stopped' } }), 0, 'a faint dot is not news');
   assert.equal(foldSignalRank({ running: false, agent: { state: 'unknown' } }), 0);
@@ -130,7 +131,7 @@ test('the rank follows the glyph, agent first', () => {
 });
 
 test('a folded section borrows the loudest tab it holds', () => {
-  const waiting = { running: false, agent: { state: 'waiting' } };
+  const waiting = { running: false, agent: { state: 'waiting', needsInput: 'question' } };
   const list = [{ running: false }, { running: true }, waiting, { running: false, attention: { exitCode: 1 } }];
   assert.equal(loudestLive(list) === waiting, true);
 });

@@ -83,7 +83,7 @@ export function TabRowBody({
               // are prose, and reading them in mono is worse.
               (secondary.tone === 'command' || secondary.tone === 'path') && 'font-mono',
               secondary.tone === 'waiting'
-                ? 'text-st-progress'
+                ? 'text-[color:var(--agent-needs-you)]'
                 : secondary.tone === 'command'
                   ? 'text-primary'
                   : 'text-faint'

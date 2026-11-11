@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppWindow, LayoutGrid, Loader2, Plus, Search, SlidersHorizontal, SquareTerminal } from 'lucide-react';
+import { AppWindow, Bot, LayoutGrid, Loader2, Plus, Search, SlidersHorizontal, SquareTerminal } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
@@ -22,8 +22,10 @@ import { flushTerminalSettings } from '@/components/terminal/settings/useTermina
 import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { TERMINAL_EVENTS, closeTabs, openNewTerminal } from '@/components/terminal/actions';
 import { useItemMap, visibleTabOrder } from '@/components/terminal/model';
-import { TerminalGrid, ZoomedBar } from '@/components/terminal/TerminalGrid';
+import { GridRoster, TerminalGrid, ZoomedBar } from '@/components/terminal/TerminalGrid';
+import { AgentInboxMenu } from '@/components/terminal/AgentInboxMenu';
 import { useTerminalGridStore } from '@/stores/terminalGridStore';
+import { useTerminalAgentsStore } from '@/components/terminal/agentsStore';
 import { comboLabelFor } from '@/lib/keybindings';
 import { useTerminalFileDrop, useTerminalWheelZoom, useTerminalWindowShortcuts } from '@/components/terminal/useTerminalWindowShortcuts';
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
@@ -371,7 +373,9 @@ export function TerminalWindow() {
   // Grid view (ticket #55): the scope's tabs in the order the rail / strip
   // draws them, so the tiles read in the same order as the list beside them.
   const gridMode = useTerminalGridStore((s) => s.mode);
-  const toggleGrid = useTerminalGridStore((s) => s.toggle);
+  const backToGrid = useTerminalGridStore((s) => s.backToGrid);
+  const setGridMode = useTerminalGridStore((s) => s.setMode);
+  const gridRoster = useTerminalGridStore((s) => s.view.roster);
   const projects = useAppStore((s) => s.projects);
   const gridTabs = useMemo(
     () => (gridMode === 'off' ? [] : visibleTabOrder(win, projects, tabsPlacement)),
@@ -379,6 +383,19 @@ export function TerminalWindow() {
   );
   const keybindings = useAppStore((s) => s.settings?.terminal.keybindings);
   const gridCombo = comboLabelFor('window.grid', keybindings);
+
+  // The tab in front is read: a finished agent turn in it is no longer
+  // "not seen". In the grid nothing is in front until a tile is opened or
+  // clicked into (a tile's pane marks itself on the click, see LeafPane).
+  const activeTerminalIds = useMemo(
+    () => (activeTab ? collectLeaves(activeTab.layout).map((l) => l.terminalId).join('|') : ''),
+    [activeTab]
+  );
+  const agentsRevision = useTerminalAgentsStore((s) => s.revision);
+  useEffect(() => {
+    if (!activeTerminalIds || gridMode === 'grid' || !document.hasFocus()) return;
+    useTerminalAgentsStore.getState().markSeen(activeTerminalIds.split('|'));
+  }, [activeTerminalIds, gridMode, agentsRevision]);
 
   // Does this window still hold anything, whatever the scope shows?
   const hasOwnTabs = useMemo(() => win.tabs.some(tabIsLocal), [win]);
@@ -415,20 +432,34 @@ export function TerminalWindow() {
           trailing={
             <>
               {IS_PRIMARY_WINDOW && ready && <OtherWindowsMenu />}
+              {/* Agent mode (opt-in, per window): the counter and its inbox,
+                  the grid, and the way back to it. Off, the Terminal is the
+                  plain one — none of this is drawn. */}
+              {ready && gridMode !== 'off' && <AgentInboxMenu />}
+              {ready && gridMode !== 'off' && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={backToGrid}
+                  aria-pressed={gridMode === 'grid'}
+                  className={cn(gridMode === 'grid' && 'bg-accent text-foreground')}
+                  title={gridMode === 'zoomed' ? `Back to the grid${gridCombo ? ` (${gridCombo})` : ''}` : 'Grid'}
+                  aria-label="Grid"
+                >
+                  <LayoutGrid />
+                </Button>
+              )}
               {ready && (
                 <Button
                   variant="ghost"
                   size="xs"
-                  onClick={toggleGrid}
+                  onClick={() => setGridMode(gridMode === 'off' ? 'grid' : 'off')}
                   aria-pressed={gridMode !== 'off'}
                   className={cn(gridMode !== 'off' && 'bg-accent text-foreground')}
-                  title={
-                    (gridMode === 'zoomed' ? 'Back to the grid' : gridMode === 'grid' ? 'Leave the grid view' : 'Grid view: every terminal at once') +
-                    (gridCombo ? ` (${gridCombo})` : '')
-                  }
-                  aria-label="Grid view"
+                  title={gridMode === 'off' ? 'Agent mode: the grid, the counter and the inbox' : 'Leave agent mode'}
+                  aria-label="Agent mode"
                 >
-                  <LayoutGrid />
+                  <Bot />
                 </Button>
               )}
               <Button variant="ghost" size="xs" onClick={() => setPaletteOpen(true)} title="Command palette (Ctrl+K)">
@@ -478,7 +509,14 @@ export function TerminalWindow() {
                   ) : activeTab ? (
                     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                       {gridMode === 'zoomed' && <ZoomedBar tab={activeTab} items={items} count={gridTabs.length} />}
-                      <SplitTree key={activeTab.id} tab={activeTab} items={items} isActiveTab />
+                      <div className="flex min-h-0 min-w-0 flex-1">
+                        <SplitTree key={activeTab.id} tab={activeTab} items={items} isActiveTab />
+                        {/* An opened tile is the session full page, with the
+                            list of the others beside it — not the grid. */}
+                        {gridMode === 'zoomed' && gridRoster && gridTabs.length > 1 && (
+                          <GridRoster tabs={gridTabs} items={items} activeTabId={activeTab.id} />
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="flex flex-1 items-center justify-center">

@@ -349,6 +349,31 @@
   animation: halcyon-pulse 1.8s ease-out infinite;
 }
 
+/* Agent dots (see components/terminal/agentColors.ts): a family of their own,
+   never shared with a shell, a service or a script. `--agent-*` are written
+   on :root from the settings; these are the fallbacks. */
+:root {
+  --agent-working: #8b5cf6;
+  --agent-needs-you: #f97316;
+  --agent-done: #06b6d4;
+  --agent-idle: #8b7fb0;
+}
+/* Needs you: solid, with a ring that keeps calling. */
+.sdot.needs {
+  background: var(--sc);
+  border-color: transparent;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc) 60%, transparent);
+  animation: agent-call 1.4s ease-out infinite;
+}
+@keyframes agent-call {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc) 60%, transparent); }
+  70% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--sc) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sdot.needs { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--sc) 35%, transparent); }
+}
+
 /* --- Keyboard hint --- */
 .kbd {
   display: inline-grid;
