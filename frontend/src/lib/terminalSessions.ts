@@ -1396,18 +1396,35 @@ function createSession(id: string): TerminalSession {
   // selection reaches the clipboard as soon as the drag ends — never during
   // it, never for an empty or whitespace-only selection, and the highlight
   // stays where it is. Keyboard selections (select all) are left alone.
+  //
+  // Only a selection *this* press made or changed is copied (#52). The
+  // highlight outlives the copy, so a click that merely brings the focus back
+  // — after copying something else in another app — used to find it still
+  // there and copy it again over the clipboard. xterm clears the selection on
+  // a plain click, but not when a program reads the mouse (Claude Code,
+  // Codex, vim…), nor on the click that lands on the universal prompt.
   let mouseSelecting = false;
+  let selectionMoved = false;
+  session.disposables.push(term.onSelectionChange(() => {
+    if (mouseSelecting) selectionMoved = true;
+  }));
   container.addEventListener('mousedown', (e) => {
-    if (e.button === 0) mouseSelecting = true;
+    if (e.button !== 0) return;
+    mouseSelecting = true;
+    selectionMoved = false;
   });
   // On `document`: a drag very often ends with the pointer outside the pane.
   const onMouseUp = (e: MouseEvent) => {
     if (e.button !== 0 || !mouseSelecting) return;
-    mouseSelecting = false;
-    if (!copyOnSelectEnabled()) return;
+    if (!copyOnSelectEnabled()) {
+      mouseSelecting = false;
+      return;
+    }
     // One turn later: xterm settles the selection in its own listener for
     // this very mouseup, and a plain click has cleared it by then.
     window.setTimeout(() => {
+      mouseSelecting = false;
+      if (!selectionMoved) return;
       if (!term.hasSelection() || !term.getSelection().trim()) return;
       void copySelection(term, false);
     }, 0);
