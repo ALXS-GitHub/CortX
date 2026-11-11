@@ -31,8 +31,6 @@ export interface TerminalGridView {
   hideIdle: boolean;
   /** One section per project, with its name. */
   groupByProject: boolean;
-  /** The list of every session beside an opened tile. */
-  roster: boolean;
 }
 
 export const DEFAULT_GRID_VIEW: TerminalGridView = {
@@ -40,7 +38,6 @@ export const DEFAULT_GRID_VIEW: TerminalGridView = {
   agentsOnly: false,
   hideIdle: false,
   groupByProject: false,
-  roster: true,
 };
 
 interface TerminalGridState {

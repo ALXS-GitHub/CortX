@@ -22,7 +22,7 @@ import { flushTerminalSettings } from '@/components/terminal/settings/useTermina
 import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { TERMINAL_EVENTS, closeTabs, openNewTerminal } from '@/components/terminal/actions';
 import { useItemMap, visibleTabOrder } from '@/components/terminal/model';
-import { GridRoster, TerminalGrid, ZoomedBar } from '@/components/terminal/TerminalGrid';
+import { TerminalGrid, ZoomedBar } from '@/components/terminal/TerminalGrid';
 import { AgentInboxMenu } from '@/components/terminal/AgentInboxMenu';
 import { useTerminalGridStore } from '@/stores/terminalGridStore';
 import { useTerminalAgentsStore } from '@/components/terminal/agentsStore';
@@ -375,7 +375,6 @@ export function TerminalWindow() {
   const gridMode = useTerminalGridStore((s) => s.mode);
   const backToGrid = useTerminalGridStore((s) => s.backToGrid);
   const setGridMode = useTerminalGridStore((s) => s.setMode);
-  const gridRoster = useTerminalGridStore((s) => s.view.roster);
   const projects = useAppStore((s) => s.projects);
   const gridTabs = useMemo(
     () => (gridMode === 'off' ? [] : visibleTabOrder(win, projects, tabsPlacement)),
@@ -509,14 +508,7 @@ export function TerminalWindow() {
                   ) : activeTab ? (
                     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                       {gridMode === 'zoomed' && <ZoomedBar tab={activeTab} items={items} count={gridTabs.length} />}
-                      <div className="flex min-h-0 min-w-0 flex-1">
-                        <SplitTree key={activeTab.id} tab={activeTab} items={items} isActiveTab />
-                        {/* An opened tile is the session full page, with the
-                            list of the others beside it — not the grid. */}
-                        {gridMode === 'zoomed' && gridRoster && gridTabs.length > 1 && (
-                          <GridRoster tabs={gridTabs} items={items} activeTabId={activeTab.id} />
-                        )}
-                      </div>
+                      <SplitTree key={activeTab.id} tab={activeTab} items={items} isActiveTab />
                     </div>
                   ) : (
                     <div className="flex flex-1 items-center justify-center">

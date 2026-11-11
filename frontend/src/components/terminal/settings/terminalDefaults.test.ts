@@ -177,7 +177,7 @@ const BACKEND_DEFAULTS = {
   smoothScrollDuration: 100,
   suggestionConfidence: 'balanced',
   suggestionsFromOutput: true,
-  tabDisplay: { agent: true, colorBar: false, command: true, cwd: true, index: 'ctrl', status: true },
+  tabDisplay: { agent: true, agentActivity: true, colorBar: false, command: true, cwd: true, index: 'ctrl', status: true },
   tabsPlacement: 'sidebar',
   themeFollowsApp: true,
   wallpaperDim: 0,
@@ -218,7 +218,7 @@ const LIVED_IN = {
   copyOnSelect: true,
   bell: 'visual',
   keybindings: {},
-  tabDisplay: { cwd: true, command: true, status: true, agent: true, index: 'ctrl', colorBar: false },
+  tabDisplay: { cwd: true, command: true, status: true, agent: true, agentActivity: true, index: 'ctrl', colorBar: false },
 } as const;
 
 // --- 1. the contract with Rust --------------------------------------------

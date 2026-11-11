@@ -987,6 +987,10 @@ pub struct TerminalTabDisplay {
     /// Detected agent: its icon, the title it gave itself, and its own state.
     #[serde(default = "default_true")]
     pub agent: bool,
+    /// Second line of an agent tab: what the agent is at (needs you, the tool
+    /// it runs, your last prompt) instead of the directory.
+    #[serde(default = "default_true")]
+    pub agent_activity: bool,
     /// When the Ctrl+N number is shown.
     #[serde(default)]
     #[serde(deserialize_with = "lenient_enum")]
@@ -1004,6 +1008,7 @@ impl Default for TerminalTabDisplay {
             command: true,
             status: true,
             agent: true,
+            agent_activity: true,
             index: TabIndexDisplay::default(),
             color_bar: false,
         }

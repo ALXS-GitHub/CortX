@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Maximize2, PanelRight, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeft, Maximize2, SlidersHorizontal } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { useTerminalGridStore, type TerminalGridSort } from '@/stores/terminalGridStore';
@@ -393,14 +393,13 @@ function shortModel(model: string): string {
 }
 
 /**
- * Above an opened tile: the way back to the grid, what is open, and the
- * roster toggle. The tab underneath is the plain active tab — every shortcut,
+ * Above an opened tile: the way back to the grid, and what is open. The rail
+ * on the left already lists every session (with what each agent is at, see
+ * `tabDisplay.agentActivity`), so nothing here repeats it. The tab underneath is the plain active tab — every shortcut,
  * the split buttons and the rail work on it as usual.
  */
 export function ZoomedBar({ tab, items, count }: { tab: TerminalTab | null; items: ItemMap; count: number }) {
   const backToGrid = useTerminalGridStore((s) => s.backToGrid);
-  const roster = useTerminalGridStore((s) => s.view.roster);
-  const setView = useTerminalGridStore((s) => s.setView);
   const keybindings = useAppStore((s) => s.settings?.terminal.keybindings);
   const combo = comboLabelFor('window.grid', keybindings);
   const live = useMemo(() => (tab ? tabLiveState(tab, items) : null), [tab, items]);
@@ -422,75 +421,6 @@ export function ZoomedBar({ tab, items, count }: { tab: TerminalTab | null; item
           {live && <TerminalStatusGlyph live={live} />}
         </>
       )}
-      <button
-        type="button"
-        onClick={() => setView({ roster: !roster })}
-        aria-pressed={roster}
-        className={cn(
-          'ml-auto grid size-6 place-items-center rounded-[var(--rad-xs)] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-          roster && 'bg-accent text-foreground'
-        )}
-        title={roster ? 'Hide the session list' : 'Show the session list'}
-        aria-label="Session list"
-      >
-        <PanelRight className="size-3.5" />
-      </button>
     </div>
-  );
-}
-
-/**
- * Beside an opened tile: every session of the grid as one row — its dot,
- * its name, what it is at — so you can jump from one to the next without
- * going back to the grid (MulmoTerminal's roster). The opened one is marked;
- * a click opens another in its place.
- */
-export function GridRoster({ tabs, items, activeTabId }: { tabs: TerminalTab[]; items: ItemMap; activeTabId: string | null }) {
-  const agents = useTerminalAgentsStore((s) => s.agents);
-  const unseen = useTerminalAgentsStore((s) => s.unseen);
-  const projects = useAppStore((s) => s.projects);
-  const display = useTabDisplay();
-  const setActiveTab = useTerminalLayoutStore((s) => s.setActiveTab);
-  return (
-    <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-l border-border py-1" aria-label="Sessions">
-      {tabs.map((tab) => {
-        const { phase, agent } = loudestAgent(tab, agents, unseen);
-        const live = tabLiveState(tab, items);
-        const project = tabProject(tab, projects);
-        const detail = agent
-          ? activityOf(agent, phase) === 'Working' || !activityOf(agent, phase)
-            ? agent.lastPrompt ?? activityOf(agent, phase)
-            : activityOf(agent, phase)
-          : tabSecondary(tabItem(tab, items), live, display)?.text;
-        const active = tab.id === activeTabId;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={cn(
-              'mx-1 flex flex-col gap-0.5 rounded-[var(--rad-xs)] px-2 py-1.5 text-left transition-colors',
-              active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
-            )}
-          >
-            <span className="flex min-w-0 items-center gap-1.5 text-[12px]">
-              {agent && phase ? <AgentPhaseDot phase={phase} needsInput={agent.needsInput} /> : <TerminalStatusGlyph live={live} />}
-              <span className={cn('truncate', active && 'font-medium')}>{tabTitle(tab, items)}</span>
-              {project && <span className="ml-auto max-w-20 shrink-0 truncate text-[10px] text-faint">{project.name}</span>}
-            </span>
-            {detail && (
-              <span
-                className={cn(
-                  'truncate pl-[13px] text-[10.5px]',
-                  phase === 'needs-you' ? 'text-[color:var(--agent-needs-you)]' : 'text-faint'
-                )}
-              >
-                {detail}
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </aside>
   );
 }

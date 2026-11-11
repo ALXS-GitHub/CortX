@@ -121,6 +121,7 @@ export const DEFAULT_TAB_DISPLAY: ResolvedTabDisplay = {
   command: true,
   status: true,
   agent: true,
+  agentActivity: true,
   index: 'ctrl',
   colorBar: false,
 };
@@ -252,7 +253,7 @@ export interface TabSecondary {
    * `command` something runs, `path` the working
    * directory, `count` how many panes a group holds.
    */
-  tone: 'waiting' | 'command' | 'path' | 'count';
+  tone: 'waiting' | 'command' | 'path' | 'count' | 'agent';
 }
 
 /**
@@ -280,13 +281,21 @@ export function tabSecondary(
   count?: string
 ): TabSecondary | undefined {
   const agent = display.agent ? live.agent : undefined;
-  if (agent?.needsInput) {
-    return { text: agent.needsInput === 'question' ? 'Asks you something' : 'Needs your permission', tone: 'waiting' };
+  // What the agent is at (`tabDisplay.agentActivity`): its own words instead
+  // of the directory — what the grid's session list used to say beside an
+  // opened tile, now in the rail where it is not a second copy of the list.
+  const activity = agent && display.agentActivity ? agent : undefined;
+  if (activity?.needsInput) {
+    return { text: activity.needsInput === 'question' ? 'Asks you something' : 'Needs your permission', tone: 'waiting' };
   }
   if (!agent && display.command && item?.shell?.phase === 'running') {
     return { text: item.shell.command ?? '(command)', tone: 'command' };
   }
   if (count !== undefined) return { text: count, tone: 'count' };
+  if (activity?.state === 'running') {
+    return { text: activity.pendingTool ? `Running ${activity.pendingTool}` : 'Working', tone: 'agent' };
+  }
+  if (activity?.lastPrompt) return { text: activity.lastPrompt, tone: 'agent' };
   const cwd = display.cwd ? cwdLabel(item) : undefined;
   return cwd ? { text: cwd, tone: 'path' } : undefined;
 }

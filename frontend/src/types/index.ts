@@ -449,6 +449,9 @@ export interface TerminalTabDisplay {
   status?: boolean;
   /** Detected agent: its icon, the title it gave itself, its own state. Default true. */
   agent?: boolean;
+  /** Second line of an agent tab: what the agent is at (needs you, the tool it
+   *  runs, your last prompt) instead of the directory. Default true. */
+  agentActivity?: boolean;
   /** When the Ctrl+N number shows up. Default `ctrl` (only while Ctrl is held). */
   index?: TabIndexDisplay;
   /** Also draw the tab colour as a bar down the left edge, on top of the tint.

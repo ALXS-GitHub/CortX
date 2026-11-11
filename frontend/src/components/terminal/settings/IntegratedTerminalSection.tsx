@@ -79,6 +79,11 @@ const TAB_DISPLAY_TOGGLES = [
   { key: 'status', label: 'Status', hint: 'The spinner, the finished pill and the runtime dot.' },
   { key: 'agent', label: 'Agent', hint: 'A detected Claude Code / Codex session: its icon, its title, its own state.' },
   {
+    key: 'agentActivity',
+    label: 'Agent activity',
+    hint: 'Second line of an agent tab: what it is at — needs you, the tool it runs, your last prompt — instead of the directory.',
+  },
+  {
     key: 'colorBar',
     label: 'Colour bar',
     hint: "The tab colour as a bar down the left edge of the row, on top of the tint. Sessions rail only; off by default, because the tint already carries the colour.",
@@ -1057,7 +1062,7 @@ export function IntegratedTerminalSection() {
         </SettingToggle>
 
 
-        {/* Five switches on one row, so the marker and the reset belong to
+        {/* Six switches on one row, so the marker and the reset belong to
             each switch rather than to the row: `tabDisplay` is one object in
             the file, but it is five decisions on screen and nobody thinks of
             it as a whole. `terminalDefaults.ts` addresses the sub-fields as

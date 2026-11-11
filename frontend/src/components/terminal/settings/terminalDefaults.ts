@@ -452,6 +452,7 @@ export const TERMINAL_SETTINGS = {
   'tabDisplay.command': tabDisplayMeta('command', 'Tab shows the running command'),
   'tabDisplay.status': tabDisplayMeta('status', 'Tab shows the status'),
   'tabDisplay.agent': tabDisplayMeta('agent', 'Tab shows the agent'),
+  'tabDisplay.agentActivity': tabDisplayMeta('agentActivity', 'Tab shows what the agent is at'),
   'tabDisplay.colorBar': tabDisplayMeta('colorBar', 'Tab shows a colour bar'),
   'tabDisplay.index': tabDisplayMeta('index', 'Tab number'),
   openProcessesIn: { label: 'Services and scripts open in', group: 'tabs', fallback: FROM_RUST },
