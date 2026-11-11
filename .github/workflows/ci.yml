@@ -70,15 +70,18 @@ jobs:
       - name: Install Linux build deps
         timeout-minutes: 10
         run: |
-          # Same mirror switch as release.yml: Azure's Ubuntu mirror can stop
-          # answering and hang the step for hours.
-          # The sources do not name the mirror themselves: they read it from
-          # /etc/apt/apt-mirrors.txt (`mirror+file:`), so that list is what
-          # has to change — rewriting the sources alone left apt on Azure.
-          echo 'http://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          # GitHub's Ubuntu runners stopped getting packages over plain HTTP
+          # (Nov. 2026: Azure's mirror no longer resolves, and the main archive
+          # times out on every file), while HTTPS works. So apt goes to an
+          # HTTPS mirror — through its mirror list, which is where the
+          # sources read the mirror from (`mirror+file:`).
+          MIRROR='https://mirrors.edge.kernel.org/ubuntu/'
+          echo "$MIRROR" | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
           sudo sed -i \
-            -e 's|mirror+file:/etc/apt/apt-mirrors.txt|http://archive.ubuntu.com/ubuntu/|g' \
-            -e 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            -e "s|mirror+file:/etc/apt/apt-mirrors.txt|$MIRROR|g" \
+            -e "s|http://azure.archive.ubuntu.com/ubuntu/\\?|$MIRROR|g" \
+            -e "s|http://archive.ubuntu.com/ubuntu/\\?|$MIRROR|g" \
+            -e "s|http://security.ubuntu.com/ubuntu/\\?|$MIRROR|g" \
             /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
           APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
           sudo apt-get $APT update

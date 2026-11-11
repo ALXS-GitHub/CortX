@@ -23,9 +23,9 @@ CortX is built with [Tauri](https://tauri.app/), making it lightweight and secur
 
 - **Windows** (x86_64) — `.msi` and `.exe` (NSIS) installers
 - **macOS** (Apple Silicon and Intel) — `.dmg`
-- **Linux** (x86_64) — `.deb` and `.AppImage`
+- **Linux** (x86_64) — kept building and checked by CI on every push, but no longer attached to releases: build it from source (`bun run tauri:build` in `frontend/`) for a `.deb` and an `.AppImage`
 
-Pre-built artifacts for all three platforms are attached to each [release](https://github.com/ALXS-GitHub/CortX/releases).
+Pre-built artifacts for Windows and macOS are attached to each [release](https://github.com/ALXS-GitHub/CortX/releases).
 
 ## Features
 

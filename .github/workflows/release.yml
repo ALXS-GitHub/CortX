@@ -70,6 +70,12 @@ jobs:
 
     strategy:
       fail-fast: false
+      # No Linux build in the releases: nobody installs CortX on Linux today,
+      # and GitHub's Ubuntu runners could not download a package for 0.15.12
+      # and 0.15.13. Linux is still kept building — CI checks it on every
+      # push (`ci.yml`) — so adding it back is this one matrix entry:
+      #   platform 'ubuntu-22.04', target 'x86_64-unknown-linux-gnu',
+      #   plus the Tauri system libraries (see the step in `ci.yml`).
       matrix:
         include:
           - platform: 'macos-latest'  # Apple Silicon
@@ -80,10 +86,6 @@ jobs:
             target: 'x86_64-apple-darwin'
             sidecar_ext: ''
             args: '--target x86_64-apple-darwin'
-          - platform: 'ubuntu-22.04'
-            target: 'x86_64-unknown-linux-gnu'
-            sidecar_ext: ''
-            args: ''
           - platform: 'windows-latest'
             target: 'x86_64-pc-windows-msvc'
             sidecar_ext: '.exe'
@@ -93,31 +95,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Linux build deps
-        if: matrix.platform == 'ubuntu-22.04'
-        timeout-minutes: 10
-        run: |
-          # The runners point apt at Azure's mirror of Ubuntu, which sometimes
-          # stops answering: every package then times out one after the other
-          # and the step hangs for hours (0.15.12). The main archive instead,
-          # with retries and a short timeout so a bad mirror fails fast.
-          # The sources do not name the mirror themselves: they read it from
-          # /etc/apt/apt-mirrors.txt (`mirror+file:`), so that list is what
-          # has to change — rewriting the sources alone left apt on Azure.
-          echo 'http://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
-          sudo sed -i \
-            -e 's|mirror+file:/etc/apt/apt-mirrors.txt|http://archive.ubuntu.com/ubuntu/|g' \
-            -e 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
-            /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
-          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
-          sudo apt-get $APT update
-          sudo apt-get $APT install -y \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            patchelf \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
