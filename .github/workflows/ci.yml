@@ -72,7 +72,13 @@ jobs:
         run: |
           # Same mirror switch as release.yml: Azure's Ubuntu mirror can stop
           # answering and hang the step for hours.
-          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+          # The sources do not name the mirror themselves: they read it from
+          # /etc/apt/apt-mirrors.txt (`mirror+file:`), so that list is what
+          # has to change — rewriting the sources alone left apt on Azure.
+          echo 'http://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          sudo sed -i \
+            -e 's|mirror+file:/etc/apt/apt-mirrors.txt|http://archive.ubuntu.com/ubuntu/|g' \
+            -e 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
             /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
           APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
           sudo apt-get $APT update

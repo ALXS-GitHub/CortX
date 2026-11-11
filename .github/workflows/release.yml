@@ -12,13 +12,14 @@ jobs:
   # for the tag at the same moment and each made its own draft, so a version
   # ended up split over two releases (0.15.9, 0.15.12). Publishing a draft
   # pushes its tag and runs this workflow again: the release is found, not
-  # created twice.
+  # created twice — and, being published already, not rebuilt either.
   create-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
-      release_id: ${{ steps.release.outputs.result }}
+      release_id: ${{ fromJSON(steps.release.outputs.result).id }}
+      skip: ${{ fromJSON(steps.release.outputs.result).skip }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +27,6 @@ jobs:
         id: release
         uses: actions/github-script@v7
         with:
-          result-encoding: string
           script: |
             const fs = require('fs');
             const { version } = JSON.parse(fs.readFileSync('frontend/src-tauri/tauri.conf.json', 'utf8'));
@@ -36,8 +36,17 @@ jobs:
             // A published release of the tag first, then a draft one.
             const mine = releases.filter((r) => r.tag_name === tag).sort((a, b) => Number(a.draft) - Number(b.draft));
             if (mine.length > 0) {
-              core.info(`Uploading into the existing release ${mine[0].name} (${mine[0].draft ? 'draft' : 'published'}).`);
-              return String(mine[0].id);
+              const found = mine[0];
+              // Publishing a draft pushes its tag, which lands here again:
+              // that release is already built, so nothing is rebuilt. A run
+              // started by hand (workflow_dispatch) always builds, to fill a
+              // release a failed job left incomplete.
+              if (!found.draft && context.eventName === 'push') {
+                core.info(`${found.name} is already published: nothing to build.`);
+                return { id: String(found.id), skip: 'true' };
+              }
+              core.info(`Uploading into the existing release ${found.name} (${found.draft ? 'draft' : 'published'}).`);
+              return { id: String(found.id), skip: 'false' };
             }
             const { data } = await github.rest.repos.createRelease({
               owner,
@@ -50,10 +59,11 @@ jobs:
               prerelease: false,
             });
             core.info(`Created the draft release ${data.name}.`);
-            return String(data.id);
+            return { id: String(data.id), skip: 'false' };
 
   publish-tauri:
     needs: create-release
+    if: needs.create-release.outputs.skip != 'true'
     timeout-minutes: 60
     permissions:
       contents: write
@@ -92,7 +102,13 @@ jobs:
           # stops answering: every package then times out one after the other
           # and the step hangs for hours (0.15.12). The main archive instead,
           # with retries and a short timeout so a bad mirror fails fast.
-          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+          # The sources do not name the mirror themselves: they read it from
+          # /etc/apt/apt-mirrors.txt (`mirror+file:`), so that list is what
+          # has to change — rewriting the sources alone left apt on Azure.
+          echo 'http://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          sudo sed -i \
+            -e 's|mirror+file:/etc/apt/apt-mirrors.txt|http://archive.ubuntu.com/ubuntu/|g' \
+            -e 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
             /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
           APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
           sudo apt-get $APT update
