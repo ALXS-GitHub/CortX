@@ -11,6 +11,7 @@ import {
   History,
   Maximize2,
   Minimize2,
+  LayoutGrid,
   PanelLeft,
   Pencil,
   Plus,
@@ -232,6 +233,11 @@ export function TerminalPalette({ open, onOpenChange }: TerminalPaletteProps) {
               <PanelLeft />
               Toggle the sessions rail
               <Hint>{combo('window.rail')}</Hint>
+            </CommandItem>
+            <CommandItem value="grid view every terminal agents tiles overview" onSelect={() => run(() => void runAction('window.grid'))}>
+              <LayoutGrid />
+              Grid view
+              <Hint>{combo('window.grid')}</Hint>
             </CommandItem>
           </CommandGroup>
 

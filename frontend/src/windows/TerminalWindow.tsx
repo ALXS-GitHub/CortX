@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AppWindow, Loader2, Plus, Search, SlidersHorizontal, SquareTerminal } from 'lucide-react';
+import { AppWindow, LayoutGrid, Loader2, Plus, Search, SlidersHorizontal, SquareTerminal } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
@@ -21,12 +21,23 @@ import { OPEN_TERMINAL_SETTINGS_EVENT, openTerminalSettingsPanel } from '@/compo
 import { flushTerminalSettings } from '@/components/terminal/settings/useTerminalSettings';
 import { initTerminalThemeStore } from '@/stores/terminalThemeStore';
 import { TERMINAL_EVENTS, closeTabs, openNewTerminal } from '@/components/terminal/actions';
-import { useItemMap } from '@/components/terminal/model';
+import { useItemMap, visibleTabOrder } from '@/components/terminal/model';
+import { TerminalGrid, ZoomedBar } from '@/components/terminal/TerminalGrid';
+import { useTerminalGridStore } from '@/stores/terminalGridStore';
+import { comboLabelFor } from '@/lib/keybindings';
 import { useTerminalFileDrop, useTerminalWheelZoom, useTerminalWindowShortcuts } from '@/components/terminal/useTerminalWindowShortcuts';
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import { useTerminalLayoutStore, TERMINAL_WINDOW_ID } from '@/stores/terminalLayoutStore';
 import { useAppStore } from '@/stores/appStore';
-import { collectLeaves, findLeaf, PRIMARY_TERMINAL_WINDOW, tabIsLocal, tabsInScope, terminalWindowName } from '@/lib/terminalLayout';
+import {
+  collectLeaves,
+  findLeaf,
+  isAgentsScope,
+  PRIMARY_TERMINAL_WINDOW,
+  tabIsLocal,
+  tabsInScope,
+  terminalWindowName,
+} from '@/lib/terminalLayout';
 import { fitTerminal, focusTerminal, listTerminalSessionIds } from '@/lib/terminalSessions';
 import { cn } from '@/lib/utils';
 import {
@@ -357,6 +368,18 @@ export function TerminalWindow() {
     return scoped.find((t) => t.id === win.activeTabId) ?? scoped[0] ?? null;
   }, [win]);
 
+  // Grid view (ticket #55): the scope's tabs in the order the rail / strip
+  // draws them, so the tiles read in the same order as the list beside them.
+  const gridMode = useTerminalGridStore((s) => s.mode);
+  const toggleGrid = useTerminalGridStore((s) => s.toggle);
+  const projects = useAppStore((s) => s.projects);
+  const gridTabs = useMemo(
+    () => (gridMode === 'off' ? [] : visibleTabOrder(win, projects, tabsPlacement)),
+    [gridMode, win, projects, tabsPlacement]
+  );
+  const keybindings = useAppStore((s) => s.settings?.terminal.keybindings);
+  const gridCombo = comboLabelFor('window.grid', keybindings);
+
   // Does this window still hold anything, whatever the scope shows?
   const hasOwnTabs = useMemo(() => win.tabs.some(tabIsLocal), [win]);
 
@@ -392,6 +415,22 @@ export function TerminalWindow() {
           trailing={
             <>
               {IS_PRIMARY_WINDOW && ready && <OtherWindowsMenu />}
+              {ready && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={toggleGrid}
+                  aria-pressed={gridMode !== 'off'}
+                  className={cn(gridMode !== 'off' && 'bg-accent text-foreground')}
+                  title={
+                    (gridMode === 'zoomed' ? 'Back to the grid' : gridMode === 'grid' ? 'Leave the grid view' : 'Grid view: every terminal at once') +
+                    (gridCombo ? ` (${gridCombo})` : '')
+                  }
+                  aria-label="Grid view"
+                >
+                  <LayoutGrid />
+                </Button>
+              )}
               <Button variant="ghost" size="xs" onClick={() => setPaletteOpen(true)} title="Command palette (Ctrl+K)">
                 <Search />
                 <span className="kbd">Ctrl K</span>
@@ -434,8 +473,13 @@ export function TerminalWindow() {
                   {/* "A sub-shell is running here without shell integration"
                       (ticket #16) — an offer, never an automatic injection. */}
                   <SubshellBanner />
-                  {activeTab ? (
-                    <SplitTree key={activeTab.id} tab={activeTab} items={items} isActiveTab />
+                  {gridMode === 'grid' && gridTabs.length > 0 ? (
+                    <TerminalGrid tabs={gridTabs} items={items} showProject={win.scope === 'global' || isAgentsScope(win.scope)} />
+                  ) : activeTab ? (
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                      {gridMode === 'zoomed' && <ZoomedBar tab={activeTab} items={items} count={gridTabs.length} />}
+                      <SplitTree key={activeTab.id} tab={activeTab} items={items} isActiveTab />
+                    </div>
                   ) : (
                     <div className="flex flex-1 items-center justify-center">
                       <EmptyState

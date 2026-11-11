@@ -5,6 +5,7 @@ import { emit } from '@tauri-apps/api/event';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore, TERMINAL_WINDOW_ID } from '@/stores/terminalLayoutStore';
 import { useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
+import { useTerminalGridStore } from '@/stores/terminalGridStore';
 import { adjustTerminalZoom, clearTerminal, focusTerminal, resetTerminalZoom } from '@/lib/terminalSessions';
 import { jumpToBlock } from '@/lib/terminalBlocks';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
@@ -1090,6 +1091,9 @@ export function runAction(id: KeybindingActionId): boolean {
       return openCommandHistory();
     case 'window.rail':
       useTerminalWindowPrefsStore.getState().toggleRail();
+      return true;
+    case 'window.grid':
+      useTerminalGridStore.getState().toggle();
       return true;
     case 'window.scopeGlobal':
       useTerminalLayoutStore.getState().setScope('global');

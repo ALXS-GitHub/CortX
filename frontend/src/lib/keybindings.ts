@@ -68,6 +68,9 @@ export const KEYBINDING_ACTIONS = [
   // this same view, opened to pick a command). Shift keeps it out of the PTY.
   { id: 'window.history', label: 'Command history', category: 'Window', defaults: ['ctrl+shift+h'] },
   { id: 'window.rail', label: 'Toggle the sessions rail', category: 'Window', defaults: ['ctrl+b'] },
+  // Ticket #55. Also the way back from an opened tile to the grid: Esc
+  // belongs to the program in the pane (it interrupts Claude Code).
+  { id: 'window.grid', label: 'Grid view (every terminal at once)', category: 'Window', defaults: ['ctrl+shift+g'] },
   { id: 'window.scopeGlobal', label: 'Scope: global', category: 'Window', defaults: [] },
 ] as const satisfies readonly { id: string; label: string; category: KeybindingCategory; defaults: readonly string[] }[];
 
