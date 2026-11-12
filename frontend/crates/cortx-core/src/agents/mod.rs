@@ -708,6 +708,42 @@ impl AgentIndex {
             map.insert(e.session_id.clone(), e);
         }
         *self.live.write() = map;
+        self.rescan_live_claude_transcripts();
+    }
+
+    /// Bring the transcripts of the live Claude sessions up to date.
+    ///
+    /// The registry flips to idle once the turn is written, but the watcher
+    /// may report the transcript's last lines in a later batch than the
+    /// registry: the "done" broadcast then went out with the reply of the
+    /// turn before (ticket #56). Re-reading them here, before anything is
+    /// emitted, makes the two agree. Cheap: an unchanged file is one
+    /// `metadata` call, a grown one is read from where it stopped.
+    fn rescan_live_claude_transcripts(&self) {
+        let paths: Vec<PathBuf> = {
+            let live = self.live.read();
+            if live.is_empty() {
+                return;
+            }
+            let cache = self.cache.read();
+            cache
+                .iter(AgentProvider::ClaudeCode)
+                .filter(|(path, entry)| {
+                    let id = entry.summary.session_id.clone().or_else(|| {
+                        Path::new(path)
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                    });
+                    id.is_some_and(|id| live.contains_key(&id))
+                })
+                .map(|(path, _)| PathBuf::from(path))
+                .collect()
+        };
+        for path in paths {
+            if path.exists() {
+                self.scan_one(AgentProvider::ClaudeCode, &path);
+            }
+        }
     }
 
     fn reload_codex_index(&self, codex_dir: &Path) {
