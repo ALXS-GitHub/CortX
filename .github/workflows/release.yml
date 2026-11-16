@@ -100,9 +100,15 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      # Pinned, not `stable`: Rust 1.100 lays build scripts' output out as
+      # build/<crate>/<hash>/out, and tauri-build 2.6 finds target/<profile>
+      # three levels above OUT_DIR — it lands in build/ and tries to replace
+      # the cortx-mcp directory there by the sidecar ("Is a directory",
+      # 0.15.14). Move on once tauri-build follows the new layout.
+      - name: Install Rust 1.99.1
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: '1.99.1'
           targets: ${{ matrix.target }}
 
       - name: Rust cache
