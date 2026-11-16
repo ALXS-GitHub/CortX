@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged by the Tauri CLI into the app bundle's Info.plist (macOS only).
+
+  NSMicrophoneUsageDescription: a program run in CortX's terminal (Claude
+  Code's voice mode, for one) asks macOS for the microphone in CortX's name —
+  the app that owns the terminal. Without this key macOS refuses, without
+  even asking you.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>A program running in a CortX terminal (Claude Code's voice mode, for example) wants to use the microphone.</string>
+</dict>
+</plist>
