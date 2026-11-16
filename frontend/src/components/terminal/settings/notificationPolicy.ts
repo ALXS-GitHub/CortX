@@ -22,7 +22,7 @@
  * fires on any program that prints the word. See the DEV-13 report.
  */
 
-import type { TerminalConfig, TerminalNotifyStyle, TerminalNotifyWhen } from '@/types';
+import type { TerminalConfig, TerminalNotifyStyle, TerminalNotifyWhen, ToastPosition } from '@/types';
 
 export const DEFAULT_NOTIFY_WHEN: TerminalNotifyWhen = 'failed';
 export const DEFAULT_NOTIFY_STYLE: TerminalNotifyStyle = 'both';
@@ -213,6 +213,28 @@ export interface AgentEventFacts {
   /** The terminal is in front of the user right now. */
   inView: boolean;
   windowFocused: boolean;
+}
+
+/**
+ * Where the agent toasts show up. Top right by default, apart from the other
+ * toasts of the app (bottom right), so an agent calling you is not lost in
+ * the pile of "saved" and "copied". Only the agent toasts move.
+ */
+export const DEFAULT_AGENT_NOTIFY_POSITION: ToastPosition = 'top-right';
+
+/** In reading order, for the picker (a 2×3 grid: the top row, then the bottom one). */
+export const TOAST_POSITION_OPTIONS: { value: ToastPosition; label: string }[] = [
+  { value: 'top-left', label: 'Top left' },
+  { value: 'top-center', label: 'Top centre' },
+  { value: 'top-right', label: 'Top right' },
+  { value: 'bottom-left', label: 'Bottom left' },
+  { value: 'bottom-center', label: 'Bottom centre' },
+  { value: 'bottom-right', label: 'Bottom right' },
+];
+
+export function resolveAgentNotifyPosition(cfg?: Partial<TerminalConfig> | null): ToastPosition {
+  const raw = cfg?.agentNotifyPosition;
+  return TOAST_POSITION_OPTIONS.some((o) => o.value === raw) ? (raw as ToastPosition) : DEFAULT_AGENT_NOTIFY_POSITION;
 }
 
 /**

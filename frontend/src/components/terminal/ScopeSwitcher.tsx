@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Check, Ellipsis, Globe } from 'lucide-react';
 import {
   DropdownMenu,
@@ -71,16 +71,38 @@ export function ScopeSwitcher() {
       active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
     );
 
+  // The project pills that do not fit: the row wraps them onto a second line,
+  // clipped, and they are reached through the "…" menu (which lists every
+  // project anyway). Measured, so the menu can say how many are out of sight
+  // and light up when the current scope is one of them.
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const measure = () => {
+      const items = Array.from(row.children) as HTMLElement[];
+      const top = items[0]?.offsetTop ?? 0;
+      const next = items.filter((el) => el.offsetTop > top).map((el) => el.dataset.projectId ?? '');
+      setHiddenIds((prev) => (prev.length === next.length && prev.every((id, i) => id === next[i]) ? prev : next));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, [pills]);
+  const currentHidden = !!currentId && hiddenIds.includes(currentId);
+
   return (
-    <div className="flex h-6 max-w-[60vw] items-center gap-0.5 rounded-full border border-border bg-card/50 p-0.5">
-      <button type="button" className={pillClass(scope === 'global')} onClick={() => setScope('global')} title="Every terminal">
+    <div className="flex h-6 min-w-0 max-w-full items-center gap-0.5 rounded-full border border-border bg-card/50 p-0.5">
+      <button type="button" className={cn(pillClass(scope === 'global'), 'shrink-0')} onClick={() => setScope('global')} title="Every terminal">
         <Globe className="size-3" />
         Global
       </button>
       {(agentCount > 0 || isAgentsScope(scope)) && (
         <button
           type="button"
-          className={pillClass(isAgentsScope(scope))}
+          className={cn(pillClass(isAgentsScope(scope)), 'shrink-0')}
           onClick={() => setScope(AGENTS_SCOPE)}
           title="Only the sessions an agent is running in"
         >
@@ -89,25 +111,35 @@ export function ScopeSwitcher() {
           <span className="tabular-nums opacity-60">{agentCount}</span>
         </button>
       )}
-      {pills.map((p) => (
-        <button
-          key={p.id}
-          type="button"
-          className={cn(pillClass(currentId === p.id), 'max-w-[160px]')}
-          onClick={() => setScope({ projectId: p.id })}
-          title={p.rootPath}
-        >
-          <ProjectDot projectId={p.id} />
-          <span className="truncate">{p.name}</span>
-        </button>
-      ))}
+      {pills.length > 0 && (
+        <div ref={rowRef} className="flex h-5 min-w-0 shrink flex-wrap items-center gap-0.5 overflow-hidden">
+          {pills.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              data-project-id={p.id}
+              className={cn(pillClass(currentId === p.id), 'max-w-[160px] shrink-0')}
+              onClick={() => setScope({ projectId: p.id })}
+              title={p.rootPath}
+              tabIndex={hiddenIds.includes(p.id) ? -1 : undefined}
+            >
+              <ProjectDot projectId={p.id} />
+              <span className="truncate">{p.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger
-          className="grid size-5 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none aria-expanded:bg-accent aria-expanded:text-foreground"
-          aria-label="Scope to a project"
-          title="Scope to a project"
+          className={cn(
+            'flex h-5 min-w-5 shrink-0 items-center justify-center gap-0.5 rounded-full px-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none aria-expanded:bg-accent aria-expanded:text-foreground',
+            currentHidden && 'bg-accent text-foreground'
+          )}
+          aria-label={hiddenIds.length > 0 ? `Scope to a project (${hiddenIds.length} more)` : 'Scope to a project'}
+          title={hiddenIds.length > 0 ? `${hiddenIds.length} more project${hiddenIds.length === 1 ? '' : 's'}` : 'Scope to a project'}
         >
           <Ellipsis className="size-3.5" />
+          {hiddenIds.length > 0 && <span className="text-[10px] tabular-nums">+{hiddenIds.length}</span>}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="center" className="min-w-52">
           <DropdownMenuLabel>Scope</DropdownMenuLabel>

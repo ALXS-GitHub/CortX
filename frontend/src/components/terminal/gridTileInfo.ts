@@ -24,3 +24,24 @@ export function resolveGridTileInfo(cfg: Partial<TerminalConfig> | null | undefi
   if (!Array.isArray(list)) return [...DEFAULT_GRID_TILE_INFO];
   return list.filter((v): v is GridTileInfo => KNOWN.has(v));
 }
+
+/**
+ * How big a grid tile shows its session's text, in percent of full size
+ * (`terminal.gridTileTextScale`). With "Tiles keep the session's size" the
+ * whole page shrunk into a tile ends up at a quarter of its size, unreadable;
+ * at a legible scale the tile shows the part of the page around the cursor
+ * instead. 0 = the whole page, however small.
+ */
+export const GRID_TILE_TEXT_SCALE_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 0, label: 'Whole page' },
+  { value: 45, label: 'Small' },
+  { value: 60, label: 'Readable' },
+  { value: 80, label: 'Large' },
+];
+
+export const DEFAULT_GRID_TILE_TEXT_SCALE = 60;
+
+export function resolveGridTileTextScale(cfg: Partial<TerminalConfig> | null | undefined): number {
+  const raw = cfg?.gridTileTextScale;
+  return typeof raw === 'number' && raw >= 0 && raw <= 100 ? raw : DEFAULT_GRID_TILE_TEXT_SCALE;
+}

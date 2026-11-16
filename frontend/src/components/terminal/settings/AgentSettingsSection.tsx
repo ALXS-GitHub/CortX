@@ -14,10 +14,17 @@ import { Input } from '@/components/ui/input';
 import { ColorField } from '@/components/ui/ColorField';
 import { Code, Section } from '@/components/settings/SettingsPrimitives';
 import { cn } from '@/lib/utils';
-import type { GridTileInfo, TerminalConfig } from '@/types';
+import type { GridTileInfo, TerminalConfig, ToastPosition } from '@/types';
+import { resolveAgentNotifyPosition, TOAST_POSITION_OPTIONS } from './notificationPolicy';
 import { AgentPhaseDot } from '../TerminalStatusGlyph';
 import { DEFAULT_AGENT_COLORS, type AgentColorKey } from '../agentColors';
-import { GRID_TILE_INFO_OPTIONS, resolveGridTileInfo } from '../gridTileInfo';
+import {
+  GRID_TILE_INFO_OPTIONS,
+  GRID_TILE_TEXT_SCALE_OPTIONS,
+  resolveGridTileInfo,
+  resolveGridTileTextScale,
+} from '../gridTileInfo';
+import { Segmented } from '@/components/ui/Segmented';
 import type { AgentPhase } from '../agentPhase';
 import { Group, ResetCard, SettingField, SettingToggle } from './controls';
 import { useTerminalSettings } from './useTerminalSettings';
@@ -41,6 +48,7 @@ export function AgentSettingsSection() {
   const { terminal, patch } = useTerminalSettings();
   const disabled = !terminal;
   const tileInfo = resolveGridTileInfo(terminal);
+  const position = resolveAgentNotifyPosition(terminal);
   const toggleInfo = (value: GridTileInfo) => {
     const next = tileInfo.includes(value) ? tileInfo.filter((v) => v !== value) : [...tileInfo, value];
     patch({ gridTileInfo: GRID_TILE_INFO_OPTIONS.map((o) => o.value).filter((v) => next.includes(v)) });
@@ -116,6 +124,13 @@ export function AgentSettingsSection() {
             disabled={disabled}
           />
         </SettingToggle>
+        <SettingField
+          k="agentNotifyPosition"
+          label="Appear"
+          hint={`${TOAST_POSITION_OPTIONS.find((o) => o.value === position)?.label ?? ''} of the window. Only the agent toasts move; the others stay bottom right.`}
+        >
+          <ToastPositionPicker value={position} onChange={(v) => patch({ agentNotifyPosition: v })} disabled={disabled} />
+        </SettingField>
       </Group>
 
       <Group title="New agent">
@@ -182,6 +197,23 @@ export function AgentSettingsSection() {
           />
         </SettingToggle>
         <SettingField
+          k="gridTileTextScale"
+          label="Tile text size"
+          hint="With the session's size kept, the whole page shrunk into a tile is too small to read. At a readable size the tile shows the part of the page around the cursor — the prompt, or the agent's input box and its latest messages — cut at the right. Whole page = everything, however small."
+        >
+          <div
+            className={cn('w-fit', (disabled || !(terminal?.gridTilesKeepSize ?? true)) && 'pointer-events-none opacity-50')}
+            aria-disabled={disabled || !(terminal?.gridTilesKeepSize ?? true)}
+          >
+            <Segmented<string>
+              size="sm"
+              value={String(resolveGridTileTextScale(terminal))}
+              onChange={(v) => patch({ gridTileTextScale: Number(v) })}
+              options={GRID_TILE_TEXT_SCALE_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
+            />
+          </div>
+        </SettingField>
+        <SettingField
           k="gridTileInfo"
           label="A tile's header shows"
           hint="Besides its name and its dot. Also in the grid's View menu."
@@ -209,5 +241,60 @@ export function AgentSettingsSection() {
         </SettingField>
       </Group>
     </Section>
+  );
+}
+
+/**
+ * A miniature window with its six toast spots: the one you click is where the
+ * agent toasts appear. Tells at a glance what a list of six labels would not.
+ */
+function ToastPositionPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: ToastPosition;
+  onChange: (value: ToastPosition) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Where agent notifications appear"
+      className={cn(
+        'grid h-[72px] w-[120px] grid-cols-3 grid-rows-2 gap-1 rounded-md border border-border-strong bg-muted/40 p-1.5 pt-3.5',
+        'relative before:absolute before:inset-x-0 before:top-0 before:h-2 before:rounded-t-md before:border-b before:border-border before:bg-muted',
+        disabled && 'pointer-events-none opacity-50'
+      )}
+    >
+      {TOAST_POSITION_OPTIONS.map((o) => {
+        const on = o.value === value;
+        const [row, col] = o.value.split('-') as ['top' | 'bottom', 'left' | 'center' | 'right'];
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            aria-label={o.label}
+            title={o.label}
+            disabled={disabled}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              'group flex rounded-sm transition-colors hover:bg-primary/10',
+              row === 'top' ? 'items-start' : 'items-end',
+              col === 'left' ? 'justify-start' : col === 'center' ? 'justify-center' : 'justify-end'
+            )}
+          >
+            <span
+              className={cn(
+                'h-2 w-6 rounded-[2px] border transition-colors',
+                on ? 'border-primary bg-primary' : 'border-border-strong bg-card group-hover:border-primary/60'
+              )}
+            />
+          </button>
+        );
+      })}
+    </div>
   );
 }

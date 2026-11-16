@@ -78,6 +78,7 @@ import { TERMINAL_SECTION_KEYWORDS } from '@/components/terminal/settings/meta';
 import { ColorField } from '@/components/ui/ColorField';
 import { TerminalSettingsSections } from '@/components/terminal/settings/TerminalSettingsPanel';
 import { Section, Field, Code } from '@/components/settings/SettingsPrimitives';
+import { UpdatesSection, UPDATES_SECTION_KEYWORDS } from '@/components/settings/UpdatesSection';
 import type { AppSettings, AgentsSettings, ExportSummary, ImportOptions, ShimStatus } from '@/types';
 
 const DEFAULT_GLOBAL_HOTKEY = 'CmdOrCtrl+Shift+Space';
@@ -110,6 +111,7 @@ const SECTION_KEYWORDS: [SettingsTab, string][] = [
   // The terminal cards carry their own keywords (they are shared with the
   // Terminal window's settings panel), so the search banner reuses them.
   ...Object.values(TERMINAL_SECTION_KEYWORDS).map((kw) => ['terminal', kw] as [SettingsTab, string]),
+  ['general', UPDATES_SECTION_KEYWORDS],
   ['general', 'default behavior launch method integrated external clipboard services'],
   ['general', 'command palette global hotkey shortcut'],
   ['general', 'tags labels colours manage projects'],
@@ -528,6 +530,9 @@ export function Settings() {
             bound straight to settings.terminal, so the Terminal window's own
             panel (Ctrl+, there) shows the very same controls (DEV-13 #8). */}
         {(q || activeTab === 'terminal') && <TerminalSettingsSections query={q} empty={null} />}
+
+        {/* Updates: check and install a new version on demand */}
+        {visible('general', UPDATES_SECTION_KEYWORDS) && <UpdatesSection />}
 
         {/* Defaults */}
         {visible('general', 'default behavior launch method integrated external clipboard services') && (

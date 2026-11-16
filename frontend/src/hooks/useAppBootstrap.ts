@@ -4,7 +4,11 @@ import { toast } from 'sonner';
 import { registerTerminalWindowView, useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { collectLeaves, tabsInScope } from '@/lib/terminalLayout';
-import { decideAgentNotification, decideCommandNotification } from '@/components/terminal/settings/notificationPolicy';
+import {
+  decideAgentNotification,
+  decideCommandNotification,
+  resolveAgentNotifyPosition,
+} from '@/components/terminal/settings/notificationPolicy';
 import { onAgentTransitions, useTerminalAgentsStore } from '@/components/terminal/agentsStore';
 import { agentEventOf, shouldAnnounce } from '@/components/terminal/agentPhase';
 import { revealTerminal } from '@/components/terminal/agentInbox';
@@ -197,6 +201,7 @@ export function useAppBootstrap() {
         if (decision.toast) {
           (event === 'needs-you' ? toast.warning : toast.message)(title, {
             description: body,
+            position: resolveAgentNotifyPosition(cfg),
             action: { label: 'Open', onClick: () => revealTerminal(t.terminalId) },
           });
         }

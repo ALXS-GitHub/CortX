@@ -142,6 +142,8 @@ export interface TerminalConfig {
   agentModeHidesTabs?: boolean;
   /** Grid tile header, besides name and dot. Default `['project', 'activity']`. */
   gridTileInfo?: GridTileInfo[];
+  /** Text size of a grid tile, in percent of full size; 0 = the whole page. Default 60. */
+  gridTileTextScale?: number;
   /** Agent dot colours (`#rrggbb`); unset = CortX's own (see `agentColors.ts`). */
   agentColorWorking?: string;
   agentColorNeedsYou?: string;
@@ -153,6 +155,8 @@ export interface TerminalConfig {
   agentNotifyDone?: boolean;
   /** Only for agents out of sight. Default true. */
   agentNotifyOnlyWhenHidden?: boolean;
+  /** Where the agent toasts show up in the window. Default `top-right`. */
+  agentNotifyPosition?: ToastPosition;
   /** Typed in the terminal "New agent" opens. Default `claude`. */
   agentLaunchCommand?: string;
   /** Ask before closing a terminal — or quitting CortX — while a command is
@@ -473,6 +477,9 @@ export type TerminalTargetSurface = 'dock' | 'window';
 
 /** Which finished commands deserve a notification (see `notificationPolicy.ts`). */
 export type TerminalNotifyWhen = 'never' | 'failed' | 'failed-or-long' | 'all';
+/** A corner (or the middle of an edge) of the window, for a toast — sonner's own names. */
+export type ToastPosition = 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
+
 /** How a terminal notification reaches you. */
 export type TerminalNotifyStyle = 'toast' | 'system' | 'both';
 

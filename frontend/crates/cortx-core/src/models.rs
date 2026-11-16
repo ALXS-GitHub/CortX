@@ -434,6 +434,11 @@ pub struct TerminalConfig {
     /// `project`, `activity`, `branch`, `model`, `lastPrompt`, `lastReply`.
     #[serde(default = "default_grid_tile_info")]
     pub grid_tile_info: Vec<String>,
+    /// Text size of a grid tile, in percent of full size: the tile shows the
+    /// part of the page around the cursor rather than the whole page shrunk
+    /// out of sight. 0 = the whole page. Only the frontend reads this.
+    #[serde(default = "default_grid_tile_text_scale")]
+    pub grid_tile_text_scale: u8,
     /// Colours of the agent dots (`#rrggbb`). None = CortX's own, which no
     /// shell, service or script dot ever uses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -453,6 +458,10 @@ pub struct TerminalConfig {
     /// Only for agents out of sight (another tab, a tile, CortX behind).
     #[serde(default = "default_true")]
     pub agent_notify_only_when_hidden: bool,
+    /// Where the agent toasts show up in the window. Only the frontend reads this.
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub agent_notify_position: ToastPosition,
     /// What "New agent" types in the new terminal (`claude`, an alias such as
     /// `cc`, `codex`…). Typed as you would, then Enter — nothing else is sent.
     #[serde(default = "default_agent_launch_command")]
@@ -976,6 +985,10 @@ fn default_grid_tile_info() -> Vec<String> {
     vec!["project".to_string(), "activity".to_string()]
 }
 
+fn default_grid_tile_text_scale() -> u8 {
+    60
+}
+
 fn default_agent_launch_command() -> String {
     "claude".to_string()
 }
@@ -1215,6 +1228,20 @@ pub enum TerminalTarget {
     Window,
 }
 
+/// A corner (or the middle of an edge) of the window, for the toasts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToastPosition {
+    /// Top right, under the window controls (the agent toasts' default).
+    #[default]
+    TopRight,
+    TopCenter,
+    TopLeft,
+    BottomRight,
+    BottomCenter,
+    BottomLeft,
+}
+
 /// Terminal window layout for the list of tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -1265,6 +1292,7 @@ impl Default for TerminalConfig {
             grid_tiles_keep_size: true,
             agent_mode_hides_tabs: false,
             grid_tile_info: default_grid_tile_info(),
+            grid_tile_text_scale: default_grid_tile_text_scale(),
             agent_color_working: None,
             agent_color_needs_you: None,
             agent_color_done: None,
@@ -1272,6 +1300,7 @@ impl Default for TerminalConfig {
             agent_notify_needs_you: true,
             agent_notify_done: true,
             agent_notify_only_when_hidden: true,
+            agent_notify_position: ToastPosition::default(),
             agent_launch_command: default_agent_launch_command(),
             font_family: None,
             font_size: None,

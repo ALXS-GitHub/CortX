@@ -137,7 +137,7 @@ export function TitleBar({ onOpenPalette, title = 'CortX', badge, center, traili
       {/* Branding */}
       <div
         data-tauri-drag-region
-        className={cn('flex h-full min-w-0 flex-1 items-center gap-2 pr-3', isMac ? 'pl-[76px]' : 'pl-3')}
+        className={cn('flex h-full min-w-0 flex-1 items-center gap-2 pr-3', center && 'basis-0', isMac ? 'pl-[76px]' : 'pl-3')}
       >
         <img src="/cortx-logo.png" alt="" className="size-[18px] shrink-0 rounded-[4px]" draggable={false} />
         <span data-tauri-drag-region className="truncate font-display text-xs font-medium tracking-tight text-muted-foreground">
@@ -164,12 +164,13 @@ export function TitleBar({ onOpenPalette, title = 'CortX', badge, center, traili
           <span className="kbd">Ctrl K</span>
         </button>
       )}
-      {center && (
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">{center}</div>
-      )}
+      {/* In the flow, not on top: between two equal flexible sides it sits in
+          the middle while there is room, and is squeezed (never laid over the
+          buttons) once there is not. */}
+      {center && <div className="flex h-full min-w-0 shrink items-center justify-center">{center}</div>}
 
       {/* Right: app menu + window controls */}
-      <div className="flex h-full items-stretch">
+      <div className={cn('flex h-full items-stretch', center && 'flex-1 basis-0 justify-end')}>
         {trailing && <div className="flex items-center pr-1">{trailing}</div>}
         <DropdownMenu>
           <DropdownMenuTrigger

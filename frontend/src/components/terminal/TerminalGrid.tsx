@@ -26,10 +26,10 @@ import type { GridTileInfo, TerminalAgentInfo } from '@/types';
 import { SplitTree } from './SplitTree';
 import { AgentPhaseDot, TerminalStatusGlyph } from './TerminalStatusGlyph';
 import { arrangeGrid, gridShape, MIN_TILE_HEIGHT, type GridTabFacts } from './gridLayout';
-import { GRID_TILE_INFO_OPTIONS, resolveGridTileInfo } from './gridTileInfo';
+import { GRID_TILE_INFO_OPTIONS, resolveGridTileInfo, resolveGridTileTextScale } from './gridTileInfo';
 import { useTerminalAgentsStore } from './agentsStore';
 import { patchTerminalSettings } from './settings/useTerminalSettings';
-import { focusTerminal } from '@/lib/terminalSessions';
+import { focusTerminal, onTerminalRender, terminalCursorScreenRect } from '@/lib/terminalSessions';
 import { agentPhase, type AgentPhase } from './agentPhase';
 import {
   activeLeafOf,
@@ -306,8 +306,44 @@ function ScaledBody({
   interactive: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const box = useElementSize(ref);
-  const scale = box.width > 0 && box.height > 0 ? Math.min(box.width / stage.width, box.height / stage.height, 1) : 0;
+  const textScale = useAppStore((s) => resolveGridTileTextScale(s.settings?.terminal));
+  const fit = box.width > 0 && box.height > 0 ? Math.min(box.width / stage.width, box.height / stage.height, 1) : 0;
+  // The whole page shrunk into a tile is unreadable (a quarter of 13px). At
+  // a legible scale the page no longer fits: the tile shows a window onto
+  // it, at its left edge and following the cursor — the prompt, or an
+  // agent's input box with its latest messages just above.
+  const scale = fit > 0 && textScale > 0 ? Math.min(Math.max(fit, textScale / 100), 1) : fit;
+  const cropped = scale > fit + 0.001;
+  const leafId = activeLeafOf(tab).terminalId;
+  const [offsetY, setOffsetY] = useState(0);
+  useEffect(() => {
+    // Not cropped: the offset is not applied (see the transform below).
+    if (!cropped) return;
+    let frame = 0;
+    const place = () => {
+      frame = 0;
+      const stageEl = stageRef.current;
+      const cursor = terminalCursorScreenRect(leafId);
+      if (!stageEl || !cursor) return;
+      // Both rects are on screen, already scaled: their gap is the cursor's
+      // place in the scaled page, whatever the current offset.
+      const below = cursor.bottom - stageEl.getBoundingClientRect().top + cursor.height;
+      const lowest = box.height - stage.height * scale;
+      const next = Math.round(Math.min(0, Math.max(lowest, box.height - below)));
+      setOffsetY((prev) => (prev === next ? prev : next));
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(place);
+    };
+    schedule();
+    const unsubscribe = onTerminalRender(leafId, schedule);
+    return () => {
+      unsubscribe();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [cropped, leafId, scale, box.height, stage.height]);
   const focus = () => {
     if (!interactive) return;
     const leaf = activeLeafOf(tab);
@@ -319,11 +355,12 @@ function ScaledBody({
   return (
     <div ref={ref} className="relative min-h-0 flex-1 overflow-hidden" onMouseDown={focus}>
       <div
+        ref={stageRef}
         className="pointer-events-none absolute left-0 top-0 flex origin-top-left"
         style={{
           width: stage.width,
           height: stage.height,
-          transform: `scale(${scale || 0.0001})`,
+          transform: `translateY(${cropped ? offsetY : 0}px) scale(${scale || 0.0001})`,
           visibility: scale > 0 ? 'visible' : 'hidden',
         }}
       >

@@ -1888,6 +1888,33 @@ export function disposeTerminal(id: string) {
   session.container.remove();
 }
 
+/**
+ * The cursor's row of a mounted session, as a rectangle on screen (CSS
+ * transforms included), or null. A grid tile crops its scaled-down session
+ * around it: that is where the prompt, or an agent's input box, is.
+ */
+export function terminalCursorScreenRect(id: string): DOMRect | null {
+  const session = sessions.get(id);
+  if (!session?.opened || !session.container.isConnected) return null;
+  const { term } = session;
+  const screen = term.element?.querySelector<HTMLElement>('.xterm-screen');
+  if (!screen || term.rows <= 0) return null;
+  const rect = screen.getBoundingClientRect();
+  const rowHeight = rect.height / term.rows;
+  const buffer = term.buffer.active;
+  // The cursor lives at baseY + cursorY; the viewport may be scrolled up.
+  const row = Math.min(Math.max(buffer.baseY + buffer.cursorY - buffer.viewportY, 0), term.rows - 1);
+  return new DOMRect(rect.left, rect.top + row * rowHeight, rect.width, rowHeight);
+}
+
+/** Calls `cb` after each repaint of a session; returns the unsubscribe. */
+export function onTerminalRender(id: string, cb: () => void): () => void {
+  const session = sessions.get(id);
+  if (!session) return () => {};
+  const sub = session.term.onRender(cb);
+  return () => sub.dispose();
+}
+
 export function hasTerminalSession(id: string): boolean {
   return sessions.has(id);
 }

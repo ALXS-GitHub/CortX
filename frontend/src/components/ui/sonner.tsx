@@ -36,6 +36,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--width": "360px",
         } as React.CSSProperties
       }
+      // A toast on top sits under the title bar, not over the window
+      // controls; the other sides keep sonner's 24px.
+      offset={{ top: "calc(var(--titlebar-h) + 12px)" }}
       toastOptions={{
         classNames: {
           toast: "cn-toast glass-strong shadow-pop! font-sans! text-[13px]!",
