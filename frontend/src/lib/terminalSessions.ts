@@ -42,6 +42,7 @@ import {
   overrideKeySequence,
   smoothScrollDuration,
 } from '@/lib/terminalKeys';
+import { isDeliberateSelection, type PressStart } from '@/lib/mouseSelection';
 import { TerminalImageFilter, type ImagePart } from '@/lib/terminalImages';
 import { attachInputPosition, inputPositionSetting, refreshInputPositions } from '@/lib/terminalInputPosition';
 // Ticket #39: the defaults live in one table now (see the module header of
@@ -1441,8 +1442,16 @@ function createSession(id: string): TerminalSession {
   // there and copy it again over the clipboard. xterm clears the selection on
   // a plain click, but not when a program reads the mouse (Claude Code,
   // Codex, vim…), nor on the click that lands on the universal prompt.
+  //
+  // And only a selection the press made *on purpose*: xterm has no drag
+  // threshold, so a click whose pointer slips by a pixel — the click that
+  // brings CortX back to the front, typically — selects a character or the
+  // seam of two lines, which used to land on the clipboard over what had just
+  // been copied elsewhere. Such a slip is undone as if it were a plain click
+  // (see `mouseSelection.ts`).
   let mouseSelecting = false;
   let selectionMoved = false;
+  let pressStart: PressStart | null = null;
   session.disposables.push(term.onSelectionChange(() => {
     if (mouseSelecting) selectionMoved = true;
   }));
@@ -1450,19 +1459,25 @@ function createSession(id: string): TerminalSession {
     if (e.button !== 0) return;
     mouseSelecting = true;
     selectionMoved = false;
+    pressStart = { x: e.clientX, y: e.clientY, clicks: e.detail, shiftKey: e.shiftKey };
   });
   // On `document`: a drag very often ends with the pointer outside the pane.
   const onMouseUp = (e: MouseEvent) => {
     if (e.button !== 0 || !mouseSelecting) return;
-    if (!copyOnSelectEnabled()) {
-      mouseSelecting = false;
-      return;
-    }
+    const deliberate = pressStart ? isDeliberateSelection(pressStart, e.clientX, e.clientY) : false;
     // One turn later: xterm settles the selection in its own listener for
     // this very mouseup, and a plain click has cleared it by then.
     window.setTimeout(() => {
       mouseSelecting = false;
+      pressStart = null;
       if (!selectionMoved) return;
+      if (!deliberate) {
+        // A jittered click: leave no stray highlight behind either, or the
+        // next right-click would copy it instead of pasting.
+        if (term.hasSelection()) term.clearSelection();
+        return;
+      }
+      if (!copyOnSelectEnabled()) return;
       if (!term.hasSelection() || !term.getSelection().trim()) return;
       void copySelection(term, false);
     }, 0);
