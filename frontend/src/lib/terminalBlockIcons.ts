@@ -10,7 +10,7 @@
 import type { BlockActionId } from '@/lib/terminalBlockModel';
 
 /** `⋯`, the toolbar button that opens the full menu. */
-export type BlockIconId = BlockActionId | 'more';
+export type BlockIconId = BlockActionId | 'more' | 'filter';
 
 /** Lucide path data, one entry per `<path d="…">` of the icon. */
 const PATHS: Record<BlockIconId, string[]> = {
@@ -36,6 +36,8 @@ const PATHS: Record<BlockIconId, string[]> = {
   // arrow-up-to-line / arrow-down-to-line — jump to either end of the block
   scrollTop: ['M5 3h14', 'm18 13-6-6-6 6', 'M12 7v14'],
   scrollBottom: ['M5 21h14', 'm18 11-6 6-6-6', 'M12 17V3'],
+  // list-filter — keep only the output lines that match (block layout, CORT-57)
+  filter: ['M3 6h18', 'M7 12h10', 'M10 18h4'],
   // ellipsis — everything else
   more: ['M12 12h.01', 'M19 12h.01', 'M5 12h.01'],
 };

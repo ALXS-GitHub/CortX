@@ -400,6 +400,7 @@ export const TERMINAL_SETTINGS = {
   // --- Command blocks ------------------------------------------------------
   blocks: { label: 'Command blocks', group: 'blocks', fallback: FROM_RUST },
   blockSpacing: { label: 'Block spacing', group: 'blocks', fallback: FROM_RUST },
+  blockLayout: { label: 'Block layout', group: 'blocks', fallback: FROM_RUST },
   blockDividers: { label: 'Block dividers', group: 'blocks', fallback: FROM_RUST },
   blockActions: { label: 'Block actions on hover', group: 'blocks', fallback: FROM_RUST },
   blockGutter: { label: 'Block gutter', group: 'blocks', fallback: FROM_RUST },

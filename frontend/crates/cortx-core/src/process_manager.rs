@@ -2167,6 +2167,22 @@ mod pty_integration_tests {
         assert_eq!(blocks[0].exit_code, Some(0));
         assert_eq!(blocks[1].exit_code, Some(1));
         assert!(blocks[2].output_text().starts_with("no newline"));
+        // `CORTX_DUMP_STREAM=path CORTX_DUMP_COMMANDS='cmd1\ncmd2'`: run more
+        // commands and save the raw PTY stream (a fixture for the block
+        // layout's harness, CORT-57).
+        if let Ok(path) = std::env::var("CORTX_DUMP_STREAM") {
+            let extra = std::env::var("CORTX_DUMP_COMMANDS").unwrap_or_default();
+            let before = commands(&pm).len();
+            let mut n = 0;
+            for cmd in extra.lines().filter(|l| !l.trim().is_empty()) {
+                pm.write_terminal(&tid, format!("{cmd}\r").as_bytes()).unwrap();
+                n += 1;
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            assert!(wait_until(Duration::from_secs(20), || commands(&pm).len() >= before + n));
+            std::thread::sleep(Duration::from_millis(300));
+            std::fs::write(path, pm.terminal_hub().scrollback(&tid)).unwrap();
+        }
         pm.kill_shell(&*emitter, &info.id).unwrap();
     }
 

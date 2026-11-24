@@ -5,6 +5,7 @@ import './index.css'
 // Terminal styles are kept out of index.css (which the design system
 // regenerates and truncates); importing here guarantees they load.
 import './styles/terminal-window.css'
+import './styles/terminal-block-view.css'
 // The universal input editor's block (ticket #15) keeps its own file so it
 // never has to share a stylesheet with the command blocks.
 import './styles/terminal-input.css'

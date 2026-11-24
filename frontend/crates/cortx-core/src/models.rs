@@ -746,6 +746,14 @@ pub struct TerminalConfig {
     #[serde(default)]
     #[serde(deserialize_with = "lenient_enum")]
     pub block_spacing: TerminalBlockSpacing,
+    /// How blocks are drawn (CORT-57). `Classic` keeps one xterm grid per pane
+    /// with the blocks painted over it; `Blocks` lays the pane out as a list of
+    /// real cards — finished blocks are rendered as text in the page, only the
+    /// block in progress keeps a live xterm — so the space between blocks, a
+    /// fold, the sticky command and the cards work in every surface.
+    #[serde(default)]
+    #[serde(deserialize_with = "lenient_enum")]
+    pub block_layout: TerminalBlockLayout,
     /// How ⌥ (Option) behaves on macOS. Ignored everywhere else — Windows and
     /// Linux always send `ESC` + key for Alt, which is what the shells expect
     /// and what CortX has always done there.
@@ -881,6 +889,18 @@ pub enum MacOptionAsMeta {
     /// `macOptionIsMeta: true` — every ⌥ chord becomes `ESC` + key. Meta
     /// everywhere, at the price of the ⌥ layer of the keyboard.
     Always,
+}
+
+/// How a pane draws its command blocks (CORT-57).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalBlockLayout {
+    /// One xterm grid per pane, blocks drawn over it (DEV-13 #7).
+    #[default]
+    Classic,
+    /// Warp-style: a list of cards, finished blocks rendered as page text and
+    /// only the block in progress on a live xterm.
+    Blocks,
 }
 
 /// How much room a command block gets above it (DEV-13 #7).
@@ -1362,6 +1382,7 @@ impl Default for TerminalConfig {
             block_jump_to_bottom: true,
             redact_secrets: true,
             block_spacing: TerminalBlockSpacing::default(),
+            block_layout: TerminalBlockLayout::default(),
             mac_option_as_meta: MacOptionAsMeta::default(),
             link_tooltip: true,
             osc52: Osc52Access::default(),

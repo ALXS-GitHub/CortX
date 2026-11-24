@@ -122,6 +122,7 @@ const BACKEND_DEFAULTS = {
   blockGutter: true,
   blockJumpToBottom: true,
   blockSpacing: 'comfortable',
+  blockLayout: 'classic',
   blockStickyHeader: true,
   blocks: true,
   chromeBlur: 20,

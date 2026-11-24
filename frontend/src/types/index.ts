@@ -336,6 +336,12 @@ export interface TerminalConfig {
    *  grid, so the room has to exist in the buffer. `compact` adds nothing.
    *  Applies to newly opened terminals. */
   blockSpacing?: TerminalBlockSpacing;
+  /** How blocks are drawn (CORT-57). `classic` paints them over the single
+   *  xterm grid; `blocks` lays the pane out as real cards — finished blocks
+   *  rendered as page text, only the block in progress on a live xterm — so
+   *  spacing, folds, cards and the pinned command work everywhere. Default
+   *  `classic`. */
+  blockLayout?: TerminalBlockLayout;
   /** Show a link's target in a tooltip while the pointer is on it, before the
    *  click. Default true. */
   linkTooltip?: boolean;
@@ -398,6 +404,7 @@ export type TerminalOsc52Access = 'deny' | 'writeOnly' | 'readWrite';
  *  two whole rows is the nearest a grid can express. `normal` is one row, a
  *  quarter of that. */
 export type TerminalBlockSpacing = 'normal' | 'compact' | 'comfortable';
+export type TerminalBlockLayout = 'classic' | 'blocks';
 
 /**
  * What Ctrl+Tab does (issue 45b) — Warp's `keys.ctrl_tab_behavior_setting`.

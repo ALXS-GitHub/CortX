@@ -65,6 +65,7 @@ import type {
   SuggestionConfidence,
   TabIndexDisplay,
   CompletionMenuKey,
+  TerminalBlockLayout,
   TerminalBlockSpacing,
   TerminalCtrlTabBehavior,
   TerminalInputPosition,
@@ -516,6 +517,36 @@ export function IntegratedTerminalSection() {
             disabled={!terminal || !shellIntegration}
           />
         </SettingToggle>
+
+        <SettingField
+          k="blockLayout"
+          label={<span className="text-xs text-muted-foreground">Block layout</span>}
+          htmlFor="terminal-block-layout"
+          hint={
+            <>
+              <Code>Classic</Code> keeps one terminal grid per pane and draws the blocks over it.{' '}
+              <Code>Blocks</Code> lays the pane out like Warp: every finished command becomes a card rendered as text in
+              the page — real space between cards, folds that give the room back, the command pinned while you scroll a
+              long output, native selection and copy, a filter per block, the same in the dock and in the Terminal
+              window. Only the block in progress keeps a live terminal, and a full-screen program (vim, htop) still gets
+              the whole pane. <strong>Applies at once</strong> to every open terminal.
+            </>
+          }
+        >
+          <Select
+            value={terminal?.blockLayout ?? 'classic'}
+            onValueChange={(v: TerminalBlockLayout) => patch({ blockLayout: v })}
+            disabled={!terminal || !blocks}
+          >
+            <SelectTrigger id="terminal-block-layout" className="w-[260px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="classic">Classic (drawn over the grid — default)</SelectItem>
+              <SelectItem value="blocks">Blocks (cards, like Warp)</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingField>
 
         <SettingField
           k="blockSpacing"
