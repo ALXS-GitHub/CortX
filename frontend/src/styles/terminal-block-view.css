@@ -11,6 +11,13 @@
 .cortx-xterm.cortx-bv-on {
   overflow: hidden;
 }
+/* The list runs edge to edge: the pane's padding (`--terminal-padding`, on
+   the host) would frame it in a band on three sides. The cards carry their
+   own padding (--cortx-bv-p*), so the text keeps its room. The alternate
+   screen (vim, htop) is a plain terminal again and keeps the pane padding. */
+.cortx-xterm-host:has(> .cortx-xterm.cortx-bv-on:not(.cortx-bv-alt)) {
+  padding: 0;
+}
 
 /* xterm's own viewport never scrolls in this layout: the list does. Its
    background goes too: the live card's plate is what is behind the text. */
