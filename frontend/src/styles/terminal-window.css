@@ -393,7 +393,9 @@
   height: 24px;
   padding: 0 3px;
   box-sizing: border-box;
-  border-radius: 999px;
+  /* The same shape as the pane's own action cluster above it (LeafPane:
+     `rounded-[var(--rad-sm)]`), so the two read as one family of bars. */
+  border-radius: var(--rad-sm, 6px);
   border: 1px solid color-mix(in srgb, var(--cortx-block-fg) 20%, transparent);
   background: color-mix(in srgb, var(--cortx-block-bg) 86%, transparent);
   backdrop-filter: blur(8px);
@@ -446,7 +448,7 @@
   min-height: 11px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--rad-xs, 4px);
   background: transparent;
   color: color-mix(in srgb, var(--cortx-block-fg) 68%, transparent);
   cursor: pointer;

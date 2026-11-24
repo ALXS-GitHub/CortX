@@ -25,9 +25,17 @@ function ProjectDot({ projectId, className }: { projectId: string; className?: s
 }
 
 /**
+ * How many project pills the title bar shows at most. With many projects
+ * active the row used to eat the whole title bar; past this, they wait in
+ * the "…" menu (the current one is always among the visible ones).
+ */
+const MAX_PROJECT_PILLS = 4;
+
+/**
  * Title-bar pill: "Global", "Agents" while agents are running, one entry per
- * project that currently owns tabs, and a "…" menu listing every project so a
- * scope can be picked before it has any terminal.
+ * project that currently owns tabs — at most `MAX_PROJECT_PILLS`, the rest in
+ * the "…" menu — and that menu listing every project so a scope can be
+ * picked before it has any terminal.
  *
  * The Agents scope is a filter over the very same sessions (managing agents
  * is the Agents section's job, DEV-11). Its pill only exists while at least
@@ -57,13 +65,35 @@ export function ScopeSwitcher() {
   }, [tabs, projects]);
 
   // A scoped project without tabs still deserves its pill while selected.
-  const pills = useMemo(() => {
+  const active = useMemo(() => {
     if (currentId && !withTabs.some((p) => p.id === currentId)) {
       const current = projects.find((p) => p.id === currentId);
       return current ? [...withTabs, current] : withTabs;
     }
     return withTabs;
   }, [withTabs, currentId, projects]);
+
+  // Tabs per project, for the menu.
+  const tabCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of tabs) {
+      const id = projectIdOfWorkspace(t.workspaceId);
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return counts;
+  }, [tabs]);
+
+  // At most MAX_PROJECT_PILLS on the bar, in project order, the current one
+  // always among them (it takes the last seat when it would be out of sight).
+  const pills = useMemo(() => {
+    if (active.length <= MAX_PROJECT_PILLS) return active;
+    const shown = active.slice(0, MAX_PROJECT_PILLS);
+    if (currentId && !shown.some((p) => p.id === currentId)) {
+      const current = active.find((p) => p.id === currentId);
+      if (current) shown[MAX_PROJECT_PILLS - 1] = current;
+    }
+    return shown;
+  }, [active, currentId]);
 
   const pillClass = (active: boolean) =>
     cn(
@@ -92,9 +122,15 @@ export function ScopeSwitcher() {
     return () => ro.disconnect();
   }, [pills]);
   const currentHidden = !!currentId && hiddenIds.includes(currentId);
+  // Active projects without a visible pill: over the cap, or squeezed out by
+  // a narrow window.
+  const overflow = useMemo(
+    () => active.filter((p) => !pills.some((q) => q.id === p.id) || hiddenIds.includes(p.id)),
+    [active, pills, hiddenIds]
+  );
 
   return (
-    <div className="flex h-6 min-w-0 max-w-full items-center gap-0.5 rounded-full border border-border bg-card/50 p-0.5">
+    <div className="flex h-6 min-w-0 max-w-[min(100%,560px)] items-center gap-0.5 rounded-full border border-border bg-card/50 p-0.5">
       <button type="button" className={cn(pillClass(scope === 'global'), 'shrink-0')} onClick={() => setScope('global')} title="Every terminal">
         <Globe className="size-3" />
         Global
@@ -118,7 +154,7 @@ export function ScopeSwitcher() {
               key={p.id}
               type="button"
               data-project-id={p.id}
-              className={cn(pillClass(currentId === p.id), 'max-w-[160px] shrink-0')}
+              className={cn(pillClass(currentId === p.id), 'max-w-[120px] shrink-0')}
               onClick={() => setScope({ projectId: p.id })}
               title={p.rootPath}
               tabIndex={hiddenIds.includes(p.id) ? -1 : undefined}
@@ -135,13 +171,17 @@ export function ScopeSwitcher() {
             'flex h-5 min-w-5 shrink-0 items-center justify-center gap-0.5 rounded-full px-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none aria-expanded:bg-accent aria-expanded:text-foreground',
             currentHidden && 'bg-accent text-foreground'
           )}
-          aria-label={hiddenIds.length > 0 ? `Scope to a project (${hiddenIds.length} more)` : 'Scope to a project'}
-          title={hiddenIds.length > 0 ? `${hiddenIds.length} more project${hiddenIds.length === 1 ? '' : 's'}` : 'Scope to a project'}
+          aria-label={overflow.length > 0 ? `Scope to a project (${overflow.length} more active)` : 'Scope to a project'}
+          title={
+            overflow.length > 0
+              ? `${overflow.length} more active project${overflow.length === 1 ? '' : 's'}: ${overflow.map((p) => p.name).join(', ')}`
+              : 'Scope to a project'
+          }
         >
           <Ellipsis className="size-3.5" />
-          {hiddenIds.length > 0 && <span className="text-[10px] tabular-nums">+{hiddenIds.length}</span>}
+          {overflow.length > 0 && <span className="text-[10px] tabular-nums">+{overflow.length}</span>}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="center" className="min-w-52">
+        <DropdownMenuContent align="center" className="max-h-[70vh] min-w-52 overflow-y-auto">
           <DropdownMenuLabel>Scope</DropdownMenuLabel>
           <DropdownMenuItem onClick={() => setScope('global')}>
             <Globe />
@@ -156,7 +196,24 @@ export function ScopeSwitcher() {
               {isAgentsScope(scope) && <Check className="size-3.5 text-primary" />}
             </span>
           </DropdownMenuItem>
+          {overflow.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>More active</DropdownMenuLabel>
+              {overflow.map((p) => (
+                <DropdownMenuItem key={`active-${p.id}`} onClick={() => setScope({ projectId: p.id })}>
+                  <ProjectDot projectId={p.id} className="ml-1 mr-1" />
+                  <span className="truncate">{p.name}</span>
+                  <span className="ml-auto flex items-center gap-2">
+                    <span className="text-xs tabular-nums opacity-70">{tabCounts.get(p.id) ?? 0}</span>
+                    {currentId === p.id && <Check className="size-3.5 text-primary" />}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </>
+          )}
           <DropdownMenuSeparator />
+          <DropdownMenuLabel>All projects</DropdownMenuLabel>
           {projects.length === 0 && <div className="px-2.5 py-2 text-xs text-faint">No project yet</div>}
           {projects.map((p) => (
             <DropdownMenuItem key={p.id} onClick={() => setScope({ projectId: p.id })}>

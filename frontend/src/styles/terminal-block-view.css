@@ -298,7 +298,7 @@
   align-items: center;
   gap: 1px;
   padding: 2px 3px;
-  border-radius: 6px;
+  border-radius: var(--rad-sm, 6px);
   background: var(--cortx-bv-plate-solid);
   box-shadow: 0 0 0 1px var(--cortx-bv-edge);
   opacity: 0;
@@ -322,7 +322,7 @@
   height: 20px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--rad-xs, 4px);
   background: transparent;
   color: var(--cortx-bv-muted);
   cursor: pointer;
