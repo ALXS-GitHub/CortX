@@ -110,6 +110,9 @@ class InputPositionController {
 
   target(): number {
     if (inputPositionSetting() !== 'bottom') return 0;
+    // The block layout (CORT-57) places the live block itself, at the bottom
+    // of its list; shifting the element it lives in would move the list.
+    if (this.host.classList.contains('cortx-bv-on')) return 0;
     const buf = this.term.buffer.active;
     // A TUI must have the whole pane; a started scrollback is already
     // bottom-aligned by xterm itself.

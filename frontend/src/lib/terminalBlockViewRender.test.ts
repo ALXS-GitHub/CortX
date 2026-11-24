@@ -133,7 +133,7 @@ class FakeLine implements LineLike {
 function row(text: string, cols = 20, spans: Array<[number, number, FakeAttrs]> = [], wrapped = false): FakeLine {
   const cells: FakeCellData[] = [];
   for (const ch of Array.from(text)) {
-    const wide = /[　-鿿＀-￯]/.test(ch);
+    const wide = /[\u3000-\u9fff\uff00-\uffef]/.test(ch);
     cells.push({ chars: ch, width: wide ? 2 : 1 });
     if (wide) cells.push({ chars: '', width: 0 });
   }
@@ -240,8 +240,12 @@ test('wide glyphs get a two-cell box and the next run keeps its column', () => {
   );
 });
 
-test('non-ASCII glyphs that fit stay in the run, the others are boxed', () => {
-  assert.equal(renderRow(row('──'), ctx()), '<span data-c="0">──</span>');
+test('box drawing is boxed to be stretched, other glyphs that fit stay in the run', () => {
+  assert.equal(
+    renderRow(row('╭──╮x'), ctx()),
+    '<span data-c="0" class="b" style="width:32px">╭──╮</span><span data-c="4">x</span>'
+  );
+  assert.equal(renderRow(row('éa', 20), ctx({ fits: () => true })), '<span data-c="0">éa</span>');
   assert.equal(renderRow(row('⠋x'), ctx()), '<span data-c="0" class="w" style="width:8px">⠋</span><span data-c="1">x</span>');
 });
 

@@ -8,8 +8,8 @@
  * stick to the top of the pane. This module lays the pane out as a list of
  * blocks instead:
  *
- * - **Finished blocks are page text.** Each one is a card in a native,
- *   scrollable list, its rows rendered as HTML from xterm's own buffer cells
+ * - **Finished blocks are page text.** Each one is a block in a native,
+ *   scrollable list — continuous, one hairline between two, as in Warp — its rows rendered as HTML from xterm's own buffer cells
  *   (`terminalBlockViewRender.ts`), with real padding, a gap, a fold that
  *   animates and frees the room, a command that sticks while you scroll its
  *   output, a per-block filter, and native selection and copy.
@@ -91,6 +91,8 @@ export interface BlockViewHost {
   spacing(): BlockViewSpacing;
   stickyHeader(): boolean;
   failedWash(): boolean;
+  /** The hairline between two blocks (`terminal.blockDividers`). */
+  dividers(): boolean;
   actionBar(): boolean;
   /** `terminal.inputPosition === 'bottom'`: a short list sits at the bottom. */
   bottomAligned(): boolean;
@@ -195,10 +197,16 @@ const PAD_RIGHT = 10;
 /** Room kept for the list's scrollbar, px. */
 const SCROLLBAR = 10;
 
+/**
+ * Air inside a block, above and below its rows, in cells. Warp's blocks are
+ * continuous — one after the other, a rule between two — so the spacing
+ * setting is the block's own padding (Warp: ~1.1 cells above, 1.0 below),
+ * not a gap: `gap` stays 0 and exists for the layout arithmetic only.
+ */
 const SPACING: Record<BlockViewSpacing, { pad: number; gap: number }> = {
-  compact: { pad: 0.3, gap: 4 },
-  normal: { pad: 0.55, gap: 8 },
-  comfortable: { pad: 0.8, gap: 12 },
+  compact: { pad: 0.35, gap: 0 },
+  normal: { pad: 0.6, gap: 0 },
+  comfortable: { pad: 0.9, gap: 0 },
 };
 
 let nextBlockId = 1;
@@ -399,6 +407,12 @@ export class BlockView {
     return true;
   }
 
+  /** Back to the live block, following output again. */
+  scrollToBottom() {
+    this.stuck = true;
+    this.schedule();
+  }
+
   /** Ctrl+Shift+C with no xterm selection: the page selection, else the selected blocks. */
   copySelected(): boolean {
     const text = this.selectionText();
@@ -575,6 +589,12 @@ export class BlockView {
     scroller.addEventListener('mouseleave', this.onMouseLeave);
     scroller.addEventListener('contextmenu', this.onContextMenu);
     scroller.addEventListener('copy', this.onCopy);
+    scroller.addEventListener('keydown', this.onScrollerKey);
+    // Capture phase, on the clip: xterm 6 scrolls its own viewport from a
+    // listener of its scrollable element, which the custom wheel handler does
+    // not reach. Stopped here, the event never gets to it, and the browser's
+    // default scroll goes to the nearest scrollable box — the list.
+    clip.addEventListener('wheel', this.onClipWheel, { capture: true, passive: true });
     this.container.addEventListener('keydown', this.onKeyDown, true);
     window.addEventListener('keydown', this.onModifier, true);
     window.addEventListener('keyup', this.onModifier, true);
@@ -1005,6 +1025,37 @@ export class BlockView {
     }
   };
 
+  /**
+   * A key pressed while the list has the focus (right after a page
+   * selection): it is still the program's. Copy chords are answered here;
+   * anything else drops the selection and goes through xterm's own key
+   * handling, the same code path a key in its textarea takes.
+   */
+  private readonly onScrollerKey = (e: KeyboardEvent) => {
+    if (e.target !== this.scroller) return;
+    if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(e.key)) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.altKey && (e.code === 'KeyC' || e.code === 'Insert')) {
+      const text = this.selectionText();
+      if (text) {
+        e.preventDefault();
+        this.host.copy(text, 'selection', true);
+        return;
+      }
+    }
+    this.clearPageSelection();
+    this.term.focus();
+    const core = (this.term as unknown as { _core?: { _keyDown?: (ev: KeyboardEvent) => boolean | undefined } })._core;
+    core?._keyDown?.(e);
+  };
+
+  private readonly onClipWheel = (e: WheelEvent) => {
+    if (e.ctrlKey) return;
+    const buf = this.term.buffer.active;
+    if (buf.type !== 'normal' || this.term.modes.mouseTrackingMode !== 'none') return;
+    e.stopPropagation();
+  };
+
   private readonly onModifier = (e: KeyboardEvent) => {
     if (!this.host.linkModifierHeld(e)) this.clearLink();
   };
@@ -1036,6 +1087,9 @@ export class BlockView {
     const text = this.selectionText();
     if (text) {
       if (this.host.copyOnSelect() && text.trim()) this.host.copy(text, 'selection', true);
+      // Focusing xterm's textarea would drop the highlight, so the list keeps
+      // the focus and hands every key to xterm (`onScrollerKey`).
+      this.scroller?.focus({ preventScroll: true });
       return;
     }
     const moved = down ? Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4 : false;
@@ -1345,6 +1399,12 @@ export class BlockView {
     const canvas = document.createElement('canvas');
     this.measureCtx = canvas.getContext('2d');
     if (this.measureCtx) this.measureCtx.font = `${opts.fontWeight ?? 'normal'} ${size}px ${family}`;
+    // Box drawing: stretch the font's '│' from its own extent to the whole
+    // cell (plus a hair, so two rows overlap instead of leaving a seam), the
+    // way xterm's custom glyphs fill it. Scaled about the cell's centre.
+    const m = this.measureCtx?.measureText('│');
+    const glyph = m ? Math.max(m.actualBoundingBoxAscent + m.actualBoundingBoxDescent, m.fontBoundingBoxAscent + m.fontBoundingBoxDescent) : 0;
+    s.style.setProperty('--cortx-bv-box-s', String(glyph > 0 ? Math.max(1, (this.cellH / glyph) * 1.12) : 1.15));
   }
 
   private fits = (ch: string): boolean => {
@@ -1394,21 +1454,27 @@ export class BlockView {
     const base = bgOpaque ?? surface;
     const fg = palette.fg;
     const translucent = this.host.translucent() && !bgOpaque;
-    // The plate: the theme's own background lifted towards its foreground,
-    // the recipe the classic cards use — never an app accent.
+    // Warp's blocks have no plate of their own: they sit on the pane, one
+    // rule between two. Hover lifts a block a little, selection frames it.
+    // Every colour comes from the terminal's palette, never the app accent.
     const plate = mix(base, fg, 0.07);
     const s = this.scroller;
     if (s) {
       s.style.setProperty('--cortx-bv-fg', css(fg));
-      s.style.setProperty('--cortx-bv-plate', translucent ? css(plate, 0.55) : css(plate));
-      s.style.setProperty('--cortx-bv-plate-solid', css(mix(base, fg, 0.07)));
-      s.style.setProperty('--cortx-bv-plate-hover', translucent ? css(mix(base, fg, 0.1), 0.6) : css(mix(base, fg, 0.1)));
-      s.style.setProperty('--cortx-bv-edge', css(fg, 0.12));
+      s.style.setProperty('--cortx-bv-plate', 'transparent');
+      // The pinned command needs an opaque ground, or the output scrolling
+      // under it would show through.
+      s.style.setProperty('--cortx-bv-plate-solid', css(mix(base, fg, 0.04)));
+      s.style.setProperty('--cortx-bv-plate-hover', css(fg, translucent ? 0.05 : 0.035));
+      s.style.setProperty('--cortx-bv-edge', css(fg, 0.13));
       s.style.setProperty('--cortx-bv-edge-strong', css(fg, 0.38));
+      s.style.setProperty('--cortx-bv-select', css(palette.ansi[4], 0.85));
+      s.style.setProperty('--cortx-bv-select-wash', css(palette.ansi[4], 0.07));
       s.style.setProperty('--cortx-bv-muted', css(fg, 0.55));
       s.style.setProperty('--cortx-bv-ok', css(palette.ansi[2]));
       s.style.setProperty('--cortx-bv-fail', css(palette.ansi[1]));
-      s.style.setProperty('--cortx-bv-fail-wash', css(mix(plate, palette.ansi[1], 0.1), translucent ? 0.6 : 1));
+      s.style.setProperty('--cortx-bv-fail-wash', css(palette.ansi[1], 0.1));
+      void plate;
       s.style.setProperty('--cortx-bv-match', css(palette.ansi[3], 0.35));
       s.style.setProperty('--cortx-bv-match-active', css(palette.ansi[3], 0.7));
       const selection = this.term.options.theme?.selectionBackground ?? css(fg, 0.25);
@@ -1616,6 +1682,7 @@ export class BlockView {
       return;
     }
     this.updateSpacing();
+    this.scroller.classList.toggle('cortx-bv-nodividers', !this.host.dividers());
     this.trackTrims();
     const ctx = this.updatePalette();
     const buf = this.term.buffer.active;
@@ -1628,6 +1695,8 @@ export class BlockView {
       this.container.classList.toggle('cortx-bv-alt', alt);
       this.epoch++;
     }
+    // The list scrolls, xterm's viewport stays at the bottom.
+    if (buf.type === 'normal' && buf.viewportY !== buf.baseY) this.term.scrollToBottom();
     const el = this.term.element;
     if (el) {
       el.style.width = `${this.term.cols * this.cellW}px`;
@@ -1841,7 +1910,7 @@ export class BlockView {
       if (id !== undefined) this.run(id, 'filter');
       this.term.focus();
     });
-    segEl.head.insertBefore(box, segEl.meta);
+    segEl.head.insertBefore(box, segEl.promptRows?.nextSibling ?? null);
     segEl.filterBox = box;
     segEl.filterInput = input;
     segEl.filterCount = count;

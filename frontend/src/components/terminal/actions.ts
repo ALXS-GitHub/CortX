@@ -7,9 +7,15 @@ import { useTerminalLayoutStore, TERMINAL_WINDOW_ID } from '@/stores/terminalLay
 import { useTerminalWindowPrefsStore } from '@/stores/terminalWindowPrefsStore';
 import { useTerminalGridStore } from '@/stores/terminalGridStore';
 import { gotoNextAgentAttention } from './agentInbox';
-import { adjustTerminalZoom, clearTerminal, focusTerminal, pasteIntoTerminal, resetTerminalZoom } from '@/lib/terminalSessions';
+import {
+  adjustTerminalZoom,
+  clearTerminal,
+  focusTerminal,
+  jumpTerminalBlock,
+  pasteIntoTerminal,
+  resetTerminalZoom,
+} from '@/lib/terminalSessions';
 import { useTerminalAgentsStore } from './agentsStore';
-import { jumpToBlock } from '@/lib/terminalBlocks';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
 import { basename } from '@/lib/terminalNames';
 import type { KeybindingActionId } from '@/lib/keybindings';
@@ -1107,7 +1113,7 @@ export function runAction(id: KeybindingActionId): boolean {
     case 'block.next': {
       const terminalId = activeTerminalId();
       if (!terminalId) return false;
-      return jumpToBlock(terminalId, id === 'block.previous' ? 'previous' : 'next');
+      return jumpTerminalBlock(terminalId, id === 'block.previous' ? 'previous' : 'next');
     }
     case 'terminal.find':
       return openFindInActiveTerminal();

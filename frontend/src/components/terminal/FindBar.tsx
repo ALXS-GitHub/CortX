@@ -1,7 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { CaseSensitive, ChevronDown, ChevronUp, Regex, WholeWord, X } from 'lucide-react';
 import type { ISearchOptions } from '@xterm/addon-search';
-import { focusTerminal, getTerminalSession, hasTerminalSession } from '@/lib/terminalSessions';
+import {
+  focusTerminal,
+  getTerminalSession,
+  hasTerminalSession,
+  revealTerminalSearchMatch,
+  setTerminalSearchHighlight,
+} from '@/lib/terminalSessions';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { collectLeaves, tabsInScope } from '@/lib/terminalLayout';
 import { cn } from '@/lib/utils';
@@ -233,6 +239,7 @@ export function FindBar() {
     if (!search) return;
     if (!settledQuery) {
       search.clearDecorations();
+      if (terminalId) setTerminalSearchHighlight(terminalId, null);
       lastRun.current = '';
       return;
     }
@@ -243,6 +250,12 @@ export function FindBar() {
     lastRun.current = key;
     try {
       search.findNext(settledQuery, searchOptions({ caseSensitive, regex, wholeWord }, true));
+      // The block layout (CORT-57) draws finished blocks as page text: the
+      // matches are highlighted there, and the list follows the selection.
+      if (terminalId) {
+        setTerminalSearchHighlight(terminalId, settledQuery, { caseSensitive, regex, wholeWord });
+        revealTerminalSearchMatch(terminalId);
+      }
     } catch {
       // The addon compiles the term itself; a pattern `RegExp` accepts and it
       // does not must not take the bar down with it.
@@ -254,7 +267,10 @@ export function FindBar() {
   // Closing (or the pane going away) drops the highlights.
   useEffect(() => {
     if (open && terminalId && hasTerminalSession(terminalId)) return;
-    if (terminalId && hasTerminalSession(terminalId)) getTerminalSession(terminalId).search.clearDecorations();
+    if (terminalId && hasTerminalSession(terminalId)) {
+      getTerminalSession(terminalId).search.clearDecorations();
+      setTerminalSearchHighlight(terminalId, null);
+    }
   }, [open, terminalId]);
 
   if (!open || !terminalId) return null;
@@ -269,6 +285,8 @@ export function FindBar() {
     try {
       if (forward) search.findNext(query, searchOptions(modes, false));
       else search.findPrevious(query, searchOptions(modes, false));
+      setTerminalSearchHighlight(terminalId, query, modes);
+      revealTerminalSearchMatch(terminalId);
     } catch {
       // Same guard as the incremental path: never take the bar down.
     }

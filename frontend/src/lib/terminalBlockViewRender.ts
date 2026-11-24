@@ -362,6 +362,18 @@ export function styleFor(
   return parts.join(';');
 }
 
+/**
+ * Box drawing, block elements and the Powerline separators: xterm draws these
+ * itself (`customGlyphs`) so they fill the whole cell and join up across
+ * rows. A font glyph does not reach the top and bottom of a tall line box, so
+ * on the page they get a box of their own that the view stretches to the cell
+ * (`.b`, `--cortx-bv-box-*`).
+ */
+export function isBoxChar(ch: string): boolean {
+  const c = ch.codePointAt(0) ?? 0;
+  return (c >= 0x2500 && c <= 0x259f) || (c >= 0xe0b0 && c <= 0xe0bf) || (c >= 0x1fb00 && c <= 0x1fbaf);
+}
+
 /** Characters whose advance never needs checking. */
 function isAscii(ch: string): boolean {
   if (ch.length !== 1) return false;
@@ -380,16 +392,26 @@ export function renderRow(line: LineLike | undefined, ctx: RowContext, limit = I
   const end = Math.min(usedColumns(line, cell), limit);
   if (end === 0) return '';
   let html = '';
+  // The run being built: plain text, or box-drawing glyphs (stretched as one
+  // piece, so a line of `─` has no seams).
   let runKey = '';
   let runStyle = '';
   let runText = '';
   let runCol = 0;
+  let runCells = 0;
+  let runBox = false;
   const flush = () => {
     if (!runText) return;
-    html += runStyle
-      ? `<span data-c="${runCol}" style="${runStyle}">${escapeHtml(runText)}</span>`
-      : `<span data-c="${runCol}">${escapeHtml(runText)}</span>`;
+    if (runBox) {
+      const size = `width:${runCells * ctx.cellWidth}px`;
+      html += `<span data-c="${runCol}" class="b" style="${runStyle ? `${runStyle};${size}` : size}">${escapeHtml(runText)}</span>`;
+    } else {
+      html += runStyle
+        ? `<span data-c="${runCol}" style="${runStyle}">${escapeHtml(runText)}</span>`
+        : `<span data-c="${runCol}">${escapeHtml(runText)}</span>`;
+    }
     runText = '';
+    runCells = 0;
   };
   for (let x = 0; x < end; x++) {
     const c = line.getCell(x, cell);
@@ -409,21 +431,25 @@ export function renderRow(line: LineLike | undefined, ctx: RowContext, limit = I
       style = styleFor(fm, fv, bm, bv, flags, palette);
       styles.set(key, style);
     }
-    if (width === 1 && (isAscii(chars) || ctx.fits(chars))) {
-      if (key !== runKey || !runText) {
+    const ascii = isAscii(chars);
+    const box = width === 1 && !ascii && isBoxChar(chars);
+    if (width === 1 && (box || ascii || ctx.fits(chars))) {
+      if (key !== runKey || box !== runBox || !runText) {
         flush();
         runKey = key;
         runStyle = style;
         runCol = x;
+        runBox = box;
       }
       runText += chars;
+      runCells++;
       continue;
     }
     // A boxed glyph: exactly `width` cells, whatever its own advance.
     flush();
     runKey = '';
-    const box = `width:${width * ctx.cellWidth}px`;
-    html += `<span data-c="${x}" class="w" style="${style ? `${style};${box}` : box}">${escapeHtml(chars)}</span>`;
+    const size = `width:${width * ctx.cellWidth}px`;
+    html += `<span data-c="${x}" class="w" style="${style ? `${style};${size}` : size}">${escapeHtml(chars)}</span>`;
   }
   flush();
   return html;

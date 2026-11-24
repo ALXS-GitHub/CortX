@@ -360,6 +360,25 @@ async function pathLinksOn(term: Terminal, terminalId: string, row: number): Pro
 }
 
 /**
+ * The file paths on buffer row `row`, for the block layout (CORT-57), whose
+ * finished blocks are page text and have no xterm link provider of their own.
+ * Same scan, same existence check, same opener as the provider below.
+ */
+export async function blockViewPathLinks(
+  term: Terminal,
+  terminalId: string,
+  row: number
+): Promise<{ cells: { x: number; y: number }[]; target: string; open(reveal: boolean): void }[]> {
+  if (!filePathLinksEnabled()) return [];
+  const found = await pathLinksOn(term, terminalId, row);
+  return found.map((path) => ({
+    cells: path.cells,
+    target: path.target,
+    open: (reveal: boolean) => void activate(path.target, reveal, path.line, path.column),
+  }));
+}
+
+/**
  * The last thing `activate` opened. The click fallback in `LinkHover` checks
  * it so a link xterm activated normally is not opened a second time.
  */

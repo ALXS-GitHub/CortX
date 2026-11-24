@@ -770,7 +770,9 @@ class InputEditorController {
     // while the editor is open, and it has to stay the terminal's own text.
     this.applyStyle();
 
-    const host = this.container.getBoundingClientRect();
+    // Its containing box: the session container, or the live card of the
+    // block layout (CORT-57), which moves it in so it scrolls with the list.
+    const host = ((this.root.offsetParent as HTMLElement | null) ?? this.container).getBoundingClientRect();
     const rect = screen.getBoundingClientRect();
     const cellHeight = rect.height / Math.max(1, this.term.rows);
     const cellWidth = rect.width / Math.max(1, this.term.cols);

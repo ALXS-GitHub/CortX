@@ -52,7 +52,10 @@ import { DEFAULT_FONT_SIZE, DEFAULT_SCROLLBACK_LINES } from '@/components/termin
 
 export { DEFAULT_SCROLLBACK_LINES };
 import { attachInputEditor, inputEditorEnabled, refreshInputEditors } from '@/lib/terminalInputEditor';
-import { isLinkOpenClick, registerFileLinkProvider } from '@/lib/terminalLinks';
+import { blockViewPathLinks, isLinkOpenClick, registerFileLinkProvider } from '@/lib/terminalLinks';
+import { BlockView, type BlockViewHost, type BlockViewSpacing } from '@/lib/terminalBlockView';
+import { closeBlockMenu, openBlockMenu } from '@/lib/terminalBlockMenu';
+import { comboFromEvent, comboWithoutShift, effectiveCombos } from '@/lib/keybindings';
 import {
   attachBlocks,
   blockActionBarEnabled,
@@ -60,6 +63,7 @@ import {
   blockGutterEnabled,
   blocksEnabled,
   copySelectedBlock,
+  jumpToBlock,
   openSelectedBlockMenu,
   refreshBlocks,
 } from '@/lib/terminalBlocks';
@@ -108,6 +112,8 @@ export interface TerminalSession {
    *  sequence when it is denied. Swapped in place when the setting changes
    *  (see `attachOsc52`). */
   osc52: IDisposable | null;
+  /** The block layout's list (CORT-57); inactive in the classic layout. */
+  blockView: BlockView | null;
 }
 
 const sessions = new Map<string, TerminalSession>();
@@ -209,6 +215,24 @@ function toHex([r, g, b]: [number, number, number]): string {
   return '#' + [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * The block layout (CORT-57) is on: every pane is a list of cards with the
+ * live xterm inside the last one. Needs blocks to be on at all.
+ */
+export function blockLayoutActive(): boolean {
+  const terminal = useAppStore.getState().settings?.terminal;
+  return terminal?.blocks !== false && terminal?.blockLayout === 'blocks';
+}
+
+/**
+ * Whether xterm's canvas is see-through: always in the Terminal window (its
+ * wallpaper), and in the block layout everywhere, where the live card's plate
+ * is what is behind the text.
+ */
+function transparentCanvas(): boolean {
+  return IS_TERMINAL_WINDOW || blockLayoutActive();
+}
+
 function isDarkTheme(): boolean {
   return document.documentElement.classList.contains('dark');
 }
@@ -236,7 +260,7 @@ function buildPaletteTheme(): ITheme {
   const override = getXtermThemeOverride();
   const selectionColor = useAppStore.getState().settings?.terminal.selectionColor;
   if (override) {
-    return themeToXterm(override, { transparentBackground: IS_TERMINAL_WINDOW, selectionColor });
+    return themeToXterm(override, { transparentBackground: transparentCanvas(), selectionColor });
   }
   const dark = isDarkTheme();
   // Panes of the Terminal window are always see-through: the window itself
@@ -260,7 +284,7 @@ function buildPaletteTheme(): ITheme {
   const fg = resolveCssColor('--terminal-fg') ?? resolveCssColor('--foreground') ?? (dark ? [229, 229, 229] : [36, 36, 36]);
   const ansi = dark ? DARK_ANSI : LIGHT_ANSI;
   return {
-    background: toHex(bg),
+    background: blockLayoutActive() ? 'rgba(0, 0, 0, 0)' : toHex(bg),
     foreground: toHex(fg),
     cursor: toHex(fg),
     cursorAccent: toHex(bg),
@@ -756,6 +780,15 @@ export function applyTerminalPadding() {
   refreshBlocks();
 }
 
+/** What the block layout (CORT-57) redraws for. */
+function blockViewSettingsKey(): string {
+  const t = useAppStore.getState().settings?.terminal as Record<string, unknown> | undefined;
+  return JSON.stringify([
+    t?.blockSpacing, t?.blockStickyHeader, t?.blockFailedWash, t?.blockActions, t?.blockDividers,
+    t?.inputPosition, t?.fontFamily, t?.fontSize, t?.lineHeight, zoomDelta(),
+  ]);
+}
+
 /** Everything about blocks that a redraw has to notice (ticket #7). */
 function blockSettingsKey(): string {
   return [blocksEnabled(), blockGutterEnabled(), blockDividersEnabled(), blockActionBarEnabled()].join('|');
@@ -783,6 +816,8 @@ function ensureSettingsSubscription() {
   let lastLigatures = ligaturesEnabled();
   let lastMinimumContrast = terminalMinimumContrast();
   let lastScreenReader = screenReaderModeEnabled();
+  let lastLayout = blockLayoutActive();
+  let lastBlockView = blockViewSettingsKey();
   useAppStore.subscribe(() => {
     const font = terminalFontOptions();
     const fontKey = JSON.stringify([font, zoomDelta()]);
@@ -878,6 +913,31 @@ function ensureSettingsSubscription() {
       lastScreenReader = screenReader;
       for (const s of sessions.values()) s.term.options.screenReaderMode = screenReader;
     }
+    // CORT-57: switching layouts takes effect at once, in every open pane.
+    const layout = blockLayoutActive();
+    if (layout !== lastLayout) {
+      lastLayout = layout;
+      applyThemeToAll();
+      for (const s of sessions.values()) {
+        s.blockView?.setActive(layout);
+        // The renderer reads the transparency when it is (re)loaded.
+        if (s.container.isConnected) {
+          applyRenderer(s);
+          fitTerminal(s.id);
+        }
+      }
+      refreshInputPositions();
+      refreshInputEditors();
+      refreshBlocks();
+    }
+    const blockView = blockViewSettingsKey();
+    if (blockView !== lastBlockView) {
+      lastBlockView = blockView;
+      for (const s of sessions.values()) {
+        s.blockView?.refresh();
+        if (s.container.isConnected) fitTerminal(s.id);
+      }
+    }
   });
   // Here and not at module load (ticket #47): appStore and this module import
   // each other, so in the production bundle the store may not exist yet when
@@ -890,8 +950,9 @@ export function applyThemeToAll() {
   for (const s of sessions.values()) {
     // Panes of the Terminal window are always see-through: the window paints
     // the theme colour and the wallpaper behind them.
-    s.term.options.allowTransparency = IS_TERMINAL_WINDOW;
+    s.term.options.allowTransparency = transparentCanvas();
     s.term.options.theme = theme;
+    s.blockView?.refresh();
   }
 }
 
@@ -1134,8 +1195,8 @@ function linkModifierHeld(event: MouseEvent | undefined): boolean {
  * be. Two belts: this one is the one CortX controls, and it covers the
  * `WebLinksAddon` path with the same line of code.
  */
-function openTerminalLink(event: MouseEvent | undefined, uri: string): void {
-  if (!linkModifierHeld(event)) return;
+function openTerminalLink(event: MouseEvent | undefined, uri: string, checked = false): void {
+  if (!checked && !linkModifierHeld(event)) return;
   if (!/^https?:\/\//i.test(uri)) return;
   openExternal(uri).catch((err) => console.error('Failed to open URL:', err));
 }
@@ -1185,7 +1246,7 @@ function createSession(id: string): TerminalSession {
     linkHandler: OSC8_LINK_HANDLER,
     // Terminal window: the canvas is see-through so the theme's window
     // opacity and wallpaper show behind the text (see lib/terminalTheme).
-    allowTransparency: IS_TERMINAL_WINDOW,
+    allowTransparency: transparentCanvas(),
     fontFamily: font.fontFamily,
     fontSize: snapFontSize(
       font.fontFamily,
@@ -1289,6 +1350,7 @@ function createSession(id: string): TerminalSession {
     sentSize: null,
     resizeTimer: null,
     osc52: null,
+    blockView: null,
   };
 
   // OSC 52 — what programs like tmux / neovim use to reach the system
@@ -1369,7 +1431,8 @@ function createSession(id: string): TerminalSession {
       // click on its gutter bar) it copies that block instead — see #7.
       if (e.shiftKey) {
         e.preventDefault();
-        if (!term.hasSelection() && copySelectedBlock(id)) return false;
+        const view = session.blockView;
+        if (!term.hasSelection() && (view?.isActive() ? view.copySelected() : copySelectedBlock(id))) return false;
         void copySelection(term);
         return false;
       }
@@ -1425,7 +1488,11 @@ function createSession(id: string): TerminalSession {
     e.preventDefault();
     if (term.hasSelection()) {
       void copySelection(term);
-    } else if (!openSelectedBlockMenu(id, e.clientX, e.clientY)) {
+    } else if (
+      !(session.blockView?.isActive()
+        ? session.blockView.openSelectedMenu(e.clientX, e.clientY)
+        : openSelectedBlockMenu(id, e.clientX, e.clientY))
+    ) {
       void pasteFromClipboard(term, id);
     }
   });
@@ -1745,6 +1812,11 @@ export function mountTerminal(id: string, parent: HTMLElement): TerminalSession 
     // inert until the shell emits its first OSC 133 marker, and silent while
     // a restored snapshot is being replayed.
     session.disposables.push(attachBlocks(id, session.term, session.container, () => session.replaying));
+    // The block layout (CORT-57): same lifetime, active only when chosen.
+    const view = createBlockView(session);
+    session.blockView = view;
+    session.disposables.push({ dispose: () => view.dispose() });
+    view.setActive(blockLayoutActive());
     // Fit before the first output is consumed, and so the pane's size is
     // known to the next shell that spawns.
     fitTerminal(id);
@@ -1762,6 +1834,7 @@ export function mountTerminal(id: string, parent: HTMLElement): TerminalSession 
       refreshInputPositions();
       refreshInputEditors();
       refreshBlocks();
+      session.blockView?.refresh();
     })
   );
   return session;
@@ -1788,7 +1861,9 @@ export function fitTerminal(id: string) {
   const session = sessions.get(id);
   if (!session?.opened || !session.container.isConnected) return;
   try {
-    session.fit.fit();
+    // The block layout sizes the grid from its list, not from the clip xterm
+    // sits in (which is what FitAddon would measure).
+    if (!session.blockView?.fit()) session.fit.fit();
   } catch {
     // fit() throws when the container has no size yet; the ResizeObserver
     // in XtermView calls us again once it does.
@@ -1851,7 +1926,19 @@ export function focusTerminal(id: string) {
 
 /** Scroll to the bottom of the buffer. */
 export function scrollTerminalToBottom(id: string) {
-  sessions.get(id)?.term.scrollToBottom();
+  const session = sessions.get(id);
+  session?.term.scrollToBottom();
+  if (session?.blockView?.isActive()) session.blockView.scrollToBottom();
+}
+
+/**
+ * Previous / next block (Ctrl+↑ / Ctrl+↓ from the window's shortcut table):
+ * the block layout's list when it is on, the classic overlay otherwise.
+ */
+export function jumpTerminalBlock(id: string, direction: 'previous' | 'next'): boolean {
+  const view = sessions.get(id)?.blockView;
+  if (view?.isActive()) return view.jump(direction);
+  return jumpToBlock(id, direction);
 }
 
 /** Wipe the visible buffer and the backend scrollback (the "Clear" button). */
@@ -1922,6 +2009,91 @@ export function hasTerminalSession(id: string): boolean {
 /** Ids of every session held by this window (mounted or not). */
 export function listTerminalSessionIds(): string[] {
   return Array.from(sessions.keys());
+}
+
+/**
+ * Find bar, block layout (CORT-57): highlight `query` on the page rows too
+ * (the search addon only decorates what xterm draws). Null clears.
+ */
+export function setTerminalSearchHighlight(
+  id: string,
+  query: string | null,
+  opts: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean } = {}
+) {
+  const view = sessions.get(id)?.blockView;
+  if (view?.isActive()) view.setSearch(query, opts);
+}
+
+/** Find bar, block layout: scroll the list to the match the addon selected. */
+export function revealTerminalSearchMatch(id: string) {
+  const view = sessions.get(id)?.blockView;
+  if (view?.isActive()) view.revealSearchMatch();
+}
+
+/** The block layout's list for one session, wired to the app (CORT-57). */
+function createBlockView(session: TerminalSession): BlockView {
+  const { term, id } = session;
+  const terminal = () => useAppStore.getState().settings?.terminal as (Record<string, unknown> & { keybindings?: Record<string, string> }) | undefined;
+  const modifierHeld = (e: MouseEvent | KeyboardEvent) => (IS_MAC ? e.metaKey : e.ctrlKey);
+  const host: BlockViewHost = {
+    spacing: () => ((terminal()?.blockSpacing as BlockViewSpacing | undefined) ?? 'comfortable'),
+    stickyHeader: () => terminal()?.blockStickyHeader !== false,
+    failedWash: () => terminal()?.blockFailedWash !== false,
+    dividers: () => terminal()?.blockDividers !== false,
+    actionBar: () => terminal()?.blockActions !== false,
+    bottomAligned: () => inputPositionSetting() === 'bottom',
+    inputEditor: () => inputEditorEnabled(),
+    copyOnSelect: () => copyOnSelectEnabled(),
+    surface: () =>
+      resolveCssColor('--terminal-window-solid') ??
+      resolveCssColor('--bg-terminal') ??
+      resolveCssColor('--card') ??
+      (isDarkTheme() ? [30, 30, 30] : [255, 255, 255]),
+    translucent: () => IS_TERMINAL_WINDOW,
+    write: (data) => api.writeTerminal(id, data),
+    copy: (text, what, quiet) => {
+      if (!text) {
+        if (!quiet) toast.info(`Nothing to copy (${what} is empty)`);
+        return;
+      }
+      writeText(text)
+        .then(() => {
+          if (!quiet) toast.success(`Copied the ${what}`);
+        })
+        .catch((error) => toast.error(`Could not copy the ${what}`, { description: String(error) }));
+    },
+    paste: () => void pasteFromClipboard(term, id),
+    openMenu: openBlockMenu,
+    closeMenu: closeBlockMenu,
+    navigation: (e) => {
+      const combo = comboFromEvent(e);
+      if (!combo) return null;
+      const overrides = terminal()?.keybindings;
+      const directionOf = (c: string) =>
+        effectiveCombos('block.previous', overrides).includes(c)
+          ? ('previous' as const)
+          : effectiveCombos('block.next', overrides).includes(c)
+            ? ('next' as const)
+            : null;
+      const direction = directionOf(combo);
+      if (direction) return { direction, extend: false };
+      const bare = comboWithoutShift(combo);
+      const extended = bare ? directionOf(bare) : null;
+      return extended ? { direction: extended, extend: true } : null;
+    },
+    isLinkClick: (e) => isLinkOpenClick(e),
+    linkModifierHeld: modifierHeld,
+    openUrl: (url) => openTerminalLink(undefined, url, true),
+    pathLinks: (row) => blockViewPathLinks(term, id, row),
+    imageTile: (x, y) => session.image.extractTileAtBufferCell(x, y),
+    hasImages: () => {
+      const storage = (session.image as unknown as { _storage?: { _images?: Map<unknown, unknown> } })._storage;
+      return (storage?._images?.size ?? 0) > 0;
+    },
+    isReplaying: () => session.replaying,
+    now: () => Date.now(),
+  };
+  return new BlockView(term, session.container, host);
 }
 
 /**

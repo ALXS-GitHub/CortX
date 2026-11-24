@@ -12,9 +12,11 @@
   overflow: hidden;
 }
 
-/* xterm's own viewport never scrolls in this layout: the list does. */
-.cortx-bv-on .xterm .xterm-viewport {
+/* xterm's own viewport never scrolls in this layout: the list does. Its
+   background goes too: the live card's plate is what is behind the text. */
+.cortx-xterm.cortx-bv-on .xterm .xterm-viewport {
   overflow: hidden !important;
+  background-color: transparent !important;
 }
 .cortx-bv-on .xterm .xterm-scrollable-element > .scrollbar {
   display: none !important;
@@ -80,10 +82,11 @@
 
 /* ---- Segments ------------------------------------------------------------ */
 
+/* Warp's layout: blocks are continuous, full width, one hairline between two
+   (drawn as an inset shadow, so it takes no room from the rows). */
 .cortx-bv-seg {
   position: relative;
   box-sizing: border-box;
-  margin-right: 4px;
 }
 .cortx-bv-loose,
 .cortx-bv-live {
@@ -92,37 +95,42 @@
 }
 .cortx-bv-card {
   padding: var(--cortx-bv-pt, 6px) var(--cortx-bv-pr, 10px) var(--cortx-bv-pb, 6px) var(--cortx-bv-pl, 14px);
-  border-radius: 8px;
-  background: var(--cortx-bv-plate, rgba(127, 127, 127, 0.08));
+  background: var(--cortx-bv-plate, transparent);
+  box-shadow: inset 0 1px 0 var(--cortx-bv-edge, rgba(127, 127, 127, 0.2));
   transition: background-color 120ms ease, box-shadow 120ms ease;
 }
+.cortx-bv-list > .cortx-bv-card:first-child,
+.cortx-bv-nodividers .cortx-bv-card:not(.cortx-bv-sel) {
+  box-shadow: none;
+}
 .cortx-bv-card:hover {
-  background: var(--cortx-bv-plate-hover, var(--cortx-bv-plate));
+  background: var(--cortx-bv-plate-hover, rgba(127, 127, 127, 0.05));
 }
 .cortx-bv-card.cortx-bv-wash {
   background: var(--cortx-bv-fail-wash);
 }
+/* Selected: framed in the palette's blue, as Warp does. */
 .cortx-bv-card.cortx-bv-sel {
-  box-shadow: inset 0 0 0 1px var(--cortx-bv-edge-strong, rgba(127, 127, 127, 0.5));
+  background: var(--cortx-bv-select-wash, transparent);
+  box-shadow: inset 0 0 0 1px var(--cortx-bv-select, rgba(97, 175, 239, 0.8));
 }
-/* The status bar, in the card's left gutter. */
+/* The status bar at the block's left edge: only where there is something
+   to say — a failure, or a command still running. */
 .cortx-bv-card::before {
   content: '';
   position: absolute;
-  left: 5px;
-  top: 6px;
-  bottom: 6px;
+  left: 0;
+  top: 0;
+  bottom: 0;
   width: 3px;
-  border-radius: 2px;
-  background: var(--cortx-bv-edge, rgba(127, 127, 127, 0.2));
-}
-.cortx-bv-card.cortx-bv-ok::before {
-  background: color-mix(in srgb, var(--cortx-bv-ok, #4e9a06) 60%, transparent);
+  background: transparent;
 }
 .cortx-bv-card.cortx-bv-failed::before {
   background: var(--cortx-bv-fail, #cc0000);
 }
 .cortx-bv-live.cortx-bv-running::before {
+  left: 0;
+  width: 2px;
   background: var(--cortx-bv-edge-strong);
   animation: cortx-bv-pulse 1.4s ease-in-out infinite;
 }
@@ -150,7 +158,6 @@
 .cortx-bv-stuck > .cortx-bv-head {
   background: var(--cortx-bv-plate-solid);
   box-shadow: 0 1px 0 var(--cortx-bv-edge);
-  border-radius: 8px 8px 0 0;
 }
 
 /* ---- Rows ------------------------------------------------------------------ */
@@ -179,6 +186,15 @@
   overflow: visible;
   vertical-align: top;
   height: var(--cortx-bv-ch, 17px);
+}
+/* Box drawing / block elements / Powerline: stretched to the full cell. */
+.cortx-bv-r .b {
+  display: inline-block;
+  vertical-align: top;
+  height: var(--cortx-bv-ch, 17px);
+  overflow: visible;
+  transform-origin: 50% 50%;
+  transform: scaleY(var(--cortx-bv-box-s, 1));
 }
 .cortx-bv-m {
   position: absolute;

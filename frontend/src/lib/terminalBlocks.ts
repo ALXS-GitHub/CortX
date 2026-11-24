@@ -273,7 +273,9 @@ const IS_TERMINAL_WINDOW = (() => {
 
 /** Blocks are on unless the user turns them off (see the Settings copy). */
 export function blocksEnabled(): boolean {
-  return useAppStore.getState().settings?.terminal.blocks !== false;
+  const terminal = useAppStore.getState().settings?.terminal;
+  // The block layout (CORT-57) has blocks of its own: this overlay stands down.
+  return terminal?.blocks !== false && terminal?.blockLayout !== 'blocks';
 }
 
 /** The left-hand status bars. Off leaves navigation, copy and folding. */

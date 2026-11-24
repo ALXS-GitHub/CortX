@@ -525,11 +525,12 @@ export function IntegratedTerminalSection() {
           hint={
             <>
               <Code>Classic</Code> keeps one terminal grid per pane and draws the blocks over it.{' '}
-              <Code>Blocks</Code> lays the pane out like Warp: every finished command becomes a card rendered as text in
-              the page — real space between cards, folds that give the room back, the command pinned while you scroll a
-              long output, native selection and copy, a filter per block, the same in the dock and in the Terminal
-              window. Only the block in progress keeps a live terminal, and a full-screen program (vim, htop) still gets
-              the whole pane. <strong>Applies at once</strong> to every open terminal.
+              <Code>Blocks</Code> lays the pane out like Warp: every finished command becomes a block rendered as text
+              in the page, one after the other with a hairline between two — real padding (the spacing below), folds
+              that give the room back, the command pinned while you scroll a long output, native selection and copy, a
+              filter per block, the same in the dock and in the Terminal window. Only the block in progress keeps a live
+              terminal, and a full-screen program (vim, htop) still gets the whole pane.{' '}
+              <strong>Applies at once</strong> to every open terminal.
             </>
           }
         >
@@ -543,7 +544,7 @@ export function IntegratedTerminalSection() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="classic">Classic (drawn over the grid — default)</SelectItem>
-              <SelectItem value="blocks">Blocks (cards, like Warp)</SelectItem>
+              <SelectItem value="blocks">Blocks (like Warp)</SelectItem>
             </SelectContent>
           </Select>
         </SettingField>
