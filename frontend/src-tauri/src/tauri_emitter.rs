@@ -148,4 +148,49 @@ impl ProcessEventEmitter for TauriEmitter {
     fn emit_terminal_state(&self, state: &TerminalShellState) {
         let _ = self.app_handle.emit("terminal-state", state);
     }
+
+    /// Light on purpose: a frozen block can be thousands of lines, so the
+    /// event only says that something changed and the view fetches what it
+    /// is missing with `get_terminal_blocks`.
+    fn emit_terminal_block(&self, terminal_id: &str, event: &cortx_core::terminal::blocks::BlockEvent) {
+        use cortx_core::terminal::blocks::BlockEvent;
+        let payload = match event {
+            BlockEvent::Frozen(block) => TerminalBlockPayload {
+                terminal_id: terminal_id.to_string(),
+                kind: "frozen",
+                block_id: Some(block.id),
+                generation: block.generation,
+                alt_screen: None,
+            },
+            BlockEvent::Cleared { generation } => TerminalBlockPayload {
+                terminal_id: terminal_id.to_string(),
+                kind: "cleared",
+                block_id: None,
+                generation: *generation,
+                alt_screen: None,
+            },
+            BlockEvent::AltScreen(on) => TerminalBlockPayload {
+                terminal_id: terminal_id.to_string(),
+                kind: "alt-screen",
+                block_id: None,
+                generation: 0,
+                alt_screen: Some(*on),
+            },
+        };
+        let _ = self.app_handle.emit("terminal-block", payload);
+    }
+}
+
+/// `terminal-block` event (CORT-57): `kind` is `frozen`, `cleared` or
+/// `alt-screen`.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct TerminalBlockPayload {
+    terminal_id: String,
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    block_id: Option<u64>,
+    generation: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alt_screen: Option<bool>,
 }

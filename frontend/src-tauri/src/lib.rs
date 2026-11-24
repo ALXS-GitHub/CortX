@@ -740,6 +740,8 @@ pub fn run() {
             commands::write_terminal,
             commands::resize_terminal,
             commands::clear_terminal_scrollback,
+            commands::get_terminal_blocks,
+            commands::get_terminal_screen,
             commands::remove_terminal,
             commands::get_terminal_states,
             commands::get_command_history,

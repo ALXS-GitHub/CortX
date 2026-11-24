@@ -16,6 +16,7 @@
 //! Neither piece knows anything about Tauri; the GUI adapts a `Channel` into a
 //! [`SinkFn`].
 
+pub mod blocks;
 pub mod complete;
 pub mod history;
 pub mod launch;

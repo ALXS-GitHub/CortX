@@ -841,6 +841,12 @@ fn sync_terminal_budgets(state: &AppState, settings: &AppSettings) {
         .process_manager
         .command_history()
         .set_max_bytes(u64::from(settings.terminal.history_max_mb.clamp(1, 200)) * 1024 * 1024);
+    // One block's grid keeps as many lines as the pane's scrollback, within
+    // reason: it is ~24 bytes a cell, not one byte a byte like the hub.
+    state
+        .process_manager
+        .terminal_blocks()
+        .set_history_lines((settings.terminal.scrollback_lines as usize).clamp(1_000, 20_000));
 }
 
 #[tauri::command]
@@ -3010,13 +3016,39 @@ pub fn resize_terminal(
 #[tauri::command]
 pub fn clear_terminal_scrollback(state: State<AppState>, terminal_id: String) {
     state.process_manager.terminal_hub().clear(&terminal_id);
+    state.process_manager.terminal_blocks().clear(&terminal_id);
 }
 
 /// Forget a terminal completely (tab closed for good).
 #[tauri::command]
 pub fn remove_terminal(state: State<AppState>, terminal_id: String) {
     state.process_manager.terminal_hub().remove(&terminal_id);
+    state.process_manager.terminal_blocks().remove(&terminal_id);
     state.process_manager.forget_terminal_state(&terminal_id);
+}
+
+/// A terminal's command blocks, cut at OSC 133 by the backend's own emulator
+/// (CORT-57): the frozen blocks with an id above `after` (all for `0`) and
+/// the live one. `None` for a terminal that has printed nothing yet.
+#[tauri::command]
+pub fn get_terminal_blocks(
+    state: State<AppState>,
+    terminal_id: String,
+    after: Option<u64>,
+) -> Option<cortx_core::terminal::blocks::BlocksView> {
+    state
+        .process_manager
+        .terminal_blocks()
+        .view(&terminal_id, after.unwrap_or(0))
+}
+
+/// What a terminal's screen shows right now, one string per row — the
+/// alternate screen while a full-screen program holds it.
+#[tauri::command]
+pub fn get_terminal_screen(state: State<AppState>, terminal_id: String) -> Option<Vec<String>> {
+    let splitter = state.process_manager.terminal_blocks().get(&terminal_id)?;
+    let rows = splitter.lock().screen_text();
+    Some(rows)
 }
 
 /// Shell-integration state (cwd, running command, last exit code) of every

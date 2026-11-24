@@ -10,6 +10,7 @@
 
 use crate::models::{LogStream, ScriptStatus, ServiceStatus};
 use crate::runtime_state::{self, EntityKind, RuntimeEntry, RuntimeStore};
+use crate::terminal::blocks::{BlockRegistry, BlockSplitter};
 use crate::terminal::{terminal_id, AnsiLineSplitter, TerminalHub, TerminalKind};
 use crate::terminal::{
     CommandHistory, CommandRecord, OscScanner, ShellPhase, TerminalShellState, TerminalStateTracker,
@@ -101,6 +102,11 @@ pub trait ProcessEventEmitter: Send + Sync {
     /// what we know about a terminal: cwd, running command, exit code.
     /// Default no-op: only the GUI displays it.
     fn emit_terminal_state(&self, _state: &TerminalShellState) {}
+
+    /// The block splitter (`terminal::blocks`, CORT-57) froze a block,
+    /// dropped them all (`clear`), or saw the alternate screen come or go.
+    /// Default no-op: only the GUI draws blocks.
+    fn emit_terminal_block(&self, _terminal_id: &str, _event: &crate::terminal::blocks::BlockEvent) {}
 }
 
 /// Who to tell about shell-integration events for one PTY, plus the project
@@ -191,6 +197,8 @@ pub struct ProcessManager {
     /// PTY master + writer per terminal id (`service:<id>`, `shell:<id>`, ...).
     ptys: Arc<Mutex<HashMap<String, PtyIo>>>,
     terminal_hub: Arc<TerminalHub>,
+    /// One grid per command block, cut at OSC 133 (CORT-57).
+    terminal_blocks: Arc<BlockRegistry>,
     /// Latest shell-integration state per terminal id (see `terminal::osc`).
     terminal_states: Arc<Mutex<HashMap<String, TerminalShellState>>>,
     command_history: Arc<CommandHistory>,
@@ -211,6 +219,7 @@ impl ProcessManager {
             restored_shells: Arc::new(Mutex::new(HashMap::new())),
             ptys: Arc::new(Mutex::new(HashMap::new())),
             terminal_hub: Arc::new(TerminalHub::new()),
+            terminal_blocks: Arc::new(BlockRegistry::new()),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             runtime_store,
         }
@@ -225,6 +234,11 @@ impl ProcessManager {
     /// Raw scrollback + live subscribers for every terminal this manager runs.
     pub fn terminal_hub(&self) -> &Arc<TerminalHub> {
         &self.terminal_hub
+    }
+
+    /// Command blocks of every terminal (CORT-57).
+    pub fn terminal_blocks(&self) -> &Arc<BlockRegistry> {
+        &self.terminal_blocks
     }
 
     /// Shell-integration state of one terminal, if its shell ever reported any.
@@ -353,6 +367,7 @@ impl ProcessManager {
         if cols == 0 || rows == 0 {
             return Ok(());
         }
+        self.terminal_blocks.resize(terminal_id, cols, rows);
         let ptys = self.ptys.lock();
         let io = ptys
             .get(terminal_id)
@@ -425,9 +440,15 @@ impl ProcessManager {
             .lock()
             .insert(terminal_id.to_string(), TerminalShellState::new(terminal_id));
 
+        // A restarted service starts with no blocks, like it starts with a
+        // fresh shell state.
+        self.terminal_blocks.remove(terminal_id);
+        let blocks = self.terminal_blocks.get_or_create(terminal_id, size.cols, size.rows);
+
         spawn_pty_reader(
             reader,
             self.terminal_hub.clone(),
+            blocks,
             terminal_id.to_string(),
             log_path,
             on_line,
@@ -1422,6 +1443,7 @@ fn now_ms() -> i64 {
 fn spawn_pty_reader(
     mut reader: Box<dyn Read + Send>,
     hub: Arc<TerminalHub>,
+    blocks: Arc<Mutex<BlockSplitter>>,
     terminal_id: String,
     log_path: Option<PathBuf>,
     on_line: Box<dyn Fn(String) + Send>,
@@ -1449,6 +1471,15 @@ fn spawn_pty_reader(
                 Ok(n) => {
                     let chunk = &buf[..n];
                     hub.push(&terminal_id, chunk);
+                    // After the hub, so xterm.js gets the bytes first: the
+                    // splitter is a second emulator, ~100 MB/s, and nothing
+                    // on screen waits for it.
+                    let block_events = blocks.lock().feed(chunk, now_ms());
+                    if let Some(obs) = &tracking.observer {
+                        for event in &block_events {
+                            obs.emitter.emit_terminal_block(&terminal_id, event);
+                        }
+                    }
                     for line in splitter.feed(chunk) {
                         deliver(line, &mut log);
                     }
@@ -2080,6 +2111,63 @@ mod pty_integration_tests {
         assert!(wait_until(Duration::from_secs(5), || !pm.has_terminal(&tid)));
         assert!(!pm.is_script_running("script-1"));
         pm.stop_all();
+    }
+
+    /// CORT-57 end to end: a real bash with the CortX integration, three
+    /// commands typed into the PTY, and the blocks the splitter cut out of it.
+    /// Ignored for the same reason as the test below (interactive shells
+    /// wedge on CI runners).
+    #[test]
+    #[ignore = "needs a real interactive bash"]
+    fn bash_commands_become_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::new(dir.path()).unwrap());
+        let pm = ProcessManager::new(store);
+        let emitter = Arc::new(RecordingEmitter::default());
+        let info = pm
+            .spawn_shell(
+                emitter.clone(),
+                ShellSpawnRequest {
+                    cwd: dir.path().to_string_lossy().into_owned(),
+                    project_id: None,
+                    shell: Some("bash".to_string()),
+                    cols: 100,
+                    rows: 30,
+                    restore_from: None,
+                    integration: Some(crate::shell_init::InitOptions {
+                        shell_integration: true,
+                        disable_shell_predictions: false,
+                    }),
+                },
+            )
+            .expect("spawn bash");
+        let tid = terminal_id(TerminalKind::Shell, &info.id);
+        let commands = |pm: &ProcessManager| -> Vec<String> {
+            pm.terminal_blocks()
+                .view(&tid, 0)
+                .map(|v| v.frozen.iter().filter_map(|b| b.command.clone()).collect())
+                .unwrap_or_default()
+        };
+        std::thread::sleep(Duration::from_millis(500));
+        pm.write_terminal(&tid, b"echo one; echo two\r").unwrap();
+        pm.write_terminal(&tid, b"false\r").unwrap();
+        pm.write_terminal(&tid, b"printf 'no newline'\r").unwrap();
+        assert!(
+            wait_until(Duration::from_secs(10), || commands(&pm).len() >= 3),
+            "blocks: {:?}\nscrollback: {:?}",
+            commands(&pm),
+            String::from_utf8_lossy(&pm.terminal_hub().scrollback(&tid))
+        );
+        let view = pm.terminal_blocks().view(&tid, 0).unwrap();
+        let blocks: Vec<_> = view.frozen.iter().filter(|b| b.command.is_some()).collect();
+        for b in &blocks {
+            eprintln!("--- #{} {:?} exit={:?}\n[prompt]\n{}\n[output]\n{}", b.id, b.command, b.exit_code, b.prompt_text(), b.output_text());
+        }
+        assert_eq!(blocks[0].output_text(), "one\ntwo");
+        assert_eq!(blocks[0].exit_code, Some(0));
+        assert_eq!(blocks[1].exit_code, Some(1));
+        assert!(blocks[2].output_text().starts_with("no newline"));
+        pm.kill_shell(&*emitter, &info.id).unwrap();
     }
 
     /// Drives a *real interactive* shell: types a line into the PTY and waits

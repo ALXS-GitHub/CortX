@@ -79,8 +79,17 @@ impl OscScanner {
 
     /// Scan `chunk` and return the shell events it completes, in order.
     pub fn feed(&mut self, chunk: &[u8]) -> Vec<ShellEvent> {
+        self.feed_indexed(chunk).into_iter().map(|(_, ev)| ev).collect()
+    }
+
+    /// Same as [`feed`](Self::feed), with each event paired with the offset
+    /// in `chunk` just past the byte that terminated its sequence — where a
+    /// consumer that must act *between* two bytes (the block splitter, which
+    /// starts a new grid at `133;A`) has to cut the chunk.
+    pub fn feed_indexed(&mut self, chunk: &[u8]) -> Vec<(usize, ShellEvent)> {
         let mut events = Vec::new();
-        for &b in chunk {
+        for (i, &b) in chunk.iter().enumerate() {
+            let before = events.len();
             match self.state {
                 State::Ground => {
                     if b == 0x1b {
@@ -141,6 +150,9 @@ impl OscScanner {
                     }
                 }
             }
+            if events.len() > before {
+                events[before].0 = i + 1;
+            }
         }
         events
     }
@@ -159,11 +171,12 @@ impl OscScanner {
         sel == b"7" || sel == b"133"
     }
 
-    fn finish(&mut self, events: &mut Vec<ShellEvent>) {
+    fn finish(&mut self, events: &mut Vec<(usize, ShellEvent)>) {
         let payload = std::mem::take(&mut self.buf);
         self.state = State::Ground;
         if let Some(ev) = parse_osc(&payload) {
-            events.push(ev);
+            // The offset is filled in by `feed_indexed`, which knows it.
+            events.push((0, ev));
         }
     }
 }
