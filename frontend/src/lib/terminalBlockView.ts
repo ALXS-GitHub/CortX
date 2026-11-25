@@ -329,6 +329,14 @@ export class BlockView {
         return false;
       })
     );
+    // Erase in line: a running program wiping rows above its own block
+    // (`onEraseAbove`). Never consumed — xterm's own handler runs after.
+    this.disposables.push(
+      term.parser.registerCsiHandler({ final: 'K' }, () => {
+        this.onEraseAbove();
+        return false;
+      })
+    );
     const redraw = () => this.schedule();
     this.disposables.push(term.onWriteParsed(redraw));
     this.disposables.push(term.onRender(redraw));
@@ -741,6 +749,53 @@ export class BlockView {
         break;
       }
     }
+    this.schedule();
+  }
+
+  /**
+   * The running program erased a row *above* its own block: it has taken
+   * the screen over, and what it draws there from now on is its own.
+   *
+   * Claude Code does it on every resize — such as the one the agent bar makes
+   * when it appears under the pane. Through ConPTY that arrives as `CSI H`,
+   * then `CSI 2K` on each screen row, then the whole conversation printed
+   * again from the top row (no `ED 2`: captured from a real session). An
+   * erased line keeps its markers, so the block's start stayed on the row
+   * where `claude` had been typed — in the middle of the reprinted
+   * conversation — and the card was cut in two there, the part above it
+   * drawn as the end of the previous command.
+   *
+   * So the block starts again at the first row the program erases above it.
+   * Only for a running command: a shell redrawing its own prompt never goes
+   * above the prompt's first row, and a command that keeps to its own rows
+   * (a progress bar) never triggers this.
+   */
+  private onEraseAbove() {
+    const buf = this.term.buffer.active;
+    if (buf.type !== 'normal') return;
+    const record = this.current;
+    if (!record || record.status !== 'running') return;
+    const start = record.start;
+    if (!start || start.isDisposed) return;
+    const line = buf.baseY + buf.cursorY;
+    if (line >= start.line) return;
+    const was = this.tearingDown;
+    this.tearingDown = true;
+    start.dispose();
+    record.output?.dispose();
+    this.tearingDown = was;
+    // The command line itself was erased: the block is its output alone.
+    record.start = this.markerAt(line);
+    record.output = this.markerAt(line);
+    // Blocks that started on the rows it takes over are being erased with
+    // them: left in place, the one below would pass for the last block and
+    // the running one for a finished one above it.
+    for (const other of [...this.records]) {
+      if (other !== record && other.start && !other.start.isDisposed && other.start.line >= line) this.drop(other);
+    }
+    // What the program drew before is gone: the card is as tall as what it
+    // draws from now on.
+    this.liveHigh = null;
     this.schedule();
   }
 

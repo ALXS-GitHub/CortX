@@ -51,7 +51,7 @@ import { attachInputPosition, inputPositionSetting, refreshInputPositions } from
 import { DEFAULT_FONT_SIZE, DEFAULT_SCROLLBACK_LINES } from '@/components/terminal/settings/terminalDefaults';
 
 export { DEFAULT_SCROLLBACK_LINES };
-import { attachInputEditor, inputEditorEnabled, refreshInputEditors } from '@/lib/terminalInputEditor';
+import { attachInputEditor, inputEditorEnabled, layoutInputEditor, refreshInputEditors } from '@/lib/terminalInputEditor';
 import { blockViewPathLinks, isLinkOpenClick, registerFileLinkProvider } from '@/lib/terminalLinks';
 import { BlockView, type BlockViewHost, type BlockViewSpacing } from '@/lib/terminalBlockView';
 import { closeBlockMenu, openBlockMenu } from '@/lib/terminalBlockMenu';
@@ -2090,6 +2090,9 @@ function createBlockView(session: TerminalSession): BlockView {
       const storage = (session.image as unknown as { _storage?: { _images?: Map<unknown, unknown> } })._storage;
       return (storage?._images?.size ?? 0) > 0;
     },
+    // The universal input editor sits on the prompt row of the live card: it
+    // has to follow every paint, not only xterm's own events.
+    onLayout: () => layoutInputEditor(id),
     isReplaying: () => session.replaying,
     now: () => Date.now(),
   };

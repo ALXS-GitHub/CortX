@@ -1428,6 +1428,25 @@ function detachInputEditor(terminalId: string) {
   controller.dispose();
 }
 
+/**
+ * Re-place this terminal's editor *now*: what it sits on has just moved.
+ *
+ * The block layout (CORT-57) calls it after every paint. Its own frame runs
+ * after the editor's (both are scheduled from xterm's `onWriteParsed`, the
+ * editor's listener first), so without it the editor was placed against the
+ * previous layout — when a command finished, against the old live card — and
+ * nothing moved it again while the shell sat at its prompt: the editor was
+ * left outside the list, out of sight, and the keys typed into it went
+ * nowhere visible until Ctrl+C brought a new prompt.
+ */
+export function layoutInputEditor(terminalId: string) {
+  const controller = controllers.get(terminalId);
+  // Not editing: nothing to place, and `refresh()` would close the grid's
+  // completion menu on every scroll frame.
+  if (!controller?.machine.isEditing) return;
+  controller.refresh();
+}
+
 /** The setting changed: close every editor that may no longer show. */
 export function refreshInputEditors() {
   const on = inputEditorEnabled();
