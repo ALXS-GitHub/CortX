@@ -46,6 +46,8 @@ export function AgentPromptBar({ terminalId }: { terminalId: string }) {
 
 function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent: TerminalAgentInfo }) {
   const keybindings = useAppStore((s) => s.settings?.terminal?.keybindings);
+  const bubbleColor = useAppStore((s) => s.settings?.terminal?.agentPromptColor);
+  const bubbleOpacity = useAppStore((s) => s.settings?.terminal?.agentPromptOpacity ?? 95);
   // A permission prompt is answered in the agent's own UI (its keys pick an
   // option): the editor steps aside until it is answered.
   const blocked = agent.needsInput === 'permission';
@@ -69,14 +71,35 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
     [terminalId]
   );
 
+  // The field to focus once it is there. Focusing it from `show()` (even a
+  // frame later) raced React's render: on the first Ctrl+G the bubble was not
+  // mounted yet, nothing took the keys, and it took a second Ctrl+G.
+  const wantFocus = useRef(false);
   const show = useCallback(
     (focus = true) => {
       setOpen(true);
       setEditorOpen(terminalId, true);
-      if (focus) requestAnimationFrame(() => fieldRef.current?.focus());
+      if (focus) {
+        wantFocus.current = true;
+        fieldRef.current?.focus();
+      }
     },
     [terminalId]
   );
+  useLayoutEffect(() => {
+    const field = fieldRef.current;
+    if (!open || blocked || !wantFocus.current || !field) return;
+    wantFocus.current = false;
+    field.focus();
+    // …and once more a frame later if the pane took it back meanwhile (the
+    // terminal re-focusing itself after the key that opened the bubble).
+    const pane = barRef.current?.parentElement;
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (active !== field && (!active || active === document.body || pane?.contains(active))) field.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, blocked]);
 
   const hide = useCallback(() => {
     setOpen(false);
@@ -251,7 +274,11 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
       {open && !blocked && (
         <div className="absolute inset-x-0 bottom-0 z-20 px-2 pb-1.5">
           <div
-            className="rounded-[var(--rad-md)] border border-border-strong bg-popover/95 shadow-pop backdrop-blur-sm"
+            className="rounded-[var(--rad-md)] border border-border-strong shadow-pop backdrop-blur-sm"
+            style={{
+              // Settings > Agents > Agent prompt: colour and opacity.
+              background: `color-mix(in srgb, ${bubbleColor || 'var(--color-popover)'} ${Math.min(100, Math.max(20, bubbleOpacity))}%, transparent)`,
+            }}
             onMouseDown={(e) => {
               // A click on the frame (not the field) keeps the caret in it.
               if (e.target !== fieldRef.current && !(e.target as HTMLElement).closest('button')) e.preventDefault();

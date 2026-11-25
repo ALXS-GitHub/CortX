@@ -141,6 +141,7 @@ const BACKEND_DEFAULTS = {
   gridTileTextScale: 60,
   agentNotifyNeedsYou: true,
   agentPromptBar: true,
+  agentPromptOpacity: 95,
   agentNotifyDone: true,
   agentNotifyOnlyWhenHidden: true,
   agentNotifyPosition: 'top-right',

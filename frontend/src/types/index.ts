@@ -160,6 +160,11 @@ export interface TerminalConfig {
   /** The agent prompt (Warp-style rich input) under a terminal running an
    *  agent. Default true. */
   agentPromptBar?: boolean;
+  /** Background of the agent prompt's bubble (any CSS colour). Unset = the
+   *  theme's popover colour. */
+  agentPromptColor?: string;
+  /** Opacity of the agent prompt's bubble, 20–100 (%). Default 95. */
+  agentPromptOpacity?: number;
   /** Typed in the terminal "New agent" opens. Default `claude`. */
   agentLaunchCommand?: string;
   /** Ask before closing a terminal — or quitting CortX — while a command is

@@ -47,6 +47,7 @@ const COLORS: Array<{ key: AgentColorKey; field: ColorSetting; phase: AgentPhase
 export function AgentSettingsSection() {
   const { terminal, patch } = useTerminalSettings();
   const disabled = !terminal;
+  const promptOpacity = terminal?.agentPromptOpacity ?? 95;
   const tileInfo = resolveGridTileInfo(terminal);
   const position = resolveAgentNotifyPosition(terminal);
   const toggleInfo = (value: GridTileInfo) => {
@@ -147,6 +148,36 @@ export function AgentSettingsSection() {
             disabled={disabled}
           />
         </SettingToggle>
+        <SettingField k="agentPromptColor" label="Bubble colour" hint="Background of the prompt bubble. Empty = the theme's.">
+          <ColorField
+            value={terminal?.agentPromptColor ?? ''}
+            onChange={(hex) => patch({ agentPromptColor: hex || undefined })}
+            clearable
+            placeholder="theme"
+            disabled={disabled}
+            aria-label="Agent prompt bubble colour"
+            className="w-40"
+          />
+        </SettingField>
+        <SettingField
+          k="agentPromptOpacity"
+          label={`Bubble opacity · ${promptOpacity}%`}
+          hint="How much of the terminal shows through the bubble."
+        >
+          <div className="flex w-56 items-center gap-3">
+            <input
+              type="range"
+              min={20}
+              max={100}
+              step={1}
+              value={promptOpacity}
+              onChange={(e) => patch({ agentPromptOpacity: Number(e.target.value) })}
+              disabled={disabled}
+              aria-label="Agent prompt bubble opacity"
+              className="h-1.5 flex-1 cursor-pointer accent-primary"
+            />
+          </div>
+        </SettingField>
       </Group>
 
       <Group title="New agent">

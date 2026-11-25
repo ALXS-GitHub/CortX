@@ -470,6 +470,14 @@ pub struct TerminalConfig {
     /// an agent runs in it. Only the frontend reads this.
     #[serde(default = "default_true")]
     pub agent_prompt_bar: bool,
+    /// Background colour of the agent prompt's bubble (any CSS colour). None =
+    /// the app theme's popover colour. Only the frontend reads this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_prompt_color: Option<String>,
+    /// Opacity of the agent prompt's bubble, 20–100 (%). Only the frontend
+    /// reads this.
+    #[serde(default = "default_agent_prompt_opacity")]
+    pub agent_prompt_opacity: u8,
     /// Font of every terminal (dock and window). None = bundled default stack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
@@ -1013,6 +1021,10 @@ fn default_grid_tile_text_scale() -> u8 {
     60
 }
 
+fn default_agent_prompt_opacity() -> u8 {
+    95
+}
+
 fn default_agent_launch_command() -> String {
     "claude".to_string()
 }
@@ -1327,6 +1339,8 @@ impl Default for TerminalConfig {
             agent_notify_position: ToastPosition::default(),
             agent_launch_command: default_agent_launch_command(),
             agent_prompt_bar: true,
+            agent_prompt_color: None,
+            agent_prompt_opacity: default_agent_prompt_opacity(),
             font_family: None,
             font_size: None,
             window_zoom: 0,
@@ -2515,6 +2529,7 @@ mod tests {
             "agentColorNeedsYou",
             "agentColorDone",
             "agentColorIdle",
+            "agentPromptColor",
         ] {
             assert!(
                 !written.contains_key(absent),
