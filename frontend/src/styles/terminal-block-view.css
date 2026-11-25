@@ -46,9 +46,7 @@
   /* No rubber band: the view pins the list to its bottom, and a bounce past
      the end (WebKit, Edge on a precision touchpad) would be cut short. */
   overscroll-behavior: none;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--cortx-bv-fg, currentColor) 22%, transparent) transparent;
+  scrollbar-width: none;
   outline: none;
   font-family: var(--cortx-bv-font, monospace);
   font-size: var(--cortx-bv-size, 13px);
@@ -58,21 +56,47 @@
   font-variant-ligatures: none;
   -webkit-font-smoothing: antialiased;
 }
+/* The list's own scrollbar is hidden: it would take its width from the
+   blocks (or keep a gutter for it), and they would stop short of the pane's
+   right edge. `.cortx-bv-bar` floats over the list instead. */
 .cortx-bv::-webkit-scrollbar {
-  width: 8px;
+  display: none;
 }
-.cortx-bv::-webkit-scrollbar-track {
-  background: transparent;
+
+.cortx-bv-bar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  z-index: 6;
+  opacity: 0;
+  transition: opacity 200ms ease;
 }
-.cortx-bv::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--cortx-bv-fg, currentColor) 22%, transparent);
+.cortx-bv-bar[hidden] {
+  display: none;
+}
+.cortx-bv-on:hover > .cortx-bv-bar,
+.cortx-bv-bar.cortx-bv-bar-on,
+.cortx-bv-bar.cortx-bv-bar-drag {
+  opacity: 1;
+}
+.cortx-bv-thumb {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  width: 5px;
   border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  background: color-mix(in srgb, var(--cortx-bv-fg, currentColor) 24%, transparent);
+  transition: width 120ms ease, background-color 120ms ease;
 }
-.cortx-bv::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--cortx-bv-fg, currentColor) 38%, transparent);
-  background-clip: padding-box;
+.cortx-bv-bar:hover .cortx-bv-thumb,
+.cortx-bv-bar-drag .cortx-bv-thumb {
+  width: 7px;
+  background: color-mix(in srgb, var(--cortx-bv-fg, currentColor) 40%, transparent);
+}
+.cortx-bv-alt > .cortx-bv-bar {
+  display: none;
 }
 .cortx-bv ::selection {
   background: var(--cortx-bv-selection, rgba(127, 127, 127, 0.35));

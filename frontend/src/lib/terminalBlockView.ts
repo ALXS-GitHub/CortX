@@ -194,8 +194,8 @@ const MAX_PROMPT_ROWS = 12;
 const PAD_LEFT = 14;
 /** Right padding inside a card, px. */
 const PAD_RIGHT = 10;
-/** Room kept for the list's scrollbar, px. */
-const SCROLLBAR = 10;
+/** Shortest the overlay scrollbar's thumb gets, px. */
+const MIN_THUMB = 28;
 
 /**
  * Air inside a block, above and below its rows, in cells. Warp's blocks are
@@ -258,6 +258,11 @@ export class BlockView {
   private live: SegEl | null = null;
   private clip: HTMLElement | null = null;
   private probe: HTMLElement | null = null;
+  /** The overlay scrollbar: a track over the list's right edge, and its thumb. */
+  private bar: HTMLElement | null = null;
+  private thumb: HTMLElement | null = null;
+  private barTimer = 0;
+  private drag: { y: number; top: number; ratio: number } | null = null;
   private linkLine: HTMLElement | null = null;
   private els = new Map<string, SegEl>();
   private segs: Seg[] = [];
@@ -414,7 +419,9 @@ export class BlockView {
     const vh = this.scroller.clientHeight;
     if (vw <= 0 || vh <= 0) return false;
     this.updateSpacing();
-    const cols = Math.max(2, Math.floor((vw - PAD_LEFT - PAD_RIGHT - SCROLLBAR) / this.cellW));
+    // The scrollbar is an overlay (see `updateBar`): the cards run to the
+    // pane's right edge and the grid gets the width the cards' padding leaves.
+    const cols = Math.max(2, Math.floor((vw - PAD_LEFT - PAD_RIGHT) / this.cellW));
     const rows = Math.max(2, Math.floor((vh - this.padTop - this.padBottom) / this.cellH));
     if (cols !== this.term.cols || rows !== this.term.rows) this.term.resize(cols, rows);
     this.schedule();
@@ -586,9 +593,23 @@ export class BlockView {
       seg: this.emptySeg('live'),
     };
 
+    // A native scrollbar takes its width from the list (or, with a stable
+    // gutter, keeps a strip free for it): the blocks would stop short of the
+    // pane's edge. The list's own is hidden; this one floats over it.
+    const bar = document.createElement('div');
+    bar.className = 'cortx-bv-bar';
+    bar.setAttribute('aria-hidden', 'true');
+    const thumb = document.createElement('div');
+    thumb.className = 'cortx-bv-thumb';
+    bar.appendChild(thumb);
+    this.bar = bar;
+    this.thumb = thumb;
+    bar.addEventListener('pointerdown', this.onBarDown);
+
     const focused = this.term.element?.contains(document.activeElement) ?? false;
     this.container.classList.add('cortx-bv-on');
     this.container.insertBefore(scroller, this.container.firstChild);
+    scroller.after(bar);
     if (this.term.element) clip.appendChild(this.term.element);
     // The universal input editor is laid out over the prompt row; it moves
     // with the live card so it scrolls with the list.
@@ -639,6 +660,10 @@ export class BlockView {
     window.removeEventListener('keydown', this.onModifier, true);
     window.removeEventListener('keyup', this.onModifier, true);
     this.scroller?.remove();
+    this.bar?.remove();
+    window.clearTimeout(this.barTimer);
+    this.drag = null;
+    this.bar = this.thumb = null;
     this.scroller = this.list = this.clip = this.probe = this.linkLine = null;
     this.live = null;
     this.els.clear();
@@ -1014,7 +1039,73 @@ export class BlockView {
     const s = this.scroller;
     if (!s) return;
     this.stuck = s.scrollTop >= s.scrollHeight - s.clientHeight - 2;
+    this.updateBar(true);
     this.scheduleScroll();
+  };
+
+  /**
+   * Place the overlay scrollbar's thumb. `reveal` shows it for a moment (a
+   * scroll); hovering the track keeps it shown (CSS).
+   */
+  private updateBar(reveal = false) {
+    const s = this.scroller;
+    const bar = this.bar;
+    const thumb = this.thumb;
+    if (!s || !bar || !thumb) return;
+    const viewH = s.clientHeight;
+    const range = s.scrollHeight - viewH;
+    if (this.alt || range <= 1 || viewH <= 0) {
+      bar.hidden = true;
+      return;
+    }
+    bar.hidden = false;
+    const h = Math.max(MIN_THUMB, Math.round((viewH * viewH) / s.scrollHeight));
+    const top = Math.round((Math.min(range, Math.max(0, s.scrollTop)) / range) * (viewH - h));
+    thumb.style.height = `${h}px`;
+    thumb.style.transform = `translateY(${top}px)`;
+    if (reveal) {
+      bar.classList.add('cortx-bv-bar-on');
+      window.clearTimeout(this.barTimer);
+      this.barTimer = window.setTimeout(() => {
+        if (!this.drag) this.bar?.classList.remove('cortx-bv-bar-on');
+      }, 900);
+    }
+  }
+
+  private readonly onBarDown = (e: PointerEvent) => {
+    const s = this.scroller;
+    const thumb = this.thumb;
+    if (!s || !thumb || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const viewH = s.clientHeight;
+    const range = s.scrollHeight - viewH;
+    const h = thumb.offsetHeight;
+    const ratio = viewH - h > 0 ? range / (viewH - h) : 0;
+    if (e.target !== thumb) {
+      // On the track: jump so the thumb's middle lands under the pointer.
+      const y = e.clientY - (this.bar?.getBoundingClientRect().top ?? 0);
+      s.scrollTop = (y - h / 2) * ratio;
+    }
+    this.drag = { y: e.clientY, top: s.scrollTop, ratio };
+    const bar = this.bar!;
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add('cortx-bv-bar-drag');
+    const move = (ev: PointerEvent) => {
+      if (!this.drag || !this.scroller) return;
+      this.scroller.scrollTop = this.drag.top + (ev.clientY - this.drag.y) * this.drag.ratio;
+    };
+    const up = () => {
+      this.drag = null;
+      bar.classList.remove('cortx-bv-bar-drag');
+      bar.removeEventListener('pointermove', move);
+      bar.removeEventListener('pointerup', up);
+      bar.removeEventListener('pointercancel', up);
+      this.updateBar(true);
+    };
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', up);
+    bar.addEventListener('pointercancel', up);
   };
 
   private readonly onKeyDown = (e: KeyboardEvent) => {
@@ -1742,6 +1833,7 @@ export class BlockView {
     if (alt) {
       scroller.scrollTop = 0;
       this.lastListH = -1;
+      this.updateBar();
       if (el) el.style.transform = '';
       if (this.clip) this.clip.style.height = `${this.term.rows * this.cellH}px`;
       this.host.onLayout?.();
@@ -1839,6 +1931,7 @@ export class BlockView {
     if (move && Math.abs(scroller.scrollTop - scrollTop) > 0.5) scroller.scrollTop = scrollTop;
     this.prevLayout.clear();
     for (const seg of segs) this.prevLayout.set(seg.key, { top: seg.top, height: seg.height });
+    this.updateBar();
     this.host.onLayout?.();
   }
 
