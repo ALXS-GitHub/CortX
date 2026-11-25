@@ -223,6 +223,30 @@ function trimUrl(url: string): string {
   return out;
 }
 
+/**
+ * Data xterm sends to the program by itself, not from the keyboard: focus in
+ * / out, mouse reports (SGR and X10), cursor-position and device-attribute
+ * replies, mode and window reports, OSC / DCS answers.
+ */
+/* eslint-disable no-control-regex -- terminal reports are escape sequences */
+const REPORT_RES = [
+  /^\x1b\[[IO]$/,
+  /^\x1b\[<\d+;\d+;\d+[Mm]$/,
+  /^\x1b\[M[\s\S]{3}$/,
+  /^\x1b\[\??\d+;\d+R$/,
+  /^\x1b\[[?>=][\d;]*c$/,
+  /^\x1b\[\??[\d;]*\$y$/,
+  /^\x1b\[[\d;]+t$/,
+  /^\x1b\[\?[\d;]*u$/,
+  /^\x1b\][\s\S]*(\x07|\x1b\\)$/,
+  /^\x1bP[\s\S]*\x1b\\$/,
+];
+/* eslint-enable no-control-regex */
+
+export function isTerminalReport(data: string): boolean {
+  return data.startsWith('\x1b') && data.length > 2 && REPORT_RES.some((re) => re.test(data));
+}
+
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
@@ -362,9 +386,14 @@ export class BlockView {
     );
     // Typing follows the prompt, the way it does in any terminal; it also
     // puts away a page selection, as Warp does.
+    // Only what the user typed or pasted, though: `onData` also carries what
+    // xterm answers on its own — the focus report a click sends to a program
+    // that asked for them (Claude Code does, `CSI ? 1004 h`), mouse reports,
+    // replies to a cursor-position or device query. Taken for typing, a mere
+    // click in an agent's conversation threw the list back to the bottom.
     this.disposables.push(
-      term.onData(() => {
-        if (!this.active) return;
+      term.onData((data) => {
+        if (!this.active || isTerminalReport(data)) return;
         this.stuck = true;
         this.schedule();
       })

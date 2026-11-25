@@ -385,7 +385,12 @@ export function renderRow(line: LineLike | undefined, ctx: RowContext, limit = I
   if (!line) return '';
   const { cell, palette, styles } = ctx;
   const end = Math.min(usedColumns(line, cell), limit);
-  if (end === 0) return '';
+  // The row runs to the grid's width in blanks, as a terminal row does: a
+  // selection then reaches the column the pointer is on, and the rows between
+  // its ends are selected across, not just as far as their text. (Copying
+  // still trims the trailing blanks, as xterm does — `textBetween`.)
+  const pad = Number.isFinite(limit) && limit > end ? `<span data-c="${end}">${' '.repeat(limit - end)}</span>` : '';
+  if (end === 0) return pad;
   let html = '';
   // The run being built: plain text, or drawn glyphs (box drawing, blocks,
   // Powerline — `terminalBoxGlyphs.ts`), one SVG per run so a line of `─`
@@ -454,7 +459,7 @@ export function renderRow(line: LineLike | undefined, ctx: RowContext, limit = I
     html += `<span data-c="${x}" class="w" style="${style ? `${style};${size}` : size}">${escapeHtml(chars)}</span>`;
   }
   flush();
-  return html;
+  return html + pad;
 }
 
 // ---------------------------------------------------------------------------
