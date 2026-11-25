@@ -13,9 +13,12 @@
 }
 /* The list runs edge to edge: the pane's padding (`--terminal-padding`, on
    the host) would frame it in a band on three sides. The cards carry their
-   own padding (--cortx-bv-p*), so the text keeps its room. The alternate
-   screen (vim, htop) is a plain terminal again and keeps the pane padding. */
-.cortx-xterm-host:has(> .cortx-xterm.cortx-bv-on:not(.cortx-bv-alt)) {
+   own padding (--cortx-bv-p*), so the text keeps its room.
+   The alternate screen (vim, htop, an agent's full-screen UI) keeps it at 0
+   too, and pads its own card instead: the pane padding coming back would
+   shrink the host, the ResizeObserver would refit, and every program that
+   switches screens would get a SIGWINCH and redraw at another width. */
+.cortx-xterm-host:has(> .cortx-xterm.cortx-bv-on) {
   padding: 0;
 }
 
@@ -40,6 +43,9 @@
   overflow-x: hidden;
   overflow-y: auto;
   overflow-anchor: none;
+  /* No rubber band: the view pins the list to its bottom, and a bounce past
+     the end (WebKit, Edge on a precision touchpad) would be cut short. */
+  overscroll-behavior: none;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--cortx-bv-fg, currentColor) 22%, transparent) transparent;
@@ -85,6 +91,11 @@
 .cortx-bv-list {
   position: relative;
   box-sizing: border-box;
+  /* The list's height is the scroll range, exactly: nothing that hangs out
+     of a card (the input editor's breathing room, an image tile) may make the
+     page scrollable past the last row. `clip`, not `hidden`: no scroll
+     container, so the sticky heads still stick to the scroller. */
+  overflow: clip;
 }
 
 /* ---- Segments ------------------------------------------------------------ */
@@ -94,6 +105,9 @@
 .cortx-bv-seg {
   position: relative;
   box-sizing: border-box;
+  /* Each block stacks on its own: its head, its wash and its toolbar order
+     among themselves, never against another block or xterm's layers. */
+  isolation: isolate;
 }
 .cortx-bv-loose,
 .cortx-bv-live {
@@ -110,14 +124,27 @@
 .cortx-bv-nodividers .cortx-bv-card:not(.cortx-bv-sel) {
   box-shadow: none;
 }
-.cortx-bv-card:hover {
+/* Hover, failure wash and selection are a layer *over* the whole card, not
+   its background: a background is hidden by whatever is opaque inside the
+   card (the pinned head's plate, the live xterm), so the effect stopped short
+   of part of the block. The layer takes no pointer events. */
+.cortx-bv-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: transparent;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+.cortx-bv-card:hover::after {
   background: var(--cortx-bv-plate-hover, rgba(127, 127, 127, 0.05));
 }
-.cortx-bv-card.cortx-bv-wash {
+.cortx-bv-card.cortx-bv-wash::after {
   background: var(--cortx-bv-fail-wash);
 }
 /* Selected: framed in the palette's blue, as Warp does. */
-.cortx-bv-card.cortx-bv-sel {
+.cortx-bv-card.cortx-bv-sel::after {
   background: var(--cortx-bv-select-wash, transparent);
   box-shadow: inset 0 0 0 1px var(--cortx-bv-select, rgba(97, 175, 239, 0.8));
 }
@@ -162,9 +189,26 @@
   position: sticky;
   top: 0;
 }
+/* Pinned: an opaque plate, and a short fade below it rather than a rule —
+   a 1 px line right under the prompt's last row read as a stray bar under
+   the text. */
 .cortx-bv-stuck > .cortx-bv-head {
   background: var(--cortx-bv-plate-solid);
-  box-shadow: 0 1px 0 var(--cortx-bv-edge);
+}
+.cortx-bv-stuck > .cortx-bv-head::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 6px;
+  background: linear-gradient(var(--cortx-bv-plate-solid), transparent);
+  pointer-events: none;
+}
+/* Its toolbar normally sits in the card's top padding, which is above the
+   view once the head is pinned: bring it onto the head. */
+.cortx-bv-stuck > .cortx-bv-head > .cortx-bv-tools {
+  top: 1px;
 }
 
 /* ---- Rows ------------------------------------------------------------------ */
@@ -363,6 +407,9 @@
 .cortx-bv-clip {
   position: relative;
   overflow: hidden;
+  /* xterm's own layers (decorations, the helper textarea) stay below the
+     card's hover / selection layer. */
+  isolation: isolate;
 }
 .cortx-bv-clip > .xterm {
   position: relative;
@@ -382,11 +429,14 @@
 }
 .cortx-bv-alt .cortx-bv-live {
   height: auto !important;
-  padding: 0 0 0 var(--cortx-bv-pl, 14px) !important;
+  /* The pane padding is not there (see the host rule at the top): the card
+     brings its own. The grid's rows already leave room for it (fit()). */
+  padding: var(--cortx-bv-pt, 6px) 0 0 var(--cortx-bv-pl, 14px) !important;
   background: none !important;
   box-shadow: none !important;
 }
 .cortx-bv-alt .cortx-bv-live::before,
+.cortx-bv-alt .cortx-bv-live::after,
 .cortx-bv-alt .cortx-bv-live > .cortx-bv-body {
   display: none;
 }

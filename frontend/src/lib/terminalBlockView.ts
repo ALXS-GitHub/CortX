@@ -289,6 +289,20 @@ export class BlockView {
   private alt = false;
   /** Segment heights of the previous frame, for scroll anchoring. */
   private prevLayout = new Map<string, { top: number; height: number }>();
+  /** Anything but a scroll asked for this frame: the segments are rebuilt. */
+  private layoutDirty = true;
+  /** Height of the list at the last full layout, px. */
+  private lastListH = -1;
+  /** Frozen segments drawn around the view at the last paint. */
+  private shown = new Set<string>();
+  /**
+   * The lowest screen row the running command has used. A program that
+   * redraws (an agent's UI, a progress bar) erases its rows before it writes
+   * them again, and a frame can land in between: the block would shrink and
+   * grow back, and the whole list jump with it. A real screen does not
+   * shrink while a program runs either.
+   */
+  private liveHigh: { id: number; row: number } | null = null;
 
   // -- Search -----------------------------------------------------------------
   private searchRe: RegExp | null = null;
@@ -1000,7 +1014,7 @@ export class BlockView {
     const s = this.scroller;
     if (!s) return;
     this.stuck = s.scrollTop >= s.scrollHeight - s.clientHeight - 2;
-    this.schedule();
+    this.scheduleScroll();
   };
 
   private readonly onKeyDown = (e: KeyboardEvent) => {
@@ -1521,6 +1535,12 @@ export class BlockView {
   // ==========================================================================
 
   private schedule() {
+    this.layoutDirty = true;
+    this.scheduleScroll();
+  }
+
+  /** A frame for a scroll alone: the layout is the last one, only repainted. */
+  private scheduleScroll() {
     if (!this.active || this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
@@ -1531,6 +1551,7 @@ export class BlockView {
   private renderNow() {
     if (this.frame) cancelAnimationFrame(this.frame);
     this.frame = 0;
+    this.layoutDirty = true;
     this.render();
   }
 
@@ -1632,6 +1653,13 @@ export class BlockView {
         break;
       }
     }
+    if (liveBlock?.status === 'running') {
+      const high = this.liveHigh?.id === liveBlock.id ? Math.min(this.liveHigh.row, this.term.rows - 1) : -1;
+      lastRow = Math.max(lastRow, high);
+      this.liveHigh = { id: liveBlock.id, row: lastRow };
+    } else {
+      this.liveHigh = null;
+    }
     live.screenRows = Math.max(1, lastRow - live.screenTop + 1);
     live.card = liveBlock !== null;
     out.push(live);
@@ -1677,6 +1705,15 @@ export class BlockView {
 
   private render() {
     if (!this.active || !this.scroller || !this.list || !this.live || !this.container.isConnected) return;
+    const full = this.layoutDirty;
+    this.layoutDirty = false;
+    // A scroll alone changes nothing but what is in view: no segments to
+    // rebuild, no scroll position to set — the browser already has it, and
+    // writing it back mid-gesture is what made the list jerk.
+    if (!full && !this.alt && this.segs.length > 0 && this.term.buffer.active.type === 'normal') {
+      this.paintScroll();
+      return;
+    }
     if (!this.measure()) {
       this.schedule();
       return;
@@ -1704,6 +1741,7 @@ export class BlockView {
     }
     if (alt) {
       scroller.scrollTop = 0;
+      this.lastListH = -1;
       if (el) el.style.transform = '';
       if (this.clip) this.clip.style.height = `${this.term.rows * this.cellH}px`;
       this.host.onLayout?.();
@@ -1739,13 +1777,28 @@ export class BlockView {
     this.list.style.paddingTop = `${filler}px`;
     this.list.style.height = `${y}px`;
 
-    // -- Where the view will be, to know what to draw.
-    let scrollTop = scroller.scrollTop;
-    if (this.stuck) scrollTop = Math.max(0, y - viewH);
-    else if (anchor) {
+    // -- Where the view will be, to know what to draw. The position is only
+    // ever moved to follow the content (it grew under a view pinned to the
+    // bottom, or moved under the row the view was on); a position the user
+    // scrolled to is theirs — a view past the end (a rubber band) included.
+    const current = scroller.scrollTop;
+    let scrollTop = current;
+    let move = false;
+    if (this.stuck) {
+      const bottom = Math.max(0, y - viewH);
+      if (current < bottom - 0.5 || y !== this.lastListH) {
+        scrollTop = bottom;
+        move = true;
+      }
+    } else if (anchor) {
       const seg = segs.find((s) => s.key === anchor!.key);
-      if (seg) scrollTop = Math.max(0, seg.top + anchor.offset);
+      const prev = this.prevLayout.get(anchor.key);
+      if (seg && (!prev || prev.top !== seg.top)) {
+        scrollTop = Math.max(0, seg.top + anchor.offset);
+        move = true;
+      }
     }
+    this.lastListH = y;
     const winTop = scrollTop - viewH;
     const winBottom = scrollTop + viewH * 2;
 
@@ -1766,6 +1819,10 @@ export class BlockView {
       segEl.seg = seg;
       this.paintSeg(segEl, seg, ctx, winTop, winBottom, scrollTop);
     }
+    this.shown.clear();
+    for (let i = 0; i < segs.length - 1; i++) {
+      if (segs[i].top + segs[i].height > winTop && segs[i].top < winBottom) this.shown.add(segs[i].key);
+    }
     for (const [key, segEl] of this.els) {
       if (!wanted.has(key)) {
         segEl.root.remove();
@@ -1779,9 +1836,56 @@ export class BlockView {
     this.paintLive(liveSeg, ctx, winTop, winBottom);
 
     // -- Scroll.
-    if (Math.abs(scroller.scrollTop - scrollTop) > 0.5) scroller.scrollTop = scrollTop;
+    if (move && Math.abs(scroller.scrollTop - scrollTop) > 0.5) scroller.scrollTop = scrollTop;
     this.prevLayout.clear();
     for (const seg of segs) this.prevLayout.set(seg.key, { top: seg.top, height: seg.height });
+    this.host.onLayout?.();
+  }
+
+  /**
+   * A frame for a scroll alone: the segments of the last layout, painted
+   * around the new position. Only the ones in the window — and the ones that
+   * just left it, to put their rows away and unpin their head — are touched,
+   * so a list of hundreds of blocks scrolls at the cost of the few in view.
+   */
+  private paintScroll() {
+    const scroller = this.scroller!;
+    const ctx = this.rowCtx;
+    if (!ctx) return;
+    const segs = this.segs;
+    const scrollTop = scroller.scrollTop;
+    const viewH = scroller.clientHeight;
+    const winTop = scrollTop - viewH;
+    const winBottom = scrollTop + viewH * 2;
+    // First segment that reaches into the window (they are in order).
+    let lo = 0;
+    let hi = segs.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (segs[mid].top + segs[mid].height > winTop) hi = mid;
+      else lo = mid + 1;
+    }
+    const inView = new Set<string>();
+    for (let i = lo; i < segs.length - 1 && segs[i].top < winBottom; i++) {
+      const seg = segs[i];
+      const segEl = this.els.get(seg.key);
+      if (!segEl) continue;
+      inView.add(seg.key);
+      this.paintSeg(segEl, seg, ctx, winTop, winBottom, scrollTop);
+    }
+    for (const key of this.shown) {
+      if (inView.has(key)) continue;
+      const segEl = this.els.get(key);
+      if (segEl) this.paintSeg(segEl, segEl.seg, ctx, winTop, winBottom, scrollTop);
+    }
+    this.shown = inView;
+    const live = segs[segs.length - 1];
+    if (this.live && live) {
+      const bodyTop = live.top + (live.card ? this.padTop : 0);
+      this.paintChunks(this.live, live, ctx, bodyTop, winTop, winBottom);
+    }
+    // What is laid out over the live card (the editor's completion list) is
+    // placed in viewport coordinates.
     this.host.onLayout?.();
   }
 
