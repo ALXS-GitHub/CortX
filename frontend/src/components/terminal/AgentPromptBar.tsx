@@ -36,9 +36,10 @@ function providerName(agent: TerminalAgentInfo): string {
 
 /**
  * The agent prompt docked under a terminal while an agent runs in it (see
- * `agentPrompt.ts`): a one-line toolbelt, and over the terminal's last rows
- * an editor whose prompt goes to the agent. Nothing at all while no agent
- * runs, or when the setting is off.
+ * `agentPrompt.ts`): a one-line toolbelt which, open, grows upwards over the
+ * terminal's last rows into the editor whose prompt goes to the agent — one
+ * surface, never the editor *and* the toolbelt's field. Nothing at all while
+ * no agent runs, or when the setting is off.
  */
 export function AgentPromptBar({ terminalId }: { terminalId: string }) {
   const agent = useTerminalAgent(terminalId);
@@ -248,116 +249,134 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
   const canSend = !sending && (draft.text.trim() !== '' || draft.attachments.length > 0);
   const pending = draft.text.trim() !== '' || draft.attachments.length > 0;
 
+  const expanded = open && !blocked;
+  const phaseLabel = <span className="hidden shrink-0 text-[11px] text-faint sm:inline">{AGENT_PHASE_LABEL[phase]}</span>;
+  const who = (
+    <>
+      <AgentPhaseDot phase={phase} needsInput={agent.needsInput} provider={agent.provider} size={7} />
+      <AgentProviderIcon provider={agent.provider} plain />
+      <span className="max-w-[12rem] shrink-0 truncate text-muted-foreground" title={agent.name || name}>
+        {agent.name || name}
+      </span>
+    </>
+  );
+
   return (
     <div ref={barRef} data-agent-bar={terminalId} className="relative shrink-0 select-none font-sans">
-      {open && !blocked && (
-        <div className="absolute inset-x-0 bottom-full z-20 px-2 pb-1.5">
-          <div
-            className="rounded-[var(--rad-md)] border border-border-strong bg-popover/95 shadow-pop backdrop-blur-sm"
-            onMouseDown={(e) => {
-              // A click on the frame (not the field) keeps the caret in it.
-              if (e.target !== fieldRef.current && !(e.target as HTMLElement).closest('button')) e.preventDefault();
-            }}
-          >
-            {draft.attachments.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 px-2.5 pt-2">
-                {draft.attachments.map((a) => (
-                  <span
-                    key={a.path}
-                    title={a.path}
-                    className="inline-flex max-w-[16rem] items-center gap-1 rounded-[var(--rad-xs)] border border-border bg-muted/60 py-0.5 pr-0.5 pl-1.5 text-[11px] text-muted-foreground"
-                  >
-                    {a.image ? <ImageIcon className="size-3 shrink-0" /> : <FileText className="size-3 shrink-0" />}
-                    <span className="truncate">{a.name}</span>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${a.name}`}
-                      onClick={() => removeAttachment(a.path)}
-                      className="grid size-4 place-items-center rounded-[3px] hover:bg-accent hover:text-foreground"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <textarea
-              ref={fieldRef}
-              value={draft.text}
-              rows={1}
-              spellCheck={false}
-              placeholder={`Message ${name}…`}
-              onChange={(e) => {
-                recall.current = -1;
-                setDraft((d) => ({ ...d, text: e.target.value }));
-              }}
-              onKeyDown={onKeyDown}
-              onPaste={(e) => void onPaste(e)}
-              className="block max-h-[33vh] w-full resize-none bg-transparent px-3 pt-2 pb-1 font-mono text-[13px] leading-5 text-foreground outline-none placeholder:text-faint select-text"
-            />
-            <div className="flex items-center gap-2 px-2 pb-1.5 text-[11px] text-faint">
-              <button
-                type="button"
-                onClick={() => void pickFiles()}
-                className="inline-flex items-center gap-1 rounded-[var(--rad-xs)] px-1.5 py-0.5 hover:bg-accent hover:text-foreground"
-                title="Attach files or images (or paste an image, or drop files here)"
-              >
-                <Paperclip className="size-3" />
-                Attach
-              </button>
-              <span className="ml-auto">Shift+Enter new line · Esc back to the terminal</span>
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={() => void send()}
-                className={cn(
-                  'inline-flex items-center gap-1 rounded-[var(--rad-xs)] px-2 py-0.5 font-medium',
-                  canSend ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'bg-muted text-faint'
-                )}
-              >
-                Send
-                <CornerDownLeft className="size-3" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* The toolbelt: which agent, what it is at, and the way in. */}
-      <div className="flex h-8 items-center gap-2 border-t border-border/60 bg-terminal px-2.5 text-xs">
-        <AgentPhaseDot phase={phase} needsInput={agent.needsInput} provider={agent.provider} size={7} />
-        <AgentProviderIcon provider={agent.provider} plain />
-        <span className="max-w-[12rem] shrink-0 truncate text-muted-foreground" title={agent.name || name}>
-          {agent.name || name}
-        </span>
+      {/* The toolbelt: which agent, what it is at, and the way in. Open, the
+          editor takes its place and grows upwards over the terminal's last
+          rows; the toolbelt keeps its room (invisible), so the terminal is
+          not resized — a resize makes the agent redraw its whole screen. */}
+      <div
+        aria-hidden={expanded || undefined}
+        className={cn(
+          'flex h-8 items-center gap-2 border-t border-border/60 bg-terminal px-2.5 text-xs',
+          expanded && 'invisible'
+        )}
+      >
+        {who}
         {blocked ? (
           <span className="min-w-0 flex-1 truncate text-st-blocked">Answer {name}&rsquo;s question in the terminal</span>
         ) : (
           <button
             type="button"
-            onClick={() => (open ? fieldRef.current?.focus() : show())}
-            className={cn(
-              'flex h-6 min-w-0 flex-1 items-center gap-2 rounded-[var(--rad-sm)] border border-border/70 px-2 text-left transition-colors hover:border-border-strong',
-              open && 'border-border-strong'
-            )}
+            tabIndex={expanded ? -1 : undefined}
+            onClick={() => show()}
+            className="flex h-6 min-w-0 flex-1 items-center gap-2 rounded-[var(--rad-sm)] border border-border/70 px-2 text-left transition-colors hover:border-border-strong"
           >
             <span className={cn('min-w-0 flex-1 truncate', pending ? 'text-foreground' : 'text-faint')}>
-              {pending ? draft.text.split('\n')[0] || `${draft.attachments.length} attachment(s)` : `Message ${name}…`}
+              {pending ? draft.text.split('\n')[0] ||`${draft.attachments.length} attachment(s)` : `Message ${name}…`}
             </span>
             {shortcut && <kbd className="shrink-0 font-sans text-[10px] text-faint">{shortcut}</kbd>}
           </button>
         )}
-        <span className="hidden shrink-0 text-[11px] text-faint sm:inline">{AGENT_PHASE_LABEL[phase]}</span>
+        {phaseLabel}
         <button
           type="button"
           aria-label="Attach files"
           title="Attach files or images"
+          tabIndex={expanded ? -1 : undefined}
           onClick={() => void pickFiles()}
           className="grid size-6 shrink-0 place-items-center rounded-[var(--rad-xs)] text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Paperclip className="size-3.5" />
         </button>
       </div>
+
+      {expanded && (
+        <div
+          className="absolute inset-x-0 bottom-0 z-20 border-t border-border-strong bg-terminal shadow-pop"
+          onMouseDown={(e) => {
+            // A click on the frame (not the field) keeps the caret in it.
+            if (e.target !== fieldRef.current && !(e.target as HTMLElement).closest('button')) e.preventDefault();
+          }}
+        >
+          {draft.attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-2.5 pt-2">
+              {draft.attachments.map((a) => (
+                <span
+                  key={a.path}
+                  title={a.path}
+                  className="inline-flex max-w-[16rem] items-center gap-1 rounded-[var(--rad-xs)] border border-border bg-muted/60 py-0.5 pr-0.5 pl-1.5 text-[11px] text-muted-foreground"
+                >
+                  {a.image ? <ImageIcon className="size-3 shrink-0" /> : <FileText className="size-3 shrink-0" />}
+                  <span className="truncate">{a.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${a.name}`}
+                    onClick={() => removeAttachment(a.path)}
+                    className="grid size-4 place-items-center rounded-[3px] hover:bg-accent hover:text-foreground"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={fieldRef}
+            value={draft.text}
+            rows={1}
+            spellCheck={false}
+            placeholder={`Message ${name}…`}
+            onChange={(e) => {
+              recall.current = -1;
+              setDraft((d) => ({ ...d, text: e.target.value }));
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={(e) => void onPaste(e)}
+            className="block max-h-[33vh] w-full resize-none bg-transparent px-3 pt-2 pb-1 font-mono text-[13px] leading-5 text-foreground outline-none placeholder:text-faint select-text"
+          />
+          {/* The toolbelt's own row, at the bottom where it was: the editor
+              grew out of it rather than opening a second one above it. */}
+          <div className="flex h-8 items-center gap-2 px-2.5 text-xs">
+            {who}
+            {phaseLabel}
+            <span className="ml-auto hidden truncate text-[11px] text-faint md:inline">Shift+Enter new line · Esc back to the terminal</span>
+            <button
+              type="button"
+              onClick={() => void pickFiles()}
+              className="inline-flex shrink-0 items-center gap-1 rounded-[var(--rad-xs)] px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground max-md:ml-auto"
+              title="Attach files or images (or paste an image, or drop files here)"
+            >
+              <Paperclip className="size-3" />
+              Attach
+            </button>
+            <button
+              type="button"
+              disabled={!canSend}
+              onClick={() => void send()}
+              className={cn(
+                'inline-flex shrink-0 items-center gap-1 rounded-[var(--rad-xs)] px-2 py-0.5 text-[11px] font-medium',
+                canSend ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'bg-muted text-faint'
+              )}
+            >
+              Send
+              <CornerDownLeft className="size-3" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
