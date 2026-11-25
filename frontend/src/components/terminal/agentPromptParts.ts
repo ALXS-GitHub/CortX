@@ -78,3 +78,64 @@ export function promptParts(text: string, attachments: readonly PromptAttachment
   if (rest) parts.push({ kind: 'text', text: rest });
   return parts;
 }
+
+// ---------------------------------------------------------------------------
+// Markers as one piece in the editor
+// ---------------------------------------------------------------------------
+
+/** Where an image marker sits in the text (only markers of a real image). */
+export interface MarkerSpan {
+  start: number;
+  end: number;
+  n: number;
+}
+
+export function markerSpans(text: string, attachments: readonly PromptAttachment[]): MarkerSpan[] {
+  const known = new Set(attachments.filter((a) => a.image && a.n !== undefined).map((a) => a.n));
+  const out: MarkerSpan[] = [];
+  for (const m of text.matchAll(MARKER_RE)) {
+    const n = Number(m[1]);
+    if (known.has(n)) out.push({ start: m.index!, end: m.index! + m[0].length, n });
+  }
+  return out;
+}
+
+/**
+ * Backspace / Delete next to (or a selection over part of) a marker: the
+ * whole marker goes, as one character would. Null when no marker is
+ * involved — the field's own editing then applies.
+ */
+export function eraseMarker(
+  text: string,
+  spans: readonly MarkerSpan[],
+  from: number,
+  to: number,
+  key: 'Backspace' | 'Delete'
+): { text: string; caret: number } | null {
+  let a = from;
+  let b = to;
+  if (from === to) {
+    const hit = spans.find((s) => (key === 'Backspace' ? s.start < from && from <= s.end : s.start <= from && from < s.end));
+    if (!hit) return null;
+    a = hit.start;
+    b = hit.end;
+  } else {
+    const cut = spans.filter((s) => s.start < b && s.end > a && (s.start < a || s.end > b));
+    if (cut.length === 0) return null;
+    for (const s of cut) {
+      a = Math.min(a, s.start);
+      b = Math.max(b, s.end);
+    }
+  }
+  // The space the marker was set off with goes too, not to leave two.
+  if (text[a - 1] === ' ' && (b === text.length || text[b] === ' ')) a--;
+  return { text: text.slice(0, a) + text.slice(b), caret: a };
+}
+
+/** A caret inside a marker moves to its nearer edge (or the one `toward`). */
+export function snapCaret(spans: readonly MarkerSpan[], pos: number, toward?: 'start' | 'end'): number {
+  const s = spans.find((x) => x.start < pos && pos < x.end);
+  if (!s) return pos;
+  if (toward) return toward === 'start' ? s.start : s.end;
+  return pos - s.start <= s.end - pos ? s.start : s.end;
+}

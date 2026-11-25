@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { CornerDownLeft, FileText, Image as ImageIcon, Paperclip, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
@@ -21,7 +21,15 @@ import {
   type AgentAttachment,
   type AgentDraft,
 } from './agentPrompt';
-import { imageMarker, nextImageNumber, visibleAttachments } from './agentPromptParts';
+import {
+  eraseMarker,
+  imageMarker,
+  markerSpans,
+  nextImageNumber,
+  snapCaret,
+  visibleAttachments,
+  type MarkerSpan,
+} from './agentPromptParts';
 
 const PROVIDER_NAME: Record<TerminalAgentInfo['provider'], string> = {
   'claude-code': 'Claude Code',
@@ -31,6 +39,37 @@ const PROVIDER_NAME: Record<TerminalAgentInfo['provider'], string> = {
 function providerName(agent: TerminalAgentInfo): string {
   return PROVIDER_NAME[agent.provider] ?? 'the agent';
 }
+
+/**
+ * The prompt's text with each image marker drawn as a bubble. The bubble
+ * holds the marker's own characters, so it is exactly as wide as the text it
+ * stands for: the brackets are kept, invisible, as its padding. (No icon:
+ * in a monospace line it would only get one character's width.)
+ */
+function renderWithBubbles(text: string, spans: MarkerSpan[]) {
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const sp of spans) {
+    if (sp.start > last) out.push(text.slice(last, sp.start));
+    out.push(
+      <span
+        key={sp.start}
+        className="rounded-[5px] bg-primary/15 text-primary shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-primary)_45%,transparent)]"
+      >
+        <span className="text-transparent">[</span>
+        {text.slice(sp.start + 1, sp.end - 1)}
+        <span className="text-transparent">]</span>
+      </span>
+    );
+    last = sp.end;
+  }
+  // A last empty line still takes its height in the field.
+  out.push(text.slice(last) + (text.endsWith(NEWLINE) ? ZWSP : ''));
+  return out;
+}
+
+const NEWLINE = String.fromCharCode(10);
+const ZWSP = String.fromCharCode(0x200b);
 
 /**
  * The agent prompt of a terminal running an agent (see `agentPrompt.ts`): a
@@ -59,6 +98,7 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
   const [sending, setSending] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
   const recall = useRef(-1);
 
   const setDraft = useCallback(
@@ -126,7 +166,7 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
         const markers = added.map((a) => imageMarker(a.n)).join(' ');
         const before = d.text.slice(0, from ?? d.text.length);
         const after = d.text.slice(to ?? d.text.length);
-        const head = `${before}${before && !/\s$/.test(before) ? ' ' : ''}${markers}${after && !/^\s/.test(after) ? ' ' : ''}`;
+        const head = `${before}${before && !/\s$/.test(before) ? ' ' : ''}${markers}${!/^\s/.test(after) ? ' ' : ''}`;
         pendingCaret.current = head.length;
         return { text: head + after, attachments: [...d.attachments, ...added] };
       });
@@ -253,6 +293,33 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
       hide();
       return;
     }
+    // An image marker is one character to the keyboard: erased whole, and
+    // stepped over by ← / →.
+    {
+      const field = e.currentTarget;
+      const from = field.selectionStart;
+      const to = field.selectionEnd;
+      if ((e.key === 'Backspace' || e.key === 'Delete') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const erased = eraseMarker(draft.text, spans, from, to, e.key);
+        if (erased) {
+          e.preventDefault();
+          recall.current = -1;
+          pendingCaret.current = erased.caret;
+          setDraft((d) => ({ ...d, text: erased.text }));
+          return;
+        }
+      }
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && from === to) {
+        const left = e.key === 'ArrowLeft';
+        const hit = spans.find((sp) => (left ? sp.end === from : sp.start === from));
+        if (hit) {
+          e.preventDefault();
+          const caret = left ? hit.start : hit.end;
+          field.setSelectionRange(caret, caret);
+          return;
+        }
+      }
+    }
     // ↑ / ↓ on an empty field (or one recalled from the history) walk the
     // prompts already sent to this agent.
     const list = promptHistory(terminalId);
@@ -307,7 +374,13 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
           : d.text,
       attachments: d.attachments.filter((a) => a !== target && a.path !== target.path),
     }));
-  const chips = visibleAttachments(draft.text, draft.attachments);
+  // Images are shown in the text itself (the bubbles below); the chips are
+  // for the files, and for images from an older draft that has no marker.
+  const chips = visibleAttachments(draft.text, draft.attachments).filter((a) => !a.image || a.n === undefined);
+
+  // Where the image markers are, for the keys and for the bubbles drawn
+  // under the field.
+  const spans = markerSpans(draft.text, draft.attachments);
 
   const canSend = !sending && (draft.text.trim() !== '' || draft.attachments.length > 0);
 
@@ -353,20 +426,44 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
                 ))}
               </div>
             )}
-            <textarea
-              ref={fieldRef}
-              value={draft.text}
-              rows={1}
-              spellCheck={false}
-              placeholder={`Message ${name}…`}
-              onChange={(e) => {
-                recall.current = -1;
-                setDraft((d) => ({ ...d, text: e.target.value }));
-              }}
-              onKeyDown={onKeyDown}
-              onPaste={(e) => void onPaste(e)}
-              className="block max-h-[33vh] w-full resize-none bg-transparent px-3 pt-2 pb-1 font-mono text-[13px] leading-5 text-foreground outline-none placeholder:text-faint select-text"
-            />
+            {/* The text is drawn twice: by the field, transparent, which keeps
+                the caret, the selection and all the editing; and under it, the
+                same characters in the same monospace font, where an image
+                marker is a bubble. Same box, same wrapping, so every glyph
+                sits exactly under its own. */}
+            <div className="relative">
+              <div
+                ref={backdropRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 overflow-hidden px-3 pt-2 pb-1 font-mono text-[13px] leading-5 break-words whitespace-pre-wrap text-foreground"
+              >
+                {renderWithBubbles(draft.text, spans)}
+              </div>
+              <textarea
+                ref={fieldRef}
+                value={draft.text}
+                rows={1}
+                spellCheck={false}
+                placeholder={`Message ${name}…`}
+                onChange={(e) => {
+                  recall.current = -1;
+                  setDraft((d) => ({ ...d, text: e.target.value }));
+                }}
+                onKeyDown={onKeyDown}
+                onPaste={(e) => void onPaste(e)}
+                onSelect={(e) => {
+                  // A click inside a marker puts the caret at its edge.
+                  const field = e.currentTarget;
+                  if (field.selectionStart !== field.selectionEnd) return;
+                  const snapped = snapCaret(spans, field.selectionStart);
+                  if (snapped !== field.selectionStart) field.setSelectionRange(snapped, snapped);
+                }}
+                onScroll={(e) => {
+                  if (backdropRef.current) backdropRef.current.scrollTop = e.currentTarget.scrollTop;
+                }}
+                className="relative block max-h-[33vh] w-full resize-none bg-transparent px-3 pt-2 pb-1 font-mono text-[13px] leading-5 break-words whitespace-pre-wrap text-transparent caret-foreground outline-none [scrollbar-width:none] placeholder:text-faint select-text"
+              />
+            </div>
             <div className="flex items-center gap-2 px-2 pb-1.5 text-[11px] text-faint">
               <button
                 type="button"

@@ -7,7 +7,16 @@
  * text — the text before it, its path alone, the text after — and a marker
  * the user deleted (or typed by hand) does not send an image.
  */
-import { imageMarker, nextImageNumber, promptParts, visibleAttachments, type PromptAttachment } from './agentPromptParts.ts';
+import {
+  eraseMarker,
+  imageMarker,
+  markerSpans,
+  nextImageNumber,
+  promptParts,
+  snapCaret,
+  visibleAttachments,
+  type PromptAttachment,
+} from './agentPromptParts.ts';
 
 const failures: string[] = [];
 let passed = 0;
@@ -66,6 +75,36 @@ test('files go last as paths; older images without a marker go first', () => {
 test('numbers keep counting up', () => {
   equal(nextImageNumber([]), 1);
   equal(nextImageNumber([img(1), img(3)]), 4);
+});
+
+test('a marker is erased whole, with the space it was set off with', () => {
+  const text = `see ${imageMarker(1)} now`;
+  const spans = markerSpans(text, [img(1)]);
+  equal(spans, [{ start: 4, end: 14, n: 1 }]);
+  equal(eraseMarker(text, spans, 14, 14, 'Backspace'), { text: 'see now', caret: 3 });
+  equal(eraseMarker(text, spans, 4, 4, 'Delete'), { text: 'see now', caret: 3 });
+  equal(eraseMarker(text, spans, 9, 9, 'Backspace'), { text: 'see now', caret: 3 });
+  equal(eraseMarker(text, spans, 3, 3, 'Backspace'), null);
+  equal(eraseMarker(text, spans, 15, 15, 'Delete'), null);
+});
+
+test('a selection over part of a marker takes all of it', () => {
+  const text = `a ${imageMarker(2)}b`;
+  const spans = markerSpans(text, [img(2)]);
+  equal(eraseMarker(text, spans, 0, 5, 'Backspace'), { text: 'b', caret: 0 });
+  equal(eraseMarker('plain', [], 0, 2, 'Delete'), null);
+});
+
+test('a hand-typed marker is not one piece', () => {
+  equal(markerSpans(`x ${imageMarker(9)}`, [img(1)]), []);
+});
+
+test('a caret inside a marker goes to an edge', () => {
+  const spans = [{ start: 4, end: 14, n: 1 }];
+  equal(snapCaret(spans, 6), 4);
+  equal(snapCaret(spans, 12), 14);
+  equal(snapCaret(spans, 6, 'end'), 14);
+  equal(snapCaret(spans, 14), 14);
 });
 
 console.log(`agentPromptParts: ${passed} passed, ${failures.length} failed`);
