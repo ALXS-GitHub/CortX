@@ -137,8 +137,8 @@ export function AgentSettingsSection() {
         <SettingToggle
           k="agentPromptBar"
           id="agent-prompt-bar"
-          label="Agent prompt under the terminal"
-          hint="While an agent runs in a terminal, a bar below it: write your prompt in a real editor (Ctrl+G), paste or drop images and files, and it goes to the agent as if typed in its own input."
+          label="Agent prompt (Ctrl+G)"
+          hint="While an agent runs in a terminal, Ctrl+G opens an editor over its last rows: write your prompt there, paste or drop images and files, and it goes to the agent as if typed in its own input."
         >
           <Switch
             id="agent-prompt-bar"
