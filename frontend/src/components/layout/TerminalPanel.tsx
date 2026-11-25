@@ -28,6 +28,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { XtermView } from './XtermView';
+import { AgentPromptBar } from '@/components/terminal/AgentPromptBar';
 import { CloseConfirmDialog } from '@/components/terminal/CloseConfirmDialog';
 import { CommandHistoryView } from '@/components/terminal/history/CommandHistoryView';
 import { confirmCloseTerminals } from '@/components/terminal/actions';
@@ -252,6 +253,7 @@ function DroppablePaneContent({
           <div className="relative min-h-0 flex-1">
             <XtermView terminalId={activeTerminal.id} autoFocus={isFocused} />
           </div>
+          <AgentPromptBar terminalId={activeTerminal.id} />
         </TerminalErrorBoundary>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-faint">

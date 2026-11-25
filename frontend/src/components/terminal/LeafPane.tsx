@@ -13,6 +13,7 @@ import type { TerminalItem } from '@/components/layout/terminal-dnd/types';
 import type { GlobalScript } from '@/types';
 import { closeLeaf, sendLeafToDock, splitLeaf } from './actions';
 import { hasEnded } from './model';
+import { AgentPromptBar } from './AgentPromptBar';
 
 /**
  * How to start the process behind an ended service / script leaf again. The
@@ -165,6 +166,10 @@ export function LeafPane({ tab, leaf, item, isActiveLeaf, isActiveTab, multi, ma
           </div>
         )}
       </div>
+
+      {/* While an agent runs here: the prompt that writes to it (Warp's rich
+          input). Below the terminal, so the agent's own rows stay visible. */}
+      <AgentPromptBar terminalId={leaf.terminalId} />
 
       {/* Floating actions */}
       <div

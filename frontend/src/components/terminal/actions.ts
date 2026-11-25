@@ -16,6 +16,7 @@ import {
   resetTerminalZoom,
 } from '@/lib/terminalSessions';
 import { useTerminalAgentsStore } from './agentsStore';
+import { attachToAgentPrompt, isEditorOpen, toggleAgentPrompt } from './agentPrompt';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
 import { basename } from '@/lib/terminalNames';
 import type { KeybindingActionId } from '@/lib/keybindings';
@@ -976,6 +977,12 @@ export function pasteDroppedPaths(paths: string[], position: { x: number; y: num
   const tab = tabContainingTerminal(useTerminalLayoutStore.getState().doc.window, terminalId);
   const leaf = tab ? collectLeaves(tab.layout).find((l) => l.terminalId === terminalId) : undefined;
   if (tab && leaf) useTerminalLayoutStore.getState().setActiveLeaf(tab.id, leaf.id);
+  // On the agent prompt (its toolbelt, or its editor open on this pane): the
+  // files become attachments of the prompt being written.
+  if (el?.closest('[data-agent-bar]') || isEditorOpen(terminalId)) {
+    attachToAgentPrompt(terminalId, paths);
+    return true;
+  }
   const text = paths.map(quotePath).join(' ');
   // Into an agent's prompt, as a paste: Claude Code turns a pasted image path
   // into an attached image, where typed characters stay plain text. A shell
@@ -1114,6 +1121,13 @@ export function runAction(id: KeybindingActionId): boolean {
       const terminalId = activeTerminalId();
       if (!terminalId) return false;
       return jumpTerminalBlock(terminalId, id === 'block.previous' ? 'previous' : 'next');
+    }
+    case 'agent.prompt': {
+      const terminalId = activeTerminalId();
+      if (!terminalId || !useTerminalAgentsStore.getState().agents.has(terminalId)) return false;
+      if (useAppStore.getState().settings?.terminal?.agentPromptBar === false) return false;
+      toggleAgentPrompt(terminalId);
+      return true;
     }
     case 'terminal.find':
       return openFindInActiveTerminal();

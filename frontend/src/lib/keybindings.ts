@@ -57,6 +57,9 @@ export const KEYBINDING_ACTIONS = [
   // --- Terminal
   { id: 'block.previous', label: 'Previous block', category: 'Terminal', defaults: ['ctrl+up'] },
   { id: 'block.next', label: 'Next block', category: 'Terminal', defaults: ['ctrl+down'] },
+  // As in Warp. Only taken while an agent runs in the pane (and the agent
+  // prompt is on): anywhere else Ctrl+G still reaches the program.
+  { id: 'agent.prompt', label: 'Agent prompt (write to the running agent)', category: 'Terminal', defaults: ['ctrl+g'] },
   { id: 'terminal.find', label: 'Find in terminal', category: 'Terminal', defaults: ['ctrl+shift+f'] },
   { id: 'terminal.clear', label: 'Clear terminal', category: 'Terminal', defaults: ['ctrl+shift+l'] },
   { id: 'terminal.zoomIn', label: 'Zoom in', category: 'Terminal', defaults: ['ctrl+='] },

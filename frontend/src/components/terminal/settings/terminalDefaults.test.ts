@@ -140,6 +140,7 @@ const BACKEND_DEFAULTS = {
   gridTileInfo: ['project', 'activity'],
   gridTileTextScale: 60,
   agentNotifyNeedsYou: true,
+  agentPromptBar: true,
   agentNotifyDone: true,
   agentNotifyOnlyWhenHidden: true,
   agentNotifyPosition: 'top-right',

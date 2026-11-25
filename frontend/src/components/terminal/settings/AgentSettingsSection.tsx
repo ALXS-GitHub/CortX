@@ -59,7 +59,7 @@ export function AgentSettingsSection() {
       title="Agents"
       icon={Bot}
       action={<ResetCard card="agents" title="Agents" />}
-      description="How CortX shows the agents (Claude Code, Codex) running in its terminals. It only watches what they write on their own — their session files and their output — and never sends them anything."
+      description="How CortX shows the agents (Claude Code, Codex) running in its terminals. It watches what they write on their own — their session files and their output — and only sends them what you write in the agent prompt."
     >
       <Group title="Dot colours" group="agents">
         <p className="text-xs text-faint">
@@ -131,6 +131,22 @@ export function AgentSettingsSection() {
         >
           <ToastPositionPicker value={position} onChange={(v) => patch({ agentNotifyPosition: v })} disabled={disabled} />
         </SettingField>
+      </Group>
+
+      <Group title="Agent prompt">
+        <SettingToggle
+          k="agentPromptBar"
+          id="agent-prompt-bar"
+          label="Agent prompt under the terminal"
+          hint="While an agent runs in a terminal, a bar below it: write your prompt in a real editor (Ctrl+G), paste or drop images and files, and it goes to the agent as if typed in its own input."
+        >
+          <Switch
+            id="agent-prompt-bar"
+            checked={terminal?.agentPromptBar ?? true}
+            onCheckedChange={(v) => patch({ agentPromptBar: v })}
+            disabled={disabled}
+          />
+        </SettingToggle>
       </Group>
 
       <Group title="New agent">

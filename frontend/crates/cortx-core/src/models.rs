@@ -466,6 +466,10 @@ pub struct TerminalConfig {
     /// `cc`, `codex`…). Typed as you would, then Enter — nothing else is sent.
     #[serde(default = "default_agent_launch_command")]
     pub agent_launch_command: String,
+    /// The agent prompt (Warp-style rich input) docked under a terminal while
+    /// an agent runs in it. Only the frontend reads this.
+    #[serde(default = "default_true")]
+    pub agent_prompt_bar: bool,
     /// Font of every terminal (dock and window). None = bundled default stack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
@@ -1322,6 +1326,7 @@ impl Default for TerminalConfig {
             agent_notify_only_when_hidden: true,
             agent_notify_position: ToastPosition::default(),
             agent_launch_command: default_agent_launch_command(),
+            agent_prompt_bar: true,
             font_family: None,
             font_size: None,
             window_zoom: 0,

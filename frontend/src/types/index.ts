@@ -157,6 +157,9 @@ export interface TerminalConfig {
   agentNotifyOnlyWhenHidden?: boolean;
   /** Where the agent toasts show up in the window. Default `top-right`. */
   agentNotifyPosition?: ToastPosition;
+  /** The agent prompt (Warp-style rich input) under a terminal running an
+   *  agent. Default true. */
+  agentPromptBar?: boolean;
   /** Typed in the terminal "New agent" opens. Default `claude`. */
   agentLaunchCommand?: string;
   /** Ask before closing a terminal — or quitting CortX — while a command is

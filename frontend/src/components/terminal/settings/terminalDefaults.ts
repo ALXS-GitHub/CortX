@@ -453,6 +453,7 @@ export const TERMINAL_SETTINGS = {
   agentNotifyOnlyWhenHidden: { label: 'Only for agents out of sight', group: 'agents', fallback: FROM_RUST },
   agentNotifyPosition: { label: 'Agent notifications appear', group: 'agents', fallback: FROM_RUST },
   agentLaunchCommand: { label: 'New agent runs', group: 'agents', fallback: FROM_RUST },
+  agentPromptBar: { label: 'Agent prompt under the terminal', group: 'agents', fallback: FROM_RUST },
   'tabDisplay.cwd': tabDisplayMeta('cwd', 'Tab shows the directory'),
   'tabDisplay.command': tabDisplayMeta('command', 'Tab shows the running command'),
   'tabDisplay.status': tabDisplayMeta('status', 'Tab shows the status'),
