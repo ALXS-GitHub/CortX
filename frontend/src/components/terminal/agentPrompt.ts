@@ -13,10 +13,12 @@
  *   it, which Claude Code and Codex do), so a multi-line prompt stays one
  *   prompt instead of being sent line by line. Enter follows, alone, a moment
  *   later: an Enter glued to the paste would be taken as part of it.
- * - **Images** are pasted on their own first, as bare paths: that is what
- *   Claude Code (and Codex) turn into an attached image, the same thing a
- *   file dropped on the terminal does. A path in the middle of the text
- *   stays text.
+ * - **Images** sit in the text where they were pasted or dropped, as an
+ *   `[Image #N]` marker, the way Claude Code's own input shows them. They are
+ *   sent in place: the text before, the image's bare path on its own (what
+ *   Claude Code and Codex turn into an attached image, at the caret), the
+ *   text after — one paste each, since a path inside a paste stays text
+ *   (`agentPromptParts.ts`).
  * - **Other files** go into the text as paths: the agent reads them.
  *
  * The state (drafts, which editor is open) is per terminal and lives here,
@@ -27,12 +29,9 @@ import { appCacheDir, join } from '@tauri-apps/api/path';
 import { mkdir, writeFile } from '@tauri-apps/plugin-fs';
 import { writeTerminal } from '@/lib/tauri';
 import { pasteIntoTerminal } from '@/lib/terminalSessions';
+import { promptParts, type PromptAttachment } from './agentPromptParts';
 
-export interface AgentAttachment {
-  path: string;
-  name: string;
-  image: boolean;
-}
+export type AgentAttachment = PromptAttachment;
 
 export interface AgentDraft {
   text: string;
@@ -96,35 +95,18 @@ export function attachToAgentPrompt(terminalId: string, paths: string[]) {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function quote(path: string): string {
-  if (!/[\s"'()&;|<>$`]/.test(path)) return path;
-  return `"${path.replace(/"/g, '\\"')}"`;
-}
-
-/** The text actually sent: the prompt, then the paths of the non-image files. */
-export function composePrompt(draft: AgentDraft): string {
-  const files = draft.attachments.filter((a) => !a.image).map((a) => quote(a.path));
-  const text = draft.text.replace(/\s+$/, '');
-  if (files.length === 0) return text;
-  return text ? `${text}\n\n${files.join(' ')}` : files.join(' ');
-}
-
 /**
  * Hand a prompt to the agent running in `terminalId`. Resolves to false when
  * the terminal is not there to receive it (nothing was sent).
  */
 export async function sendAgentPrompt(terminalId: string, draft: AgentDraft): Promise<boolean> {
-  const text = composePrompt(draft);
-  const images = draft.attachments.filter((a) => a.image);
-  if (!text && images.length === 0) return false;
-  for (const image of images) {
-    if (!pasteIntoTerminal(terminalId, `${quote(image.path)} `)) return false;
-    // Each image is its own paste: the agent has to see a bare path.
-    await sleep(160);
-  }
-  if (text) {
-    if (!pasteIntoTerminal(terminalId, text)) return false;
-    await sleep(120);
+  const parts = promptParts(draft.text, draft.attachments);
+  if (parts.length === 0) return false;
+  for (const part of parts) {
+    if (!pasteIntoTerminal(terminalId, part.kind === 'image' ? part.path : part.text)) return false;
+    // One paste at a time: the agent reads an image's file before it places
+    // it, and the text after it must not overtake it.
+    await sleep(part.kind === 'image' ? 220 : 120);
   }
   await writeTerminal(terminalId, '\r');
   if (draft.text.trim()) {

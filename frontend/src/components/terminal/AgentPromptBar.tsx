@@ -21,6 +21,7 @@ import {
   type AgentAttachment,
   type AgentDraft,
 } from './agentPrompt';
+import { imageMarker, nextImageNumber, visibleAttachments } from './agentPromptParts';
 
 const PROVIDER_NAME: Record<TerminalAgentInfo['provider'], string> = {
   'claude-code': 'Claude Code',
@@ -107,16 +108,54 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
     focusTerminal(terminalId);
   }, [terminalId]);
 
+  // Images go *into* the text, at the caret, as `[Image #N]` — where Claude
+  // Code's own input puts a pasted image — and are sent there
+  // (`agentPromptParts.ts`). The caret is put back after the marker once the
+  // text is rendered.
+  const pendingCaret = useRef<number | null>(null);
+  const placeImages = useCallback(
+    (images: AgentAttachment[]) => {
+      if (images.length === 0) return;
+      const field = fieldRef.current;
+      const focused = !!field && document.activeElement === field;
+      const from = focused ? field.selectionStart : null;
+      const to = focused ? field.selectionEnd : null;
+      setDraft((d) => {
+        let n = nextImageNumber(d.attachments);
+        const added = images.map((a) => ({ ...a, image: true, n: n++ }));
+        const markers = added.map((a) => imageMarker(a.n)).join(' ');
+        const before = d.text.slice(0, from ?? d.text.length);
+        const after = d.text.slice(to ?? d.text.length);
+        const head = `${before}${before && !/\s$/.test(before) ? ' ' : ''}${markers}${after && !/^\s/.test(after) ? ' ' : ''}`;
+        pendingCaret.current = head.length;
+        return { text: head + after, attachments: [...d.attachments, ...added] };
+      });
+    },
+    [setDraft]
+  );
+  useLayoutEffect(() => {
+    const caret = pendingCaret.current;
+    const field = fieldRef.current;
+    if (caret === null || !field) return;
+    pendingCaret.current = null;
+    field.setSelectionRange(caret, caret);
+  }, [draft.text]);
+
   const addPaths = useCallback(
     (paths: string[]) => {
       if (paths.length === 0) return;
-      setDraft((d) => ({
-        ...d,
-        attachments: [...d.attachments, ...paths.filter((p) => !d.attachments.some((a) => a.path === p)).map(attachmentOf)],
-      }));
+      const fresh = paths.map(attachmentOf);
+      placeImages(fresh.filter((a) => a.image));
+      const files = fresh.filter((a) => !a.image);
+      if (files.length > 0) {
+        setDraft((d) => ({
+          ...d,
+          attachments: [...d.attachments, ...files.filter((f) => !d.attachments.some((a) => a.path === f.path))],
+        }));
+      }
       show();
     },
-    [setDraft, show]
+    [setDraft, show, placeImages]
   );
 
   // Ctrl+G (the window's shortcut table) and drops on the bar.
@@ -243,7 +282,7 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
         const blob = item.getAsFile();
         if (blob) saved.push(await saveClipboardImage(blob));
       }
-      setDraft((d) => ({ ...d, attachments: [...d.attachments, ...saved] }));
+      placeImages(saved);
     } catch (error) {
       toast.error('The image could not be attached', { description: String(error) });
     }
@@ -259,8 +298,16 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
     }
   };
 
-  const removeAttachment = (path: string) =>
-    setDraft((d) => ({ ...d, attachments: d.attachments.filter((a) => a.path !== path) }));
+  // An image's chip takes its marker out of the text with it.
+  const removeAttachment = (target: AgentAttachment) =>
+    setDraft((d) => ({
+      text:
+        target.n !== undefined
+          ? d.text.split(` ${imageMarker(target.n)}`).join('').split(imageMarker(target.n)).join('')
+          : d.text,
+      attachments: d.attachments.filter((a) => a !== target && a.path !== target.path),
+    }));
+  const chips = visibleAttachments(draft.text, draft.attachments);
 
   const canSend = !sending && (draft.text.trim() !== '' || draft.attachments.length > 0);
 
@@ -284,20 +331,20 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
               if (e.target !== fieldRef.current && !(e.target as HTMLElement).closest('button')) e.preventDefault();
             }}
           >
-            {draft.attachments.length > 0 && (
+            {chips.length > 0 && (
               <div className="flex flex-wrap gap-1.5 px-2.5 pt-2">
-                {draft.attachments.map((a) => (
+                {chips.map((a) => (
                   <span
                     key={a.path}
                     title={a.path}
                     className="inline-flex max-w-[16rem] items-center gap-1 rounded-[var(--rad-xs)] border border-border bg-muted/60 py-0.5 pr-0.5 pl-1.5 text-[11px] text-muted-foreground"
                   >
                     {a.image ? <ImageIcon className="size-3 shrink-0" /> : <FileText className="size-3 shrink-0" />}
-                    <span className="truncate">{a.name}</span>
+                    <span className="truncate">{a.image && a.n !== undefined ? imageMarker(a.n).slice(1, -1) : a.name}</span>
                     <button
                       type="button"
                       aria-label={`Remove ${a.name}`}
-                      onClick={() => removeAttachment(a.path)}
+                      onClick={() => removeAttachment(a)}
                       className="grid size-4 place-items-center rounded-[3px] hover:bg-accent hover:text-foreground"
                     >
                       <X className="size-3" />
