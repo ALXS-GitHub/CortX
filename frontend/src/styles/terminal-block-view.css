@@ -255,21 +255,33 @@
   user-select: text;
   -webkit-user-select: text;
 }
-.cortx-bv-r .w {
+/* Every run is a full cell tall: an inline span's background only covers the
+   font's own height, so a coloured run (a Powerline segment, a TUI's bar)
+   was a thinner band than the cell, and thinner than the separators closing
+   it. */
+.cortx-bv-r > span {
   display: inline-block;
-  letter-spacing: 0;
-  overflow: visible;
   vertical-align: top;
   height: var(--cortx-bv-ch, 17px);
 }
-/* Box drawing / block elements / Powerline: stretched to the full cell. */
-.cortx-bv-r .b {
-  display: inline-block;
-  vertical-align: top;
-  height: var(--cortx-bv-ch, 17px);
+.cortx-bv-r .w {
+  letter-spacing: 0;
   overflow: visible;
-  transform-origin: 50% 50%;
-  transform: scaleY(var(--cortx-bv-box-s, 1));
+}
+/* Box drawing / block elements / Powerline: drawn to the cell
+   (terminalBoxGlyphs.ts). The text stays underneath, invisible, for selection
+   and copy; `color` still holds the run's colour, which the drawing uses. */
+.cortx-bv-r .b {
+  position: relative;
+  -webkit-text-fill-color: transparent;
+}
+.cortx-bv-r .b > .g {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  fill: currentColor;
+  pointer-events: none;
 }
 .cortx-bv-m {
   position: absolute;

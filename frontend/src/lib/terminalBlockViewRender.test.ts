@@ -23,6 +23,7 @@ import {
   type LineLike,
   type RowContext,
 } from './terminalBlockViewRender.ts';
+import { boxGlyphSvg, hasBoxGlyph } from './terminalBoxGlyphs.ts';
 
 // --- a test runner in twenty lines ----------------------------------------
 
@@ -154,6 +155,7 @@ function ctx(overrides: Partial<RowContext> = {}): RowContext {
   return {
     palette: buildPalette(THEME, { surface: [16, 16, 16] }),
     cellWidth: 8,
+    cellHeight: 16,
     cell: new FakeCell(),
     fits: (ch) => ch === '─',
     styles: new Map(),
@@ -240,13 +242,30 @@ test('wide glyphs get a two-cell box and the next run keeps its column', () => {
   );
 });
 
-test('box drawing is boxed to be stretched, other glyphs that fit stay in the run', () => {
-  assert.equal(
-    renderRow(row('╭──╮x'), ctx()),
-    '<span data-c="0" class="b" style="width:32px">╭──╮</span><span data-c="4">x</span>'
-  );
+test('box drawing is drawn over its own text, other glyphs that fit stay in the run', () => {
+  const html = renderRow(row('╭──╮x'), ctx());
+  // One run, its text kept for selection, one SVG the size of its cells.
+  assert.ok(html.startsWith('<span data-c="0" class="b" style="width:32px">╭──╮<svg class="g" width="32" height="16"'), html);
+  assert.ok(html.endsWith('</svg></span><span data-c="4">x</span>'), html);
   assert.equal(renderRow(row('éa', 20), ctx({ fits: () => true })), '<span data-c="0">éa</span>');
   assert.equal(renderRow(row('⠋x'), ctx()), '<span data-c="0" class="w" style="width:8px">⠋</span><span data-c="1">x</span>');
+});
+
+test('drawn glyphs fill the cell: lines meet across rows, arrows fit their band', () => {
+  // `│` reaches the top and the bottom of its row, at the same x as the
+  // vertical of `╭` / `╰`, so a two-row frame joins up.
+  const bar = boxGlyphSvg(['│'], 8, 16);
+  assert.ok(bar.includes('<rect x="4" y="0" width="1"') && bar.includes('<rect x="4" y="8" width="1" height="8"/>'), bar);
+  const top = boxGlyphSvg(['╭'], 8, 16);
+  const bottom = boxGlyphSvg(['╰'], 8, 16);
+  assert.ok(/M8 8\.5H8A[\d.]+ [\d.]+ 0 0 0 4\.5 [\d.]+V16"/.test(top), `the corner goes down to the bottom edge at x 4.5: ${top}`);
+  assert.ok(/M4\.5 0V[\d.]+A[\d.]+ [\d.]+ 0 0 0 8 8\.5/.test(bottom), `and starts at the top edge at x 4.5: ${bottom}`);
+  // The Powerline arrow is exactly the row: top, middle, bottom.
+  assert.ok(boxGlyphSvg(['\u{e0b0}'], 8, 16).includes('<path d="M-0.5 0L8 8L-0.5 16Z"/>'));
+  // Second cell of a run is offset by one cell width.
+  assert.ok(boxGlyphSvg(['─', '\u{e0b2}'], 8, 16).includes('M16.5 0L8 8L16.5 16Z'));
+  assert.ok(hasBoxGlyph('─') && hasBoxGlyph('\u{e0b4}') && hasBoxGlyph('█'));
+  assert.ok(!hasBoxGlyph('a') && !hasBoxGlyph('\u{1fb00}'), 'nothing to draw: left to the font');
 });
 
 test('html is escaped', () => {

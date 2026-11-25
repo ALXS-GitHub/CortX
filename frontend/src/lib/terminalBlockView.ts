@@ -1559,12 +1559,6 @@ export class BlockView {
     const canvas = document.createElement('canvas');
     this.measureCtx = canvas.getContext('2d');
     if (this.measureCtx) this.measureCtx.font = `${opts.fontWeight ?? 'normal'} ${size}px ${family}`;
-    // Box drawing: stretch the font's '│' from its own extent to the whole
-    // cell (plus a hair, so two rows overlap instead of leaving a seam), the
-    // way xterm's custom glyphs fill it. Scaled about the cell's centre.
-    const m = this.measureCtx?.measureText('│');
-    const glyph = m ? Math.max(m.actualBoundingBoxAscent + m.actualBoundingBoxDescent, m.fontBoundingBoxAscent + m.fontBoundingBoxDescent) : 0;
-    s.style.setProperty('--cortx-bv-box-s', String(glyph > 0 ? Math.max(1, (this.cellH / glyph) * 1.12) : 1.15));
   }
 
   private fits = (ch: string): boolean => {
@@ -1601,7 +1595,7 @@ export class BlockView {
   private updatePalette(): RowContext {
     const theme = this.term.options.theme ?? {};
     const surface = this.host.surface();
-    const key = JSON.stringify([theme, surface, this.term.options.minimumContrastRatio, this.term.options.drawBoldTextInBrightColors, this.cellW]);
+    const key = JSON.stringify([theme, surface, this.term.options.minimumContrastRatio, this.term.options.drawBoldTextInBrightColors, this.cellW, this.cellH]);
     if (key === this.paletteKey && this.rowCtx) return this.rowCtx;
     this.paletteKey = key;
     this.epoch++;
@@ -1643,6 +1637,7 @@ export class BlockView {
     this.rowCtx = {
       palette,
       cellWidth: this.cellW,
+      cellHeight: this.cellH,
       cell: this.term.buffer.active.getNullCell() as unknown as CellLike,
       fits: this.fits,
       styles: new Map(),

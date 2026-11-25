@@ -18,6 +18,10 @@
  *   a glyph whose advance differs from the grid's anyway — a wide CJK cell, an
  *   emoji, a Nerd Font icon from a fallback font — gets a box of its own,
  *   `width` × cells, so nothing after it drifts.
+ * - **Drawn glyphs**: box drawing, block elements and the Powerline
+ *   separators are not font glyphs on xterm's canvas (`customGlyphs`), and
+ *   are not here either: they are drawn to the cell (`terminalBoxGlyphs.ts`),
+ *   so a line reaches both edges of its row and an arrow fits its band.
  *
  * Every run carries `data-c`, the column it starts at, which is how a DOM
  * selection is mapped back to buffer cells for copying (`columnAt`).
@@ -26,6 +30,7 @@
  * it takes the narrow slice of `IBufferLine` / `IBufferCell` it needs, which
  * is what lets it run under `node --test`.
  */
+import { boxGlyphSvg, hasBoxGlyph } from './terminalBoxGlyphs.ts';
 
 /** The slice of xterm's `IBufferCell` this module reads. */
 export interface CellLike {
@@ -294,6 +299,8 @@ export interface RowContext {
   palette: RenderPalette;
   /** Width of one grid cell, px. */
   cellWidth: number;
+  /** Height of one grid cell (one row), px: drawn glyphs fill it. */
+  cellHeight: number;
   /** Scratch cell reused for every read (xterm's `getNullCell()`). */
   cell: CellLike;
   /**
@@ -362,18 +369,6 @@ export function styleFor(
   return parts.join(';');
 }
 
-/**
- * Box drawing, block elements and the Powerline separators: xterm draws these
- * itself (`customGlyphs`) so they fill the whole cell and join up across
- * rows. A font glyph does not reach the top and bottom of a tall line box, so
- * on the page they get a box of their own that the view stretches to the cell
- * (`.b`, `--cortx-bv-box-*`).
- */
-export function isBoxChar(ch: string): boolean {
-  const c = ch.codePointAt(0) ?? 0;
-  return (c >= 0x2500 && c <= 0x259f) || (c >= 0xe0b0 && c <= 0xe0bf) || (c >= 0x1fb00 && c <= 0x1fbaf);
-}
-
 /** Characters whose advance never needs checking. */
 function isAscii(ch: string): boolean {
   if (ch.length !== 1) return false;
@@ -392,19 +387,24 @@ export function renderRow(line: LineLike | undefined, ctx: RowContext, limit = I
   const end = Math.min(usedColumns(line, cell), limit);
   if (end === 0) return '';
   let html = '';
-  // The run being built: plain text, or box-drawing glyphs (stretched as one
-  // piece, so a line of `─` has no seams).
+  // The run being built: plain text, or drawn glyphs (box drawing, blocks,
+  // Powerline — `terminalBoxGlyphs.ts`), one SVG per run so a line of `─`
+  // has no seams.
   let runKey = '';
   let runStyle = '';
   let runText = '';
   let runCol = 0;
   let runCells = 0;
   let runBox = false;
+  let runChars: string[] = [];
   const flush = () => {
     if (!runText) return;
     if (runBox) {
+      // The text stays (transparent) under the drawing: selection and copy
+      // read it as they read any run.
       const size = `width:${runCells * ctx.cellWidth}px`;
-      html += `<span data-c="${runCol}" class="b" style="${runStyle ? `${runStyle};${size}` : size}">${escapeHtml(runText)}</span>`;
+      const svg = boxGlyphSvg(runChars, ctx.cellWidth, ctx.cellHeight);
+      html += `<span data-c="${runCol}" class="b" style="${runStyle ? `${runStyle};${size}` : size}">${escapeHtml(runText)}${svg}</span>`;
     } else {
       html += runStyle
         ? `<span data-c="${runCol}" style="${runStyle}">${escapeHtml(runText)}</span>`
@@ -412,6 +412,7 @@ export function renderRow(line: LineLike | undefined, ctx: RowContext, limit = I
     }
     runText = '';
     runCells = 0;
+    runChars = [];
   };
   for (let x = 0; x < end; x++) {
     const c = line.getCell(x, cell);
@@ -432,7 +433,7 @@ export function renderRow(line: LineLike | undefined, ctx: RowContext, limit = I
       styles.set(key, style);
     }
     const ascii = isAscii(chars);
-    const box = width === 1 && !ascii && isBoxChar(chars);
+    const box = width === 1 && !ascii && hasBoxGlyph(chars);
     if (width === 1 && (box || ascii || ctx.fits(chars))) {
       if (key !== runKey || box !== runBox || !runText) {
         flush();
@@ -442,6 +443,7 @@ export function renderRow(line: LineLike | undefined, ctx: RowContext, limit = I
         runBox = box;
       }
       runText += chars;
+      if (box) runChars.push(chars);
       runCells++;
       continue;
     }
