@@ -51,7 +51,7 @@ import { attachInputPosition, inputPositionSetting, refreshInputPositions } from
 import { DEFAULT_FONT_SIZE, DEFAULT_SCROLLBACK_LINES } from '@/components/terminal/settings/terminalDefaults';
 
 export { DEFAULT_SCROLLBACK_LINES };
-import { attachInputEditor, inputEditorEnabled, layoutInputEditor, refreshInputEditors } from '@/lib/terminalInputEditor';
+import { attachInputEditor, inputEditorEnabled, inputEditorOwnsLine, layoutInputEditor, refreshInputEditors } from '@/lib/terminalInputEditor';
 import { blockViewPathLinks, isLinkOpenClick, registerFileLinkProvider } from '@/lib/terminalLinks';
 import { BlockView, type BlockViewHost, type BlockViewSpacing } from '@/lib/terminalBlockView';
 import { closeBlockMenu, openBlockMenu } from '@/lib/terminalBlockMenu';
@@ -1362,10 +1362,58 @@ function createSession(id: string): TerminalSession {
   // WebLinksAddon already does. Registered second, so URLs still win.
   session.disposables.push(registerFileLinkProvider(term, id));
 
+  // Focus reports (`CSI I` / `CSI O`, sent by xterm while a program has
+  // `CSI ? 1004 h` on) follow the *pane*, not xterm's helper textarea. Inside
+  // a pane the keyboard moves between that textarea, the universal input
+  // editor and the block list (after a page selection) — every Enter at the
+  // prompt did it twice — and each move used to send a report. A program
+  // that asked for them and quit without turning them off (or a shell plugin
+  // that did) left the shell to echo them: `^[[Itest`, `^[[I^[[Obonjour`.
+  // So a report is only sent once the focus has settled, and only when the
+  // pane as a whole gained or lost it.
+  // The pane's focus is tracked all the time, mode or not, so a program that
+  // turns the reports on later is told about the next real change only.
+  let paneFocused = false;
+  let focusTimer: number | null = null;
+  const settleFocus = () => {
+    if (focusTimer !== null) window.clearTimeout(focusTimer);
+    focusTimer = window.setTimeout(() => {
+      focusTimer = null;
+      const doc = container.ownerDocument;
+      const inside = doc.hasFocus() && container.contains(doc.activeElement);
+      if (inside === paneFocused) return;
+      paneFocused = inside;
+      if (session.replaying || !term.modes.sendFocusMode) return;
+      // The shell sits at its prompt under the universal editor: nothing
+      // running asked for the reports, the mode was only left on.
+      if (inputEditorOwnsLine(id)) return;
+      api.writeTerminal(id, inside ? '\x1b[I' : '\x1b[O').catch(() => {});
+    }, 0);
+  };
+  {
+    const win = container.ownerDocument.defaultView ?? window;
+    container.addEventListener('focusin', settleFocus);
+    container.addEventListener('focusout', settleFocus);
+    win.addEventListener('focus', settleFocus);
+    win.addEventListener('blur', settleFocus);
+    session.disposables.push({
+      dispose: () => {
+        if (focusTimer !== null) window.clearTimeout(focusTimer);
+        container.removeEventListener('focusin', settleFocus);
+        container.removeEventListener('focusout', settleFocus);
+        win.removeEventListener('focus', settleFocus);
+        win.removeEventListener('blur', settleFocus);
+      },
+    });
+  }
+
   // Keyboard input → PTY. Errors (process already gone) are expected; ignore.
   session.disposables.push(
     term.onData((data) => {
       if (session.replaying) return;
+      // xterm's own focus reports follow its textarea: replaced by the
+      // pane's, above.
+      if (data === '\x1b[I' || data === '\x1b[O') return;
       api.writeTerminal(id, data).catch(() => {});
     })
   );

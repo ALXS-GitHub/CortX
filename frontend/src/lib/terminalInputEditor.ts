@@ -322,6 +322,8 @@ class InputEditorController {
   geom: { rowTop: number; cellHeight: number; hostHeight: number } | null = null;
   disposables: IDisposable[] = [];
   cleanup: Array<() => void> = [];
+  /** The primary button is down in this pane: a click or a selection drag in progress. */
+  private pointerDown = false;
 
   constructor(id: string, term: Terminal, container: HTMLElement, isReplaying: () => boolean) {
     this.id = id;
@@ -478,15 +480,37 @@ class InputEditorController {
     // Focus discipline (plan §6.5): while the editor is up it is the one
     // keyboard target. A mouse selection may take the focus for the duration
     // of the drag; it comes back as soon as there is nothing selected.
+    //
+    // "Selection" is xterm's *and* the page's: the block layout draws the
+    // finished blocks as page text, selected by the browser. Taking the focus
+    // during that drag — the mousedown focuses the list, `focusin` fired, the
+    // field took it back — collapsed the selection before it could grow, so
+    // nothing above the prompt could be selected at all.
+    {
+      const onDown = (e: MouseEvent) => {
+        if (e.button === 0) this.pointerDown = true;
+      };
+      const onUp = () => {
+        this.pointerDown = false;
+      };
+      this.container.addEventListener('mousedown', onDown, true);
+      // On the document, in the capture phase: the drag may end outside the
+      // pane, and this has to run before the container's own `mouseup`.
+      document.addEventListener('mouseup', onUp, true);
+      this.cleanup.push(() => {
+        this.container.removeEventListener('mousedown', onDown, true);
+        document.removeEventListener('mouseup', onUp, true);
+      });
+    }
     on(this.container, 'focusin', (e) => {
       if (!this.machine.isEditing || this.root.hidden) return;
       if (e.target === this.field) return;
-      if (this.term.hasSelection()) return;
+      if (this.pointerDown || this.hasAnySelection()) return;
       this.focusField();
     });
     on(this.container, 'mouseup', () => {
       if (!this.machine.isEditing || this.root.hidden) return;
-      if (this.term.hasSelection()) return;
+      if (this.hasAnySelection()) return;
       this.focusField();
     });
     // …and a key typed while the grid still holds the focus (right after a
@@ -500,6 +524,13 @@ class InputEditorController {
         if (e.target === this.field) return;
         if (this.term.hasSelection()) return;
         if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return;
+        // A page selection (finished blocks): the copy chords are the list's
+        // (`terminalBlockView` answers them); any other key puts it away and
+        // is typed into the editor, as it would be without a selection.
+        if (this.hasPageSelection()) {
+          if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'KeyC' || e.code === 'Insert')) return;
+          document.getSelection()?.removeAllRanges();
+        }
         this.focusField();
         if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
           e.preventDefault();
@@ -637,6 +668,19 @@ class InputEditorController {
    * whenever the focus had wandered to the body, which is the common case
    * after a click on the window chrome or a tab switch.
    */
+  /** A page (DOM) selection somewhere in this pane, outside the editor itself. */
+  hasPageSelection(): boolean {
+    const sel = document.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+    const node = sel.getRangeAt(0).commonAncestorContainer;
+    return this.container.contains(node) && !this.root.contains(node);
+  }
+
+  /** xterm's selection or the page's: either one must survive the focus. */
+  hasAnySelection(): boolean {
+    return this.term.hasSelection() || this.hasPageSelection();
+  }
+
   focusField() {
     if (this.root.hidden || !this.machine.isEditing) return;
     if (document.activeElement === this.field) return;

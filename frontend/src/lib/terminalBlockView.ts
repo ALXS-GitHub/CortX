@@ -179,8 +179,10 @@ interface SegEl {
   filterBox: HTMLElement | null;
   filterInput: HTMLInputElement | null;
   filterCount: HTMLElement | null;
-  chunks: Map<number, { el: HTMLElement; key: string }>;
+  chunks: Map<number, { el: HTMLElement; key: string; html: string }>;
   promptKey: string;
+  /** The prompt rows' last markup, so an unchanged repaint leaves the DOM (and a selection in it) alone. */
+  promptHtml: string;
   seg: Seg;
 }
 
@@ -340,6 +342,14 @@ export class BlockView {
 
   // -- Pointer ----------------------------------------------------------------
   private downAt: { x: number; y: number; t: number } | null = null;
+  /** The press was on the live xterm: the gesture is xterm's own. */
+  private downInClip = false;
+  /**
+   * Where a page selection dragged down into the live xterm ended. The DOM
+   * selection cannot say which row of the grid that is (it lands on one of
+   * xterm's own nodes), so the pointer's cell is kept while the drag lasts.
+   */
+  private dragLiveCell: { line: number; col: number } | null = null;
   private linkAt: { key: string; open: (e: MouseEvent) => void } | null = null;
   private linkGen = 0;
 
@@ -490,9 +500,15 @@ export class BlockView {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
     const range = sel.getRangeAt(0);
-    if (!this.scroller.contains(range.commonAncestorContainer)) return null;
+    // A selection that starts on the page and runs on into the block in
+    // progress ends on one of xterm's nodes, or on the pane itself: its common
+    // ancestor is then outside the list.
+    if (!this.scroller.contains(range.startContainer)) return null;
+    if (!this.container.contains(range.commonAncestorContainer)) return null;
+    const intoLive =
+      !!this.clip && (!this.scroller.contains(range.endContainer) || this.clip.contains(range.endContainer) || range.intersectsNode(this.clip));
     const from = this.pointToCell(range.startContainer, range.startOffset, 'start');
-    const to = this.pointToCell(range.endContainer, range.endOffset, 'end');
+    const to = intoLive ? this.liveSelectionEnd() : this.pointToCell(range.endContainer, range.endOffset, 'end');
     if (!from || !to) return sel.toString() || null;
     const buf = this.term.buffer.active;
     const text = textBetween((y) => buf.getLine(y) as unknown as LineLike | undefined, from, to);
@@ -501,7 +517,7 @@ export class BlockView {
 
   clearPageSelection() {
     const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && this.scroller && sel.rangeCount && this.scroller.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+    if (sel && !sel.isCollapsed && this.scroller && sel.rangeCount && this.scroller.contains(sel.getRangeAt(0).startContainer)) {
       sel.removeAllRanges();
     }
   }
@@ -627,6 +643,7 @@ export class BlockView {
       filterCount: null,
       chunks: new Map(),
       promptKey: '',
+      promptHtml: '',
       seg: this.emptySeg('live'),
     };
 
@@ -1252,8 +1269,10 @@ export class BlockView {
   private readonly onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
     this.downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
+    this.dragLiveCell = null;
+    this.downInClip = !!this.clip?.contains(e.target as Node);
     // A click on the live xterm is xterm's.
-    if (this.clip?.contains(e.target as Node)) {
+    if (this.downInClip) {
       this.clearPageSelection();
       return;
     }
@@ -1266,7 +1285,9 @@ export class BlockView {
     const down = this.downAt;
     this.downAt = null;
     const target = e.target as HTMLElement;
-    if (this.clip?.contains(target)) return;
+    // Released over the live xterm: xterm's gesture — unless the drag started
+    // on the page and only ended there.
+    if (this.downInClip || (this.clip?.contains(target) && !this.selectionText())) return;
     if (target.closest('.cortx-bv-tools, .cortx-bv-fold, .cortx-bv-filter')) return;
     // A link opened by modifier+click.
     if (this.linkAt && this.host.isLinkClick(e)) {
@@ -1328,6 +1349,9 @@ export class BlockView {
   };
 
   private readonly onMouseMove = (e: MouseEvent) => {
+    if ((e.buttons & 1) && this.downAt && this.clip?.contains(e.target as Node)) {
+      this.dragLiveCell = this.liveCellAt(e.clientX, e.clientY);
+    }
     if (e.buttons !== 0 || !this.host.linkModifierHeld(e)) {
       if (this.linkAt) this.clearLink();
       return;
@@ -1447,6 +1471,7 @@ export class BlockView {
   }
 
   private pointToCell(node: Node, offset: number, edge: 'start' | 'end'): { line: number; col: number } | null {
+    if (this.clip?.contains(node)) return edge === 'end' ? this.liveSelectionEnd() : { line: this.term.buffer.active.baseY, col: 0 };
     const el = (node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement)) as HTMLElement | null;
     let row = el?.closest?.('.cortx-bv-r') as HTMLElement | null;
     if (!row) {
@@ -1479,6 +1504,22 @@ export class BlockView {
     const c = child?.dataset?.c;
     if (c !== undefined) return { line, col: Number(c) };
     return { line, col: offset === 0 ? 0 : this.term.cols };
+  }
+
+  /** Where a page selection that ran into the live xterm ends: the cell the pointer reached, else the cursor's line. */
+  private liveSelectionEnd(): { line: number; col: number } {
+    const buf = this.term.buffer.active;
+    return this.dragLiveCell ?? { line: buf.baseY + buf.cursorY, col: this.term.cols };
+  }
+
+  /** The grid cell of the live xterm under a point, clamped to its screen. */
+  private liveCellAt(x: number, y: number): { line: number; col: number } | null {
+    const screen = this.term.element?.querySelector('.xterm-screen');
+    if (!screen || this.cellW <= 0 || this.cellH <= 0) return null;
+    const rect = screen.getBoundingClientRect();
+    const row = Math.max(0, Math.min(this.term.rows - 1, Math.floor((y - rect.top) / this.cellH)));
+    const col = Math.max(0, Math.min(this.term.cols, Math.round((x - rect.left) / this.cellW)));
+    return { line: this.term.buffer.active.viewportY + row, col };
   }
 
   private cellAtPoint(x: number, y: number): { line: number; col: number; row: HTMLElement } | null {
@@ -2079,6 +2120,7 @@ export class BlockView {
       filterCount: null,
       chunks: new Map(),
       promptKey: '',
+      promptHtml: '',
       seg,
     };
     if (seg.card) {
@@ -2227,14 +2269,21 @@ export class BlockView {
       }
       const filterBtn = segEl.tools?.querySelector<HTMLElement>('[data-icon="filter"]');
       if (filterBtn) filterBtn.hidden = seg.outputLines === 0;
-      // Prompt rows.
-      const promptKey = `${this.epoch}|${this.searchGen}|${seg.start + this.trimmed}|${seg.promptEnd - seg.start}|${seg.promptEnd > buf.baseY ? performance.now() : ''}`;
-      if (promptKey !== segEl.promptKey && segEl.promptRows) {
-        segEl.promptKey = promptKey;
+      // Prompt rows. Rows still on the xterm screen can change under us, so
+      // they are rebuilt every frame — but only written to the DOM when the
+      // markup actually changed: replacing them under a page selection is
+      // what made every block on the screen impossible to select.
+      const promptLive = seg.promptEnd > buf.baseY;
+      const promptKey = `${this.epoch}|${this.searchGen}|${seg.start + this.trimmed}|${seg.promptEnd - seg.start}`;
+      if (segEl.promptRows && (promptLive || promptKey !== segEl.promptKey)) {
         let html = '';
         for (let i = 0; i < seg.promptEnd - seg.start; i++) html += this.rowHtml(seg.start + i, ctx, `data-p="${i}"`);
-        segEl.promptRows.innerHTML = html;
-        this.paintImages(segEl.promptRows, (i) => seg.start + i, '[data-p]');
+        if (promptKey !== segEl.promptKey || html !== segEl.promptHtml) {
+          segEl.promptKey = promptKey;
+          segEl.promptHtml = html;
+          segEl.promptRows.innerHTML = html;
+          this.paintImages(segEl.promptRows, (i) => seg.start + i, '[data-p]');
+        }
       }
       // Meta: status and timing.
       if (segEl.meta) {
@@ -2290,22 +2339,27 @@ export class BlockView {
       const to = Math.min(count, from + CHUNK);
       const firstLine = lineOf(from);
       const lastLine = lineOf(to - 1);
-      // Rows still on the xterm screen can change under us: never cached.
-      const live = lastLine >= buf.baseY ? `|${performance.now()}` : '';
-      const key = `${this.epoch}|${this.searchGen}|${firstLine + this.trimmed}|${to - from}|${seg.rows ? 'f' : ''}${live}`;
+      // Rows still on the xterm screen can change under us: never trusted
+      // to the key alone. They are rebuilt, and written to the DOM only when
+      // the markup changed — a page selection lives in these very nodes, and
+      // rewriting them on every frame (a cursor blink is enough) dropped it.
+      const live = lastLine >= buf.baseY;
+      const key = `${this.epoch}|${this.searchGen}|${firstLine + this.trimmed}|${to - from}|${seg.rows ? 'f' : ''}`;
       let chunk = segEl.chunks.get(c);
-      if (chunk && chunk.key === key) continue;
+      if (chunk && chunk.key === key && !live) continue;
+      let html = '';
+      for (let i = from; i < to; i++) html += this.rowHtml(lineOf(i), ctx, `data-r="${i}"`);
+      if (chunk && chunk.key === key && chunk.html === html) continue;
       if (!chunk) {
         const el = document.createElement('div');
         el.className = 'cortx-bv-chunk';
         segEl.body.appendChild(el);
-        chunk = { el, key: '' };
+        chunk = { el, key: '', html: '' };
         segEl.chunks.set(c, chunk);
       }
       chunk.key = key;
+      chunk.html = html;
       chunk.el.style.top = `${from * this.cellH}px`;
-      let html = '';
-      for (let i = from; i < to; i++) html += this.rowHtml(lineOf(i), ctx, `data-r="${i}"`);
       chunk.el.innerHTML = html;
       this.paintImages(chunk.el, (i) => lineOf(i), '[data-r]');
     }
@@ -2315,6 +2369,10 @@ export class BlockView {
   private dropChunks(segEl: SegEl, keep: Set<number>) {
     for (const [c, chunk] of segEl.chunks) {
       if (keep.has(c)) continue;
+      // A chunk that holds an end of the page selection stays: a selection
+      // dragged across blocks scrolls its start out of the window, and
+      // removing those rows would collapse it.
+      if (this.holdsSelectionEnd(chunk.el)) continue;
       chunk.el.remove();
       segEl.chunks.delete(c);
     }
@@ -2322,10 +2380,18 @@ export class BlockView {
 
   private clearContent(segEl: SegEl) {
     this.dropChunks(segEl, new Set());
-    if (segEl.promptRows && segEl.promptKey) {
+    if (segEl.promptRows && segEl.promptKey && !this.holdsSelectionEnd(segEl.promptRows)) {
       segEl.promptRows.textContent = '';
       segEl.promptKey = '';
+      segEl.promptHtml = '';
     }
+  }
+
+  /** Whether the page selection starts or ends inside `el`. */
+  private holdsSelectionEnd(el: HTMLElement): boolean {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+    return (!!sel.anchorNode && el.contains(sel.anchorNode)) || (!!sel.focusNode && el.contains(sel.focusNode));
   }
 
   /** One row: its runs, search highlights and the attribute it is found by. */
