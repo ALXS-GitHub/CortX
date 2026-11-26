@@ -60,6 +60,9 @@ export const KEYBINDING_ACTIONS = [
   // As in Warp. Only taken while an agent runs in the pane (and the agent
   // prompt is on): anywhere else Ctrl+G still reaches the program.
   { id: 'agent.prompt', label: 'Agent prompt (write to the running agent)', category: 'Terminal', defaults: ['ctrl+g'] },
+  // Ticket CORT-62. Only taken while an agent runs in the pane (or the pane
+  // shows its agent view): anywhere else the key reaches the program.
+  { id: 'agent.view', label: 'Agent view (show the agent as a conversation / as the terminal)', category: 'Terminal', defaults: ['ctrl+shift+m'] },
   { id: 'terminal.find', label: 'Find in terminal', category: 'Terminal', defaults: ['ctrl+shift+f'] },
   { id: 'terminal.clear', label: 'Clear terminal', category: 'Terminal', defaults: ['ctrl+shift+l'] },
   { id: 'terminal.zoomIn', label: 'Zoom in', category: 'Terminal', defaults: ['ctrl+='] },

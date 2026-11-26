@@ -168,6 +168,15 @@ export interface TerminalConfig {
   agentPromptColor?: string;
   /** Opacity of the agent prompt's bubble, 20–100 (%). Default 95. */
   agentPromptOpacity?: number;
+  /** Agent view (CORT-62): behind the conversation, the terminal's
+   *  background (theme, wallpaper, opacity) or the app's. Default `terminal`. */
+  agentViewBackground?: AgentViewBackground;
+  /** Agent view: the interface font or the terminal's. Default `interface`. */
+  agentViewFont?: AgentViewFont;
+  /** Agent view: text size in px, 12–18. Default 14. */
+  agentViewTextSize?: number;
+  /** Agent view: width of the conversation column. Default `narrow`. */
+  agentViewWidth?: AgentViewWidth;
   /** Typed in the terminal "New agent" opens. Default `claude`. */
   agentLaunchCommand?: string;
   /** Ask before closing a terminal — or quitting CortX — while a command is
@@ -557,6 +566,10 @@ export interface TerminalShellState {
  * is a descendant of the PTY's, found by walking the process tree
  * (`terminal-agents` event / `get_terminal_agents`).
  */
+export type AgentViewBackground = 'terminal' | 'app';
+export type AgentViewFont = 'interface' | 'terminal';
+export type AgentViewWidth = 'narrow' | 'wide' | 'full';
+
 export interface TerminalAgentInfo {
   terminalId: string;
   provider: AgentProvider;

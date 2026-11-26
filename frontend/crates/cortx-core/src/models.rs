@@ -483,6 +483,23 @@ pub struct TerminalConfig {
     /// reads this.
     #[serde(default = "default_agent_prompt_opacity")]
     pub agent_prompt_opacity: u8,
+    /// Agent view (ticket CORT-62), what is behind the conversation:
+    /// `terminal` (the terminal's theme, wallpaper and opacity) or `app` (the
+    /// app's own background). None = `terminal`. Only the frontend reads this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_view_background: Option<String>,
+    /// Agent view: font of the conversation, `interface` or `terminal` (the
+    /// terminal's font). None = `interface`. Only the frontend reads this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_view_font: Option<String>,
+    /// Agent view: text size in px, 12–18. None = 14. Only the frontend
+    /// reads this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_view_text_size: Option<u8>,
+    /// Agent view: width of the conversation column, `narrow`, `wide` or
+    /// `full`. None = `narrow`. Only the frontend reads this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_view_width: Option<String>,
     /// Font of every terminal (dock and window). None = bundled default stack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
@@ -1347,6 +1364,10 @@ impl Default for TerminalConfig {
             agent_status_bar: true,
             agent_prompt_color: None,
             agent_prompt_opacity: default_agent_prompt_opacity(),
+            agent_view_background: None,
+            agent_view_font: None,
+            agent_view_text_size: None,
+            agent_view_width: None,
             font_family: None,
             font_size: None,
             window_zoom: 0,

@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { ColorField } from '@/components/ui/ColorField';
 import { Code, Section } from '@/components/settings/SettingsPrimitives';
 import { cn } from '@/lib/utils';
-import type { GridTileInfo, TerminalConfig, ToastPosition } from '@/types';
+import type { AgentViewBackground, AgentViewFont, AgentViewWidth, GridTileInfo, TerminalConfig, ToastPosition } from '@/types';
 import { resolveAgentNotifyPosition, TOAST_POSITION_OPTIONS } from './notificationPolicy';
 import { AgentPhaseDot } from '../TerminalStatusGlyph';
 import { DEFAULT_AGENT_COLORS, type AgentColorKey } from '../agentColors';
@@ -190,6 +190,56 @@ export function AgentSettingsSection() {
               className="h-1.5 flex-1 cursor-pointer accent-primary"
             />
           </div>
+        </SettingField>
+      </Group>
+
+      <Group title="Agent view">
+        <p className="px-1 pb-1 text-xs text-muted-foreground">
+          A pane running Claude Code can show it as a conversation instead of the terminal (the pane&rsquo;s{' '}
+          <em>Show as a conversation</em> button, or Ctrl+Shift+M). Only the display changes: the agent keeps running in
+          its terminal, and you can switch back at any time.
+        </p>
+        <SettingField k="agentViewBackground" label="Background" hint="The terminal's: its theme colour, wallpaper and opacity, as in the terminal. The app's: the plain app background.">
+          <Segmented<AgentViewBackground>
+            size="sm"
+            value={terminal?.agentViewBackground ?? 'terminal'}
+            onChange={(v) => patch({ agentViewBackground: v })}
+            options={[
+              { value: 'terminal', label: 'Terminal' },
+              { value: 'app', label: 'App' },
+            ]}
+          />
+        </SettingField>
+        <SettingField k="agentViewFont" label="Font" hint="The interface font, or the terminal's font (Appearance).">
+          <Segmented<AgentViewFont>
+            size="sm"
+            value={terminal?.agentViewFont ?? 'interface'}
+            onChange={(v) => patch({ agentViewFont: v })}
+            options={[
+              { value: 'interface', label: 'Interface' },
+              { value: 'terminal', label: 'Terminal' },
+            ]}
+          />
+        </SettingField>
+        <SettingField k="agentViewTextSize" label="Text size" hint="Size of the messages, in pixels.">
+          <Segmented<string>
+            size="sm"
+            value={String(terminal?.agentViewTextSize ?? 14)}
+            onChange={(v) => patch({ agentViewTextSize: Number(v) })}
+            options={[12, 13, 14, 15, 16, 18].map((n) => ({ value: String(n), label: String(n) }))}
+          />
+        </SettingField>
+        <SettingField k="agentViewWidth" label="Width" hint="How wide the conversation runs in the pane.">
+          <Segmented<AgentViewWidth>
+            size="sm"
+            value={terminal?.agentViewWidth ?? 'narrow'}
+            onChange={(v) => patch({ agentViewWidth: v })}
+            options={[
+              { value: 'narrow', label: 'Narrow' },
+              { value: 'wide', label: 'Wide' },
+              { value: 'full', label: 'Full' },
+            ]}
+          />
         </SettingField>
       </Group>
 

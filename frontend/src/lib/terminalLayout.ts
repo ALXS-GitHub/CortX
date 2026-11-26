@@ -70,6 +70,13 @@ export interface LeafNode {
   rows?: number;
   /** Shell command line to use when restoring (launch configs). */
   shell?: string | null;
+  /**
+   * How the pane shows an agent running in it (ticket CORT-62): `agent` = as
+   * a conversation (the agent view), absent = the terminal itself. Only a
+   * way of showing it: the process, its PTY and its screen are the same
+   * either way. Ignored while no agent runs in the pane.
+   */
+  view?: 'agent';
 }
 
 export interface SplitNode {
@@ -715,6 +722,22 @@ export function setLeafCwd(layout: TerminalWindowLayout, terminalId: string, cwd
     const next = mapLeaves(t.layout, (leaf) =>
       leaf.terminalId === terminalId && leaf.cwd !== cwd ? { ...leaf, cwd } : leaf
     );
+    if (next === t.layout) return t;
+    changed = true;
+    return { ...t, layout: next };
+  });
+  return changed ? { ...layout, tabs } : layout;
+}
+
+/** Show a terminal's pane as the agent view, or as the terminal (`null`). */
+export function setLeafView(layout: TerminalWindowLayout, terminalId: string, view: 'agent' | null): TerminalWindowLayout {
+  let changed = false;
+  const tabs = layout.tabs.map((t) => {
+    const next = mapLeaves(t.layout, (leaf) => {
+      if (leaf.terminalId !== terminalId || (leaf.view ?? null) === view) return leaf;
+      const { view: _old, ...rest } = leaf;
+      return view ? { ...rest, view } : rest;
+    });
     if (next === t.layout) return t;
     changed = true;
     return { ...t, layout: next };

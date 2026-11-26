@@ -22,6 +22,7 @@ pub mod codex;
 pub mod index_cache;
 pub mod jsonl;
 pub mod launch;
+pub mod live;
 pub mod terminal_link;
 pub mod watcher;
 

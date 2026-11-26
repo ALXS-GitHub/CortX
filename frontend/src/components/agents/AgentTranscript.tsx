@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronUp, Loader2, MessageSquareOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { getAgentTranscript } from '@/lib/tauri';
 import type { AgentMessage, AgentState, AgentTranscriptPage } from '@/types';
 import { AgentTranscriptMessage, type ToolResultPart } from './AgentTranscriptMessage';
@@ -22,6 +23,12 @@ interface AgentTranscriptProps {
   sessionState: AgentState;
   /** Bumped by the parent when `agent-sessions-changed` fires: reload the last page. */
   changeToken: number;
+  /** The loaded messages, each time they change (the agent view reads the pending tool off them). */
+  onMessages?: (messages: AgentMessage[]) => void;
+  /** Shown after the last message (the agent view's "working" line); the list sticks to it. */
+  footer?: ReactNode;
+  /** Classes of the column holding the messages (the agent view centres it). */
+  contentClassName?: string;
 }
 
 function toState(page: AgentTranscriptPage): TranscriptState {
@@ -41,7 +48,14 @@ function isToolResultOnly(m: AgentMessage): boolean {
  * Mount with `key={sessionId}` so switching sessions starts fresh.
  * Default export so the sheet can lazy-load it (streamdown/shiki are heavy).
  */
-export default function AgentTranscript({ sessionId, sessionState, changeToken }: AgentTranscriptProps) {
+export default function AgentTranscript({
+  sessionId,
+  sessionState,
+  changeToken,
+  onMessages,
+  footer,
+  contentClassName,
+}: AgentTranscriptProps) {
   const [state, setState] = useState<TranscriptState | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +64,11 @@ export default function AgentTranscript({ sessionId, sessionState, changeToken }
   // Mirror of `state` for effects that must not re-run on every page change.
   const stateRef = useRef<TranscriptState | null>(null);
   useEffect(() => { stateRef.current = state; }, [state]);
+  const onMessagesRef = useRef(onMessages);
+  useEffect(() => { onMessagesRef.current = onMessages; }, [onMessages]);
+  useEffect(() => {
+    if (state) onMessagesRef.current?.(state.messages);
+  }, [state]);
 
   // Initial load: last page.
   useEffect(() => {
@@ -84,6 +103,14 @@ export default function AgentTranscript({ sessionId, sessionState, changeToken }
       .catch(console.error);
     return () => { cancelled = true; };
   }, [changeToken, sessionId]);
+
+  // The footer coming or going (the agent starts / stops working): stay at
+  // the bottom when the list was there.
+  const footerShown = footer != null && footer !== false;
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 96) el.scrollTop = el.scrollHeight;
+  }, [footerShown]);
 
   // Apply the scroll intent once the new messages are in the DOM.
   useLayoutEffect(() => {
@@ -137,7 +164,7 @@ export default function AgentTranscript({ sessionId, sessionState, changeToken }
 
   return (
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-      <div className="flex flex-col gap-5 p-4">
+      <div className={cn('flex flex-col gap-5 p-4', contentClassName)}>
         {state.hasMore && (
           <div className="flex justify-center">
             <Button variant="outline" size="sm" onClick={loadOlder} disabled={loadingOlder}>
@@ -152,6 +179,7 @@ export default function AgentTranscript({ sessionId, sessionState, changeToken }
         {visible.map((m) => (
           <AgentTranscriptMessage key={m.id} message={m} toolResults={toolResults} sessionState={sessionState} />
         ))}
+        {footer}
       </div>
     </div>
   );

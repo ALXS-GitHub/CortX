@@ -17,6 +17,7 @@ import {
 } from '@/lib/terminalSessions';
 import { useTerminalAgentsStore } from './agentsStore';
 import { attachToAgentPrompt, isEditorOpen, toggleAgentPrompt } from './agentPrompt';
+import { canShowAgentView, focusAgentView, leafViewOf, toggleAgentView } from './agent-view/agentView';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
 import { basename } from '@/lib/terminalNames';
 import type { KeybindingActionId } from '@/lib/keybindings';
@@ -1125,9 +1126,18 @@ export function runAction(id: KeybindingActionId): boolean {
     case 'agent.prompt': {
       const terminalId = activeTerminalId();
       if (!terminalId || !useTerminalAgentsStore.getState().agents.has(terminalId)) return false;
+      // In the agent view, the prompt is its composer.
+      if (leafViewOf(terminalId) === 'agent' && canShowAgentView(useTerminalAgentsStore.getState().agents.get(terminalId))) {
+        focusAgentView(terminalId);
+        return true;
+      }
       if (useAppStore.getState().settings?.terminal?.agentPromptBar === false) return false;
       toggleAgentPrompt(terminalId);
       return true;
+    }
+    case 'agent.view': {
+      const terminalId = activeTerminalId();
+      return terminalId ? toggleAgentView(terminalId) : false;
     }
     case 'terminal.find':
       return openFindInActiveTerminal();

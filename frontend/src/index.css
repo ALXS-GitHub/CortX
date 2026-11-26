@@ -413,6 +413,15 @@
   scrollbar-width: thin;
 }
 
+/* Agent view (ticket CORT-62): the conversation's text size follows
+   Settings > Agents > Agent view; the smaller texts follow it. */
+.agent-view .text-sm {
+  font-size: var(--agent-view-text, 14px);
+}
+.agent-view .text-xs {
+  font-size: calc(var(--agent-view-text, 14px) - 2px);
+}
+
 /* Terminal clickable links (legacy log view) */
 .terminal-link {
   color: var(--st-open);

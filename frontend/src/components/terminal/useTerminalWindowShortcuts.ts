@@ -26,7 +26,9 @@ const ALWAYS_ON: ReadonlySet<KeybindingActionId> = new Set<KeybindingActionId>([
 function isTextFieldOutsideTerminal(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const field = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-  return field && !target.closest('.cortx-xterm');
+  // The composer of an agent view (ticket CORT-62) is the pane's input, as
+  // the terminal is: the window's shortcuts work from it too.
+  return field && !target.closest('.cortx-xterm, [data-agent-view]');
 }
 
 /** While Control is held, the rail / strip show their tab numbers (`html[data-ctrl-held]`). */
