@@ -699,6 +699,11 @@ export async function agentGuiStop(key: string): Promise<void> {
   return invoke('agent_gui_stop', { key });
 }
 
+/** The git branch of a directory (`.git/HEAD`), null outside a repository. */
+export async function agentGuiGitBranch(cwd: string): Promise<string | null> {
+  return invoke('agent_gui_git_branch', { cwd });
+}
+
 export async function onAgentGuiEvent(callback: (payload: AgentGuiEventPayload) => void): Promise<UnlistenFn> {
   return listen<AgentGuiEventPayload>('agent-gui', (e) => callback(e.payload));
 }

@@ -37,7 +37,7 @@ const assert = {
 const fold = (state: GuiAgentState, ...messages: Record<string, unknown>[]) => messages.reduce((s, m) => reduce(s, m, 0), state);
 const delta = (index: number, d: Record<string, unknown>) => ({ type: 'stream_event', event: { type: 'content_block_delta', index, delta: d } });
 
-test('init gives the session, the model and the commands', () => {
+test('init gives the session, the model, the commands and the connectors', () => {
   const s = fold(initialState(), {
     type: 'system',
     subtype: 'init',
@@ -45,12 +45,26 @@ test('init gives the session, the model and the commands', () => {
     model: 'claude-opus',
     permissionMode: 'default',
     slash_commands: ['compact', 'review'],
+    cwd: '/p',
+    claude_code_version: '2.1.332',
+    mcp_servers: [{ name: 'zorg', status: 'connected' }],
+    tools: ['Bash', 'Read'],
   });
   assert.equal([s.sessionId, s.model, s.permissionMode, s.slashCommands], ['sess-1', 'claude-opus', 'default', ['compact', 'review']]);
+  assert.equal([s.info.cwd, s.info.version, s.info.mcpServers, s.info.tools], ['/p', '2.1.332', [{ name: 'zorg', status: 'connected' }], 2]);
+});
+
+test('usage, cost and context window', () => {
+  const s = fold(
+    initialState(),
+    { type: 'assistant', message: { id: 'm', content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 5, cache_read_input_tokens: 100 } } },
+    { type: 'result', subtype: 'success', total_cost_usd: 0.2, num_turns: 3, modelUsage: { opus: { contextWindow: 200000 } } }
+  );
+  assert.equal([s.usage, s.costUsd, s.turns, s.contextWindow], [{ input_tokens: 5, cache_read_input_tokens: 100 }, 0.2, 3, 200000]);
 });
 
 test('the answer streams in, then the finished block takes its place', () => {
-  let s = withUserPrompt(initialState(), 'hello', 0, 0);
+  let s = withUserPrompt(initialState(), 'hello', [], 0);
   s = fold(
     s,
     { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg_1' } } },
@@ -82,7 +96,7 @@ test('the answer streams in, then the finished block takes its place', () => {
 });
 
 test('tool results, then the end of the turn', () => {
-  let s = withUserPrompt(initialState(), 'go', 0, 0);
+  let s = withUserPrompt(initialState(), 'go', [], 0);
   s = fold(
     s,
     { type: 'assistant', message: { id: 'm', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } },
@@ -91,6 +105,22 @@ test('tool results, then the end of the turn', () => {
   );
   assert.equal(s.messages[2].parts, [{ type: 'tool-result', toolId: 't1', output: 'a\nb', isError: false }]);
   assert.equal([s.busy, s.lastResult?.durationMs, s.sessionId], [false, 1200, 's']);
+});
+
+test('images: in a tool result, and in a prompt', () => {
+  const png = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAA' } };
+  const s = fold(
+    withUserPrompt(initialState(), 'look', [{ mediaType: 'image/jpeg', data: 'BBB' }], 0),
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: [png, { type: 'text', text: 'shot' }] }] } }
+  );
+  assert.equal(s.messages[0].parts[1], { type: 'image', mediaType: 'image/jpeg', data: 'BBB' });
+  assert.equal(s.messages[1].parts[0], {
+    type: 'tool-result',
+    toolId: 't',
+    output: '[image]\nshot',
+    isError: false,
+    images: [{ mediaType: 'image/png', data: 'AAA' }],
+  });
 });
 
 test('a permission request, and the answers to it', () => {

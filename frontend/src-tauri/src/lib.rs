@@ -889,6 +889,7 @@ pub fn run() {
             agent_gui::agent_gui_send,
             agent_gui::agent_gui_running,
             agent_gui::agent_gui_stop,
+            agent_gui::agent_gui_git_branch,
             commands::update_agent_annotations,
             commands::resume_agent_session,
             commands::get_agent_resume_command,

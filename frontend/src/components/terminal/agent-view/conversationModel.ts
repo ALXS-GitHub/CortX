@@ -14,7 +14,7 @@
  *
  * Pure functions, tested in `conversationModel.test.ts`.
  */
-import type { AgentMessage, AgentPart } from '@/types';
+import type { AgentImage, AgentMessage, AgentPart } from '@/types';
 
 export type ToolCallPart = Extract<AgentPart, { type: 'tool-call' }>;
 export type ToolResultPart = Extract<AgentPart, { type: 'tool-result' }>;
@@ -39,7 +39,17 @@ export type Block =
   | { kind: 'question'; key: string; questions: string[]; answer: string | null; pending: boolean };
 
 export type Turn =
-  | { kind: 'user'; id: string; timestamp: string; text: string; images: number; command: { name: string; args: string } | null }
+  | {
+      kind: 'user';
+      id: string;
+      timestamp: string;
+      text: string;
+      /** Images with their data, drawn as thumbnails. */
+      pictures: AgentImage[];
+      /** Images known only as "an image" (too big, another provider). */
+      images: number;
+      command: { name: string; args: string } | null;
+    }
   | { kind: 'notice'; id: string; timestamp: string; text: string }
   | { kind: 'assistant'; id: string; timestamp: string; blocks: Block[] };
 
@@ -88,6 +98,9 @@ export function answerOf(output: string): string {
 function userTurn(m: AgentMessage): Turn | null {
   const texts = m.parts.filter((p): p is Extract<AgentPart, { type: 'text' }> => p.type === 'text').map((p) => p.text);
   const images = m.parts.filter((p) => p.type === 'attachment').length;
+  const pictures = m.parts
+    .filter((p): p is Extract<AgentPart, { type: 'image' }> => p.type === 'image')
+    .map((p) => ({ mediaType: p.mediaType, data: p.data }));
   const kept: string[] = [];
   for (const t of texts) {
     if (HIDDEN_USER_TEXT.test(t) || BASH_OUT_RE.test(t)) continue;
@@ -96,7 +109,7 @@ function userTurn(m: AgentMessage): Turn | null {
     if (cmd) {
       const name = cmd[1].startsWith('/') ? cmd[1] : `/${cmd[1]}`;
       const args = (COMMAND_ARGS_RE.exec(t)?.[1] ?? '').trim();
-      return { kind: 'user', id: m.id, timestamp: m.timestamp, text: '', images: 0, command: { name, args } };
+      return { kind: 'user', id: m.id, timestamp: m.timestamp, text: '', pictures: [], images: 0, command: { name, args } };
     }
     const out = STDOUT_RE.exec(t);
     if (out) {
@@ -106,13 +119,13 @@ function userTurn(m: AgentMessage): Turn | null {
     }
     const bash = BASH_INPUT_RE.exec(t);
     if (bash) {
-      return { kind: 'user', id: m.id, timestamp: m.timestamp, text: '', images: 0, command: { name: '!', args: bash[1].trim() } };
+      return { kind: 'user', id: m.id, timestamp: m.timestamp, text: '', pictures: [], images: 0, command: { name: '!', args: bash[1].trim() } };
     }
     kept.push(t);
   }
   const text = kept.join('\n').replace(IMAGE_MARKER_RE, '').trim();
-  if (!text && images === 0) return null;
-  return { kind: 'user', id: m.id, timestamp: m.timestamp, text, images, command: null };
+  if (!text && images === 0 && pictures.length === 0) return null;
+  return { kind: 'user', id: m.id, timestamp: m.timestamp, text, pictures, images, command: null };
 }
 
 /** Build the turns of a conversation from its messages (chronological). */

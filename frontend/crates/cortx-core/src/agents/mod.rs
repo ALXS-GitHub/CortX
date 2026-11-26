@@ -194,10 +194,58 @@ pub enum AgentPart {
         name: Option<String>,
         output: String,
         is_error: bool,
+        /// Images the tool gave back (a screenshot it read…), shown in the
+        /// agent view (ticket CORT-62).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<AgentImage>,
     },
     Attachment {
         description: String,
     },
+    /// An image in a prompt, with its data (ticket CORT-62).
+    #[serde(rename_all = "camelCase")]
+    Image {
+        media_type: String,
+        data: String,
+    },
+}
+
+/// An image carried by a message (base64, as the transcript stores it).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentImage {
+    pub media_type: String,
+    pub data: String,
+}
+
+/// Images above this size (base64 characters) are not sent to the view:
+/// the part says "image" and that is all.
+pub const MAX_IMAGE_CHARS: usize = 12 * 1024 * 1024;
+
+/// A base64 image block (`{type:image, source:{type:base64, media_type, data}}`).
+pub fn image_of_block(block: &serde_json::Value) -> Option<AgentImage> {
+    let source = block.get("source")?;
+    if source.get("type").and_then(|t| t.as_str()) != Some("base64") {
+        return None;
+    }
+    let data = source.get("data")?.as_str()?;
+    if data.len() > MAX_IMAGE_CHARS {
+        return None;
+    }
+    let media_type = source.get("media_type").and_then(|m| m.as_str()).unwrap_or("image/png");
+    Some(AgentImage { media_type: media_type.to_string(), data: data.to_string() })
+}
+
+/// The images of a `tool_result.content` array.
+pub fn images_of_content(content: Option<&serde_json::Value>) -> Vec<AgentImage> {
+    match content {
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter(|i| i.get("type").and_then(|t| t.as_str()) == Some("image"))
+            .filter_map(image_of_block)
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1666,12 +1714,18 @@ mod tests {
             name: None,
             output: "ok".into(),
             is_error: false,
+            images: Vec::new(),
         };
         let v = serde_json::to_value(&part).unwrap();
+        assert!(v.get("images").is_none());
         assert_eq!(v["type"], "tool-result");
         assert_eq!(v["toolId"], "t1");
         assert_eq!(v["isError"], false);
         assert!(v.get("name").is_none());
+        let image = serde_json::to_value(AgentPart::Image { media_type: "image/png".into(), data: "AAA".into() }).unwrap();
+        assert_eq!(image, serde_json::json!({ "type": "image", "mediaType": "image/png", "data": "AAA" }));
+        let block = serde_json::json!({ "type": "image", "source": { "type": "base64", "media_type": "image/jpeg", "data": "QQ==" } });
+        assert_eq!(images_of_content(Some(&serde_json::json!([block, { "type": "text", "text": "x" }]))).len(), 1);
         assert_eq!(
             serde_json::to_value(AgentProvider::ClaudeCode).unwrap(),
             "claude-code"

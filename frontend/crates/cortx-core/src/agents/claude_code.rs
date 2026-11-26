@@ -610,6 +610,9 @@ struct FullBlock {
     content: Option<serde_json::Value>,
     #[serde(default)]
     is_error: Option<bool>,
+    /// An image block's source (`{type: base64, media_type, data}`).
+    #[serde(default)]
+    source: Option<serde_json::Value>,
 }
 
 /// Flatten a `tool_result.content` (string | [{type:text,text}] | other).
@@ -690,16 +693,26 @@ pub fn parse_transcript(path: &Path) -> std::io::Result<Vec<AgentMessage>> {
                                 let name = tool_names.get(&tool_id).cloned();
                                 let output =
                                     b.content.as_ref().map(value_to_text).unwrap_or_default();
+                                let images = super::images_of_content(b.content.as_ref());
                                 parts.push(AgentPart::ToolResult {
                                     tool_id,
                                     name,
                                     output,
                                     is_error: b.is_error.unwrap_or(false),
+                                    images,
                                 });
                             }
-                            "image" => parts.push(AgentPart::Attachment {
-                                description: "image".to_string(),
-                            }),
+                            "image" => {
+                                let image = b
+                                    .source
+                                    .map(|source| serde_json::json!({ "source": source }))
+                                    .as_ref()
+                                    .and_then(super::image_of_block);
+                                parts.push(match image {
+                                    Some(img) => AgentPart::Image { media_type: img.media_type, data: img.data },
+                                    None => AgentPart::Attachment { description: "image".to_string() },
+                                });
+                            }
                             _ => {}
                         }
                     }
@@ -871,6 +884,7 @@ mod tests {
                 name,
                 output,
                 is_error,
+                ..
             } => {
                 assert_eq!(tool_id, "toolu_1");
                 assert_eq!(name.as_deref(), Some("Read"));

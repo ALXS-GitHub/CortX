@@ -1297,8 +1297,15 @@ export type AgentPart =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
   | { type: 'tool-call'; toolId: string; name: string; input: unknown }
-  | { type: 'tool-result'; toolId: string; name?: string; output: string; isError: boolean }
-  | { type: 'attachment'; description: string };
+  | { type: 'tool-result'; toolId: string; name?: string; output: string; isError: boolean; images?: AgentImage[] }
+  | { type: 'attachment'; description: string }
+  | { type: 'image'; mediaType: string; data: string };
+
+/** An image carried by a message, base64 (ticket CORT-62). */
+export interface AgentImage {
+  mediaType: string;
+  data: string;
+}
 
 export interface AgentMessage {
   id: string;

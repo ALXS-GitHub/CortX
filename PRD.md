@@ -378,6 +378,8 @@ An agent pane of the Terminal window runs in one of two modes:
 | F9.2 | Switch TUI ↔ GUI (pane button, Ctrl+Shift+M): the session is closed in one mode and resumed in the other (`--resume`) | Must Have | Done |
 | F9.3 | Settings: GUI command (`agentGuiCommand`), mode of a new agent (`agentDefaultMode`), view background (terminal / app), font, text size, width | Must Have | Done |
 | F9.4 | A resumed session's history is read once from its transcript; everything after is live from the process | Must Have | Done |
+| F9.6 | Side panel: environment (model, mode, folder, branch, version, session), context meter and cost, to-dos, sub-agents, background commands, changed files (open in the editor), images, web sources, connectors (MCP) | Must Have | Done |
+| F9.7 | Images shown in the conversation (prompts, tool results, local files in the agent's markdown) as thumbnails, opened in a viewer (zoom, drag, ← →) | Must Have | Done |
 | F9.5 | Voice dictation in GUI mode (Claude Code's `/voice` exists only in its TUI; no SDK / stream-json API) | Could Have | Pending |
 
 ---

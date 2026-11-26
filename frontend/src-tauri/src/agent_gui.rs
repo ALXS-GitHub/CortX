@@ -253,9 +253,59 @@ pub fn stop_all() {
     }
 }
 
+/// The git branch of a directory, read from `.git/HEAD` (walking up, a
+/// worktree's `.git` file followed) — for the agent view's side panel. A
+/// detached HEAD gives its short hash; no repository, nothing.
+pub fn git_branch_of(dir: &std::path::Path) -> Option<String> {
+    let mut cur = Some(dir);
+    while let Some(d) = cur {
+        let dot_git = d.join(".git");
+        let git_dir = if dot_git.is_dir() {
+            Some(dot_git)
+        } else if dot_git.is_file() {
+            std::fs::read_to_string(&dot_git)
+                .ok()
+                .and_then(|s| s.trim().strip_prefix("gitdir:").map(|p| d.join(p.trim())))
+        } else {
+            None
+        };
+        if let Some(git_dir) = git_dir {
+            let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+            let head = head.trim();
+            return Some(match head.strip_prefix("ref: refs/heads/") {
+                Some(branch) => branch.to_string(),
+                None => head.chars().take(7).collect(),
+            });
+        }
+        cur = d.parent();
+    }
+    None
+}
+
+#[tauri::command]
+pub fn agent_gui_git_branch(cwd: String) -> Option<String> {
+    if cwd.trim().is_empty() {
+        return None;
+    }
+    git_branch_of(std::path::Path::new(&cwd))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_branch_from_head() {
+        let dir = std::env::temp_dir().join(format!("cortx-git-branch-{}", std::process::id()));
+        let sub = dir.join("src").join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        std::fs::write(dir.join(".git").join("HEAD"), "ref: refs/heads/feature/x\n").unwrap();
+        assert_eq!(git_branch_of(&sub).as_deref(), Some("feature/x"));
+        std::fs::write(dir.join(".git").join("HEAD"), "0123456789abcdef\n").unwrap();
+        assert_eq!(git_branch_of(&dir).as_deref(), Some("0123456"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn command_line_appends_the_flags_and_the_session() {

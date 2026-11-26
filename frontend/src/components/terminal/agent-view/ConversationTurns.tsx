@@ -37,6 +37,8 @@ import {
   type Turn,
 } from './conversationModel';
 import { diffLines, toolPreview } from './pendingTool';
+import { MarkdownImage, Thumbnails } from './AgentImages';
+import { dataUrl } from './agentImageStore';
 
 const CATEGORY_ICON: Record<StepCategory, ComponentType<{ className?: string }>> = {
   read: FileText,
@@ -49,6 +51,9 @@ const CATEGORY_ICON: Record<StepCategory, ComponentType<{ className?: string }>>
 };
 
 const OUTPUT_LIMIT = 6000;
+
+/** Images in the agent's markdown: thumbnails, local files read from disk. */
+const MARKDOWN_COMPONENTS = { img: MarkdownImage } as const;
 
 interface ConversationTurnsProps {
   messages: AgentMessage[];
@@ -128,16 +133,19 @@ function UserTurn({ turn }: { turn: Extract<Turn, { kind: 'user' }> }) {
     );
   }
   return (
-    <div className="group/user flex flex-col items-end gap-1">
-      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words text-foreground shadow-soft">
-        {turn.images > 0 && (
-          <span className="mb-1.5 flex items-center gap-1 text-xs text-muted-foreground">
-            <ImageIcon className="size-3.5" />
-            {turn.images === 1 ? 'Image' : `${turn.images} images`}
-          </span>
-        )}
-        {turn.text}
-      </div>
+    <div className="group/user flex flex-col items-end gap-1.5">
+      <Thumbnails images={turn.pictures.map((p, i) => ({ src: dataUrl(p), alt: `Image ${i + 1}` }))} className="max-w-[85%] justify-end" />
+      {(turn.text || turn.images > 0) && (
+        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words text-foreground shadow-soft">
+          {turn.images > 0 && (
+            <span className="mb-1.5 flex items-center gap-1 text-xs text-muted-foreground">
+              <ImageIcon className="size-3.5" />
+              {turn.images === 1 ? 'Image' : `${turn.images} images`}
+            </span>
+          )}
+          {turn.text}
+        </div>
+      )}
       <time className="pr-1 text-[10px] text-faint opacity-0 transition-opacity group-hover/user:opacity-100" dateTime={turn.timestamp}>
         {formatTime(turn.timestamp)}
       </time>
@@ -197,7 +205,7 @@ function BlockView({ block, live, subagents }: { block: Block; live: boolean; su
     case 'text':
       return (
         <div className="agent-prose text-sm leading-7 text-foreground">
-          <MessageResponse>{block.text}</MessageResponse>
+          <MessageResponse components={MARKDOWN_COMPONENTS}>{block.text}</MessageResponse>
         </div>
       );
     case 'thinking':
@@ -224,7 +232,7 @@ function BlockView({ block, live, subagents }: { block: Block; live: boolean; su
             )}
           </div>
           <div className="agent-prose max-h-[28rem] overflow-auto px-4 py-3 text-sm leading-7">
-            <MessageResponse>{block.plan}</MessageResponse>
+            <MessageResponse components={MARKDOWN_COMPONENTS}>{block.plan}</MessageResponse>
           </div>
         </div>
       );
@@ -353,6 +361,12 @@ function StepRow({ step, live, activity }: { step: Step; live: boolean; activity
         <p className="ml-5 truncate text-xs text-faint" title={activity}>
           ↳ {activity}
         </p>
+      )}
+      {step.result?.images && step.result.images.length > 0 && (
+        <Thumbnails
+          images={step.result.images.map((img, i) => ({ src: dataUrl(img), alt: `${label.target || label.verb} · ${i + 1}` }))}
+          className="mt-1.5 mb-1 ml-5"
+        />
       )}
       {open && <StepDetail step={step} />}
     </div>

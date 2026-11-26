@@ -704,6 +704,7 @@ pub fn parse_transcript(path: &Path) -> std::io::Result<Vec<AgentMessage>> {
                         tool_id,
                         output,
                         is_error: false,
+                        images: Vec::new(),
                     }],
                     is_sidechain: false,
                 });

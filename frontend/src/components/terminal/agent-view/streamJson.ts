@@ -26,7 +26,7 @@
  * shape (`AgentMessage`), so the conversation renderer draws a live session
  * and a resumed one's history the same way.
  */
-import type { AgentMessage, AgentPart } from '@/types';
+import type { AgentImage, AgentMessage, AgentPart } from '@/types';
 
 type Json = Record<string, unknown>;
 
@@ -87,6 +87,34 @@ export interface GuiAgentState {
   activity: string | null;
   /** The models the agent offers (from `initialize`). */
   models: { value: string; displayName: string }[];
+  /** From `init`: where it runs, its version, its connectors (MCP servers)… */
+  info: SessionInfo;
+  /** Token usage of the last answer (main thread), for the context meter. */
+  usage: Usage | null;
+  /** The model's context window, from the last `result`'s `modelUsage`. */
+  contextWindow: number | null;
+  /** Cost Claude Code reports (`total_cost_usd` of the last result). */
+  costUsd: number | null;
+  /** Turns of this process (`num_turns` of the last result). */
+  turns: number;
+}
+
+export interface Usage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+export interface SessionInfo {
+  cwd: string | null;
+  version: string | null;
+  outputStyle: string | null;
+  mcpServers: { name: string; status: string }[];
+  tools: number;
+  skills: string[];
+  plugins: string[];
+  account: string | null;
 }
 
 export function initialState(): GuiAgentState {
@@ -107,7 +135,16 @@ export function initialState(): GuiAgentState {
     initialized: false,
     activity: null,
     models: [],
+    info: { cwd: null, version: null, outputStyle: null, mcpServers: [], tools: 0, skills: [], plugins: [], account: null },
+    usage: null,
+    contextWindow: null,
+    costUsd: null,
+    turns: 0,
   };
+}
+
+function strings(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 }
 
 function obj(v: unknown): Json | null {
@@ -133,6 +170,24 @@ function resultText(content: unknown): string {
       .join('\n');
   }
   return content == null ? '' : JSON.stringify(content);
+}
+
+/** A base64 image block (`{type: image, source: {type: base64, media_type, data}}`). */
+function imageOf(block: Json): AgentImage | null {
+  const source = obj(block.source);
+  if (!source || source.type !== 'base64') return null;
+  const data = str(source.data);
+  if (!data) return null;
+  return { mediaType: str(source.media_type) ?? 'image/png', data };
+}
+
+function imagesOf(content: unknown): AgentImage[] {
+  if (!Array.isArray(content)) return [];
+  return content
+    .map((b) => obj(b))
+    .filter((b): b is Json => !!b && b.type === 'image')
+    .map(imageOf)
+    .filter((i): i is AgentImage => !!i);
 }
 
 /** Content blocks of an API message, as parts. */
@@ -163,11 +218,15 @@ function partsOf(content: unknown, role: 'user' | 'assistant'): AgentPart[] {
           toolId: str(o.tool_use_id) ?? '',
           output: resultText(o.content),
           isError: o.is_error === true,
+          ...(imagesOf(o.content).length > 0 ? { images: imagesOf(o.content) } : {}),
         });
         break;
-      case 'image':
-        if (role === 'user') parts.push({ type: 'attachment', description: 'image' });
+      case 'image': {
+        if (role !== 'user') break;
+        const image = imageOf(o);
+        parts.push(image ? { type: 'image', ...image } : { type: 'attachment', description: 'image' });
         break;
+      }
     }
   }
   return parts;
@@ -216,6 +275,23 @@ export function reduce(state: GuiAgentState, message: Json, now: number = Date.n
           slashCommands: Array.isArray(message.slash_commands)
             ? message.slash_commands.filter((c): c is string => typeof c === 'string')
             : state.slashCommands,
+          info: {
+            ...state.info,
+            cwd: str(message.cwd) ?? state.info.cwd,
+            version: str(message.claude_code_version) ?? state.info.version,
+            outputStyle: str(message.output_style) ?? state.info.outputStyle,
+            mcpServers: Array.isArray(message.mcp_servers)
+              ? message.mcp_servers
+                  .map((m) => obj(m))
+                  .filter((m): m is Json => !!m && typeof m.name === 'string')
+                  .map((m) => ({ name: m.name as string, status: str(m.status) ?? 'unknown' }))
+              : state.info.mcpServers,
+            tools: Array.isArray(message.tools) ? message.tools.length : state.info.tools,
+            skills: Array.isArray(message.skills) ? strings(message.skills) : state.info.skills,
+            plugins: Array.isArray(message.plugins)
+              ? message.plugins.map((p) => str(obj(p)?.name)).filter((n): n is string => !!n)
+              : state.info.plugins,
+          },
         };
       }
       if (subtype === 'compact_boundary') {
@@ -271,12 +347,15 @@ export function reduce(state: GuiAgentState, message: Json, now: number = Date.n
       } else {
         messages.push({ id, role: 'assistant', timestamp: new Date(now).toISOString(), parts, isSidechain: false });
       }
+      const usage = obj(msg.usage) as Usage | null;
       return {
         ...state,
         sessionId: str(message.session_id) ?? state.sessionId,
         messages,
         finalBlocks: { ...state.finalBlocks, [id]: finalCount },
         busy: true,
+        usage: usage ?? state.usage,
+        model: str(msg.model) ?? state.model,
       };
     }
 
@@ -319,6 +398,9 @@ export function reduce(state: GuiAgentState, message: Json, now: number = Date.n
         subagents: {},
         activity: null,
         lastResult: result,
+        costUsd: typeof message.total_cost_usd === 'number' ? message.total_cost_usd : state.costUsd,
+        turns: typeof message.num_turns === 'number' ? message.num_turns : state.turns,
+        contextWindow: contextWindowOf(message.modelUsage) ?? state.contextWindow,
       };
     }
 
@@ -364,6 +446,8 @@ export function reduce(state: GuiAgentState, message: Json, now: number = Date.n
           const names = body.commands.map((c) => str(obj(c)?.name)).filter((n): n is string => !!n);
           if (names.length > 0) next = { ...next, slashCommands: names };
         }
+        const account = obj(body?.account);
+        if (account) next = { ...next, info: { ...next.info, account: str(account.email) ?? str(account.subscriptionType) } };
         if (body && Array.isArray(body.models)) {
           const models = body.models
             .map((m) => obj(m))
@@ -378,6 +462,18 @@ export function reduce(state: GuiAgentState, message: Json, now: number = Date.n
     default:
       return state;
   }
+}
+
+/** The largest context window of the models a result reports. */
+function contextWindowOf(modelUsage: unknown): number | null {
+  const all = obj(modelUsage);
+  if (!all) return null;
+  let best: number | null = null;
+  for (const v of Object.values(all)) {
+    const w = obj(v)?.contextWindow;
+    if (typeof w === 'number' && (best === null || w > best)) best = w;
+  }
+  return best;
 }
 
 function systemNote(id: string, text: string, now: number): AgentMessage {
@@ -510,10 +606,10 @@ export function setModeUpdate(mode: string): Json {
 }
 
 /** Our own prompt, shown at once (the agent does not echo it back). */
-export function withUserPrompt(state: GuiAgentState, text: string, images: number, now: number = Date.now()): GuiAgentState {
+export function withUserPrompt(state: GuiAgentState, text: string, images: AgentImage[], now: number = Date.now()): GuiAgentState {
   const parts: AgentPart[] = [];
   if (text.trim()) parts.push({ type: 'text', text });
-  for (let i = 0; i < images; i++) parts.push({ type: 'attachment', description: 'image' });
+  for (const image of images) parts.push({ type: 'image', ...image });
   const message: AgentMessage = { id: `prompt-${now}-${state.messages.length}`, role: 'user', timestamp: new Date(now).toISOString(), parts, isSidechain: false };
   return { ...state, busy: true, lastResult: null, messages: [...state.messages, message] };
 }

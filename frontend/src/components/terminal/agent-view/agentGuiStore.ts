@@ -24,7 +24,7 @@ import {
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import { collectLeaves } from '@/lib/terminalLayout';
-import type { AgentMessage } from '@/types';
+import type { AgentImage, AgentMessage } from '@/types';
 import {
   allowResponse,
   controlRequest,
@@ -262,13 +262,16 @@ export async function sendPanePrompt(key: string, input: PromptInput): Promise<b
 
   const content: OutgoingContent[] = [];
   const unreadable: string[] = [];
+  const shown: AgentImage[] = [];
   for (const path of input.images) {
     const ext = path.split('.').pop()?.toLowerCase() ?? '';
     const mediaType = IMAGE_TYPES[ext];
     try {
       if (!mediaType) throw new Error('not an image');
       const bytes = await readFile(path);
-      content.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: toBase64(bytes) } });
+      const data = toBase64(bytes);
+      content.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } });
+      shown.push({ mediaType, data });
     } catch {
       unreadable.push(path);
     }
@@ -282,7 +285,7 @@ export async function sendPanePrompt(key: string, input: PromptInput): Promise<b
   const store = useAgentGuiStore.getState();
   store.patch(key, (p) => ({
     ...p,
-    state: withUserPrompt(p.state, input.text.trim() || paths.join(' '), input.images.length - unreadable.length),
+    state: withUserPrompt(p.state, input.text.trim() || paths.join(' '), shown),
     turnStartedAt: p.turnStartedAt ?? Date.now(),
   }));
   try {
