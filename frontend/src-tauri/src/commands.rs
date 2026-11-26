@@ -2916,10 +2916,20 @@ pub fn compute_terminal_agents(
     cortx_core::agents::terminal_link::mark_needs_input(&mut agents, |id| hub.output_idle(id));
     // Panes in GUI mode: CortX runs their agent itself, outside any terminal
     // (CORT-66). A terminal where Claude Code was found keeps that one.
-    for gui in crate::agent_gui::terminal_agents() {
-        if !agents.iter().any(|a| a.terminal_id == gui.terminal_id) {
-            agents.push(gui);
+    // Its title (`/rename`, the auto title) and branch come from the same
+    // index as a terminal agent's: the pipes do not carry them.
+    let gui: Vec<_> = crate::agent_gui::terminal_agents()
+        .into_iter()
+        .filter(|g| !agents.iter().any(|a| a.terminal_id == g.terminal_id))
+        .collect();
+    let ids: Vec<String> = gui.iter().filter_map(|g| g.session_id.clone()).collect();
+    let labels = state.agents.claude_session_labels(&ids);
+    for mut agent in gui {
+        if let Some((name, branch)) = agent.session_id.as_ref().and_then(|id| labels.get(id)) {
+            agent.name = agent.name.or_else(|| name.clone());
+            agent.details.git_branch = agent.details.git_branch.or_else(|| branch.clone());
         }
+        agents.push(agent);
     }
     agents
 }

@@ -1058,8 +1058,8 @@ impl AgentIndex {
         if settings.claude_enabled {
             let live = self.live.read();
             if !live.is_empty() {
-                let titles = self.claude_live_titles(&live);
-                let mut details = self.claude_live_details(&live);
+                let titles = self.claude_live_titles(|id| live.contains_key(id));
+                let mut details = self.claude_live_details(|id| live.contains_key(id));
                 for (id, entry) in live.iter() {
                     let name = entry
                         .custom_name()
@@ -1122,11 +1122,38 @@ impl AgentIndex {
         out
     }
 
+    /// The title and git branch of these Claude Code sessions, the way an
+    /// agent found in a terminal gets them — for the panes in GUI mode, whose
+    /// agent CortX runs itself, outside any terminal (CORT-66). Keyed by
+    /// session id; a session with neither is left out.
+    pub fn claude_session_labels(&self, ids: &[String]) -> HashMap<String, (Option<String>, Option<String>)> {
+        if ids.is_empty() || !self.settings().claude_enabled {
+            return HashMap::new();
+        }
+        let wanted = |id: &str| ids.iter().any(|w| w == id);
+        let titles = self.claude_live_titles(wanted);
+        let details = self.claude_live_details(wanted);
+        let live = self.live.read();
+        let mut out = HashMap::new();
+        for id in ids {
+            let name = live
+                .get(id)
+                .and_then(|e| e.custom_name())
+                .map(|n| single_line(n, TITLE_MAX_CHARS))
+                .or_else(|| titles.get(id).cloned());
+            let branch = details.get(id).and_then(|d| d.git_branch.clone());
+            if name.is_some() || branch.is_some() {
+                out.insert(id.clone(), (name, branch));
+            }
+        }
+        out
+    }
+
     /// Session titles (`ai-title`, `/rename`, `--name`) of the live sessions,
     /// read from the index cache in one pass.
     fn claude_live_titles(
         &self,
-        live: &HashMap<String, claude_code::LiveEntry>,
+        wanted: impl Fn(&str) -> bool,
     ) -> HashMap<String, String> {
         let cache = self.cache.read();
         let mut out = HashMap::new();
@@ -1139,7 +1166,7 @@ impl AgentIndex {
                 Some(id) => id,
                 None => continue,
             };
-            if !live.contains_key(&id) {
+            if !wanted(&id) {
                 continue;
             }
             let title = entry
@@ -1163,7 +1190,7 @@ impl AgentIndex {
     /// branch, model, last activity.
     fn claude_live_details(
         &self,
-        live: &HashMap<String, claude_code::LiveEntry>,
+        wanted: impl Fn(&str) -> bool,
     ) -> HashMap<String, terminal_link::AgentDetails> {
         const LINE: usize = 160;
         let cache = self.cache.read();
@@ -1178,7 +1205,7 @@ impl AgentIndex {
                 Some(id) => id,
                 None => continue,
             };
-            if !live.contains_key(&id) {
+            if !wanted(&id) {
                 continue;
             }
             let line = |t: &Option<String>| {
@@ -1586,6 +1613,44 @@ mod tests {
 
         // No terminal, no process-table walk.
         assert!(index.terminal_agents(&[]).is_empty());
+    }
+
+    #[test]
+    fn session_labels_name_a_gui_agent_like_a_terminal_one() {
+        // A pane in GUI mode: its agent runs under no terminal, so it only
+        // gets a title through `claude_session_labels` (CORT-66).
+        let dir = tempfile::tempdir().unwrap();
+        let claude = dir.path().join("claude");
+        let runtime = dir.path().join("runtime");
+        let proj = claude.join("projects").join("C--Users-Me-Proj-CortX");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::create_dir_all(claude.join("sessions")).unwrap();
+        let titled = "cccc3333-0000-4000-8000-000000000003";
+        let renamed = "dddd4444-0000-4000-8000-000000000004";
+        std::fs::write(
+            proj.join(format!("{}.jsonl", titled)),
+            format!("{{\"type\":\"ai-title\",\"aiTitle\":\"GUI parity\",\"sessionId\":\"{}\"}}\n", titled),
+        )
+        .unwrap();
+        // `/rename` lands in the live registry first.
+        let pid = std::process::id();
+        std::fs::write(
+            claude.join("sessions").join(format!("{}.json", pid)),
+            format!(
+                r#"{{"pid":{},"sessionId":"{}","cwd":"C:\\x","status":"busy","kind":"interactive","name":"My session","nameSource":"user"}}"#,
+                pid, renamed
+            ),
+        )
+        .unwrap();
+        let settings = AgentsSettings { claude_config_dir: Some(claude.to_string_lossy().to_string()), ..Default::default() };
+        let index = AgentIndex::new(settings, &runtime);
+        index.refresh_all();
+
+        let labels = index.claude_session_labels(&[titled.to_owned(), renamed.to_owned(), "nope".to_owned()]);
+        assert_eq!(labels.get(titled).and_then(|l| l.0.as_deref()), Some("GUI parity"));
+        assert_eq!(labels.get(renamed).and_then(|l| l.0.as_deref()), Some("My session"));
+        assert!(!labels.contains_key("nope"));
+        assert!(index.claude_session_labels(&[]).is_empty());
     }
 
     #[test]

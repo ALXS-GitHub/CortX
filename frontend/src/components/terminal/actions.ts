@@ -19,7 +19,7 @@ import { useTerminalAgentsStore } from './agentsStore';
 import { attachToAgentPrompt, isEditorOpen, toggleAgentPrompt } from './agentPrompt';
 import { focusAgentView, isGuiPane, toggleAgentView } from './agent-view/paneMode';
 import { adjustAgentViewZoom, resetAgentViewZoom } from './agent-view/agentViewZoom';
-import { ensurePaneAgent, startPaneAgent } from './agent-view/agentGuiStore';
+import { ensurePaneAgent, startPaneAgent, useAgentGuiStore } from './agent-view/agentGuiStore';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
 import { basename } from '@/lib/terminalNames';
 import type { KeybindingActionId } from '@/lib/keybindings';
@@ -312,11 +312,33 @@ export function describeTerminalLocation(terminalId: string): string {
   return `${where} · ${terminalWindowName(terminalWindowIdOf(tab))}`;
 }
 
-/** The terminals of `terminalIds` whose shell says a command is running. */
+/** How a running GUI agent is named in the prompt (as `agent_gui::RUNNING_LABEL`). */
+const GUI_AGENT_LABEL = 'Claude Code (GUI mode)';
+
+/**
+ * The terminals of `terminalIds` that a close would interrupt: the shell
+ * says a command is running, or the pane is in GUI mode with its agent up.
+ * A GUI agent runs beside the pane's shell, not in it (CORT-62) — the shell
+ * stays idle — but closing the pane kills that Claude Code session exactly
+ * as closing a terminal running its TUI would. A GUI pane whose agent is not
+ * started (restored, no prompt yet) has nothing to kill, like an idle shell.
+ */
 export function runningAmong(terminalIds: string[]): RunningCommand[] {
   const states = useAppStore.getState().terminalStates;
+  const agents = useTerminalAgentsStore.getState().agents;
+  const panes = useAgentGuiStore.getState().panes;
   const out: RunningCommand[] = [];
   for (const terminalId of new Set(terminalIds)) {
+    const agent = agents.get(terminalId);
+    if (agent?.kind === 'gui' && agent.pid > 0) {
+      out.push({
+        terminalId,
+        where: describeTerminalLocation(terminalId),
+        command: agent.name ? `${GUI_AGENT_LABEL} · ${agent.name}` : GUI_AGENT_LABEL,
+        startedAt: panes[terminalId]?.startedAt ?? null,
+      });
+      continue;
+    }
     const state = states.get(terminalId);
     if (state?.phase !== 'running') continue;
     out.push({

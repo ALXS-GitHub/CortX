@@ -20,6 +20,7 @@
 
 use cortx_core::agents::terminal_link::{AgentDetails, NeedsInput, TerminalAgent};
 use cortx_core::agents::{AgentProvider, AgentState};
+use cortx_core::process_manager::RunningTerminal;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -40,6 +41,8 @@ const STREAM_JSON_FLAGS: &str =
 struct GuiProcess {
     generation: u64,
     pid: u32,
+    /// Epoch ms the process was started at (the close prompts' "for 3m").
+    started_at: i64,
     child: Child,
     stdin: ChildStdin,
     live: GuiLive,
@@ -210,6 +213,28 @@ pub fn terminal_agents() -> Vec<TerminalAgent> {
     out
 }
 
+/// The panes whose agent is running, for the quit prompt: closing them
+/// kills a Claude Code session exactly as closing a terminal running its TUI
+/// would, so they are listed the same way (`running_terminals`).
+pub fn running_terminals() -> Vec<RunningTerminal> {
+    let Ok(procs) = processes().lock() else {
+        return Vec::new();
+    };
+    let mut out: Vec<RunningTerminal> = procs
+        .iter()
+        .map(|(key, p)| RunningTerminal {
+            terminal_id: key.clone(),
+            command: Some(RUNNING_LABEL.to_owned()),
+            started_at: Some(p.started_at),
+        })
+        .collect();
+    out.sort_by(|a, b| a.terminal_id.cmp(&b.terminal_id));
+    out
+}
+
+/// How a running GUI agent is named in the close / quit prompts.
+pub const RUNNING_LABEL: &str = "Claude Code (GUI mode)";
+
 fn processes() -> &'static Mutex<HashMap<String, GuiProcess>> {
     static PROCS: OnceLock<Mutex<HashMap<String, GuiProcess>>> = OnceLock::new();
     PROCS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -347,7 +372,7 @@ pub fn agent_gui_start(
         .map_err(|e| e.to_string())?
         .insert(
             key.clone(),
-            GuiProcess { generation, pid, child, stdin, live: GuiLive { cwd: cwd.clone(), ..Default::default() } },
+            GuiProcess { generation, pid, started_at: now_ms(), child, stdin, live: GuiLive { cwd: cwd.clone(), ..Default::default() } },
         );
     crate::refresh_terminal_agents(&app);
 

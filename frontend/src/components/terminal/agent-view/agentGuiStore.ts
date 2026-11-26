@@ -59,6 +59,8 @@ export interface PaneAgent {
   error: string | null;
   /** When the current turn started (epoch ms), for the live timer. */
   turnStartedAt: number | null;
+  /** When this window started the process (epoch ms), for the close prompt; null when unknown. */
+  startedAt: number | null;
 }
 
 interface AgentGuiStore {
@@ -174,6 +176,7 @@ export function ensurePaneAgent(key: string, cwd: string, sessionId: string | nu
           exitCode: null,
           error: null,
           turnStartedAt: null,
+          startedAt: null,
         },
       },
     }));
@@ -202,7 +205,7 @@ export async function startPaneAgent(key: string): Promise<boolean> {
   store.patch(key, (p) => ({ ...p, status: 'starting', error: null, exitCode: null }));
   try {
     const generation = await agentGuiStart(key, pane.cwd, guiCommand(), pane.resumeId, guiPermissionMode());
-    store.patch(key, (p) => ({ ...p, generation, status: 'running' }));
+    store.patch(key, (p) => ({ ...p, generation, status: 'running', startedAt: Date.now() }));
     // The SDK's handshake: the agent answers with its commands, models…
     const id = newRequestId();
     store.patch(key, (p) => ({ ...p, state: withPendingControl(p.state, id, 'initialize') }));

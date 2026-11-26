@@ -265,7 +265,13 @@ const CONFIRM_QUIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// that knows the `confirmCloseRunning` setting — when it is off the webview
 /// answers `true` straight away). Nothing running = nothing to ask.
 fn confirm_quit_with_running_terminals(app: &AppHandle, state: &AppState) -> bool {
-    let running = state.process_manager.running_terminals();
+    let mut running = state.process_manager.running_terminals();
+    // A pane in GUI mode runs its agent outside the shell (CORT-62): its
+    // shell is idle, but the quit kills a Claude Code session all the same.
+    for gui in agent_gui::running_terminals() {
+        running.retain(|r| r.terminal_id != gui.terminal_id);
+        running.push(gui);
+    }
     if running.is_empty() {
         return true;
     }
