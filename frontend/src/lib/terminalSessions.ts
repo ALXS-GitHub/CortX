@@ -2043,6 +2043,24 @@ export function terminalCursorScreenRect(id: string): DOMRect | null {
 }
 
 /** Calls `cb` after each repaint of a session; returns the unsubscribe. */
+/** What the user types or pastes into a terminal (and xterm's own replies), as it goes to the PTY. */
+export function onTerminalInput(id: string, cb: (data: string) => void): () => void {
+  const session = sessions.get(id);
+  if (!session) return () => {};
+  const sub = session.term.onData(cb);
+  return () => sub.dispose();
+}
+
+/** The rows on a terminal's screen, as text (the bottom of the normal buffer, or the alternate screen). */
+export function terminalScreenRows(id: string): string[] | null {
+  const session = sessions.get(id);
+  if (!session) return null;
+  const buf = session.term.buffer.active;
+  const rows: string[] = [];
+  for (let y = 0; y < session.term.rows; y++) rows.push(buf.getLine(buf.baseY + y)?.translateToString(true) ?? '');
+  return rows;
+}
+
 export function onTerminalRender(id: string, cb: () => void): () => void {
   const session = sessions.get(id);
   if (!session) return () => {};

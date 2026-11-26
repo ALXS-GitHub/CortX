@@ -28,8 +28,9 @@
 import { appCacheDir, join } from '@tauri-apps/api/path';
 import { mkdir, writeFile } from '@tauri-apps/plugin-fs';
 import { writeTerminal } from '@/lib/tauri';
-import { pasteIntoTerminal } from '@/lib/terminalSessions';
+import { pasteIntoTerminal, terminalScreenRows } from '@/lib/terminalSessions';
 import { promptParts, type PromptAttachment } from './agentPromptParts';
+import { clearKeys, inputHoldsPrompt, readInputBox } from './agentPromptRestore';
 
 export type AgentAttachment = PromptAttachment;
 
@@ -58,6 +59,10 @@ export function attachmentOf(path: string): AgentAttachment {
 }
 
 const drafts = new Map<string, AgentDraft>();
+/** The last prompt the bubble sent to each terminal's agent, until it is given back or goes stale. */
+const lastSent = new Map<string, { draft: AgentDraft; at: number; escForwarded: boolean }>();
+/** A sent prompt can sit in Claude Code's queue for as long as a turn lasts. */
+const SENT_TTL = 30 * 60_000;
 const history = new Map<string, string[]>();
 const openEditors = new Set<string>();
 const HISTORY_LIMIT = 50;
@@ -109,6 +114,7 @@ export async function sendAgentPrompt(terminalId: string, draft: AgentDraft): Pr
     await sleep(part.kind === 'image' ? 220 : 120);
   }
   await writeTerminal(terminalId, '\r');
+  lastSent.set(terminalId, { draft, at: Date.now(), escForwarded: false });
   if (draft.text.trim()) {
     const list = history.get(terminalId) ?? [];
     if (list[list.length - 1] !== draft.text) list.push(draft.text);
@@ -116,6 +122,79 @@ export async function sendAgentPrompt(terminalId: string, draft: AgentDraft): Pr
     history.set(terminalId, list);
   }
   return true;
+}
+
+function freshSent(terminalId: string) {
+  const sent = lastSent.get(terminalId);
+  if (!sent) return null;
+  if (Date.now() - sent.at > SENT_TTL || !sent.draft.text.trim()) {
+    lastSent.delete(terminalId);
+    return null;
+  }
+  return sent;
+}
+
+/**
+ * Esc in the bubble, right after it sent a prompt and with nothing typed
+ * since: the Esc is the agent's (stop, and give the queued prompt back), the
+ * way it is in Claude Code's own input. Once only — a second Esc closes the
+ * bubble, and never reaches the agent as the double Esc that opens its
+ * history.
+ */
+export function escapeGoesToAgent(terminalId: string): boolean {
+  const sent = freshSent(terminalId);
+  if (!sent || sent.escForwarded) return false;
+  if (Date.now() - sent.at > ESC_WINDOW) return false;
+  sent.escForwarded = true;
+  return true;
+}
+/** How long after a send Esc in the bubble still means "stop" rather than "close". */
+const ESC_WINDOW = 60_000;
+
+/** Send the agent an Esc, as its own input would. */
+export async function sendEscapeToAgent(terminalId: string) {
+  await writeTerminal(terminalId, '\x1b');
+}
+
+const restoring = new Set<string>();
+
+/**
+ * An Esc just reached the agent: if it gives back the prompt the bubble sent
+ * (`agentPromptRestore.ts`), take it out of the agent's input box and resolve
+ * to it, for the bubble. Null when the agent kept it — too late, the message
+ * was already taken up — or when there is nothing to watch for.
+ */
+export async function takeBackPrompt(terminalId: string): Promise<AgentDraft | null> {
+  const sent = freshSent(terminalId);
+  if (!sent || restoring.has(terminalId)) return null;
+  restoring.add(terminalId);
+  try {
+    // The agent redraws its box a moment after the key.
+    let box: string | null = null;
+    const until = Date.now() + 1500;
+    while (Date.now() < until) {
+      await sleep(80);
+      box = readInputBox(terminalScreenRows(terminalId) ?? []);
+      if (inputHoldsPrompt(box, sent.draft.text)) break;
+      box = null;
+    }
+    if (box === null) return null;
+    await writeTerminal(terminalId, clearKeys(box));
+    // Only take it if the box really let go of it: otherwise it stays where
+    // the agent put it, rather than living in two places.
+    let after: string | null = box;
+    const settle = Date.now() + 800;
+    while (Date.now() < settle) {
+      await sleep(80);
+      after = readInputBox(terminalScreenRows(terminalId) ?? []);
+      if (after === '') break;
+    }
+    if (after === box) return null;
+    lastSent.delete(terminalId);
+    return sent.draft;
+  } finally {
+    restoring.delete(terminalId);
+  }
 }
 
 const IMAGE_EXT: Record<string, string> = {

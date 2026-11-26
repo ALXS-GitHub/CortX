@@ -5,7 +5,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '@/stores/appStore';
 import { AgentProviderIcon } from '@/components/agents/AgentProviderIcon';
 import { comboFromEvent, comboLabelFor, effectiveCombos } from '@/lib/keybindings';
-import { focusTerminal } from '@/lib/terminalSessions';
+import { focusTerminal, onTerminalInput } from '@/lib/terminalSessions';
 import { cn } from '@/lib/utils';
 import type { TerminalAgentInfo } from '@/types';
 import { useTerminalAgent, useTerminalAgentsStore } from './agentsStore';
@@ -15,12 +15,15 @@ import {
   AGENT_PROMPT_EVENTS,
   attachmentOf,
   draftOf,
+  escapeGoesToAgent,
   isEditorOpen,
   promptHistory,
   saveClipboardImage,
   saveDraft,
   sendAgentPrompt,
+  sendEscapeToAgent,
   setEditorOpen,
+  takeBackPrompt,
   type AgentAttachment,
   type AgentDraft,
 } from './agentPrompt';
@@ -105,6 +108,7 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
   const [open, setOpen] = useState(() => isEditorOpen(terminalId));
   const [draft, setDraftState] = useState<AgentDraft>(() => draftOf(terminalId));
   const [sending, setSending] = useState(false);
+  const pending = draft.text.trim() !== '' || draft.attachments.length > 0;
   const barRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -243,6 +247,39 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
     return () => pane.removeEventListener('keydown', onKey, true);
   }, [keybindings, open, show, hide]);
 
+  // Claude Code's Esc on a prompt still waiting in its queue: the agent stops
+  // and gives the prompt back to its input box. Sent from here, it comes back
+  // here instead (`agentPrompt.takeBackPrompt`) — only when the agent did
+  // give it back; a late Esc that only stops it leaves everything alone.
+  const restoreDraft = useCallback(
+    (back: AgentDraft) => {
+      setDraft((d) => {
+        if (!d.text && d.attachments.length === 0) return back;
+        const known = new Set(back.attachments.map((a) => a.path));
+        return {
+          text: d.text ? `${back.text}${NEWLINE}${d.text}` : back.text,
+          attachments: [...back.attachments, ...d.attachments.filter((a) => !known.has(a.path))],
+        };
+      });
+      pendingCaret.current = back.text.length;
+      show();
+    },
+    [setDraft, show]
+  );
+  const takeBack = useCallback(() => {
+    void takeBackPrompt(terminalId).then((back) => {
+      if (back) restoreDraft(back);
+    });
+  }, [terminalId, restoreDraft]);
+  // …the Esc typed in the terminal itself (the agent's own input).
+  useEffect(
+    () =>
+      onTerminalInput(terminalId, (data) => {
+        if (data === '\x1b' || data === '\x1b[27u') takeBack();
+      }),
+    [terminalId, takeBack]
+  );
+
   // A permission prompt took the keyboard back to the agent.
   const wasBlocked = useRef(blocked);
   useEffect(() => {
@@ -299,6 +336,13 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
     }
     if (e.key === 'Escape') {
       e.preventDefault();
+      // Right after a send, with nothing typed since: the Esc is the agent's
+      // (stop; a prompt still queued comes back into this field). The bubble
+      // stays open for it. Any other Esc closes the bubble.
+      if (!pending && escapeGoesToAgent(terminalId)) {
+        void sendEscapeToAgent(terminalId).then(takeBack);
+        return;
+      }
       hide();
       return;
     }
@@ -392,7 +436,6 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
   const spans = markerSpans(draft.text, draft.attachments);
 
   const canSend = !sending && (draft.text.trim() !== '' || draft.attachments.length > 0);
-  const pending = draft.text.trim() !== '' || draft.attachments.length > 0;
   const shortcut = comboLabelFor('agent.prompt', keybindings);
   const expanded = open && !blocked;
 
