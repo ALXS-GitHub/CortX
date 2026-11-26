@@ -4,6 +4,7 @@ import { useAppStore } from '@/stores/appStore';
 import { IS_MAC, comboFromEvent, resolveKeybindings, type KeybindingActionId } from '@/lib/keybindings';
 import { endTabCycle, pasteDroppedPaths, runAction } from './actions';
 import { adjustTerminalZoom } from '@/lib/terminalSessions';
+import { adjustAgentViewZoom } from './agent-view/agentViewZoom';
 
 /** Actions that must also work while a text field (palette, find, rename) has focus. */
 const ALWAYS_ON: ReadonlySet<KeybindingActionId> = new Set<KeybindingActionId>(['window.palette', 'terminal.find']);
@@ -208,6 +209,7 @@ export function useTerminalWheelZoom() {
       e.preventDefault();
       e.stopPropagation();
       const delta = wheelDeltaPx(e);
+      const agentView = e.target instanceof Element ? (e.target.closest<HTMLElement>('[data-agent-view]')?.dataset.agentView ?? null) : null;
       const now = e.timeStamp || performance.now();
       // A new gesture: after a pause, or as soon as the user pushes back the
       // other way — carrying the leftover across would swallow the reversal.
@@ -218,7 +220,9 @@ export function useTerminalWheelZoom() {
       while (Math.abs(travel) >= ZOOM_WHEEL_STEP_PX) {
         const step = travel < 0 ? 1 : -1;
         travel += step * ZOOM_WHEEL_STEP_PX;
-        adjustTerminalZoom(step);
+        // Over a pane in GUI mode: that conversation only (CORT-66).
+        if (agentView) adjustAgentViewZoom(agentView, step);
+        else adjustTerminalZoom(step);
       }
     };
     window.addEventListener('wheel', onWheel, { capture: true, passive: false });

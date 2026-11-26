@@ -682,8 +682,19 @@ export interface AgentGuiEventPayload {
 }
 
 /** Start Claude Code in stream-json mode for a pane; resolves to the generation its events carry. */
-export async function agentGuiStart(key: string, cwd: string, command: string, resume: string | null): Promise<number> {
-  return invoke('agent_gui_start', { key, cwd, command, resume });
+export async function agentGuiStart(
+  key: string,
+  cwd: string,
+  command: string,
+  resume: string | null,
+  permissionMode: string | null = null
+): Promise<number> {
+  return invoke('agent_gui_start', { key, cwd, command, resume, permissionMode });
+}
+
+/** Has anyone written in this session yet? Only then can it be resumed (CORT-66). */
+export async function agentSessionHasConversation(sessionId: string): Promise<boolean> {
+  return invoke('agent_session_has_conversation', { sessionId });
 }
 
 /** Write one JSON message to a pane's agent. */

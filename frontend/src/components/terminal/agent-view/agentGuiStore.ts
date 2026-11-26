@@ -79,6 +79,11 @@ function guiCommand(): string {
   return (useAppStore.getState().settings?.terminal?.agentGuiCommand ?? 'claude').trim() || 'claude';
 }
 
+/** The permission mode a new agent starts in; null = the command's own. */
+function guiPermissionMode(): string | null {
+  return useAppStore.getState().settings?.terminal?.agentGuiPermissionMode ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Events from the processes
 // ---------------------------------------------------------------------------
@@ -196,7 +201,7 @@ export async function startPaneAgent(key: string): Promise<boolean> {
   const store = useAgentGuiStore.getState();
   store.patch(key, (p) => ({ ...p, status: 'starting', error: null, exitCode: null }));
   try {
-    const generation = await agentGuiStart(key, pane.cwd, guiCommand(), pane.resumeId);
+    const generation = await agentGuiStart(key, pane.cwd, guiCommand(), pane.resumeId, guiPermissionMode());
     store.patch(key, (p) => ({ ...p, generation, status: 'running' }));
     // The SDK's handshake: the agent answers with its commands, models…
     const id = newRequestId();

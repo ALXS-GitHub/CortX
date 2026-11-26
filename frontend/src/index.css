@@ -3,8 +3,11 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/outfit";
 @import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource-variable/plus-jakarta-sans/wght-italic.css";
 @import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/jetbrains-mono/wght-italic.css";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/inter/wght-italic.css";
 
 /* Themes ("skins"). Each file defines the full token set for light + dark;
    see styles/tokens.md. Halcyon is the default, Classic is selected with
@@ -18,7 +21,10 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  font-synthesis: none;
+  /* No faux bold. Faux italic stays allowed, for the fonts that have no
+     italic face (Outfit, a terminal font of the user's): with `none`, the
+     agent's *italics* came out upright (CORT-66). */
+  font-synthesis: style;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -420,6 +426,79 @@
 }
 .agent-view .text-xs {
   font-size: calc(var(--agent-view-text, 14px) - 2px);
+}
+
+/* Agent view prose (CORT-66): the agent's markdown sized and spaced for a
+   conversation, as the Claude desktop app sets it — Streamdown's defaults
+   are a document's (30px titles, bullets inside the text, a gap above every
+   item). Line spacing follows Settings > Agents > Agent view. */
+.agent-view .agent-prose,
+.agent-view .agent-leading {
+  line-height: var(--agent-view-leading, 1.6);
+}
+.agent-view .agent-prose :where(p, ul, ol, blockquote, pre, table) {
+  margin-block: 0.6em;
+}
+.agent-view .agent-prose :where(h1, h2, h3, h4, h5, h6) {
+  margin-top: 1.1em;
+  margin-bottom: 0.35em;
+  line-height: 1.3;
+  font-weight: 600;
+}
+.agent-view .agent-prose h1 {
+  font-size: 1.4em;
+}
+.agent-view .agent-prose h2 {
+  font-size: 1.22em;
+}
+.agent-view .agent-prose h3 {
+  font-size: 1.08em;
+}
+.agent-view .agent-prose :where(h4, h5, h6) {
+  font-size: 1em;
+}
+.agent-view .agent-prose :where(ul, ol) {
+  list-style-position: outside;
+  padding-left: 1.35em;
+}
+.agent-view .agent-prose :where(ul, ol) :where(ul, ol) {
+  margin-block: 0.15em;
+  padding-left: 1.2em;
+}
+.agent-view .agent-prose li {
+  padding-block: 0.12em;
+  padding-left: 0.15em;
+}
+.agent-view .agent-prose li::marker {
+  color: var(--text-faint);
+}
+.agent-view .agent-prose [data-streamdown="inline-code"] {
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+}
+.agent-view .agent-prose [data-streamdown="code-block"] {
+  margin-block: 0.75em;
+}
+.agent-view .agent-prose [data-streamdown="code-block"] pre {
+  font-size: 0.9em;
+  line-height: 1.55;
+}
+.agent-view .agent-prose [data-streamdown="code-block"] pre :where(code, span) {
+  font-size: inherit;
+}
+.agent-view .agent-prose li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -1.1em;
+}
+.agent-view .agent-prose li > input[type="checkbox"] {
+  margin-right: 0.4em;
+  vertical-align: -0.1em;
+}
+.agent-view .agent-prose [data-streamdown="blockquote"] {
+  font-style: normal;
+}
+.agent-view .agent-prose :where(em, i) {
+  font-style: italic;
 }
 
 /* Terminal clickable links (legacy log view) */

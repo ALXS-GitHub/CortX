@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ChevronDown, Loader2, PanelRight, RotateCcw, Sparkles, SquareTerminal, TriangleAlert } from 'lucide-react';
+import { ArrowDown, Check, Loader2, Minus, PanelRight, Plus, RotateCcw, SlidersHorizontal, Sparkles, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { AgentProviderIcon } from '@/components/agents/AgentProviderIcon';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Segmented } from '@/components/ui/Segmented';
+import { patchTerminalSettings } from '../settings/useTerminalSettings';
+import type { AgentViewLineHeight, AgentViewWidth } from '@/types';
 import { useAppStore } from '@/stores/appStore';
 import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
@@ -15,6 +18,7 @@ import { visibleMessages } from './streamJson';
 import { ImageLightbox } from './AgentImages';
 import { AgentCwdContext } from './agentImageStore';
 import { AgentSidePanel } from './AgentSidePanel';
+import { adjustAgentViewZoom, resetAgentViewZoom, useAgentViewZoom } from './agentViewZoom';
 
 const PANEL_KEY = 'cortx.agentPanel.open';
 
@@ -68,6 +72,13 @@ const WIDTH_CLASS: Record<string, string> = {
   full: 'max-w-none',
 };
 
+/** Line height of the conversation, per Settings > Agents > Line spacing. */
+const LEADING: Record<string, number> = {
+  compact: 1.5,
+  normal: 1.65,
+  relaxed: 1.85,
+};
+
 const MODES: { value: string; label: string; hint: string }[] = [
   {
     value: 'default',
@@ -117,9 +128,11 @@ export function AgentView({ terminalId, cwd, sessionId, active, onShowTerminal }
   const background = useAppStore((s) => s.settings?.terminal?.agentViewBackground ?? 'terminal');
   const font = useAppStore((s) => s.settings?.terminal?.agentViewFont ?? 'interface');
   const textSize = useAppStore((s) => s.settings?.terminal?.agentViewTextSize ?? 14);
-  const width = useAppStore((s) => s.settings?.terminal?.agentViewWidth ?? 'narrow');
+  const width = useAppStore((s) => s.settings?.terminal?.agentViewWidth ?? 'wide');
+  const lineHeight = useAppStore((s) => s.settings?.terminal?.agentViewLineHeight ?? 'normal');
   const terminalFont = useAppStore((s) => s.settings?.terminal?.fontFamily);
-  const column = WIDTH_CLASS[width] ?? WIDTH_CLASS.narrow;
+  const column = WIDTH_CLASS[width] ?? WIDTH_CLASS.wide;
+  const zoom = useAgentViewZoom(terminalId);
 
   useEffect(() => ensurePaneAgent(terminalId, cwd, sessionId), [terminalId, cwd, sessionId]);
   const pane = useAgentGuiStore((s) => s.panes[terminalId]);
@@ -183,7 +196,8 @@ export function AgentView({ terminalId, cwd, sessionId, active, onShowTerminal }
   const paneWidth = useWidth(rootRef);
   const [panelOpen, togglePanel] = usePanelOpen();
   // A narrow pane: the panel goes over the conversation, closed by default.
-  const narrowPane = paneWidth > 0 && paneWidth < 780;
+  // Zoomed in, the conversation has less room: the threshold follows.
+  const narrowPane = paneWidth > 0 && paneWidth / zoom < 780;
   const [overlayOpen, setOverlayOpen] = useState(false);
   const showPanel = narrowPane ? overlayOpen : panelOpen;
 
@@ -206,6 +220,7 @@ export function AgentView({ terminalId, cwd, sessionId, active, onShowTerminal }
         style={
           {
             '--agent-view-text': `${Math.min(18, Math.max(12, textSize))}px`,
+            '--agent-view-leading': LEADING[lineHeight] ?? LEADING.normal,
             ...(font === 'terminal' && terminalFont ? { fontFamily: terminalFont } : {}),
           } as React.CSSProperties
         }
@@ -228,11 +243,24 @@ export function AgentView({ terminalId, cwd, sessionId, active, onShowTerminal }
             )}
             title={pane?.status}
           />
+          {(mode.value === 'plan' || mode.value === 'acceptEdits') && (
+            <span className="shrink-0 rounded-full bg-primary/12 px-2 py-0.5 text-[10px] font-medium text-primary" title={mode.hint}>
+              {mode.label}
+            </span>
+          )}
+          <ViewOptions
+            terminalId={terminalId}
+            zoom={zoom}
+            width={width as AgentViewWidth}
+            lineHeight={lineHeight}
+            mode={mode.value}
+            canSetMode={pane?.status === 'running'}
+          />
           <button
             type="button"
             onClick={() => (narrowPane ? setOverlayOpen((o) => !o) : togglePanel())}
             className={cn(
-              'ml-auto grid size-6 shrink-0 place-items-center rounded-md hover:bg-accent hover:text-foreground',
+              'grid size-6 shrink-0 place-items-center rounded-md hover:bg-accent hover:text-foreground',
               showPanel ? 'text-primary' : 'text-muted-foreground',
             )}
             title={showPanel ? 'Hide the session panel' : 'Show the session panel'}
@@ -251,7 +279,7 @@ export function AgentView({ terminalId, cwd, sessionId, active, onShowTerminal }
           </button>
         </div>
 
-        <div className="relative flex min-h-0 flex-1">
+        <div className="relative flex min-h-0 flex-1" style={zoom !== 1 ? { zoom } : undefined}>
           <div className="flex min-w-0 flex-1 flex-col">
             <div ref={scrollRef} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto">
               <div className={cn('mx-auto flex w-full flex-col gap-6 px-5 pt-6 pb-4', column)}>
@@ -333,30 +361,6 @@ export function AgentView({ terminalId, cwd, sessionId, active, onShowTerminal }
                 working={busy}
                 locked={permissions.length > 0}
                 commands={state?.slashCommands ?? []}
-                status={
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        {mode.label}
-                        <ChevronDown className="size-3" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" side="top">
-                      <DropdownMenuLabel>Permissions</DropdownMenuLabel>
-                      {MODES.map((m) => (
-                        <DropdownMenuItem key={m.value} onSelect={() => void setPanePermissionMode(terminalId, m.value)}>
-                          <div className="flex flex-col">
-                            <span className={cn(m.value === mode.value && 'font-medium text-primary')}>{m.label}</span>
-                            <span className="text-[11px] text-muted-foreground">{m.hint}</span>
-                          </div>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                }
               />
             </div>
           </div>
@@ -365,5 +369,119 @@ export function AgentView({ terminalId, cwd, sessionId, active, onShowTerminal }
         <ImageLightbox />
       </div>
     </AgentCwdContext.Provider>
+  );
+}
+
+/**
+ * How the conversation looks, from the view itself (CORT-66): this pane's
+ * zoom, the column width and the line spacing (Settings > Agents, for every
+ * pane), and the session's permission mode — kept out of the composer's
+ * bar, where it took room under every message for a choice made once.
+ */
+function ViewOptions({
+  terminalId,
+  zoom,
+  width,
+  lineHeight,
+  mode,
+  canSetMode,
+}: {
+  terminalId: string;
+  zoom: number;
+  width: AgentViewWidth;
+  lineHeight: AgentViewLineHeight;
+  mode: string;
+  canSetMode: boolean;
+}) {
+  const keybindings = useAppStore((s) => s.settings?.terminal?.keybindings);
+  const zoomIn = comboLabelFor('terminal.zoomIn', keybindings);
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:text-primary"
+          title="View options"
+          aria-label="View options"
+        >
+          <SlidersHorizontal className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 space-y-3 p-3 text-xs">
+        <div className="space-y-1.5">
+          <p className="font-medium text-foreground">Zoom</p>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => adjustAgentViewZoom(terminalId, -1)}
+              className="grid size-7 place-items-center rounded-md border border-border hover:bg-accent"
+              aria-label="Zoom out"
+            >
+              <Minus className="size-3.5" />
+            </button>
+            <span className="w-12 text-center font-mono text-[11px] tabular-nums">{Math.round(zoom * 100)}%</span>
+            <button
+              type="button"
+              onClick={() => adjustAgentViewZoom(terminalId, 1)}
+              className="grid size-7 place-items-center rounded-md border border-border hover:bg-accent"
+              aria-label="Zoom in"
+            >
+              <Plus className="size-3.5" />
+            </button>
+            {zoom !== 1 && (
+              <button type="button" onClick={() => resetAgentViewZoom(terminalId)} className="ml-1 text-[11px] text-primary hover:underline">
+                Reset
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-faint">This pane only{zoomIn ? ` · ${zoomIn}, Ctrl + wheel` : ''}.</p>
+        </div>
+        <div className="space-y-1.5">
+          <p className="font-medium text-foreground">Width</p>
+          <Segmented<AgentViewWidth>
+            size="sm"
+            value={width}
+            onChange={(v) => patchTerminalSettings({ agentViewWidth: v })}
+            options={[
+              { value: 'narrow', label: 'Narrow' },
+              { value: 'wide', label: 'Wide' },
+              { value: 'full', label: 'Full' },
+            ]}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <p className="font-medium text-foreground">Line spacing</p>
+          <Segmented<AgentViewLineHeight>
+            size="sm"
+            value={lineHeight}
+            onChange={(v) => patchTerminalSettings({ agentViewLineHeight: v })}
+            options={[
+              { value: 'compact', label: 'Compact' },
+              { value: 'normal', label: 'Normal' },
+              { value: 'relaxed', label: 'Relaxed' },
+            ]}
+          />
+        </div>
+        <div className="space-y-1">
+          <p className="font-medium text-foreground">Permissions</p>
+          {!canSetMode && <p className="text-[11px] text-faint">Once the agent runs. New agents start as set in Settings &gt; Agents.</p>}
+          {MODES.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              disabled={!canSetMode}
+              onClick={() => void setPanePermissionMode(terminalId, m.value)}
+              className="flex w-full items-start gap-2 rounded-md px-1.5 py-1 text-left hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+            >
+              <Check className={cn('mt-0.5 size-3.5 shrink-0 text-primary', m.value !== mode && 'invisible')} />
+              <span className="flex flex-col">
+                <span className={cn(m.value === mode && 'font-medium text-foreground')}>{m.label}</span>
+                <span className="text-[11px] text-muted-foreground">{m.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

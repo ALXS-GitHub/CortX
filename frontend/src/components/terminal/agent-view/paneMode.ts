@@ -16,12 +16,12 @@
  */
 import { ask } from '@tauri-apps/plugin-dialog';
 import { toast } from 'sonner';
-import { writeTerminal } from '@/lib/tauri';
+import { agentSessionHasConversation, writeTerminal } from '@/lib/tauri';
 import { focusTerminal } from '@/lib/terminalSessions';
 import { collectLeaves, type LeafNode } from '@/lib/terminalLayout';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
-import { useTerminalAgentsStore } from '../agentsStore';
+import { refreshGuiPanes, registerGuiPanes, useTerminalAgentsStore, type GuiPaneRef } from '../agentsStore';
 import { ensurePaneAgent, startPaneAgent, stopPaneAgent, useAgentGuiStore } from './agentGuiStore';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -33,6 +33,30 @@ export function leafOf(terminalId: string): LeafNode | null {
   }
   return null;
 }
+
+function guiLeaves(): GuiPaneRef[] {
+  const out: GuiPaneRef[] = [];
+  for (const tab of useTerminalLayoutStore.getState().doc.window.tabs) {
+    for (const leaf of collectLeaves(tab.layout)) {
+      if (leaf.view === 'agent') out.push({ terminalId: leaf.terminalId, sessionId: leaf.agentSession ?? null, cwd: leaf.cwd ?? undefined });
+    }
+  }
+  return out;
+}
+
+// A pane in GUI mode is an agent for the rest of the window — its tab's dot
+// and colour, the grid, the inbox (CORT-66) — even before its agent runs.
+registerGuiPanes(guiLeaves);
+let guiSignature = '';
+useTerminalLayoutStore.subscribe(() => {
+  const next = guiLeaves()
+    .map((p) => p.terminalId)
+    .sort()
+    .join('|');
+  if (next === guiSignature) return;
+  guiSignature = next;
+  refreshGuiPanes();
+});
 
 /** Is this pane in GUI mode? */
 export function isGuiPane(terminalId: string): boolean {
@@ -52,19 +76,28 @@ function paneCwd(terminalId: string): string {
   return leafOf(terminalId)?.cwd ?? '';
 }
 
+/** Is Claude Code's TUI still detected in the terminal? */
+function tuiThere(terminalId: string): boolean {
+  const agent = useTerminalAgentsStore.getState().agents.get(terminalId);
+  return !!agent && agent.kind !== 'gui';
+}
+
 /** Wait until no agent is detected in the terminal any more. */
 async function tuiGone(terminalId: string, timeoutMs: number): Promise<boolean> {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
-    if (!useTerminalAgentsStore.getState().agents.has(terminalId)) return true;
+    if (!tuiThere(terminalId)) return true;
     await sleep(150);
   }
-  return !useTerminalAgentsStore.getState().agents.has(terminalId);
+  return !tuiThere(terminalId);
 }
 
 /** TUI → GUI: quit Claude Code in the terminal, resume its session in the conversation view. */
 export async function switchToGui(terminalId: string): Promise<boolean> {
-  const agent = useTerminalAgentsStore.getState().agents.get(terminalId);
+  // The pane's own agent, in the terminal — not a GUI agent still reported
+  // for it while it was switched back a moment ago.
+  const found = useTerminalAgentsStore.getState().agents.get(terminalId);
+  const agent = found?.kind === 'gui' ? undefined : found;
   const cwd = agent?.cwd || paneCwd(terminalId);
   let session: string | null = null;
 
@@ -113,7 +146,10 @@ export async function switchToTui(terminalId: string): Promise<boolean> {
   }
   await stopPaneAgent(terminalId);
   useTerminalLayoutStore.getState().setLeafView(terminalId, null, null);
-  const command = session ? `${tuiCommand()} --resume ${session}` : tuiCommand();
+  // A session nobody wrote in yet cannot be resumed (CORT-66): Claude Code
+  // would stop on "No conversation found". A new one is started instead.
+  const resumable = session ? await agentSessionHasConversation(session).catch(() => true) : false;
+  const command = session && resumable ? `${tuiCommand()} --resume ${session}` : tuiCommand();
   await writeTerminal(terminalId, `${command}\r`).catch((error) => {
     toast.error('Could not start Claude Code in the terminal', { description: String(error) });
   });

@@ -993,7 +993,9 @@ async function pasteFromClipboard(term: Terminal, terminalId?: string) {
  * Claude Code is left alone. Returns whether it did.
  */
 function pasteImageIntoAgent(terminalId: string): boolean {
-  if (useTerminalAgentsStore.getState().agents.get(terminalId)?.provider !== 'claude-code') return false;
+  const agent = useTerminalAgentsStore.getState().agents.get(terminalId);
+  // A pane in GUI mode has no Claude Code in its terminal to take the key.
+  if (agent?.provider !== 'claude-code' || agent.kind === 'gui') return false;
   api.writeTerminal(terminalId, IS_WINDOWS ? '\x1bv' : '\x16').catch(() => {});
   return true;
 }

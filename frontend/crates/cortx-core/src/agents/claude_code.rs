@@ -62,6 +62,40 @@ pub fn transcript_path_for(projects_dir: &Path, cwd: &str, session_id: &str) -> 
         .join(format!("{}.jsonl", session_id))
 }
 
+/// Does this session hold a conversation Claude Code can `--resume`? A
+/// session gets its id when Claude Code starts, but its transcript is only
+/// written with the first message: resuming a session nobody wrote in yet
+/// fails with "No conversation found with session ID" (CORT-66). The
+/// transcript is looked for under every project folder, since the cwd it was
+/// started in is not always the one we know.
+pub fn session_has_conversation(projects_dir: &Path, session_id: &str) -> bool {
+    use std::io::BufRead;
+    let file_name = format!("{}.jsonl", session_id);
+    let Ok(dirs) = std::fs::read_dir(projects_dir) else {
+        return false;
+    };
+    for dir in dirs.flatten() {
+        let path = dir.path().join(&file_name);
+        let Ok(file) = std::fs::File::open(&path) else {
+            continue;
+        };
+        for line in std::io::BufReader::new(file).lines() {
+            let Ok(line) = line else { break };
+            // Cheap test first: most lines are long and not worth parsing.
+            if !(line.contains("\"user\"") || line.contains("\"assistant\"")) {
+                continue;
+            }
+            let kind = serde_json::from_str::<serde_json::Value>(&line)
+                .ok()
+                .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(str::to_owned));
+            if matches!(kind.as_deref(), Some("user") | Some("assistant")) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Number of subagent transcripts next to a main transcript
 /// (`<sessionId>/**/*.jsonl`, depth-limited).
 pub fn count_subagents(main_transcript: &Path) -> u32 {
@@ -808,6 +842,23 @@ mod tests {
 {"parentUuid":"u2","isSidechain":false,"type":"assistant","message":{"model":"claude-x","id":"msg_2","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Bash","input":{"command":"cargo check"}}]},"uuid":"a4","timestamp":"2026-09-02T20:24:30.000Z","cwd":"C:\\Users\\Me\\Proj\\CortX","sessionId":"aaaa1111-0000-4000-8000-000000000001","version":"2.1.258","gitBranch":"feat/dev-11"}
 {"parentUuid":"x","isSidechain":true,"type":"assistant","message":{"model":"claude-x","id":"msg_side","role":"assistant","content":[{"type":"text","text":"side"}]},"uuid":"s1","timestamp":"2026-09-02T20:24:31.000Z","cwd":"C:\\Users\\Me\\Proj\\CortX","sessionId":"aaaa1111-0000-4000-8000-000000000001","version":"2.1.258","gitBranch":"feat/dev-11"}
 "##;
+
+    #[test]
+    fn a_session_without_a_message_has_no_conversation() {
+        let root = std::env::temp_dir().join(format!("cortx-has-conv-{}", std::process::id()));
+        let project = root.join("C--Proj");
+        std::fs::create_dir_all(&project).unwrap();
+        let id = "aaaa1111-0000-4000-8000-000000000001";
+        // No transcript at all.
+        assert!(!session_has_conversation(&root, id));
+        // Only metadata lines.
+        std::fs::write(project.join(format!("{}.jsonl", id)), "{\"type\":\"mode\",\"mode\":\"normal\"}\n").unwrap();
+        assert!(!session_has_conversation(&root, id));
+        // A real exchange.
+        std::fs::write(project.join(format!("{}.jsonl", id)), FIXTURE).unwrap();
+        assert!(session_has_conversation(&root, id));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn scan(fixture: &str) -> TranscriptSummary {
         let mut s = TranscriptSummary::default();

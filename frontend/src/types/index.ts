@@ -181,8 +181,13 @@ export interface TerminalConfig {
   agentViewFont?: AgentViewFont;
   /** Agent view: text size in px, 12–18. Default 14. */
   agentViewTextSize?: number;
-  /** Agent view: width of the conversation column. Default `narrow`. */
+  /** Agent view: width of the conversation column. Default `wide`. */
   agentViewWidth?: AgentViewWidth;
+  /** Agent view: spacing of the lines. Default `normal`. */
+  agentViewLineHeight?: AgentViewLineHeight;
+  /** GUI mode: the permission mode an agent starts in. Unset = whatever
+   *  the GUI command says (an alias shim may carry its own flags). */
+  agentGuiPermissionMode?: AgentPermissionMode;
   /** Typed in the terminal "New agent" opens. Default `claude`. */
   agentLaunchCommand?: string;
   /** Ask before closing a terminal — or quitting CortX — while a command is
@@ -575,6 +580,8 @@ export interface TerminalShellState {
 export type AgentViewBackground = 'terminal' | 'app';
 export type AgentViewFont = 'interface' | 'terminal';
 export type AgentViewWidth = 'narrow' | 'wide' | 'full';
+export type AgentViewLineHeight = 'compact' | 'normal' | 'relaxed';
+export type AgentPermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
 
 export interface TerminalAgentInfo {
   terminalId: string;

@@ -2914,6 +2914,13 @@ pub fn compute_terminal_agents(
     // and the terminal's own output — nothing is ever sent to the agent.
     let hub = state.process_manager.terminal_hub();
     cortx_core::agents::terminal_link::mark_needs_input(&mut agents, |id| hub.output_idle(id));
+    // Panes in GUI mode: CortX runs their agent itself, outside any terminal
+    // (CORT-66). A terminal where Claude Code was found keeps that one.
+    for gui in crate::agent_gui::terminal_agents() {
+        if !agents.iter().any(|a| a.terminal_id == gui.terminal_id) {
+            agents.push(gui);
+        }
+    }
     agents
 }
 

@@ -507,9 +507,18 @@ pub struct TerminalConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_view_text_size: Option<u8>,
     /// Agent view: width of the conversation column, `narrow`, `wide` or
-    /// `full`. None = `narrow`. Only the frontend reads this.
+    /// `full`. None = `wide`. Only the frontend reads this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_view_width: Option<String>,
+    /// Agent view: spacing of the lines, `compact`, `normal` or `relaxed`.
+    /// None = `normal`. Only the frontend reads this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_view_line_height: Option<String>,
+    /// GUI mode: the permission mode an agent starts in (`default`,
+    /// `acceptEdits`, `plan`, `bypassPermissions`). None = whatever the GUI
+    /// command says. Only the frontend reads this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_gui_permission_mode: Option<String>,
     /// Font of every terminal (dock and window). None = bundled default stack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
@@ -1380,6 +1389,8 @@ impl Default for TerminalConfig {
             agent_view_font: None,
             agent_view_text_size: None,
             agent_view_width: None,
+            agent_view_line_height: None,
+            agent_gui_permission_mode: None,
             font_family: None,
             font_size: None,
             window_zoom: 0,

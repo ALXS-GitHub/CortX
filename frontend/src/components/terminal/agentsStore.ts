@@ -47,6 +47,53 @@ export function registerAgentInView(fn: (terminalId: string) => boolean): void {
   inView = fn;
 }
 
+/** A pane of this window in GUI mode (ticket CORT-62). */
+export interface GuiPaneRef {
+  terminalId: string;
+  sessionId: string | null;
+  cwd?: string;
+}
+
+/**
+ * The panes of this window in GUI mode. Registered by `agent-view/paneMode`
+ * (which reads the layout store) — hence a setter rather than an import.
+ */
+let guiPanes: () => GuiPaneRef[] = () => [];
+export function registerGuiPanes(fn: () => GuiPaneRef[]): void {
+  guiPanes = fn;
+}
+
+/** The last list the backend sent, re-applied when the GUI panes change. */
+let lastPayload: TerminalAgentInfo[] = [];
+
+/**
+ * The backend reports the agent of a GUI pane once CortX runs it (CORT-66);
+ * a GUI pane whose agent is not started yet (a restored pane, waiting for
+ * its first prompt) is an agent at rest all the same — its tab shows it.
+ */
+function withGuiPanes(list: TerminalAgentInfo[]): TerminalAgentInfo[] {
+  const panes = guiPanes();
+  if (panes.length === 0) return list;
+  const known = new Set(list.map((a) => a.terminalId));
+  const resting: TerminalAgentInfo[] = panes
+    .filter((p) => !known.has(p.terminalId))
+    .map((p) => ({
+      terminalId: p.terminalId,
+      provider: 'claude-code',
+      state: 'stopped',
+      pid: 0,
+      sessionId: p.sessionId ?? undefined,
+      cwd: p.cwd,
+      kind: 'gui',
+    }));
+  return resting.length > 0 ? [...list, ...resting] : list;
+}
+
+/** The GUI panes changed (one switched mode, closed, was restored): show it now. */
+export function refreshGuiPanes(): void {
+  useTerminalAgentsStore.getState().setAgents(lastPayload);
+}
+
 type TransitionListener = (transitions: PhaseTransition[], agents: Map<string, TerminalAgentInfo>) => void;
 const transitionListeners = new Set<TransitionListener>();
 /** Every change of phase, for the notifications. Returns the disposer. */
@@ -63,7 +110,9 @@ export const useTerminalAgentsStore = create<TerminalAgentsState>()((set, get) =
   since: new Map(),
   firstSeen: new Map(),
   readyAt: null,
-  setAgents: (list) => {
+  setAgents: (payload) => {
+    lastPayload = payload;
+    const list = withGuiPanes(payload);
     const agents = new Map(list.map((a) => [a.terminalId, a]));
     // The scope filter reads this registry through `tabInScope`.
     setAgentTerminalIds(agents.keys());

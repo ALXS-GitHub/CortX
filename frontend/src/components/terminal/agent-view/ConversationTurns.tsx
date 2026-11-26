@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type ComponentType } from 'react';
+import { memo, useMemo, useState, type ComponentProps, type ComponentType } from 'react';
 import { motion } from 'motion/react';
 import {
   Bot,
@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { MessageResponse } from '@/components/ai-elements/message';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { cn } from '@/lib/utils';
@@ -37,7 +38,8 @@ import {
   type Turn,
 } from './conversationModel';
 import { diffLines, toolPreview } from './pendingTool';
-import { MarkdownImage, Thumbnails } from './AgentImages';
+import { MarkdownImage, PathImages, Thumbnails } from './AgentImages';
+import { codeHighlighter } from './codeHighlighter';
 import { dataUrl } from './agentImageStore';
 
 const CATEGORY_ICON: Record<StepCategory, ComponentType<{ className?: string }>> = {
@@ -52,8 +54,41 @@ const CATEGORY_ICON: Record<StepCategory, ComponentType<{ className?: string }>>
 
 const OUTPUT_LIMIT = 6000;
 
+/**
+ * A link in the agent's markdown opens in the browser. Streamdown's own asks
+ * first in a modal, then calls `window.open` — which, in a webview, opens
+ * the page inside CortX.
+ */
+function MarkdownLink({ href, children, className }: ComponentProps<'a'>) {
+  const external = !!href && /^(https?:|mailto:)/i.test(href);
+  return (
+    <a
+      href={href}
+      title={href}
+      className={cn('wrap-anywhere font-medium text-primary underline underline-offset-2', className)}
+      onClick={(e) => {
+        e.preventDefault();
+        if (external) openExternal(href).catch(() => {});
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
 /** Images in the agent's markdown: thumbnails, local files read from disk. */
-const MARKDOWN_COMPONENTS = { img: MarkdownImage } as const;
+const MARKDOWN_COMPONENTS = { img: MarkdownImage, a: MarkdownLink } as const;
+const MARKDOWN_PLUGINS = { code: codeHighlighter } as const;
+const NO_LINK_SAFETY = { enabled: false } as const;
+
+/** The agent's markdown, as the Claude desktop app renders it: code highlighted, links to the browser. */
+function Markdown({ text }: { text: string }) {
+  return (
+    <MessageResponse components={MARKDOWN_COMPONENTS} plugins={MARKDOWN_PLUGINS} linkSafety={NO_LINK_SAFETY}>
+      {text}
+    </MessageResponse>
+  );
+}
 
 interface ConversationTurnsProps {
   messages: AgentMessage[];
@@ -136,7 +171,7 @@ function UserTurn({ turn }: { turn: Extract<Turn, { kind: 'user' }> }) {
     <div className="group/user flex flex-col items-end gap-1.5">
       <Thumbnails images={turn.pictures.map((p, i) => ({ src: dataUrl(p), alt: `Image ${i + 1}` }))} className="max-w-[85%] justify-end" />
       {(turn.text || turn.images > 0) && (
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words text-foreground shadow-soft">
+        <div className="agent-leading max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-sm whitespace-pre-wrap break-words text-foreground shadow-soft">
           {turn.images > 0 && (
             <span className="mb-1.5 flex items-center gap-1 text-xs text-muted-foreground">
               <ImageIcon className="size-3.5" />
@@ -146,6 +181,7 @@ function UserTurn({ turn }: { turn: Extract<Turn, { kind: 'user' }> }) {
           {turn.text}
         </div>
       )}
+      {turn.text && <PathImages text={turn.text} className="max-w-[85%] justify-end" />}
       <time className="pr-1 text-[10px] text-faint opacity-0 transition-opacity group-hover/user:opacity-100" dateTime={turn.timestamp}>
         {formatTime(turn.timestamp)}
       </time>
@@ -204,8 +240,9 @@ function BlockView({ block, live, subagents }: { block: Block; live: boolean; su
   switch (block.kind) {
     case 'text':
       return (
-        <div className="agent-prose text-sm leading-7 text-foreground">
-          <MessageResponse components={MARKDOWN_COMPONENTS}>{block.text}</MessageResponse>
+        <div className="agent-prose text-sm text-foreground">
+          <Markdown text={block.text} />
+          {!live && <PathImages text={block.text} className="mt-2" />}
         </div>
       );
     case 'thinking':
@@ -231,8 +268,8 @@ function BlockView({ block, live, subagents }: { block: Block; live: boolean; su
               </span>
             )}
           </div>
-          <div className="agent-prose max-h-[28rem] overflow-auto px-4 py-3 text-sm leading-7">
-            <MessageResponse components={MARKDOWN_COMPONENTS}>{block.plan}</MessageResponse>
+          <div className="agent-prose max-h-[28rem] overflow-auto px-4 py-3 text-sm">
+            <Markdown text={block.plan} />
           </div>
         </div>
       );

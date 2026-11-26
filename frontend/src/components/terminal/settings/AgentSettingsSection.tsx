@@ -14,7 +14,16 @@ import { Input } from '@/components/ui/input';
 import { ColorField } from '@/components/ui/ColorField';
 import { Code, Section } from '@/components/settings/SettingsPrimitives';
 import { cn } from '@/lib/utils';
-import type { AgentViewBackground, AgentViewFont, AgentViewWidth, GridTileInfo, TerminalConfig, ToastPosition } from '@/types';
+import type {
+  AgentPermissionMode,
+  AgentViewBackground,
+  AgentViewFont,
+  AgentViewLineHeight,
+  AgentViewWidth,
+  GridTileInfo,
+  TerminalConfig,
+  ToastPosition,
+} from '@/types';
 import { resolveAgentNotifyPosition, TOAST_POSITION_OPTIONS } from './notificationPolicy';
 import { AgentPhaseDot } from '../TerminalStatusGlyph';
 import { DEFAULT_AGENT_COLORS, type AgentColorKey } from '../agentColors';
@@ -232,7 +241,7 @@ export function AgentSettingsSection() {
         <SettingField k="agentViewWidth" label="Width" hint="How wide the conversation runs in the pane.">
           <Segmented<AgentViewWidth>
             size="sm"
-            value={terminal?.agentViewWidth ?? 'narrow'}
+            value={terminal?.agentViewWidth ?? 'wide'}
             onChange={(v) => patch({ agentViewWidth: v })}
             options={[
               { value: 'narrow', label: 'Narrow' },
@@ -241,6 +250,22 @@ export function AgentSettingsSection() {
             ]}
           />
         </SettingField>
+        <SettingField k="agentViewLineHeight" label="Line spacing" hint="Room between the lines of the messages.">
+          <Segmented<AgentViewLineHeight>
+            size="sm"
+            value={terminal?.agentViewLineHeight ?? 'normal'}
+            onChange={(v) => patch({ agentViewLineHeight: v })}
+            options={[
+              { value: 'compact', label: 'Compact' },
+              { value: 'normal', label: 'Normal' },
+              { value: 'relaxed', label: 'Relaxed' },
+            ]}
+          />
+        </SettingField>
+        <p className="px-1 text-xs text-faint">
+          Zoom one pane&rsquo;s conversation with Ctrl + = / − / 0 or Ctrl + wheel over it; the view&rsquo;s options
+          button (top right of the pane) has the width, the spacing and the session&rsquo;s permissions too.
+        </p>
       </Group>
 
       <Group title="New agent">
@@ -274,6 +299,24 @@ export function AgentSettingsSection() {
             onChange={(e) => patch({ agentGuiCommand: e.target.value })}
             placeholder="claude"
             disabled={disabled}
+          />
+        </SettingField>
+        <SettingField
+          k="agentGuiPermissionMode"
+          label="GUI agents start in"
+          hint="The permission mode of an agent started in GUI mode. “As the command says” passes nothing: an alias shim that carries --dangerously-skip-permissions keeps it. Change it for one session from the view's options."
+        >
+          <Segmented<AgentPermissionMode | 'command'>
+            size="sm"
+            value={terminal?.agentGuiPermissionMode ?? 'command'}
+            onChange={(v) => patch({ agentGuiPermissionMode: v === 'command' ? undefined : v })}
+            options={[
+              { value: 'command', label: 'As the command says' },
+              { value: 'default', label: 'Ask' },
+              { value: 'acceptEdits', label: 'Accept edits' },
+              { value: 'plan', label: 'Plan' },
+              { value: 'bypassPermissions', label: 'Bypass' },
+            ]}
           />
         </SettingField>
         <SettingField

@@ -1,9 +1,10 @@
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, ImageOff, Maximize, Minus, Plus, X } from 'lucide-react';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { cn } from '@/lib/utils';
 import { AgentCwdContext, useLightbox, type ViewerImage } from './agentImageStore';
+import { imagePathsIn } from './imagePaths';
 
 /**
  * Images in the agent view (ticket CORT-62), the way the Claude desktop app
@@ -94,6 +95,36 @@ export function MarkdownImage({ src, alt }: { src?: string | Blob; alt?: string 
   }
   if (!url) return <span className="inline-block h-24 w-36 animate-pulse rounded-xl bg-muted/60" />;
   return <Thumbnails images={[{ src: url, alt }]} className="my-2" />;
+}
+
+/**
+ * The images a message names by their path (CORT-66), as thumbnails under
+ * it. A path that is not there, or not readable, shows nothing: the text
+ * already says it.
+ */
+export function PathImages({ text, className }: { text: string; className?: string }) {
+  const cwd = useContext(AgentCwdContext);
+  const paths = useMemo(() => imagePathsIn(text), [text]);
+  const key = `${cwd}\n${paths.join('\n')}`;
+  // Tagged with the paths they were read for: a stale list never shows.
+  const [loaded, setLoaded] = useState<{ key: string; images: ViewerImage[] }>({ key: '', images: [] });
+  useEffect(() => {
+    if (paths.length === 0) return;
+    let alive = true;
+    void Promise.all(
+      paths.map((p) =>
+        localUrl(resolvePath(p, cwd))
+          .then((src): ViewerImage | null => ({ src, alt: p }))
+          .catch(() => null)
+      )
+    ).then((found) => {
+      if (alive) setLoaded({ key, images: found.filter((x): x is ViewerImage => x !== null) });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [key, paths, cwd]);
+  return <Thumbnails images={loaded.key === key ? loaded.images : []} className={className} />;
 }
 
 // ---------------------------------------------------------------------------

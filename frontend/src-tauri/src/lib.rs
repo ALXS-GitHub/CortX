@@ -47,15 +47,23 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+/// The last `terminal-agents` payload sent, so the event only fires when
+/// something actually changed.
+fn last_terminal_agents() -> &'static std::sync::Mutex<Vec<TerminalAgent>> {
+    static LAST: std::sync::OnceLock<std::sync::Mutex<Vec<TerminalAgent>>> = std::sync::OnceLock::new();
+    LAST.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
 /// Recompute which terminal runs which agent and broadcast it, but only when
 /// the answer changed — the payload lands in both windows and feeds the tab
-/// titles, so a needless event is a needless re-render everywhere.
-fn emit_terminal_agents(app: &AppHandle, last: &Arc<std::sync::Mutex<Vec<TerminalAgent>>>) {
+/// titles, so a needless event is a needless re-render everywhere. Called by
+/// the poll, the agent watcher, and the GUI-mode agents as their turn moves.
+pub fn refresh_terminal_agents(app: &AppHandle) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
     let current = commands::compute_terminal_agents(&state);
-    let Ok(mut previous) = last.lock() else {
+    let Ok(mut previous) = last_terminal_agents().lock() else {
         return;
     };
     if *previous == current {
@@ -508,21 +516,15 @@ pub fn run() {
 
             // Agents section: watch the provider roots (transcripts, live
             // registry, Codex sqlite) and refresh incrementally.
-            // Terminal ↔ agent link (DEV-13): the last payload sent, so the
-            // event only fires when something actually changed.
-            let terminal_agents: Arc<std::sync::Mutex<Vec<TerminalAgent>>> =
-                Arc::new(std::sync::Mutex::new(Vec::new()));
-
             let agents = state.agents.clone();
             let agents_app = app.handle().clone();
-            let ta_watch = terminal_agents.clone();
             match agent_watcher::start_agent_watching(agents.watch_roots(), move |changed| {
                 if agents.refresh_paths(&changed) {
                     let _ = agents_app.emit("agent-sessions-changed", ());
                     // The Claude live registry is rewritten on every
                     // busy/idle flip: react to it right away instead of
                     // waiting for the next poll.
-                    emit_terminal_agents(&agents_app, &ta_watch);
+                    refresh_terminal_agents(&agents_app);
                 }
             }) {
                 Ok(handle) => {
@@ -546,14 +548,13 @@ pub fn run() {
             // Agent detection needs the OS process table, which no watcher
             // reports: poll it, cheaply, and only while terminals exist.
             let ta_app = app.handle().clone();
-            let ta_poll = terminal_agents.clone();
             std::thread::Builder::new()
                 .name("cortx-terminal-agents".into())
                 .spawn(move || loop {
                     // 3 s: a permission prompt is only recognised by the
                     // agent going quiet, so this poll is what notices it.
                     std::thread::sleep(std::time::Duration::from_secs(3));
-                    emit_terminal_agents(&ta_app, &ta_poll);
+                    refresh_terminal_agents(&ta_app);
                 })
                 .ok();
 
@@ -890,6 +891,7 @@ pub fn run() {
             agent_gui::agent_gui_running,
             agent_gui::agent_gui_stop,
             agent_gui::agent_gui_git_branch,
+            agent_gui::agent_session_has_conversation,
             commands::update_agent_annotations,
             commands::resume_agent_session,
             commands::get_agent_resume_command,

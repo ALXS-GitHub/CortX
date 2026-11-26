@@ -18,6 +18,7 @@ import {
 import { useTerminalAgentsStore } from './agentsStore';
 import { attachToAgentPrompt, isEditorOpen, toggleAgentPrompt } from './agentPrompt';
 import { focusAgentView, isGuiPane, toggleAgentView } from './agent-view/paneMode';
+import { adjustAgentViewZoom, resetAgentViewZoom } from './agent-view/agentViewZoom';
 import { ensurePaneAgent, startPaneAgent } from './agent-view/agentGuiStore';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
 import { basename } from '@/lib/terminalNames';
@@ -1203,14 +1204,19 @@ export function runAction(id: KeybindingActionId): boolean {
       return true;
     }
     case 'terminal.zoomIn':
-      adjustTerminalZoom(1);
-      return true;
     case 'terminal.zoomOut':
-      adjustTerminalZoom(-1);
+    case 'terminal.zoomReset': {
+      // A pane in GUI mode zooms its own conversation (CORT-66).
+      const terminalId = activeTerminalId();
+      if (terminalId && isGuiPane(terminalId)) {
+        if (id === 'terminal.zoomReset') resetAgentViewZoom(terminalId);
+        else adjustAgentViewZoom(terminalId, id === 'terminal.zoomIn' ? 1 : -1);
+        return true;
+      }
+      if (id === 'terminal.zoomReset') resetTerminalZoom();
+      else adjustTerminalZoom(id === 'terminal.zoomIn' ? 1 : -1);
       return true;
-    case 'terminal.zoomReset':
-      resetTerminalZoom();
-      return true;
+    }
     case 'terminal.copyCwd': {
       const terminalId = activeTerminalId();
       if (!terminalId) return false;
