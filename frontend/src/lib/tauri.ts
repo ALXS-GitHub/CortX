@@ -669,6 +669,40 @@ export async function createProjectFromSession(sessionId: string): Promise<Proje
   return invoke('create_project_from_session', { sessionId });
 }
 
+// --- Agents in GUI mode (ticket CORT-62, src-tauri/src/agent_gui.rs) ------
+
+/** One line of a GUI agent's output (`message` parsed, or `text`), or its end. */
+export interface AgentGuiEventPayload {
+  key: string;
+  generation: number;
+  message?: Record<string, unknown>;
+  text?: string;
+  exited?: boolean;
+  exitCode?: number | null;
+}
+
+/** Start Claude Code in stream-json mode for a pane; resolves to the generation its events carry. */
+export async function agentGuiStart(key: string, cwd: string, command: string, resume: string | null): Promise<number> {
+  return invoke('agent_gui_start', { key, cwd, command, resume });
+}
+
+/** Write one JSON message to a pane's agent. */
+export async function agentGuiSend(key: string, message: unknown): Promise<void> {
+  return invoke('agent_gui_send', { key, line: JSON.stringify(message) });
+}
+
+export async function agentGuiRunning(key: string): Promise<number | null> {
+  return invoke('agent_gui_running', { key });
+}
+
+export async function agentGuiStop(key: string): Promise<void> {
+  return invoke('agent_gui_stop', { key });
+}
+
+export async function onAgentGuiEvent(callback: (payload: AgentGuiEventPayload) => void): Promise<UnlistenFn> {
+  return listen<AgentGuiEventPayload>('agent-gui', (e) => callback(e.payload));
+}
+
 export async function getAgentsHealth(): Promise<AgentsHealth> {
   return invoke('get_agents_health');
 }

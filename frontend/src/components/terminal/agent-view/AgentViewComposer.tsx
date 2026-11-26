@@ -3,21 +3,9 @@ import { ArrowUp, FileText, Image as ImageIcon, Paperclip, Square, X } from 'luc
 import { toast } from 'sonner';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { cn } from '@/lib/utils';
-import {
-  AGENT_PROMPT_EVENTS,
-  attachmentOf,
-  draftOf,
-  escapeGoesToAgent,
-  promptHistory,
-  saveClipboardImage,
-  saveDraft,
-  sendAgentPrompt,
-  sendEscapeToAgent,
-  takeBackPrompt,
-  type AgentAttachment,
-  type AgentDraft,
-} from '../agentPrompt';
+import { AGENT_PROMPT_EVENTS, attachmentOf, draftOf, saveClipboardImage, saveDraft, type AgentAttachment, type AgentDraft } from '../agentPrompt';
 import { imageMarker, visibleAttachments } from '../agentPromptParts';
+import { interruptPaneAgent, sendPanePrompt } from './agentGuiStore';
 
 export interface AgentViewComposerHandle {
   focus: () => void;
@@ -31,26 +19,27 @@ interface AgentViewComposerProps {
   cwd?: string;
   /** The agent is working: Stop instead of Send while nothing is typed. */
   working: boolean;
-  /** A menu of the agent has the keyboard: the composer waits. */
+  /** The agent waits on a card above (a permission, a question): it gets the answer first. */
   locked: boolean;
-  /** Under the field, right: the model, what the agent is at. */
+  /** The agent's slash commands, for the completion list. */
+  commands: string[];
+  /** Under the field: the model, the permission mode… */
   status?: React.ReactNode;
 }
 
-const NEWLINE = String.fromCharCode(10);
+/** Prompts sent from this composer, per pane, most recent last (↑ walks them). */
+const sentHistory = new Map<string, string[]>();
 
 /**
- * The composer at the bottom of the agent view: a chat field, the way the
- * Claude desktop app has one. What it sends goes to the agent through the PTY
- * (`agentPrompt.sendAgentPrompt`), exactly as the Ctrl+G bubble does — same
- * draft (written in one, found in the other), same history (↑), same Esc
- * (stop the agent; a prompt still queued comes back here).
- *
- * Images (pasted, dropped, picked) and files are chips above the text; they
- * are sent as their paths, which Claude Code turns into attachments.
+ * The composer at the bottom of the agent view, the way the Claude desktop
+ * app has one. What it sends goes to the GUI agent as a stream-json user
+ * message (`agentGuiStore.sendPanePrompt`): the text, the images as image
+ * blocks, the files as paths. While the agent works, Send queues the prompt
+ * (Claude Code takes it after the current step) and Stop / Esc interrupt it.
+ * `/` opens the agent's own slash commands.
  */
 export const AgentViewComposer = forwardRef<AgentViewComposerHandle, AgentViewComposerProps>(function AgentViewComposer(
-  { terminalId, agentName, cwd, working, locked, status },
+  { terminalId, agentName, cwd, working, locked, commands, status },
   ref
 ) {
   const [draft, setDraftState] = useState<AgentDraft>(() => draftOf(terminalId));
@@ -113,69 +102,70 @@ export const AgentViewComposer = forwardRef<AgentViewComposerHandle, AgentViewCo
     field.style.height = `${Math.min(field.scrollHeight, Math.round(window.innerHeight / 3))}px`;
   }, [draft.text]);
 
-  const restoreDraft = useCallback(
-    (back: AgentDraft) => {
-      setDraft((d) => {
-        if (!d.text && d.attachments.length === 0) return back;
-        const known = new Set(back.attachments.map((a) => a.path));
-        return {
-          text: d.text ? `${back.text}${NEWLINE}${d.text}` : back.text,
-          attachments: [...back.attachments, ...d.attachments.filter((a) => !known.has(a.path))],
-        };
-      });
-      fieldRef.current?.focus();
-    },
-    [setDraft]
-  );
+  const stop = useCallback(() => void interruptPaneAgent(terminalId), [terminalId]);
 
-  /** Stop the agent (its Esc); a prompt it gives back comes back here. */
-  const stop = useCallback(() => {
-    void sendEscapeToAgent(terminalId)
-      .then(() => takeBackPrompt(terminalId))
-      .then((back) => {
-        if (back) restoreDraft(back);
-      });
-  }, [terminalId, restoreDraft]);
-
-  const send = async () => {
+  const send = async (override?: string) => {
     if (sending || locked) return;
-    const value = draft;
+    const value = override !== undefined ? { ...draft, text: override } : draft;
     if (!value.text.trim() && value.attachments.length === 0) return;
     setSending(true);
     try {
-      const ok = await sendAgentPrompt(terminalId, value);
-      if (!ok) {
-        toast.error('The prompt could not be sent', { description: 'The terminal is not available.' });
-        return;
+      const text = value.text.replace(/\[Image #\d+\]/g, '').trim();
+      const ok = await sendPanePrompt(terminalId, {
+        text,
+        images: value.attachments.filter((a) => a.image).map((a) => a.path),
+        files: value.attachments.filter((a) => !a.image).map((a) => a.path),
+      });
+      if (!ok) return;
+      if (text) {
+        const list = sentHistory.get(terminalId) ?? [];
+        if (list[list.length - 1] !== text) list.push(text);
+        sentHistory.set(terminalId, list.slice(-50));
       }
       recall.current = -1;
       setDraft({ text: '', attachments: [] });
-    } catch (error) {
-      toast.error('The prompt could not be sent', { description: String(error) });
     } finally {
       setSending(false);
       fieldRef.current?.focus();
     }
   };
 
+  // Slash commands: `/` at the start, no space yet.
+  const [pick, setPick] = useState(0);
+  const slash = /^\/[^\s]*$/.test(draft.text) ? draft.text.slice(1).toLowerCase() : null;
+  const matches = slash === null ? [] : commands.filter((c) => c.toLowerCase().startsWith(slash)).slice(0, 8);
+  useEffect(() => setPick(0), [slash]);
+
   const pending = draft.text.trim() !== '' || draft.attachments.length > 0;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing) return;
+    if (matches.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setPick((i) => (i + (e.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length);
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && `/${matches[pick]}` !== draft.text)) {
+        e.preventDefault();
+        setDraft((d) => ({ ...d, text: `/${matches[pick]} ` }));
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       void send();
       return;
     }
-    if (e.key === 'Escape' && !pending) {
+    if (e.key === 'Escape' && working) {
       // As in Claude Code's own input: Esc stops the agent.
       e.preventDefault();
-      if (working || escapeGoesToAgent(terminalId)) stop();
+      stop();
       return;
     }
     // ↑ / ↓ on an empty field (or one recalled from the history) walk the
     // prompts already sent to this agent.
-    const list = promptHistory(terminalId);
+    const list = sentHistory.get(terminalId) ?? [];
     const field = e.currentTarget;
     const atStart = field.selectionStart === 0 && field.selectionEnd === 0;
     const recalled = recall.current >= 0 && draft.text === list[list.length - 1 - recall.current];
@@ -268,12 +258,33 @@ export const AgentViewComposer = forwardRef<AgentViewComposerHandle, AgentViewCo
           ))}
         </div>
       )}
+      {matches.length > 0 && (
+        <div className="mx-2 mt-2 overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-pop">
+          {matches.map((c, i) => (
+            <button
+              key={c}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setDraft((d) => ({ ...d, text: `/${c} ` }));
+                fieldRef.current?.focus();
+              }}
+              className={cn(
+                'flex w-full items-center px-3 py-1.5 text-left font-mono text-xs',
+                i === pick ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60'
+              )}
+            >
+              /{c}
+            </button>
+          ))}
+        </div>
+      )}
       <textarea
         ref={fieldRef}
         value={draft.text}
         rows={1}
         disabled={locked}
-        placeholder={locked ? `Answer ${agentName} above first…` : `Reply to ${agentName}…`}
+        placeholder={locked ? `Answer ${agentName} above first…` : working ? `Queue a message for ${agentName}…` : `Reply to ${agentName}…`}
         onChange={(e) => {
           recall.current = -1;
           setDraft((d) => ({ ...d, text: e.target.value }));

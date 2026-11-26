@@ -363,6 +363,22 @@ attached to CortX projects by their working directory. Plan of record: `plans/ag
 | F8.9 | Claude Code hooks (opt-in button) for precise waiting / failed / current-tool states | Should Have | Pending |
 | F8.10 | Batch relaunch of a project's sessions (one Warp launch config = N tabs) | Should Have | Pending |
 | F8.11 | TUI tab + MCP tools + AI summaries | Could Have | Pending |
+| F8.12 | Agents section slimmed down (CORT-62): history by project, one line per session (state, title, time), running ones on top; a click opens the session in the Terminal window (where it runs, or resumed in the default mode). Replaces F8.3–F8.5's cards, filters and detail sheet | Must Have | Done |
+
+#### F9: Agent panes, TUI or GUI — CORT-62
+
+An agent pane of the Terminal window runs in one of two modes:
+
+- **TUI**: Claude Code's own interface in the terminal, unchanged.
+- **GUI**: a conversation view in the style of the Claude desktop app. CortX runs Claude Code itself the way the Agent SDK does (`claude --output-format stream-json --verbose --input-format stream-json --include-partial-messages --permission-prompt-tool stdio`, pipes, no terminal): the answer streams in, tool calls show as folded steps (diffs, outputs), the to-do list as a checklist, permissions / questions / plans arrive as cards (`can_use_tool` control requests) and are answered the same way.
+
+| ID | Requirement | Priority | Status |
+|----|-------------|----------|--------|
+| F9.1 | Per-pane mode, remembered with the session to resume (`LeafNode.view`, `agentSession`) | Must Have | Done |
+| F9.2 | Switch TUI ↔ GUI (pane button, Ctrl+Shift+M): the session is closed in one mode and resumed in the other (`--resume`) | Must Have | Done |
+| F9.3 | Settings: GUI command (`agentGuiCommand`), mode of a new agent (`agentDefaultMode`), view background (terminal / app), font, text size, width | Must Have | Done |
+| F9.4 | A resumed session's history is read once from its transcript; everything after is live from the process | Must Have | Done |
+| F9.5 | Voice dictation in GUI mode (Claude Code's `/voice` exists only in its TUI; no SDK / stream-json API) | Could Have | Pending |
 
 ---
 

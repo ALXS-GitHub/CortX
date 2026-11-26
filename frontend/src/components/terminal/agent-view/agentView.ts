@@ -1,52 +1,130 @@
 /**
- * The agent view (ticket CORT-62): a pane running an agent, shown as a
- * conversation — the way the Claude desktop app shows one — instead of as
- * the terminal. Only a way of showing it:
+ * The two modes of an agent pane (ticket CORT-62):
  *
- * - the agent keeps running in its terminal, untouched: same process, same
- *   PTY, same screen (kept rendered, out of sight, so it stays the right size
- *   and its menus can be read);
- * - what the view shows is the session's transcript, the JSONL file Claude
- *   Code writes on its own (`get_agent_transcript`), followed live;
- * - what you write in it goes to the agent through the PTY, as if typed in
- *   the terminal (`agentPrompt.sendAgentPrompt`);
- * - a menu the agent shows (a permission, a question, a plan to approve) is
- *   read off its screen (`agentMenu.ts`) and drawn as buttons, which send the
- *   arrows and Enter you would have typed.
+ * - **TUI**: Claude Code's own interface, in the pane's terminal — the
+ *   terminal as it always was.
+ * - **GUI**: the conversation view. CortX runs Claude Code itself in
+ *   stream-json mode, the way the Claude desktop app does
+ *   (`agentGuiStore.ts`); the pane's shell stays underneath, unused.
  *
- * So the two views never disagree, and switching back and forth loses
- * nothing. The choice is remembered per pane (`LeafNode.view`), and ignored
- * while no agent runs there: the pane is then the terminal, as always.
+ * One session cannot be in both at once. Switching closes it in one mode
+ * and resumes it in the other (`--resume <session>`): from the TUI, CortX
+ * quits Claude Code (Ctrl+C twice, as you would) and starts the GUI agent on
+ * the same session; from the GUI, it stops the GUI agent and types the TUI
+ * command (`terminal.agentLaunchCommand`, e.g. `cc`) with `--resume` in the
+ * shell. The choice is remembered per pane (`LeafNode.view`).
  */
+import { ask } from '@tauri-apps/plugin-dialog';
+import { toast } from 'sonner';
+import { writeTerminal } from '@/lib/tauri';
+import { focusTerminal } from '@/lib/terminalSessions';
+import { collectLeaves, type LeafNode } from '@/lib/terminalLayout';
+import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
-import { collectLeaves } from '@/lib/terminalLayout';
-import type { TerminalAgentInfo } from '@/types';
 import { useTerminalAgentsStore } from '../agentsStore';
+import { ensurePaneAgent, startPaneAgent, stopPaneAgent, useAgentGuiStore } from './agentGuiStore';
 
-/** Can this agent be shown as a conversation? Claude Code with a known session, for now. */
-export function canShowAgentView(agent: TerminalAgentInfo | undefined): agent is TerminalAgentInfo & { sessionId: string } {
-  return !!agent && agent.provider === 'claude-code' && !!agent.sessionId;
-}
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** The view the user chose for a terminal's pane. */
-export function leafViewOf(terminalId: string): 'agent' | null {
+export function leafOf(terminalId: string): LeafNode | null {
   for (const tab of useTerminalLayoutStore.getState().doc.window.tabs) {
     const leaf = collectLeaves(tab.layout).find((l) => l.terminalId === terminalId);
-    if (leaf) return leaf.view ?? null;
+    if (leaf) return leaf;
   }
   return null;
 }
 
-/**
- * Switch a pane between the terminal and the agent view. False (nothing
- * done) when no agent the view can show runs in it.
- */
-export function toggleAgentView(terminalId: string): boolean {
+/** Is this pane in GUI mode? */
+export function isGuiPane(terminalId: string): boolean {
+  return leafOf(terminalId)?.view === 'agent';
+}
+
+function tuiCommand(): string {
+  return (useAppStore.getState().settings?.terminal?.agentLaunchCommand ?? 'claude').trim() || 'claude';
+}
+
+/** Where the pane's shell is (its live cwd), for the GUI agent to start in. */
+function paneCwd(terminalId: string): string {
+  const app = useAppStore.getState();
+  const live = app.terminalStates.get(terminalId)?.cwd;
+  if (live) return live;
+  if (terminalId.startsWith('shell:')) return app.shellRuntimes.get(terminalId.slice('shell:'.length))?.cwd ?? '';
+  return leafOf(terminalId)?.cwd ?? '';
+}
+
+/** Wait until no agent is detected in the terminal any more. */
+async function tuiGone(terminalId: string, timeoutMs: number): Promise<boolean> {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    if (!useTerminalAgentsStore.getState().agents.has(terminalId)) return true;
+    await sleep(150);
+  }
+  return !useTerminalAgentsStore.getState().agents.has(terminalId);
+}
+
+/** TUI → GUI: quit Claude Code in the terminal, resume its session in the conversation view. */
+export async function switchToGui(terminalId: string): Promise<boolean> {
   const agent = useTerminalAgentsStore.getState().agents.get(terminalId);
-  const current = leafViewOf(terminalId);
-  // Back to the terminal is always possible (the agent may have just left).
-  if (current !== 'agent' && !canShowAgentView(agent)) return false;
-  useTerminalLayoutStore.getState().setLeafView(terminalId, current === 'agent' ? null : 'agent');
+  const cwd = agent?.cwd || paneCwd(terminalId);
+  let session: string | null = null;
+
+  if (agent) {
+    if (agent.provider !== 'claude-code') {
+      toast.error('Only Claude Code has a GUI mode for now.');
+      return false;
+    }
+    session = agent.sessionId ?? null;
+    if (agent.state === 'running') {
+      const ok = await ask('Claude is in the middle of a turn. Interrupt it and continue in the GUI mode?', {
+        title: 'Switch to the GUI mode',
+        kind: 'warning',
+      });
+      if (!ok) return false;
+      await writeTerminal(terminalId, '\x1b');
+      await sleep(400);
+    }
+    // Ctrl+C twice quits Claude Code (the first one clears its input).
+    await writeTerminal(terminalId, '\x03');
+    await sleep(250);
+    await writeTerminal(terminalId, '\x03');
+    if (!(await tuiGone(terminalId, 5000))) {
+      toast.error('Claude Code did not quit in the terminal', { description: 'Quit it there (/exit), then switch again.' });
+      return false;
+    }
+  }
+
+  useTerminalLayoutStore.getState().setLeafView(terminalId, 'agent', session);
+  ensurePaneAgent(terminalId, cwd, session);
+  // Resumed right away: the conversation is ready when the view shows it.
+  if (session) void startPaneAgent(terminalId);
+  return true;
+}
+
+/** GUI → TUI: stop the GUI agent, resume its session with Claude Code in the terminal. */
+export async function switchToTui(terminalId: string): Promise<boolean> {
+  const pane = useAgentGuiStore.getState().panes[terminalId];
+  const session = pane?.state.sessionId ?? pane?.resumeId ?? leafOf(terminalId)?.agentSession ?? null;
+  if (pane?.state.busy) {
+    const ok = await ask('Claude is in the middle of a turn. Stop it and continue in the terminal?', {
+      title: 'Switch to the terminal',
+      kind: 'warning',
+    });
+    if (!ok) return false;
+  }
+  await stopPaneAgent(terminalId);
+  useTerminalLayoutStore.getState().setLeafView(terminalId, null, null);
+  const command = session ? `${tuiCommand()} --resume ${session}` : tuiCommand();
+  await writeTerminal(terminalId, `${command}\r`).catch((error) => {
+    toast.error('Could not start Claude Code in the terminal', { description: String(error) });
+  });
+  focusTerminal(terminalId);
+  return true;
+}
+
+/** The pane's mode switch (button, Ctrl+Shift+M). */
+export function toggleAgentView(terminalId: string): boolean {
+  if (isGuiPane(terminalId)) void switchToTui(terminalId);
+  else void switchToGui(terminalId);
   return true;
 }
 

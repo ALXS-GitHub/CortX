@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState, type ComponentType } from 'react';
+import { memo, useMemo, useState, type ComponentType } from 'react';
 import { motion } from 'motion/react';
 import {
   Bot,
@@ -54,7 +54,11 @@ interface ConversationTurnsProps {
   messages: AgentMessage[];
   /** The agent is on a turn: the last answer is the live one. */
   live: boolean;
+  /** What each running sub-agent is doing, by its Task tool call id. */
+  subagents?: Record<string, string>;
 }
+
+const NO_SUBAGENTS: Record<string, string> = {};
 
 /**
  * The conversation of the agent view (ticket CORT-62), laid out the way the
@@ -64,12 +68,11 @@ interface ConversationTurnsProps {
  * its to-do list as a checklist. New turns slide in; the live answer shows
  * what the agent is doing right now.
  */
-export const ConversationTurns = memo(function ConversationTurns({ messages, live }: ConversationTurnsProps) {
+export const ConversationTurns = memo(function ConversationTurns({ messages, live, subagents = NO_SUBAGENTS }: ConversationTurnsProps) {
   const turns = useMemo(() => buildTurns(messages), [messages]);
   // Turns there on the first render appear at once; the ones that arrive
   // afterwards slide in.
-  const initial = useRef<Set<string> | null>(null);
-  if (initial.current === null) initial.current = new Set(turns.map((t) => t.id));
+  const [initial] = useState(() => new Set(turns.map((t) => t.id)));
 
   const lastAssistant = turns.length > 0 && turns[turns.length - 1].kind === 'assistant' ? turns[turns.length - 1].id : null;
 
@@ -78,18 +81,18 @@ export const ConversationTurns = memo(function ConversationTurns({ messages, liv
       {turns.map((turn) => (
         <motion.div
           key={turn.id}
-          initial={initial.current!.has(turn.id) ? false : { opacity: 0, y: 8 }}
+          initial={initial.has(turn.id) ? false : { opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.22, ease: 'easeOut' }}
         >
-          <TurnView turn={turn} live={live && turn.id === lastAssistant} />
+          <TurnView turn={turn} live={live && turn.id === lastAssistant} subagents={subagents} />
         </motion.div>
       ))}
     </>
   );
 });
 
-function TurnView({ turn, live }: { turn: Turn; live: boolean }) {
+function TurnView({ turn, live, subagents }: { turn: Turn; live: boolean; subagents: Record<string, string> }) {
   switch (turn.kind) {
     case 'user':
       return <UserTurn turn={turn} />;
@@ -104,7 +107,7 @@ function TurnView({ turn, live }: { turn: Turn; live: boolean }) {
         </div>
       );
     case 'assistant':
-      return <AssistantTurn turn={turn} live={live} />;
+      return <AssistantTurn turn={turn} live={live} subagents={subagents} />;
   }
 }
 
@@ -142,7 +145,15 @@ function UserTurn({ turn }: { turn: Extract<Turn, { kind: 'user' }> }) {
   );
 }
 
-function AssistantTurn({ turn, live }: { turn: Extract<Turn, { kind: 'assistant' }>; live: boolean }) {
+function AssistantTurn({
+  turn,
+  live,
+  subagents,
+}: {
+  turn: Extract<Turn, { kind: 'assistant' }>;
+  live: boolean;
+  subagents: Record<string, string>;
+}) {
   const lastIndex = turn.blocks.length - 1;
   const text = turn.blocks
     .filter((b): b is Extract<Block, { kind: 'text' }> => b.kind === 'text')
@@ -159,7 +170,7 @@ function AssistantTurn({ turn, live }: { turn: Extract<Turn, { kind: 'assistant'
   return (
     <div className="group/answer flex flex-col gap-3">
       {turn.blocks.map((block, i) => (
-        <BlockView key={block.key} block={block} live={live && i === lastIndex} />
+        <BlockView key={block.key} block={block} live={live && i === lastIndex} subagents={subagents} />
       ))}
       {!live && text && (
         <div className="-mt-1 flex h-6 items-center gap-1 opacity-0 transition-opacity group-hover/answer:opacity-100">
@@ -181,7 +192,7 @@ function AssistantTurn({ turn, live }: { turn: Extract<Turn, { kind: 'assistant'
   );
 }
 
-function BlockView({ block, live }: { block: Block; live: boolean }) {
+function BlockView({ block, live, subagents }: { block: Block; live: boolean; subagents: Record<string, string> }) {
   switch (block.kind) {
     case 'text':
       return (
@@ -192,7 +203,7 @@ function BlockView({ block, live }: { block: Block; live: boolean }) {
     case 'thinking':
       return <Thinking text={block.text} live={live} />;
     case 'steps':
-      return <Steps steps={block.steps} live={live} />;
+      return <Steps steps={block.steps} live={live} subagents={subagents} />;
     case 'todos':
       return <Todos todos={block.todos} />;
     case 'plan':
@@ -261,10 +272,10 @@ function Thinking({ text, live }: { text: string; live: boolean }) {
 }
 
 /** A run of tool calls: one row each, or folded under a summary when there are several. */
-function Steps({ steps, live }: { steps: Step[]; live: boolean }) {
+function Steps({ steps, live, subagents }: { steps: Step[]; live: boolean; subagents: Record<string, string> }) {
   const [open, setOpen] = useState(false);
   const running = live ? steps.find((s) => !s.result) ?? null : null;
-  if (steps.length === 1) return <StepRow step={steps[0]} live={live} />;
+  if (steps.length === 1) return <StepRow step={steps[0]} live={live} activity={subagents[steps[0].call.toolId]} />;
   const failed = steps.filter((s) => s.result?.isError).length;
   return (
     <div className="text-sm">
@@ -290,13 +301,13 @@ function Steps({ steps, live }: { steps: Step[]; live: boolean }) {
       {open ? (
         <div className="mt-1.5 ml-2 flex flex-col gap-0.5 border-l border-border pl-3">
           {steps.map((s) => (
-            <StepRow key={s.call.toolId} step={s} live={live} />
+            <StepRow key={s.call.toolId} step={s} live={live} activity={subagents[s.call.toolId]} />
           ))}
         </div>
       ) : (
         running && (
           <div className="mt-1 ml-2 border-l border-border pl-3">
-            <StepRow step={running} live />
+            <StepRow step={running} live activity={subagents[running.call.toolId]} />
           </div>
         )
       )}
@@ -304,7 +315,7 @@ function Steps({ steps, live }: { steps: Step[]; live: boolean }) {
   );
 }
 
-function StepRow({ step, live }: { step: Step; live: boolean }) {
+function StepRow({ step, live, activity }: { step: Step; live: boolean; activity?: string }) {
   const [open, setOpen] = useState(false);
   const done = !!step.result;
   const label = stepLabel(step.call, done || !live);
@@ -338,6 +349,11 @@ function StepRow({ step, live }: { step: Step; live: boolean }) {
         {error && <X className="size-3.5 shrink-0 text-st-blocked" />}
         <ChevronRight className={cn('ml-auto size-3.5 shrink-0 opacity-0 transition-all group-hover/step:opacity-100', open && 'rotate-90 opacity-100')} />
       </button>
+      {activity && !done && live && (
+        <p className="ml-5 truncate text-xs text-faint" title={activity}>
+          ↳ {activity}
+        </p>
+      )}
       {open && <StepDetail step={step} />}
     </div>
   );

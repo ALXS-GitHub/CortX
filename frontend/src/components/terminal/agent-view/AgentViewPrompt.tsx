@@ -1,24 +1,19 @@
 import { useState } from 'react';
-import { CornerDownLeft, FileCode2, Globe, ListChecks, MessageCircleQuestion, ShieldQuestion, SquareTerminal } from 'lucide-react';
-import { toast } from 'sonner';
+import { Check, CornerDownLeft, FileCode2, Globe, ListChecks, MessageCircleQuestion, ShieldQuestion, SquareTerminal } from 'lucide-react';
 import { MessageResponse } from '@/components/ai-elements/message';
 import { cn } from '@/lib/utils';
-import type { AgentMenu, AgentMenuOption } from '../agentMenu';
-import { pickMenuOption } from './menuKeys';
-import { diffLines, toolCardTitle, toolPreview, type ToolCall, type ToolPreview } from './pendingTool';
+import type { PermissionRequest } from './streamJson';
+import { questionAnswers, setModeUpdate } from './streamJson';
+import { answerPermission } from './agentGuiStore';
+import { diffLines, toolCardTitle, toolPreview, type ToolPreview } from './pendingTool';
 
-interface AgentViewPromptProps {
-  terminalId: string;
-  agentName: string;
-  /** The menu on the agent's screen; null when it waits without one we can read. */
-  menu: AgentMenu | null;
-  /** The tool call the menu is about, from the transcript. */
-  call: ToolCall | null;
-  onOpenTerminal: () => void;
+interface PermissionCardProps {
+  paneKey: string;
+  request: PermissionRequest;
 }
 
-function iconFor(call: ToolCall | null) {
-  switch (call?.name) {
+function iconFor(name: string) {
+  switch (name) {
     case 'Bash':
     case 'PowerShell':
       return SquareTerminal;
@@ -37,22 +32,14 @@ function iconFor(call: ToolCall | null) {
   }
 }
 
-/** The header chip of the question shown (AskUserQuestion's `header`). */
-function questionHeader(call: ToolCall | null, title: string | null): string | null {
-  if (call?.name !== 'AskUserQuestion' || !title) return null;
-  const questions = (call.input as { questions?: { question?: string; header?: string }[] } | null)?.questions;
-  if (!Array.isArray(questions)) return null;
-  const q = questions.find((x) => typeof x.question === 'string' && x.question.trim() === title.trim());
-  return q?.header ?? null;
-}
-
 function Preview({ preview }: { preview: ToolPreview }) {
   switch (preview.kind) {
     case 'command':
       return (
         <div className="space-y-1.5">
           {preview.description && <p className="text-xs text-muted-foreground">{preview.description}</p>}
-          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 px-3 py-2 font-mono text-xs text-foreground">
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/60 px-3 py-2 font-mono text-xs text-foreground">
+            <span className="select-none text-faint">$ </span>
             {preview.command}
           </pre>
         </div>
@@ -63,7 +50,7 @@ function Preview({ preview }: { preview: ToolPreview }) {
           <p className="truncate font-mono text-xs text-muted-foreground" title={preview.path}>
             {preview.path}
           </p>
-          <div className="max-h-64 overflow-auto rounded-md bg-muted/60 py-1.5 font-mono text-xs">
+          <div className="max-h-64 overflow-auto rounded-lg bg-muted/50 py-1.5 font-mono text-xs">
             {preview.hunks.map((hunk, i) => (
               <div key={i} className={cn(i > 0 && 'mt-1.5 border-t border-border/60 pt-1.5')}>
                 {diffLines(hunk).map((line, j) => (
@@ -89,15 +76,9 @@ function Preview({ preview }: { preview: ToolPreview }) {
           <p className="truncate font-mono text-xs text-muted-foreground" title={preview.path}>
             {preview.path}
           </p>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 px-3 py-2 font-mono text-xs">
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-3 py-2 font-mono text-xs">
             {preview.content}
           </pre>
-        </div>
-      );
-    case 'plan':
-      return (
-        <div className="max-h-80 overflow-auto rounded-md border border-border/60 bg-background/40 px-4 py-3 text-sm">
-          <MessageResponse>{preview.plan}</MessageResponse>
         </div>
       );
     case 'url':
@@ -108,181 +89,269 @@ function Preview({ preview }: { preview: ToolPreview }) {
         </div>
       );
     case 'generic':
-      return preview.summary ? (
-        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 px-3 py-2 font-mono text-xs">
-          {preview.summary}
+      return (
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-3 py-2 font-mono text-[11px] text-muted-foreground">
+          {JSON.stringify(preview.input, null, 2)}
         </pre>
-      ) : null;
-    case 'question':
+      );
+    default:
       return null;
   }
 }
 
-/**
- * What the agent is waiting on you for — a permission, a question, a plan —
- * as a card over the composer, the way the Claude desktop app asks it.
- *
- * The *content* comes from the transcript (the tool call: its command, its
- * diff, its plan); the *choices* come from the agent's own screen
- * (`agentMenu.ts`), so they are always the ones the agent offers, in its
- * words, and picking one sends the keys you would have typed. Keys work too:
- * 1–9 pick, ↑ ↓ Enter move and confirm (see `AgentView`).
- */
-export function AgentViewPrompt({ terminalId, agentName, menu, call, onOpenTerminal }: AgentViewPromptProps) {
-  const [freeText, setFreeText] = useState<{ n: number; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const Icon = iconFor(call);
-  const preview = call ? toolPreview(call) : null;
-  const header = questionHeader(call, menu?.title ?? null);
-  // A menu with no tool behind it (a slash command's picker, the trust
-  // prompt): its own rows say what it is about.
-  const title = call ? toolCardTitle(call, agentName) : menu?.title ?? toolCardTitle(null, agentName);
-  const question = call && menu?.title && menu.title !== title ? menu.title : null;
+function CardFrame({ icon: Icon, title, children }: { icon: typeof ShieldQuestion; title: string; children: React.ReactNode }) {
+  return (
+    <div data-agent-view-prompt className="overflow-hidden rounded-2xl border border-border-strong bg-card shadow-pop">
+      <div className="flex items-center gap-2.5 px-4 pt-3.5 pb-1">
+        <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary">
+          <Icon className="size-3.5" />
+        </span>
+        <h3 className="min-w-0 text-sm font-medium text-foreground">{title}</h3>
+      </div>
+      <div className="space-y-3 px-4 pt-2 pb-3.5">{children}</div>
+    </div>
+  );
+}
 
-  const pick = async (option: AgentMenuOption, text?: string) => {
-    if (!menu || busy) return;
-    if (option.freeText && text === undefined) {
-      setFreeText({ n: option.n, text: '' });
+function ActionButton({
+  children,
+  onClick,
+  variant = 'outline',
+  hint,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  variant?: 'primary' | 'outline' | 'ghost';
+  hint?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors',
+        variant === 'primary' && 'bg-primary text-primary-foreground shadow-soft hover:bg-primary/90',
+        variant === 'outline' && 'border border-border-strong bg-background/60 text-foreground hover:bg-accent',
+        variant === 'ghost' && 'text-muted-foreground hover:bg-accent hover:text-foreground'
+      )}
+    >
+      {children}
+      {hint && <kbd className="font-sans text-[10px] opacity-60">{hint}</kbd>}
+    </button>
+  );
+}
+
+/**
+ * What the agent waits on you for, as the Claude desktop app asks it: a
+ * card over the composer. The request comes from Claude Code itself (the
+ * `can_use_tool` control request of the stream-json protocol), and so does
+ * everything it shows; the answer goes back the same way.
+ */
+export function PermissionCard({ paneKey, request }: PermissionCardProps) {
+  if (request.toolName === 'AskUserQuestion') return <QuestionCard paneKey={paneKey} request={request} />;
+  if (request.toolName === 'ExitPlanMode') return <PlanCard paneKey={paneKey} request={request} />;
+  return <ToolCard paneKey={paneKey} request={request} />;
+}
+
+function ToolCard({ paneKey, request }: PermissionCardProps) {
+  const preview = toolPreview({ name: request.toolName, input: request.input });
+  const title = request.title ?? toolCardTitle({ name: request.toolName, input: request.input }, 'Claude');
+  const canAlways = request.suggestions.length > 0 && !request.suppressAlways;
+  return (
+    <CardFrame icon={iconFor(request.toolName)} title={title}>
+      {request.description && <p className="text-xs text-muted-foreground">{request.description}</p>}
+      <Preview preview={preview} />
+      {request.reason && <p className="text-[11px] text-faint">{request.reason}</p>}
+      <div className="flex flex-wrap items-center justify-end gap-2 pt-0.5">
+        <ActionButton variant="ghost" onClick={() => void answerPermission(paneKey, request, { kind: 'deny', message: 'The user denied this tool call.' })}>
+          Deny
+        </ActionButton>
+        {canAlways && (
+          <ActionButton onClick={() => void answerPermission(paneKey, request, { kind: 'allow', always: true })}>Always allow</ActionButton>
+        )}
+        <ActionButton variant="primary" onClick={() => void answerPermission(paneKey, request, { kind: 'allow' })}>
+          Allow once
+        </ActionButton>
+      </div>
+    </CardFrame>
+  );
+}
+
+interface AskQuestion {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options: { label: string; description?: string }[];
+}
+
+function questionsOf(input: unknown): AskQuestion[] {
+  const list = (input as { questions?: unknown } | null)?.questions;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((q): q is AskQuestion => !!q && typeof q === 'object' && typeof (q as AskQuestion).question === 'string')
+    .map((q) => ({ ...q, options: Array.isArray(q.options) ? q.options.filter((o) => o && typeof o.label === 'string') : [] }));
+}
+
+/** AskUserQuestion: the questions with their options, answered in place. */
+function QuestionCard({ paneKey, request }: PermissionCardProps) {
+  const questions = questionsOf(request.input);
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const [other, setOther] = useState<Record<string, string>>({});
+
+  const answerOf = (q: AskQuestion): string | string[] | null => {
+    const free = other[q.question]?.trim();
+    const chosen = picked[q.question] ?? [];
+    if (q.multiSelect) {
+      const all = free ? [...chosen, free] : chosen;
+      return all.length > 0 ? all : null;
+    }
+    return free || chosen[0] || null;
+  };
+  const complete = questions.every((q) => answerOf(q) !== null);
+
+  const submit = (override?: Record<string, string[]>) => {
+    const answers: Record<string, string | string[]> = {};
+    for (const q of questions) {
+      const chosen = override?.[q.question];
+      const a = chosen ? (q.multiSelect ? chosen : chosen[0]) : answerOf(q);
+      if (a !== null && a !== undefined) answers[q.question] = a;
+    }
+    void answerPermission(paneKey, request, { kind: 'allow', updatedInput: questionAnswers(request, answers) });
+  };
+
+  const choose = (q: AskQuestion, label: string) => {
+    if (q.multiSelect) {
+      setPicked((p) => {
+        const cur = p[q.question] ?? [];
+        return { ...p, [q.question]: cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label] };
+      });
       return;
     }
-    setBusy(true);
-    try {
-      await pickMenuOption(terminalId, menu, option, text);
-      setFreeText(null);
-    } catch (error) {
-      toast.error('Could not answer the agent', { description: String(error) });
-    } finally {
-      setBusy(false);
-    }
+    const next = { ...picked, [q.question]: [label] };
+    setPicked(next);
+    setOther((o) => ({ ...o, [q.question]: '' }));
+    // One question, one choice: answered on the click, as in the desktop app.
+    if (questions.length === 1) submit(next);
   };
 
   return (
-    <div
-      data-agent-view-prompt
-      className="rounded-xl border border-border-strong bg-card shadow-pop"
-    >
-      <div className="flex items-start gap-2.5 px-4 pt-3.5">
-        <Icon className="mt-0.5 size-4 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
+    <CardFrame icon={MessageCircleQuestion} title={questions.length > 1 ? 'Claude has a few questions' : 'Claude has a question'}>
+      {questions.map((q) => (
+        <div key={q.question} className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-medium text-foreground">{title}</h3>
-            {header && (
-              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">{header}</span>
-            )}
+            {q.header && <span className="rounded-full bg-primary/12 px-2 py-0.5 text-[11px] font-medium text-primary">{q.header}</span>}
+            <p className="text-sm text-foreground">{q.question}</p>
           </div>
-          {call && preview?.kind === 'generic' && (
-            <p className="mt-0.5 font-mono text-[11px] text-faint">{call.name}</p>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-3 px-4 pt-2.5 pb-3.5">
-        {preview && <Preview preview={preview} />}
-        {!call && menu && menu.context.length > 0 && (
-          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
-            {menu.context.join('\n')}
-          </pre>
-        )}
-        {question && <p className="text-sm text-foreground">{question}</p>}
-
-        {menu ? (
-          <div className="flex flex-col gap-1" role="listbox" aria-label={question ?? title}>
-            {menu.options.map((option) =>
-              freeText?.n === option.n ? (
-                <form
-                  key={option.n}
-                  className="flex items-center gap-2 rounded-lg border border-primary/50 bg-background/60 px-2 py-1.5"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (freeText.text.trim()) void pick(option, freeText.text);
-                  }}
-                >
-                  <kbd className="grid size-5 shrink-0 place-items-center rounded-[5px] border border-border bg-muted font-sans text-[11px] text-muted-foreground">
-                    {option.n}
-                  </kbd>
-                  <input
-                    autoFocus
-                    value={freeText.text}
-                    onChange={(e) => setFreeText({ n: option.n, text: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setFreeText(null);
-                      }
-                    }}
-                    placeholder={option.label.replace(/\.$/, '') + '…'}
-                    className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!freeText.text.trim() || busy}
-                    className="grid size-6 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground disabled:bg-muted disabled:text-faint"
-                    aria-label="Send the answer"
-                  >
-                    <CornerDownLeft className="size-3.5" />
-                  </button>
-                </form>
-              ) : (
+          <div className="flex flex-col gap-1">
+            {q.options.map((o, i) => {
+              const on = (picked[q.question] ?? []).includes(o.label);
+              return (
                 <button
-                  key={option.n}
+                  key={o.label}
                   type="button"
-                  role="option"
-                  aria-selected={option.selected}
-                  disabled={busy}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => void pick(option)}
+                  onClick={() => choose(q, o.label)}
                   className={cn(
-                    'group/opt flex w-full items-start gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors disabled:opacity-60',
-                    option.selected
-                      ? 'border-primary/50 bg-primary/10'
-                      : 'border-border/70 bg-background/40 hover:border-border-strong hover:bg-accent'
+                    'flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors',
+                    on ? 'border-primary/50 bg-primary/10' : 'border-border/70 bg-background/40 hover:border-border-strong hover:bg-accent'
                   )}
                 >
-                  <kbd
+                  <span
                     className={cn(
-                      'grid size-5 shrink-0 place-items-center rounded-[5px] border font-sans text-[11px]',
-                      option.selected ? 'border-primary/50 bg-primary/20 text-primary' : 'border-border bg-muted text-muted-foreground'
+                      'mt-0.5 grid size-4 shrink-0 place-items-center border text-[10px]',
+                      q.multiSelect ? 'rounded-[4px]' : 'rounded-full',
+                      on ? 'border-primary bg-primary text-primary-foreground' : 'border-border-strong text-faint'
                     )}
                   >
-                    {option.n}
-                  </kbd>
+                    {on ? <Check className="size-3" /> : q.multiSelect ? '' : i + 1}
+                  </span>
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2 text-sm text-foreground">
-                      {option.checked !== null && (
-                        <span
-                          aria-hidden
-                          className={cn(
-                            'grid size-3.5 place-items-center rounded-[3px] border text-[9px]',
-                            option.checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border-strong'
-                          )}
-                        >
-                          {option.checked ? '✓' : ''}
-                        </span>
-                      )}
-                      <span className="break-words">{option.label}</span>
-                    </span>
-                    {option.detail && <span className="mt-0.5 block text-xs text-muted-foreground">{option.detail}</span>}
+                    <span className="block text-sm text-foreground">{o.label}</span>
+                    {o.description && <span className="mt-0.5 block text-xs text-muted-foreground">{o.description}</span>}
                   </span>
                 </button>
-              )
-            )}
-            {menu.hint && <p className="px-1 pt-1 text-[11px] text-faint">{menu.hint}</p>}
+              );
+            })}
+            <input
+              value={other[q.question] ?? ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                setOther((o) => ({ ...o, [q.question]: v }));
+                if (!q.multiSelect && v) setPicked((p) => ({ ...p, [q.question]: [] }));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && complete) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              placeholder="Something else…"
+              className="h-9 rounded-xl border border-border/70 bg-background/40 px-3 text-sm outline-none placeholder:text-faint focus:border-primary/50"
+            />
           </div>
-        ) : (
-          <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-            <span>{agentName} is waiting for an answer in the terminal.</span>
-            <button
-              type="button"
-              onClick={onOpenTerminal}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-accent"
-            >
-              <SquareTerminal className="size-3.5" />
-              Answer in the terminal
-            </button>
-          </div>
+        </div>
+      ))}
+      <div className="flex items-center justify-end gap-2">
+        <ActionButton
+          variant="ghost"
+          onClick={() => void answerPermission(paneKey, request, { kind: 'deny', message: 'The user chose not to answer.' })}
+        >
+          Skip
+        </ActionButton>
+        {(questions.length > 1 || questions.some((q) => q.multiSelect || other[q.question])) && (
+          <button
+            type="button"
+            disabled={!complete}
+            onClick={() => submit()}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground shadow-soft hover:bg-primary/90 disabled:bg-muted disabled:text-faint disabled:shadow-none"
+          >
+            Submit
+            <CornerDownLeft className="size-3.5" />
+          </button>
         )}
       </div>
-    </div>
+    </CardFrame>
+  );
+}
+
+/** ExitPlanMode: the plan, to approve (and how edits go next) or to keep refining. */
+function PlanCard({ paneKey, request }: PermissionCardProps) {
+  const [feedback, setFeedback] = useState('');
+  const plan = (request.input as { plan?: unknown } | null)?.plan;
+  return (
+    <CardFrame icon={ListChecks} title="Claude has a plan for you">
+      {typeof plan === 'string' && plan.trim() && (
+        <div className="agent-prose max-h-[24rem] overflow-auto rounded-xl border border-border/60 bg-background/40 px-4 py-3 text-sm leading-7">
+          <MessageResponse>{plan}</MessageResponse>
+        </div>
+      )}
+      <input
+        value={feedback}
+        onChange={(e) => setFeedback(e.target.value)}
+        placeholder="Tell Claude what to change, to keep planning…"
+        className="h-9 w-full rounded-xl border border-border/70 bg-background/40 px-3 text-sm outline-none placeholder:text-faint focus:border-primary/50"
+      />
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <ActionButton
+          variant="ghost"
+          onClick={() =>
+            void answerPermission(paneKey, request, {
+              kind: 'deny',
+              message: feedback.trim() || 'The user wants to keep planning.',
+            })
+          }
+        >
+          Keep planning
+        </ActionButton>
+        <ActionButton onClick={() => void answerPermission(paneKey, request, { kind: 'allow', updatedPermissions: [setModeUpdate('default')] })}>
+          Approve, ask before edits
+        </ActionButton>
+        <ActionButton
+          variant="primary"
+          onClick={() => void answerPermission(paneKey, request, { kind: 'allow', updatedPermissions: [setModeUpdate('acceptEdits')] })}
+        >
+          Approve, auto-accept edits
+        </ActionButton>
+      </div>
+    </CardFrame>
   );
 }

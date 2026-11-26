@@ -1,3 +1,4 @@
+mod agent_gui;
 mod commands;
 mod models;
 mod process_manager;
@@ -694,6 +695,7 @@ pub fn run() {
                         }
                         log::info!("Stopping all services...");
                         state.process_manager.stop_all();
+                        agent_gui::stop_all();
                         log::info!("All services stopped, closing window...");
                     }
                     // While every window still exists: once they are destroyed
@@ -883,6 +885,10 @@ pub fn run() {
             commands::list_agent_sessions,
             commands::refresh_agent_sessions,
             commands::get_agent_transcript,
+            agent_gui::agent_gui_start,
+            agent_gui::agent_gui_send,
+            agent_gui::agent_gui_running,
+            agent_gui::agent_gui_stop,
             commands::update_agent_annotations,
             commands::resume_agent_session,
             commands::get_agent_resume_command,

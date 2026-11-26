@@ -483,6 +483,16 @@ pub struct TerminalConfig {
     /// reads this.
     #[serde(default = "default_agent_prompt_opacity")]
     pub agent_prompt_opacity: u8,
+    /// GUI mode of an agent pane (ticket CORT-62): the command CortX starts
+    /// Claude Code with, before its stream-json flags (`claude`, or an alias
+    /// shim such as `cc`). None = `claude`. Only the frontend reads this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_gui_command: Option<String>,
+    /// How a new agent pane opens: `tui` (Claude Code in the terminal) or
+    /// `gui` (the conversation view). None = `tui`. Only the frontend reads
+    /// this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_default_mode: Option<String>,
     /// Agent view (ticket CORT-62), what is behind the conversation:
     /// `terminal` (the terminal's theme, wallpaper and opacity) or `app` (the
     /// app's own background). None = `terminal`. Only the frontend reads this.
@@ -1364,6 +1374,8 @@ impl Default for TerminalConfig {
             agent_status_bar: true,
             agent_prompt_color: None,
             agent_prompt_opacity: default_agent_prompt_opacity(),
+            agent_gui_command: None,
+            agent_default_mode: None,
             agent_view_background: None,
             agent_view_font: None,
             agent_view_text_size: None,

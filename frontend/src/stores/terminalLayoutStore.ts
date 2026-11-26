@@ -174,8 +174,8 @@ interface TerminalLayoutState {
   updateLeafCwd: (terminalId: string, cwd: string) => void;
   /** Remember a pane's size so a restored shell spawns at that size. */
   updateLeafSize: (terminalId: string, cols: number, rows: number) => void;
-  /** Show a pane's agent as a conversation (`agent`) or as the terminal (`null`). */
-  setLeafView: (terminalId: string, view: 'agent' | null) => void;
+  /** Put a pane in GUI mode (`agent`, with its session) or back to the terminal (`null`). */
+  setLeafView: (terminalId: string, view: 'agent' | null, session?: string | null) => void;
   /** Append ready-made tabs (launch configuration) and show the first one. */
   addLaunchTabs: (tabs: TerminalTab[], projectId: string | null) => void;
   /**
@@ -858,9 +858,9 @@ export const useTerminalLayoutStore = create<TerminalLayoutState>((set, get) => 
     }, 800);
   },
 
-  setLeafView: (terminalId, view) =>
+  setLeafView: (terminalId, view, session) =>
     get().commit((d) => {
-      const win = setLeafView(d.window, terminalId, view);
+      const win = setLeafView(d.window, terminalId, view, session);
       return win === d.window ? d : { ...d, window: win };
     }),
 

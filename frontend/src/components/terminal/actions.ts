@@ -17,7 +17,8 @@ import {
 } from '@/lib/terminalSessions';
 import { useTerminalAgentsStore } from './agentsStore';
 import { attachToAgentPrompt, isEditorOpen, toggleAgentPrompt } from './agentPrompt';
-import { canShowAgentView, focusAgentView, leafViewOf, toggleAgentView } from './agent-view/agentView';
+import { focusAgentView, isGuiPane, toggleAgentView } from './agent-view/agentView';
+import { ensurePaneAgent, startPaneAgent } from './agent-view/agentGuiStore';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
 import { basename } from '@/lib/terminalNames';
 import type { KeybindingActionId } from '@/lib/keybindings';
@@ -45,6 +46,7 @@ import {
 } from '@/lib/terminalLayout';
 import { closeQuestion, describeCloseReach, type WindowShare } from '@/lib/closeReach';
 import { openTerminalWindow } from './terminalWindows';
+import { focusInTerminalWindow, sendToTerminalWindow } from '@/lib/terminalWindowBridge';
 import { openCommandHistory } from './history/openHistory';
 
 /**
@@ -109,24 +111,76 @@ export async function openNewTerminal(): Promise<void> {
 const AGENT_PROMPT_TIMEOUT_MS = 4000;
 
 /**
- * "New agent": a new terminal of the current scope, in which the command of
- * `terminal.agentLaunchCommand` (`claude` by default, or an alias such as
- * `cc`) is typed and entered once the shell shows its prompt — exactly what
- * you would type. Nothing else reaches the agent.
+ * "New agent": a new terminal of the current scope, opened in the mode of
+ * `terminal.agentDefaultMode` (ticket CORT-62):
+ *
+ * - `tui` (default): the command of `terminal.agentLaunchCommand` (`claude`,
+ *   or an alias such as `cc`) is typed and entered once the shell shows its
+ *   prompt — exactly what you would type;
+ * - `gui`: the pane opens in GUI mode, and CortX starts Claude Code in
+ *   stream-json mode for it, in the shell's directory.
  */
 export async function openNewAgent(): Promise<void> {
-  const command = (useAppStore.getState().settings?.terminal.agentLaunchCommand ?? 'claude').trim() || 'claude';
+  const terminal = useAppStore.getState().settings?.terminal;
+  const command = (terminal?.agentLaunchCommand ?? 'claude').trim() || 'claude';
+  const gui = terminal?.agentDefaultMode === 'gui';
   const layout = useTerminalLayoutStore.getState();
   const { projectId, cwd } = resolveSpawnTarget(layout.activeTab());
   try {
     const shellId = await useAppStore.getState().openShell({ projectId, cwd, surface: 'window' });
     const terminalId = `shell:${shellId}`;
     useTerminalLayoutStore.getState().addTerminalToWindow(terminalId, { projectId });
+    if (gui) {
+      useTerminalLayoutStore.getState().setLeafView(terminalId, 'agent', null);
+      ensurePaneAgent(terminalId, cwd ?? terminalCwd(terminalId) ?? '', null);
+      void startPaneAgent(terminalId);
+      return;
+    }
     await shellPrompt(terminalId);
     await writeTerminal(terminalId, `${command}\r`);
   } catch (error) {
     console.error('Failed to open an agent:', error);
     toast.error(`Failed to start ${command}: ${String(error)}`);
+  }
+}
+
+/**
+ * Open an agent session in the Terminal window (the Agents history, ticket
+ * CORT-62): focus it where it already runs in CortX, else resume it in a new
+ * tab, in the GUI mode or in Claude Code's TUI (`terminal.agentDefaultMode`
+ * unless `mode` says).
+ */
+export async function openAgentSession(
+  session: { id: string; cwd: string; projectId?: string },
+  mode?: 'tui' | 'gui'
+): Promise<void> {
+  const layout = useTerminalLayoutStore.getState();
+  // Already open: a TUI in a terminal, or a pane in GUI mode on it.
+  const running = [...useTerminalAgentsStore.getState().agents.values()].find((a) => a.sessionId === session.id);
+  const guiLeaf = layout.doc.window.tabs.flatMap((t) => collectLeaves(t.layout)).find((l) => l.view === 'agent' && l.agentSession === session.id);
+  const existing = running?.terminalId ?? guiLeaf?.terminalId;
+  if (existing) {
+    focusInTerminalWindow(existing);
+    return;
+  }
+  const terminal = useAppStore.getState().settings?.terminal;
+  const gui = (mode ?? terminal?.agentDefaultMode ?? 'tui') === 'gui';
+  const command = (terminal?.agentLaunchCommand ?? 'claude').trim() || 'claude';
+  try {
+    const shellId = await useAppStore.getState().openShell({ projectId: session.projectId, cwd: session.cwd, surface: 'window' });
+    const terminalId = `shell:${shellId}`;
+    if (!sendToTerminalWindow(terminalId, session.projectId ?? null)) {
+      useTerminalLayoutStore.getState().addTerminalToWindow(terminalId, { projectId: session.projectId });
+    }
+    if (gui) {
+      // The Terminal window's view loads the session and resumes it at the first prompt.
+      useTerminalLayoutStore.getState().setLeafView(terminalId, 'agent', session.id);
+      return;
+    }
+    await shellPrompt(terminalId);
+    await writeTerminal(terminalId, `${command} --resume ${session.id}\r`);
+  } catch (error) {
+    toast.error('Could not open the session', { description: String(error) });
   }
 }
 
@@ -1125,12 +1179,13 @@ export function runAction(id: KeybindingActionId): boolean {
     }
     case 'agent.prompt': {
       const terminalId = activeTerminalId();
-      if (!terminalId || !useTerminalAgentsStore.getState().agents.has(terminalId)) return false;
-      // In the agent view, the prompt is its composer.
-      if (leafViewOf(terminalId) === 'agent' && canShowAgentView(useTerminalAgentsStore.getState().agents.get(terminalId))) {
+      if (!terminalId) return false;
+      // In GUI mode, the prompt is the view's composer.
+      if (isGuiPane(terminalId)) {
         focusAgentView(terminalId);
         return true;
       }
+      if (!useTerminalAgentsStore.getState().agents.has(terminalId)) return false;
       if (useAppStore.getState().settings?.terminal?.agentPromptBar === false) return false;
       toggleAgentPrompt(terminalId);
       return true;

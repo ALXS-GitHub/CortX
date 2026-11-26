@@ -71,12 +71,14 @@ export interface LeafNode {
   /** Shell command line to use when restoring (launch configs). */
   shell?: string | null;
   /**
-   * How the pane shows an agent running in it (ticket CORT-62): `agent` = as
-   * a conversation (the agent view), absent = the terminal itself. Only a
-   * way of showing it: the process, its PTY and its screen are the same
-   * either way. Ignored while no agent runs in the pane.
+   * GUI mode (ticket CORT-62): the pane is an agent's conversation view, the
+   * agent run by CortX in stream-json mode — not Claude Code's TUI in the
+   * shell, which stays there underneath for the switch back. Absent = the
+   * terminal.
    */
   view?: 'agent';
+  /** The Claude Code session of the GUI mode, to resume it (restore, switch). */
+  agentSession?: string;
 }
 
 export interface SplitNode {
@@ -729,14 +731,26 @@ export function setLeafCwd(layout: TerminalWindowLayout, terminalId: string, cwd
   return changed ? { ...layout, tabs } : layout;
 }
 
-/** Show a terminal's pane as the agent view, or as the terminal (`null`). */
-export function setLeafView(layout: TerminalWindowLayout, terminalId: string, view: 'agent' | null): TerminalWindowLayout {
+/**
+ * Put a terminal's pane in GUI mode (`agent`, with the session to resume, if
+ * any) or back to the terminal (`null`). `session` undefined keeps the one
+ * the leaf has.
+ */
+export function setLeafView(
+  layout: TerminalWindowLayout,
+  terminalId: string,
+  view: 'agent' | null,
+  session?: string | null
+): TerminalWindowLayout {
   let changed = false;
   const tabs = layout.tabs.map((t) => {
     const next = mapLeaves(t.layout, (leaf) => {
-      if (leaf.terminalId !== terminalId || (leaf.view ?? null) === view) return leaf;
-      const { view: _old, ...rest } = leaf;
-      return view ? { ...rest, view } : rest;
+      if (leaf.terminalId !== terminalId) return leaf;
+      const nextSession = session === undefined ? leaf.agentSession ?? null : session;
+      if ((leaf.view ?? null) === view && (leaf.agentSession ?? null) === nextSession) return leaf;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { view: _v, agentSession: _s, ...rest } = leaf;
+      return { ...rest, ...(view ? { view } : {}), ...(nextSession ? { agentSession: nextSession } : {}) };
     });
     if (next === t.layout) return t;
     changed = true;

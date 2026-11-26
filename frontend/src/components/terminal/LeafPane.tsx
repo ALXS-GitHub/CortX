@@ -17,7 +17,7 @@ import { hasEnded } from './model';
 import { AgentPromptBar } from './AgentPromptBar';
 import { useTerminalAgent } from './agentsStore';
 import { AgentView } from './agent-view/AgentView';
-import { canShowAgentView, toggleAgentView } from './agent-view/agentView';
+import { toggleAgentView } from './agent-view/agentView';
 
 /**
  * How to start the process behind an ended service / script leaf again. The
@@ -125,19 +125,17 @@ export function LeafPane({ tab, leaf, item, isActiveLeaf, isActiveTab, multi, ma
     }
   };
 
-  // The agent view (ticket CORT-62): chosen per pane, shown while an agent it
-  // can show runs here. The terminal stays mounted under it, rendered but
-  // out of sight, so the PTY keeps its size and the agent's screen is there
-  // to read (and to come back to).
+  // GUI mode (ticket CORT-62): the pane is the conversation view of an agent
+  // CortX runs in stream-json mode. The shell stays mounted underneath, out
+  // of sight, for the switch back to Claude Code's TUI.
   const agent = useTerminalAgent(leaf.terminalId);
-  const viewable = canShowAgentView(agent);
-  const agentView = leaf.view === 'agent' && viewable ? agent : null;
+  const agentView = leaf.view === 'agent';
+  const canSwitch = agentView || agent?.provider === 'claude-code';
   const focused = isActiveTab && isActiveLeaf;
-  const wasAgentView = useRef(!!agentView);
+  const wasAgentView = useRef(agentView);
   useEffect(() => {
-    // Back to the terminal (by hand, or the agent left): its keys again.
     if (wasAgentView.current && !agentView && focused) focusTerminal(leaf.terminalId);
-    wasAgentView.current = !!agentView;
+    wasAgentView.current = agentView;
   }, [agentView, focused, leaf.terminalId]);
 
   const ended = item ? hasEnded(item) : settled;
@@ -188,12 +186,13 @@ export function LeafPane({ tab, leaf, item, isActiveLeaf, isActiveTab, multi, ma
 
       {/* While an agent runs here: the prompt that writes to it (Warp's rich
           input). Below the terminal, so the agent's own rows stay visible. */}
-      <AgentPromptBar terminalId={leaf.terminalId} covered={!!agentView} />
+      {!agentView && <AgentPromptBar terminalId={leaf.terminalId} />}
 
       {agentView && (
         <AgentView
           terminalId={leaf.terminalId}
-          agent={agentView}
+          cwd={leaf.cwd ?? ''}
+          sessionId={leaf.agentSession ?? null}
           active={focused}
           onShowTerminal={() => toggleAgentView(leaf.terminalId)}
         />
@@ -220,9 +219,9 @@ export function LeafPane({ tab, leaf, item, isActiveLeaf, isActiveTab, multi, ma
             Restore layout
           </button>
         )}
-        {(viewable || agentView) && (
+        {canSwitch && (
           <PaneAction
-            label={withCombo(agentView ? 'Show the terminal' : 'Show as a conversation', combo('agent.view'))}
+            label={withCombo(agentView ? 'Continue in the terminal (TUI)' : 'Continue in the GUI mode', combo('agent.view'))}
             onClick={() => toggleAgentView(leaf.terminalId)}
           >
             {agentView ? <SquareTerminal className="size-3.5" /> : <MessagesSquare className="size-3.5" />}

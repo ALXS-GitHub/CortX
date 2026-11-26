@@ -1,27 +1,15 @@
 /**
- * What the agent view needs to know about the tool call an agent is on, and
- * how to tell a person what it is about — the way the Claude desktop app
- * words its permission and question cards.
+ * How to tell a person what a tool call is about — the way the Claude
+ * desktop app words its permission cards — for the agent view's permission
+ * requests and its step details.
  *
- * Pure functions over the normalised transcript (`AgentMessage`), tested in
- * `pendingTool.test.ts`.
+ * Pure functions, tested in `pendingTool.test.ts`.
  */
-import type { AgentMessage, AgentPart } from '@/types';
 
-export type ToolCall = Extract<AgentPart, { type: 'tool-call' }>;
-
-/** The last tool call of the transcript that has no result yet, if any. */
-export function pendingToolCall(messages: readonly AgentMessage[]): ToolCall | null {
-  const done = new Set<string>();
-  for (const m of messages) for (const p of m.parts) if (p.type === 'tool-result') done.add(p.toolId);
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const parts = messages[i].parts;
-    for (let j = parts.length - 1; j >= 0; j--) {
-      const p = parts[j];
-      if (p.type === 'tool-call') return done.has(p.toolId) ? null : p;
-    }
-  }
-  return null;
+/** What these helpers read of a tool call. */
+export interface ToolCall {
+  name: string;
+  input: unknown;
 }
 
 function str(input: unknown, key: string): string | null {

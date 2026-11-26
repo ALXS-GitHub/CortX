@@ -644,42 +644,13 @@ pub(crate) fn value_to_text(v: &serde_json::Value) -> String {
 /// message; user entries carrying tool results become `user` messages with
 /// `tool-result` parts.
 pub fn parse_transcript(path: &Path) -> std::io::Result<Vec<AgentMessage>> {
-    let mut parser = TranscriptParser::default();
-    jsonl::read_all_lines(path, |line| parser.feed_line(line))?;
-    Ok(parser.messages)
-}
+    let mut messages: Vec<AgentMessage> = Vec::new();
+    let mut tool_names: std::collections::HashMap<String, String> = Default::default();
+    let mut last_assistant: Option<(String, usize)> = None; // (message.id, index)
+    let mut n = 0usize;
 
-/// The transcript parser, one line at a time — what [`parse_transcript`]
-/// runs over a whole file, and what the live view of a session (ticket
-/// CORT-62, `live::TranscriptTail`) runs over the lines appended since it
-/// last looked.
-///
-/// A line can change a message already there (an assistant message written
-/// in several lines, one per content block, is one message), so
-/// [`TranscriptParser::take_changed_from`] says from which index the
-/// messages are new or changed.
-#[derive(Debug, Default)]
-pub struct TranscriptParser {
-    pub messages: Vec<AgentMessage>,
-    tool_names: HashMap<String, String>,
-    /// (message.id, index) of the last assistant message.
-    last_assistant: Option<(String, usize)>,
-    n: usize,
-    changed_from: Option<usize>,
-}
-
-impl TranscriptParser {
-    /// Lowest index of a message added or changed since the last call.
-    pub fn take_changed_from(&mut self) -> Option<usize> {
-        self.changed_from.take()
-    }
-
-    fn mark_changed(&mut self, idx: usize) {
-        self.changed_from = Some(self.changed_from.map_or(idx, |c| c.min(idx)));
-    }
-
-    pub fn feed_line(&mut self, line: &str) {
-        self.n += 1;
+    jsonl::read_all_lines(path, |line| {
+        n += 1;
         if !is_wanted(line) {
             return;
         }
@@ -696,7 +667,7 @@ impl TranscriptParser {
             return;
         };
         let timestamp = parse_ts(&entry.timestamp).unwrap_or_else(Utc::now);
-        let id = entry.uuid.unwrap_or_else(|| format!("line-{}", self.n));
+        let id = entry.uuid.unwrap_or_else(|| format!("line-{}", n));
 
         if entry.ty == "user" {
             let mut parts = Vec::new();
@@ -716,7 +687,7 @@ impl TranscriptParser {
                             }
                             "tool_result" => {
                                 let tool_id = b.tool_use_id.unwrap_or_default();
-                                let name = self.tool_names.get(&tool_id).cloned();
+                                let name = tool_names.get(&tool_id).cloned();
                                 let output =
                                     b.content.as_ref().map(value_to_text).unwrap_or_default();
                                 parts.push(AgentPart::ToolResult {
@@ -738,15 +709,14 @@ impl TranscriptParser {
             if parts.is_empty() {
                 return;
             }
-            self.last_assistant = None;
-            self.messages.push(AgentMessage {
+            last_assistant = None;
+            messages.push(AgentMessage {
                 id,
                 role: AgentRole::User,
                 timestamp,
                 parts,
                 is_sidechain: false,
             });
-            self.mark_changed(self.messages.len() - 1);
         } else {
             let mut parts = Vec::new();
             if let Some(Content::Blocks(blocks)) = message.content {
@@ -765,7 +735,7 @@ impl TranscriptParser {
                         "tool_use" => {
                             let tool_id = b.id.unwrap_or_default();
                             let name = b.name.unwrap_or_else(|| "tool".to_string());
-                            self.tool_names.insert(tool_id.clone(), name.clone());
+                            tool_names.insert(tool_id.clone(), name.clone());
                             parts.push(AgentPart::ToolCall {
                                 tool_id,
                                 name,
@@ -776,28 +746,31 @@ impl TranscriptParser {
                     }
                 }
             }
-            let merge_into = match (&message.id, &self.last_assistant) {
+            let merge_into = match (&message.id, &last_assistant) {
                 (Some(mid), Some((last_id, idx))) if mid == last_id => Some(*idx),
                 _ => None,
             };
             if let Some(idx) = merge_into {
-                self.messages[idx].parts.extend(parts);
-                self.messages[idx].timestamp = timestamp;
-                self.mark_changed(idx);
+                messages[idx].parts.extend(parts);
+                messages[idx].timestamp = timestamp;
             } else {
-                self.messages.push(AgentMessage {
+                messages.push(AgentMessage {
                     id,
                     role: AgentRole::Assistant,
                     timestamp,
                     parts,
                     is_sidechain: false,
                 });
-                let idx = self.messages.len() - 1;
-                self.mark_changed(idx);
-                self.last_assistant = message.id.map(|mid| (mid, idx));
+                if let Some(mid) = message.id {
+                    last_assistant = Some((mid, messages.len() - 1));
+                } else {
+                    last_assistant = None;
+                }
             }
         }
-    }
+    })?;
+
+    Ok(messages)
 }
 
 // ============================================================================

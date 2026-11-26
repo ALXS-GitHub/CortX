@@ -86,20 +86,14 @@ const ZWSP = String.fromCharCode(0x200b);
  * (`terminal.agentStatusBar`; off, nothing shows and nothing takes room).
  * Nothing at all while no agent runs, or when the setting is off.
  */
-export function AgentPromptBar({ terminalId, covered = false }: { terminalId: string; covered?: boolean }) {
+export function AgentPromptBar({ terminalId }: { terminalId: string }) {
   const agent = useTerminalAgent(terminalId);
   const enabled = useAppStore((s) => s.settings?.terminal?.agentPromptBar !== false);
   if (!enabled || !agent) return null;
-  return <AgentPromptBarInner terminalId={terminalId} agent={agent} covered={covered} />;
+  return <AgentPromptBarInner terminalId={terminalId} agent={agent} />;
 }
 
-/**
- * `covered`: the pane shows its agent view (ticket CORT-62), drawn over the
- * terminal and this bar. The bar keeps its room — so the terminal is not
- * resized under the view — but answers nothing: the view's composer is the
- * prompt then.
- */
-function AgentPromptBarInner({ terminalId, agent, covered }: { terminalId: string; agent: TerminalAgentInfo; covered: boolean }) {
+function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent: TerminalAgentInfo }) {
   const keybindings = useAppStore((s) => s.settings?.terminal?.keybindings);
   const bubbleColor = useAppStore((s) => s.settings?.terminal?.agentPromptColor);
   const bubbleOpacity = useAppStore((s) => s.settings?.terminal?.agentPromptOpacity ?? 95);
@@ -220,13 +214,13 @@ function AgentPromptBarInner({ terminalId, agent, covered }: { terminalId: strin
   // Ctrl+G (the window's shortcut table) and drops on the bar.
   useEffect(() => {
     const onToggle = (e: Event) => {
-      if (covered || (e as CustomEvent).detail?.terminalId !== terminalId) return;
+      if ((e as CustomEvent).detail?.terminalId !== terminalId) return;
       if (open && document.activeElement === fieldRef.current) hide();
       else show();
     };
     const onAttach = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (!covered && detail?.terminalId === terminalId) addPaths(detail.paths ?? []);
+      if (detail?.terminalId === terminalId) addPaths(detail.paths ?? []);
     };
     window.addEventListener(AGENT_PROMPT_EVENTS.toggle, onToggle);
     window.addEventListener(AGENT_PROMPT_EVENTS.attach, onAttach);
@@ -234,13 +228,13 @@ function AgentPromptBarInner({ terminalId, agent, covered }: { terminalId: strin
       window.removeEventListener(AGENT_PROMPT_EVENTS.toggle, onToggle);
       window.removeEventListener(AGENT_PROMPT_EVENTS.attach, onAttach);
     };
-  }, [terminalId, open, show, hide, addPaths, covered]);
+  }, [terminalId, open, show, hide, addPaths]);
 
   // The shortcut where no window-level table answers it (the dock of the
   // main window): on the pane itself, before xterm sees the key.
   useEffect(() => {
     const pane = barRef.current?.parentElement;
-    if (!pane || covered) return;
+    if (!pane) return;
     const onKey = (e: KeyboardEvent) => {
       const combo = comboFromEvent(e);
       if (!combo || !effectiveCombos('agent.prompt', keybindings).includes(combo)) return;
@@ -251,7 +245,7 @@ function AgentPromptBarInner({ terminalId, agent, covered }: { terminalId: strin
     };
     pane.addEventListener('keydown', onKey, true);
     return () => pane.removeEventListener('keydown', onKey, true);
-  }, [keybindings, open, show, hide, covered]);
+  }, [keybindings, open, show, hide]);
 
   // Claude Code's Esc on a prompt still waiting in its queue: the agent stops
   // and gives the prompt back to its input box. Sent from here, it comes back
@@ -443,7 +437,7 @@ function AgentPromptBarInner({ terminalId, agent, covered }: { terminalId: strin
 
   const canSend = !sending && (draft.text.trim() !== '' || draft.attachments.length > 0);
   const shortcut = comboLabelFor('agent.prompt', keybindings);
-  const expanded = open && !blocked && !covered;
+  const expanded = open && !blocked;
 
   // The status bar (when on) is the only thing under the terminal: which
   // agent, what it is at, a draft waiting — and, clicked, the bubble. It

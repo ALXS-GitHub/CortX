@@ -457,6 +457,8 @@ export const TERMINAL_SETTINGS = {
   agentStatusBar: { label: 'Agent status bar', group: 'agents', fallback: FROM_RUST },
   agentPromptColor: { label: 'Agent prompt colour', group: 'agents', fallback: undefined },
   agentPromptOpacity: { label: 'Agent prompt opacity', group: 'agents', fallback: FROM_RUST },
+  agentGuiCommand: { label: 'GUI mode runs', group: 'agents', fallback: 'claude' },
+  agentDefaultMode: { label: 'New agents open', group: 'agents', fallback: 'tui' },
   agentViewBackground: { label: 'Agent view background', group: 'agents', fallback: 'terminal' },
   agentViewFont: { label: 'Agent view font', group: 'agents', fallback: 'interface' },
   agentViewTextSize: { label: 'Agent view text size', group: 'agents', fallback: 14 },

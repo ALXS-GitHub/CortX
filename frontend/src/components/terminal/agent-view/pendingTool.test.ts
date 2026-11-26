@@ -3,7 +3,7 @@
  *
  *     node src/components/terminal/agent-view/pendingTool.test.ts
  */
-import { diffLines, pendingToolCall, toolCardTitle, toolPreview } from './pendingTool.ts';
+import { diffLines, toolCardTitle, toolPreview } from './pendingTool.ts';
 
 const failures: string[] = [];
 let passed = 0;
@@ -25,35 +25,7 @@ const assert = {
   },
 };
 
-const at = '2026-11-26T10:00:00Z';
 const call = (toolId: string, name: string, input: unknown) => ({ type: 'tool-call' as const, toolId, name, input });
-const result = (toolId: string) => ({ type: 'tool-result' as const, toolId, output: 'ok', isError: false });
-const msg = (role: 'user' | 'assistant', parts: unknown[], id = Math.random().toString(36)) =>
-  ({ id, role, timestamp: at, parts, isSidechain: false }) as never;
-
-test('the last call without a result is pending', () => {
-  const messages = [
-    msg('assistant', [call('a', 'Read', { file_path: 'x' })]),
-    msg('user', [result('a')]),
-    msg('assistant', [{ type: 'text', text: 'Running' }, call('b', 'Bash', { command: 'npm test' })]),
-  ];
-  assert.equal(pendingToolCall(messages)?.toolId, 'b');
-});
-
-test('nothing is pending once the last call has its result', () => {
-  const messages = [msg('assistant', [call('a', 'Bash', { command: 'ls' })]), msg('user', [result('a')])];
-  assert.equal(pendingToolCall(messages), null);
-  assert.equal(pendingToolCall([]), null);
-});
-
-test('an older call left without a result (interrupted) does not count', () => {
-  const messages = [
-    msg('assistant', [call('a', 'Bash', { command: 'ls' })]),
-    msg('assistant', [call('b', 'Read', { file_path: 'x' })]),
-    msg('user', [result('b')]),
-  ];
-  assert.equal(pendingToolCall(messages), null);
-});
 
 test('previews', () => {
   assert.equal(toolPreview(call('a', 'Bash', { command: 'npm test', description: 'Tests' })), {

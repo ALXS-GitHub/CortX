@@ -195,9 +195,9 @@ export function AgentSettingsSection() {
 
       <Group title="Agent view">
         <p className="px-1 pb-1 text-xs text-muted-foreground">
-          A pane running Claude Code can show it as a conversation instead of the terminal (the pane&rsquo;s{' '}
-          <em>Show as a conversation</em> button, or Ctrl+Shift+M). Only the display changes: the agent keeps running in
-          its terminal, and you can switch back at any time.
+          An agent pane runs either Claude Code&rsquo;s own interface in the terminal (TUI), or the GUI mode: a
+          conversation view, with Claude Code driven by CortX the way the Claude desktop app drives it (stream-json).
+          Switch a pane with its button or Ctrl+Shift+M: the session is closed in one mode and resumed in the other.
         </p>
         <SettingField k="agentViewBackground" label="Background" hint="The terminal's: its theme colour, wallpaper and opacity, as in the terminal. The app's: the plain app background.">
           <Segmented<AgentViewBackground>
@@ -244,9 +244,41 @@ export function AgentSettingsSection() {
       </Group>
 
       <Group title="New agent">
+        <SettingField k="agentDefaultMode" label="Opens in" hint="The mode of a pane opened by New agent (Ctrl+Shift+A by default) and the palette.">
+          <Segmented<'tui' | 'gui'>
+            size="sm"
+            value={terminal?.agentDefaultMode ?? 'tui'}
+            onChange={(v) => patch({ agentDefaultMode: v })}
+            options={[
+              { value: 'tui', label: 'Terminal (TUI)' },
+              { value: 'gui', label: 'GUI' },
+            ]}
+          />
+        </SettingField>
+        <SettingField
+          k="agentGuiCommand"
+          label="GUI mode runs"
+          htmlFor="agent-gui-command"
+          hint={
+            <>
+              The command CortX starts Claude Code with in GUI mode; it adds the stream-json flags (and{' '}
+              <Code>--resume</Code>). <Code>claude</Code>, or an alias shim such as <Code>cc</Code> (Settings &gt; Alias
+              Shims), since it is not run by your shell.
+            </>
+          }
+        >
+          <Input
+            id="agent-gui-command"
+            className="w-56 font-mono"
+            value={terminal?.agentGuiCommand ?? 'claude'}
+            onChange={(e) => patch({ agentGuiCommand: e.target.value })}
+            placeholder="claude"
+            disabled={disabled}
+          />
+        </SettingField>
         <SettingField
           k="agentLaunchCommand"
-          label="Runs"
+          label="TUI mode runs"
           htmlFor="agent-launch-command"
           hint={
             <>

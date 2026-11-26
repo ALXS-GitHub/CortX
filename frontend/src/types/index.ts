@@ -168,6 +168,12 @@ export interface TerminalConfig {
   agentPromptColor?: string;
   /** Opacity of the agent prompt's bubble, 20–100 (%). Default 95. */
   agentPromptOpacity?: number;
+  /** GUI mode of an agent pane (CORT-62): the command Claude Code is
+   *  started with, before its stream-json flags. Default `claude`. */
+  agentGuiCommand?: string;
+  /** How a new agent pane opens: in the terminal (`tui`) or as the
+   *  conversation view (`gui`). Default `tui`. */
+  agentDefaultMode?: 'tui' | 'gui';
   /** Agent view (CORT-62): behind the conversation, the terminal's
    *  background (theme, wallpaper, opacity) or the app's. Default `terminal`. */
   agentViewBackground?: AgentViewBackground;

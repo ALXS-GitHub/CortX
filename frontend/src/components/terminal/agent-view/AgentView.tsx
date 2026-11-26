@@ -1,28 +1,29 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { GitBranch, Loader2, SquareTerminal } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ChevronDown, Loader2, RotateCcw, Sparkles, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { AgentProviderIcon } from '@/components/agents/AgentProviderIcon';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useAppStore } from '@/stores/appStore';
 import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
-import type { AgentMessage, TerminalAgentInfo } from '@/types';
-import { useTerminalAgentsStore } from '../agentsStore';
-import { agentPhase, AGENT_PHASE_LABEL } from '../agentPhase';
-import { AgentPhaseDot } from '../TerminalStatusGlyph';
-import { KEY_DOWN, KEY_ENTER, KEY_UP } from '../agentMenu';
 import { AGENT_VIEW_FOCUS_EVENT } from './agentView';
 import { AgentViewComposer, type AgentViewComposerHandle } from './AgentViewComposer';
-import { AgentViewPrompt } from './AgentViewPrompt';
-import { pickMenuOption, sendMenuKey } from './menuKeys';
-import { pendingToolCall } from './pendingTool';
-import { useAgentMenu, useTranscriptChanges } from './useAgentLive';
-
-// The transcript pulls streamdown + shiki: keep them out of the main chunk.
-const AgentTranscript = lazy(() => import('@/components/agents/AgentTranscript'));
+import { PermissionCard } from './AgentViewPrompt';
+import { ConversationTurns } from './ConversationTurns';
+import { ensurePaneAgent, setPanePermissionMode, startPaneAgent, useAgentGuiStore } from './agentGuiStore';
+import { visibleMessages } from './streamJson';
 
 interface AgentViewProps {
   terminalId: string;
-  agent: TerminalAgentInfo & { sessionId: string };
+  cwd: string;
+  /** The session the pane resumes (restore, switch from the TUI). */
+  sessionId: string | null;
   /** The pane is the one in front (active leaf of the active tab). */
   active: boolean;
   onShowTerminal: () => void;
@@ -34,23 +35,35 @@ const WIDTH_CLASS: Record<string, string> = {
   full: 'max-w-none',
 };
 
-/** What the agent is at, for the line under the last message. */
-function workingLabel(agent: TerminalAgentInfo): string {
-  if (agent.pendingTool) return `Running ${agent.pendingTool}…`;
-  return 'Working…';
+const MODES: { value: string; label: string; hint: string }[] = [
+  { value: 'default', label: 'Ask permissions', hint: 'Ask before edits and commands' },
+  { value: 'acceptEdits', label: 'Accept edits', hint: 'Edit files without asking' },
+  { value: 'plan', label: 'Plan mode', hint: 'Explore and propose a plan, no changes' },
+  { value: 'bypassPermissions', label: 'Bypass permissions', hint: 'Never ask (careful)' },
+];
+
+/** Seconds since `since`, ticking. */
+function useElapsed(since: number | null): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (since === null) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [since]);
+  return since === null ? 0 : Math.max(0, Math.round((now - since) / 1000));
 }
 
-function isTextField(el: Element | null): boolean {
-  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable);
+function formatElapsed(s: number): string {
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
 }
 
 /**
- * The agent view of a pane (ticket CORT-62, see `agentView.ts`): the
- * session's conversation, followed live from its transcript, a card for what
- * the agent waits on you for, and a composer whose text goes to the agent
- * through its terminal. Drawn over the terminal, which keeps running under it.
+ * A pane in GUI mode (ticket CORT-62): the conversation with the agent CortX
+ * runs for it in stream-json mode, live — the answer is drawn as it is
+ * written, tool calls show as they run, permission requests come as cards —
+ * and a composer. See `agentView.ts` for the two modes of a pane.
  */
-export function AgentView({ terminalId, agent, active, onShowTerminal }: AgentViewProps) {
+export function AgentView({ terminalId, cwd, sessionId, active, onShowTerminal }: AgentViewProps) {
   const keybindings = useAppStore((s) => s.settings?.terminal?.keybindings);
   const background = useAppStore((s) => s.settings?.terminal?.agentViewBackground ?? 'terminal');
   const font = useAppStore((s) => s.settings?.terminal?.agentViewFont ?? 'interface');
@@ -58,22 +71,32 @@ export function AgentView({ terminalId, agent, active, onShowTerminal }: AgentVi
   const width = useAppStore((s) => s.settings?.terminal?.agentViewWidth ?? 'narrow');
   const terminalFont = useAppStore((s) => s.settings?.terminal?.fontFamily);
   const column = WIDTH_CLASS[width] ?? WIDTH_CLASS.narrow;
-  const unseen = useTerminalAgentsStore((s) => s.unseen.has(terminalId));
-  const phase = agentPhase(agent, unseen);
-  const name = agent.provider === 'claude-code' ? 'Claude' : 'the agent';
-  const changeToken = useTranscriptChanges(agent.lastActivity);
-  const menu = useAgentMenu(terminalId);
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
-  // The call the agent is on, from the transcript — only when the agent
-  // itself reports it pending (an older call left without a result is not).
-  const pendingCall = pendingToolCall(messages);
-  const call = pendingCall && agent.pendingTool === pendingCall.name ? pendingCall : null;
-  const asking = menu !== null || agent.needsInput != null;
-  const working = agent.state === 'running' && !asking;
-  const rootRef = useRef<HTMLDivElement>(null);
-  const composerRef = useRef<AgentViewComposerHandle>(null);
 
-  // Ctrl+G (the agent prompt) lands in the composer.
+  useEffect(() => ensurePaneAgent(terminalId, cwd, sessionId), [terminalId, cwd, sessionId]);
+  const pane = useAgentGuiStore((s) => s.panes[terminalId]);
+  const workDir = pane?.cwd || cwd;
+  const state = pane?.state;
+  const live = useMemo(() => (state ? visibleMessages(state) : []), [state]);
+  const history = pane?.history;
+  const messages = useMemo(() => [...(history ?? []), ...live], [history, live]);
+  const busy = !!state?.busy;
+  const permissions = state?.permissions ?? [];
+  const elapsed = useElapsed(busy ? pane?.turnStartedAt ?? null : null);
+
+  // What the live line says: the block being written, or what runs.
+  const streamingBlocks = state?.streaming ? Object.values(state.streaming.blocks) : [];
+  const lastStreaming = streamingBlocks[streamingBlocks.length - 1];
+  const liveLabel =
+    state?.activity ??
+    (lastStreaming?.type === 'reasoning'
+      ? 'Thinking'
+      : lastStreaming?.type === 'text'
+        ? 'Writing'
+        : lastStreaming?.type === 'tool-call'
+          ? `Preparing ${lastStreaming.name}`
+          : 'Working');
+
+  const composerRef = useRef<AgentViewComposerHandle>(null);
   useEffect(() => {
     const onFocus = (e: Event) => {
       if ((e as CustomEvent).detail?.terminalId === terminalId) composerRef.current?.focus();
@@ -81,62 +104,41 @@ export function AgentView({ terminalId, agent, active, onShowTerminal }: AgentVi
     window.addEventListener(AGENT_VIEW_FOCUS_EVENT, onFocus);
     return () => window.removeEventListener(AGENT_VIEW_FOCUS_EVENT, onFocus);
   }, [terminalId]);
-
-  // The keyboard goes where the answer is: the view itself while a menu is
-  // up (its keys pick), the composer otherwise.
-  const hasMenu = menu !== null;
   useEffect(() => {
-    if (!active) return;
-    const root = rootRef.current;
-    const focused = document.activeElement;
-    const ours = !focused || focused === document.body || !!root?.contains(focused);
-    if (!ours) return;
-    if (hasMenu) {
-      if (!isTextField(focused) || (focused as HTMLTextAreaElement).disabled) root?.focus();
-    } else composerRef.current?.focus();
-  }, [hasMenu, active]);
+    if (active) composerRef.current?.focus();
+  }, [active]);
 
-  // A menu's keys, as in the terminal: 1–9 pick, ↑ ↓ move, Enter confirms,
-  // Esc / Tab go to the agent. Not while typing in a field.
-  const onKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (!menu || e.nativeEvent.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
-      const target = e.target as HTMLElement;
-      if (isTextField(target) && !(target as HTMLTextAreaElement).disabled) {
-        // The composer, empty, lets the menu have the arrows and Enter.
-        const empty = target.tagName === 'TEXTAREA' && composerRef.current?.isEmpty();
-        if (!empty) return;
-      }
-      if (/^[1-9]$/.test(e.key)) {
-        const option = menu.options.find((o) => o.n === Number(e.key));
-        if (!option || option.freeText) return;
-        e.preventDefault();
-        void pickMenuOption(terminalId, menu, option);
-        return;
-      }
-      const key =
-        e.key === 'ArrowDown' ? KEY_DOWN : e.key === 'ArrowUp' ? KEY_UP : e.key === 'Enter' ? KEY_ENTER : e.key === 'Escape' ? '\x1b' : e.key === 'Tab' ? (e.shiftKey ? '\x1b[Z' : '\t') : null;
-      if (!key) return;
-      e.preventDefault();
-      void sendMenuKey(terminalId, key);
-    },
-    [menu, terminalId]
-  );
+  // Stick to the bottom while the answer is written, unless you scrolled up.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stuck = useRef(true);
+  const [showJump, setShowJump] = useState(false);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && stuck.current) el.scrollTop = el.scrollHeight;
+  }, [messages, busy, permissions.length]);
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    stuck.current = atBottom;
+    setShowJump(!atBottom);
+  };
+  const jump = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stuck.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
 
   const viewCombo = comboLabelFor('agent.view', keybindings);
-  const title = agent.name || 'Claude Code';
+  const mode = MODES.find((m) => m.value === (state?.permissionMode ?? 'default')) ?? MODES[0];
+  const empty = messages.length === 0 && pane?.historyState !== 'loading';
 
   return (
     <div
-      ref={rootRef}
       data-agent-view={terminalId}
       // Drops attach to the composer (`pasteDroppedPaths`).
       data-agent-bar={terminalId}
-      tabIndex={-1}
-      onKeyDown={onKeyDown}
-      // Settings > Agents > Agent view. The terminal's background is its
-      // theme colour — transparent over a wallpaper or a see-through window,
-      // which then shows through here exactly as it does in the terminal.
       className={cn(
         'agent-view absolute inset-0 z-10 flex flex-col outline-none',
         background === 'app' ? 'bg-background' : 'bg-terminal',
@@ -149,83 +151,138 @@ export function AgentView({ terminalId, agent, active, onShowTerminal }: AgentVi
         } as React.CSSProperties
       }
     >
-      {/* Header: which agent, what it is at. The pane's floating actions sit
-          over its right end. */}
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 pr-44 pl-3 text-xs">
-        <AgentPhaseDot phase={phase} needsInput={agent.needsInput} provider={agent.provider} size={7} />
-        <AgentProviderIcon provider={agent.provider} plain />
-        <span className="min-w-0 truncate font-medium text-foreground" title={title}>
-          {title}
-        </span>
-        <span className="shrink-0 text-[11px] text-faint">{AGENT_PHASE_LABEL[phase]}</span>
-        {agent.gitBranch && (
-          <span className="hidden min-w-0 items-center gap-1 truncate text-[11px] text-faint sm:inline-flex">
-            <GitBranch className="size-3 shrink-0" />
-            {agent.gitBranch}
-          </span>
-        )}
+      {/* Header. The pane's floating actions sit over its right end. */}
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/50 pr-44 pl-3 text-xs">
+        <AgentProviderIcon provider="claude-code" plain />
+        <span className="font-medium text-foreground">Claude</span>
+        {state?.model && <span className="truncate font-mono text-[11px] text-faint">{state.model}</span>}
+        <span
+          className={cn(
+            'size-1.5 shrink-0 rounded-full',
+            pane?.status === 'running'
+              ? busy
+                ? 'animate-pulse bg-st-agent'
+                : 'bg-st-done'
+              : pane?.status === 'starting'
+                ? 'animate-pulse bg-st-progress'
+                : 'bg-faint'
+          )}
+          title={pane?.status}
+        />
         <button
           type="button"
           onClick={onShowTerminal}
           className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
-          title={`Show the terminal${viewCombo ? ` (${viewCombo})` : ''}`}
+          title={`Continue this session in the terminal${viewCombo ? ` (${viewCombo})` : ''}`}
         >
           <SquareTerminal className="size-3.5" />
           Terminal
         </button>
       </div>
 
-      <Suspense
-        fallback={
-          <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Loading the conversation…
-          </div>
-        }
-      >
-        <AgentTranscript
-          key={agent.sessionId}
-          sessionId={agent.sessionId}
-          sessionState={agent.state}
-          changeToken={changeToken}
-          onMessages={setMessages}
-          contentClassName={cn('mx-auto w-full px-5 py-5', column)}
-          footer={
-            working ? (
-              <div className="flex items-center gap-2 text-sm">
-                <span className="size-2 animate-pulse rounded-full bg-primary" />
-                <Shimmer as="span" className="text-sm">
-                  {workingLabel(agent)}
-                </Shimmer>
-              </div>
-            ) : null
-          }
-        />
-      </Suspense>
+      <div ref={scrollRef} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto">
+        <div className={cn('mx-auto flex w-full flex-col gap-6 px-5 pt-6 pb-4', column)}>
+          {pane?.historyState === 'loading' && (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Loading the conversation…
+            </div>
+          )}
+          {empty && (
+            <div className="flex flex-col items-center gap-3 py-16 text-center">
+              <span className="grid size-11 place-items-center rounded-2xl bg-primary/12 text-primary">
+                <Sparkles className="size-5" />
+              </span>
+              <p className="font-display text-lg font-semibold tracking-tight text-foreground">What are we building?</p>
+              <p className="max-w-sm text-sm text-muted-foreground">
+                Claude works in <span className="font-mono text-xs">{workDir || 'this folder'}</span>.
+              </p>
+            </div>
+          )}
+          <ConversationTurns messages={messages} live={busy} subagents={state?.subagents ?? {}} />
+          {busy && permissions.length === 0 && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="relative flex size-2.5">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/50" />
+                <span className="relative inline-flex size-2.5 rounded-full bg-primary" />
+              </span>
+              <Shimmer as="span" className="text-sm">{`${liveLabel}…`}</Shimmer>
+              <span className="font-mono text-[11px] text-faint">{formatElapsed(elapsed)}</span>
+              <span className="text-[11px] text-faint">· Esc to stop</span>
+            </div>
+          )}
+          {!busy && state?.lastResult?.isError && (
+            <div className="flex items-start gap-2 rounded-xl border border-st-blocked/30 bg-st-blocked/10 px-3 py-2 text-xs text-st-blocked">
+              <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+              <span className="whitespace-pre-wrap">
+                {state.lastResult.text || `The turn ended with an error (${state.lastResult.subtype}).`}
+              </span>
+            </div>
+          )}
+          {pane?.status === 'exited' && pane.error && (
+            <div className="space-y-2 rounded-xl border border-st-blocked/30 bg-st-blocked/10 px-3 py-2.5 text-xs">
+              <p className="flex items-center gap-1.5 font-medium text-st-blocked">
+                <TriangleAlert className="size-3.5" /> Claude Code stopped
+              </p>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">
+                {pane.error}
+              </pre>
+              <button
+                type="button"
+                onClick={() => void startPaneAgent(terminalId)}
+                className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-accent"
+              >
+                <RotateCcw className="size-3" /> Start again
+              </button>
+            </div>
+          )}
+        </div>
+        {showJump && (
+          <button
+            type="button"
+            onClick={jump}
+            className="sticky bottom-3 left-1/2 mb-2 grid size-8 -translate-x-1/2 place-items-center rounded-full border border-border bg-card text-muted-foreground shadow-pop hover:text-foreground"
+            aria-label="Scroll to the latest message"
+          >
+            <ArrowDown className="size-4" />
+          </button>
+        )}
+      </div>
 
       <div className={cn('mx-auto flex w-full shrink-0 flex-col gap-2 px-5 pt-1 pb-4', column)}>
-        {asking && (
-          <AgentViewPrompt
-            key={call?.toolId ?? 'menu'}
-            terminalId={terminalId}
-            agentName={name === 'Claude' ? 'Claude' : 'The agent'}
-            menu={menu}
-            call={call}
-            onOpenTerminal={onShowTerminal}
-          />
-        )}
+        {permissions.map((request) => (
+          <PermissionCard key={request.requestId} paneKey={terminalId} request={request} />
+        ))}
         <AgentViewComposer
           ref={composerRef}
           terminalId={terminalId}
-          agentName={name}
-          cwd={agent.cwd}
-          working={working}
-          locked={hasMenu}
+          agentName="Claude"
+          cwd={workDir}
+          working={busy}
+          locked={permissions.length > 0}
+          commands={state?.slashCommands ?? []}
           status={
-            <>
-              {agent.model && <span className="font-mono">{agent.model}</span>}
-              {agent.model && agent.cwd && <span> · </span>}
-              {agent.cwd && <span title={agent.cwd}>{agent.cwd.split(/[\\/]/).filter(Boolean).pop()}</span>}
-            </>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  {mode.label}
+                  <ChevronDown className="size-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top">
+                <DropdownMenuLabel>Permissions</DropdownMenuLabel>
+                {MODES.map((m) => (
+                  <DropdownMenuItem key={m.value} onSelect={() => void setPanePermissionMode(terminalId, m.value)}>
+                    <div className="flex flex-col">
+                      <span className={cn(m.value === mode.value && 'font-medium text-primary')}>{m.label}</span>
+                      <span className="text-[11px] text-muted-foreground">{m.hint}</span>
+                    </div>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           }
         />
       </div>
