@@ -160,6 +160,9 @@ export interface TerminalConfig {
   /** The agent prompt (Warp-style rich input) under a terminal running an
    *  agent. Default true. */
   agentPromptBar?: boolean;
+  /** A status bar under a terminal running an agent; a click opens the
+   *  agent prompt. Default true. */
+  agentStatusBar?: boolean;
   /** Background of the agent prompt's bubble (any CSS colour). Unset = the
    *  theme's popover colour. */
   agentPromptColor?: string;

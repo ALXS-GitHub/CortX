@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { CornerDownLeft, FileText, Image as ImageIcon, Paperclip, X } from 'lucide-react';
+import { CornerDownLeft, FileText, Image as ImageIcon, MessageSquare, Paperclip, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '@/stores/appStore';
-import { comboFromEvent, effectiveCombos } from '@/lib/keybindings';
+import { AgentProviderIcon } from '@/components/agents/AgentProviderIcon';
+import { comboFromEvent, comboLabelFor, effectiveCombos } from '@/lib/keybindings';
 import { focusTerminal } from '@/lib/terminalSessions';
 import { cn } from '@/lib/utils';
 import type { TerminalAgentInfo } from '@/types';
-import { useTerminalAgent } from './agentsStore';
+import { useTerminalAgent, useTerminalAgentsStore } from './agentsStore';
+import { agentPhase, AGENT_PHASE_LABEL } from './agentPhase';
+import { AgentPhaseDot } from './TerminalStatusGlyph';
 import {
   AGENT_PROMPT_EVENTS,
   attachmentOf,
@@ -74,8 +77,11 @@ const ZWSP = String.fromCharCode(0x200b);
 /**
  * The agent prompt of a terminal running an agent (see `agentPrompt.ts`): a
  * bubble over the terminal's last rows, opened with Ctrl+G, whose prompt goes
- * to the agent. Closed, nothing shows and nothing takes room. Nothing at all
- * while no agent runs, or when the setting is off.
+ * to the agent. Closed, a one-line status bar under the terminal says which
+ * agent it is and what it is at — no field in it, so it never repeats the
+ * agent's own input — and a click on it opens the bubble
+ * (`terminal.agentStatusBar`; off, nothing shows and nothing takes room).
+ * Nothing at all while no agent runs, or when the setting is off.
  */
 export function AgentPromptBar({ terminalId }: { terminalId: string }) {
   const agent = useTerminalAgent(terminalId);
@@ -88,6 +94,9 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
   const keybindings = useAppStore((s) => s.settings?.terminal?.keybindings);
   const bubbleColor = useAppStore((s) => s.settings?.terminal?.agentPromptColor);
   const bubbleOpacity = useAppStore((s) => s.settings?.terminal?.agentPromptOpacity ?? 95);
+  const statusBar = useAppStore((s) => s.settings?.terminal?.agentStatusBar !== false);
+  const unseen = useTerminalAgentsStore((s) => s.unseen.has(terminalId));
+  const phase = agentPhase(agent, unseen);
   // A permission prompt is answered in the agent's own UI (its keys pick an
   // option): the editor steps aside until it is answered.
   const blocked = agent.needsInput === 'permission';
@@ -383,15 +392,76 @@ function AgentPromptBarInner({ terminalId, agent }: { terminalId: string; agent:
   const spans = markerSpans(draft.text, draft.attachments);
 
   const canSend = !sending && (draft.text.trim() !== '' || draft.attachments.length > 0);
+  const pending = draft.text.trim() !== '' || draft.attachments.length > 0;
+  const shortcut = comboLabelFor('agent.prompt', keybindings);
+  const expanded = open && !blocked;
 
-  // No toolbelt any more: nothing under the terminal while an agent runs (so
-  // the pane is never resized when one starts — a resize makes the agent
-  // redraw its whole screen). Ctrl+G opens the bubble over the terminal's
-  // last rows. The anchor below takes no room; it marks where the bubble
-  // stands and where a drop attaches files.
+  // The status bar (when on) is the only thing under the terminal: which
+  // agent, what it is at, a draft waiting — and, clicked, the bubble. It
+  // keeps its room while the bubble is open (invisible under it), so opening
+  // the bubble never resizes the terminal; a resize makes the agent redraw
+  // its whole screen. Off, the anchor takes no room at all and Ctrl+G is the
+  // only way in. Either way it marks where the bubble stands and where a drop
+  // attaches files.
   return (
-    <div ref={barRef} data-agent-bar={terminalId} className="relative h-0 shrink-0 select-none font-sans">
-      {open && !blocked && (
+    <div ref={barRef} data-agent-bar={terminalId} className={cn('relative shrink-0 select-none font-sans', !statusBar && 'h-0')}>
+      {statusBar && (
+        <div
+          aria-hidden={expanded || undefined}
+          className={cn(
+            'flex h-7 items-center gap-2 border-t border-border/60 bg-terminal px-2.5 text-xs',
+            expanded && 'invisible'
+          )}
+        >
+          <button
+            type="button"
+            tabIndex={expanded ? -1 : undefined}
+            disabled={blocked}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => show()}
+            title={blocked ? undefined : `Write to ${name}${shortcut ? ` (${shortcut})` : ''}`}
+            className="group/agentbar flex h-full min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
+          >
+            <AgentPhaseDot phase={phase} needsInput={agent.needsInput} provider={agent.provider} size={7} />
+            <AgentProviderIcon provider={agent.provider} plain />
+            <span className="max-w-[12rem] shrink-0 truncate text-muted-foreground" title={agent.name || name}>
+              {agent.name || name}
+            </span>
+            <span className="shrink-0 text-[11px] text-faint">{AGENT_PHASE_LABEL[phase]}</span>
+            {blocked ? (
+              <span className="min-w-0 flex-1 truncate text-[11px] text-st-blocked">
+                · Answer {name}&rsquo;s question in the terminal
+              </span>
+            ) : pending ? (
+              <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title="Draft waiting to be sent">
+                · {draft.text.split(NEWLINE)[0] || `${draft.attachments.length} attachment(s)`}
+              </span>
+            ) : (
+              <span className="min-w-0 flex-1" />
+            )}
+            {!blocked && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-[var(--rad-xs)] px-1.5 py-0.5 text-[11px] text-faint transition-colors group-hover/agentbar:bg-accent group-hover/agentbar:text-foreground">
+                <MessageSquare className="size-3" />
+                Prompt
+                {shortcut && <kbd className="font-sans text-[10px] opacity-70">{shortcut}</kbd>}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            aria-label="Attach files"
+            title="Attach files or images"
+            tabIndex={expanded ? -1 : undefined}
+            disabled={blocked}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void pickFiles()}
+            className="grid size-5 shrink-0 place-items-center rounded-[var(--rad-xs)] text-faint hover:bg-accent hover:text-foreground disabled:opacity-40"
+          >
+            <Paperclip className="size-3.5" />
+          </button>
+        </div>
+      )}
+      {expanded && (
         <div className="absolute inset-x-0 bottom-0 z-20 px-2 pb-1.5">
           <div
             className="rounded-[var(--rad-md)] border border-border-strong shadow-pop backdrop-blur-sm"

@@ -454,6 +454,7 @@ export const TERMINAL_SETTINGS = {
   agentNotifyPosition: { label: 'Agent notifications appear', group: 'agents', fallback: FROM_RUST },
   agentLaunchCommand: { label: 'New agent runs', group: 'agents', fallback: FROM_RUST },
   agentPromptBar: { label: 'Agent prompt (Ctrl+G)', group: 'agents', fallback: FROM_RUST },
+  agentStatusBar: { label: 'Agent status bar', group: 'agents', fallback: FROM_RUST },
   agentPromptColor: { label: 'Agent prompt colour', group: 'agents', fallback: undefined },
   agentPromptOpacity: { label: 'Agent prompt opacity', group: 'agents', fallback: FROM_RUST },
   'tabDisplay.cwd': tabDisplayMeta('cwd', 'Tab shows the directory'),

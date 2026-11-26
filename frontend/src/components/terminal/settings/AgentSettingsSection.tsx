@@ -148,6 +148,19 @@ export function AgentSettingsSection() {
             disabled={disabled}
           />
         </SettingToggle>
+        <SettingToggle
+          k="agentStatusBar"
+          id="agent-status-bar"
+          label="Status bar under the terminal"
+          hint="A thin bar under a terminal running an agent: which agent, what it is doing, a draft waiting to be sent. Click it to open the agent prompt — the same as Ctrl+G. Off, nothing takes room under the terminal and Ctrl+G is the only way in."
+        >
+          <Switch
+            id="agent-status-bar"
+            checked={terminal?.agentStatusBar ?? true}
+            onCheckedChange={(v) => patch({ agentStatusBar: v })}
+            disabled={disabled || terminal?.agentPromptBar === false}
+          />
+        </SettingToggle>
         <SettingField k="agentPromptColor" label="Bubble colour" hint="Background of the prompt bubble. Empty = the theme's.">
           <ColorField
             value={terminal?.agentPromptColor ?? ''}

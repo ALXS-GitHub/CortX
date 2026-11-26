@@ -470,6 +470,11 @@ pub struct TerminalConfig {
     /// an agent runs in it. Only the frontend reads this.
     #[serde(default = "default_true")]
     pub agent_prompt_bar: bool,
+    /// A one-line status bar under a terminal running an agent (which agent,
+    /// what it is at); a click on it opens the agent prompt. Only the
+    /// frontend reads this.
+    #[serde(default = "default_true")]
+    pub agent_status_bar: bool,
     /// Background colour of the agent prompt's bubble (any CSS colour). None =
     /// the app theme's popover colour. Only the frontend reads this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1339,6 +1344,7 @@ impl Default for TerminalConfig {
             agent_notify_position: ToastPosition::default(),
             agent_launch_command: default_agent_launch_command(),
             agent_prompt_bar: true,
+            agent_status_bar: true,
             agent_prompt_color: None,
             agent_prompt_opacity: default_agent_prompt_opacity(),
             font_family: None,
