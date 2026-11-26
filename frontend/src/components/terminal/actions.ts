@@ -17,7 +17,7 @@ import {
 } from '@/lib/terminalSessions';
 import { useTerminalAgentsStore } from './agentsStore';
 import { attachToAgentPrompt, isEditorOpen, toggleAgentPrompt } from './agentPrompt';
-import { focusAgentView, isGuiPane, toggleAgentView } from './agent-view/agentView';
+import { focusAgentView, isGuiPane, toggleAgentView } from './agent-view/paneMode';
 import { ensurePaneAgent, startPaneAgent } from './agent-view/agentGuiStore';
 import { openInExplorer, showMainWindow, writeTerminal } from '@/lib/tauri';
 import { basename } from '@/lib/terminalNames';

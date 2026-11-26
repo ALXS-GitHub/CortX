@@ -6,7 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { useAppStore } from '@/stores/appStore';
 import { comboLabelFor } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
-import { AGENT_VIEW_FOCUS_EVENT } from './agentView';
+import { AGENT_VIEW_FOCUS_EVENT } from './paneMode';
 import { AgentViewComposer, type AgentViewComposerHandle } from './AgentViewComposer';
 import { PermissionCard } from './AgentViewPrompt';
 import { ConversationTurns } from './ConversationTurns';

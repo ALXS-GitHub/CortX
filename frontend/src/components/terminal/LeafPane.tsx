@@ -17,7 +17,7 @@ import { hasEnded } from './model';
 import { AgentPromptBar } from './AgentPromptBar';
 import { useTerminalAgent } from './agentsStore';
 import { AgentView } from './agent-view/AgentView';
-import { toggleAgentView } from './agent-view/agentView';
+import { toggleAgentView } from './agent-view/paneMode';
 
 /**
  * How to start the process behind an ended service / script leaf again. The

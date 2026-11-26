@@ -31,6 +31,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Two paths that differ only in case are one file on macOS and Windows
+      # (`AgentView.tsx` / `agentView.ts` broke the 0.16.1 release builds),
+      # and this Linux runner would never notice.
+      - name: No paths that differ only in case
+        working-directory: .
+        run: |
+          dups=$(git ls-files | tr '[:upper:]' '[:lower:]' | sort | uniq -d)
+          if [ -n "$dups" ]; then
+            echo "::error::These paths collide on macOS and Windows (they differ only in case):"
+            echo "$dups"
+            exit 1
+          fi
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
