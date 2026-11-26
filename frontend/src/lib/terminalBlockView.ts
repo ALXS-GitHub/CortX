@@ -324,6 +324,15 @@ export class BlockView {
   private layoutDirty = true;
   /** Height of the list at the last full layout, px. */
   private lastListH = -1;
+  /**
+   * Where the list was last scrolled to, by the user or by this view. The
+   * browser drops an element's scroll position when it leaves the page, and
+   * the pane's container does leave it whenever its tab or pane is put away
+   * (`unmountTerminal`): read back on return, `scrollTop` said 0, and the
+   * view anchored itself there — a long conversation came back scrolled to
+   * its very first line. The list's position is this one, not the DOM's.
+   */
+  private knownTop = 0;
   /** Frozen segments drawn around the view at the last paint. */
   private shown = new Set<string>();
   /**
@@ -1139,6 +1148,10 @@ export class BlockView {
   private readonly onScroll = () => {
     const s = this.scroller;
     if (!s) return;
+    // Off the page or hidden, the position is the browser's reset, not a
+    // scroll: keep the one the list had.
+    if (!s.isConnected || s.clientHeight === 0) return;
+    this.knownTop = s.scrollTop;
     this.stuck = s.scrollTop >= s.scrollHeight - s.clientHeight - 2;
     this.updateBar(true);
     this.scheduleScroll();
@@ -1545,6 +1558,7 @@ export class BlockView {
     if (!seg || !s) return;
     const top = where === 'top' ? seg.top - this.gap / 2 : seg.top + seg.height - s.clientHeight + this.gap / 2;
     s.scrollTop = Math.max(0, top);
+    this.knownTop = s.scrollTop;
     this.stuck = s.scrollTop >= s.scrollHeight - s.clientHeight - 2;
     this.schedule();
   }
@@ -1574,6 +1588,7 @@ export class BlockView {
       s.scrollTop = Math.max(0, y - s.clientHeight / 2);
       break;
     }
+    this.knownTop = s.scrollTop;
     this.stuck = s.scrollTop >= s.scrollHeight - s.clientHeight - 2;
     this.schedule();
   }
@@ -1952,6 +1967,7 @@ export class BlockView {
     }
     if (alt) {
       scroller.scrollTop = 0;
+      this.knownTop = 0;
       this.lastListH = -1;
       this.updateBar();
       if (el) el.style.transform = '';
@@ -1960,10 +1976,12 @@ export class BlockView {
       return;
     }
 
-    // -- Scroll anchor, from the previous frame's layout.
+    // -- Scroll anchor, from the previous frame's layout — and from the
+    // position the list had, not one the browser reset (see `knownTop`).
+    const reset = !this.stuck && Math.abs(scroller.scrollTop - this.knownTop) > 0.5;
     let anchor: { key: string; offset: number } | null = null;
     if (!this.stuck) {
-      const top = scroller.scrollTop;
+      const top = this.knownTop;
       for (const seg of this.segs) {
         if (seg.top + seg.height > top) {
           anchor = { key: seg.key, offset: top - seg.top };
@@ -2005,10 +2023,14 @@ export class BlockView {
     } else if (anchor) {
       const seg = segs.find((s) => s.key === anchor!.key);
       const prev = this.prevLayout.get(anchor.key);
-      if (seg && (!prev || prev.top !== seg.top)) {
+      if (seg && (reset || !prev || prev.top !== seg.top)) {
         scrollTop = Math.max(0, seg.top + anchor.offset);
         move = true;
       }
+    }
+    if (reset && !move) {
+      scrollTop = Math.max(0, Math.min(this.knownTop, y - viewH));
+      move = true;
     }
     this.lastListH = y;
     const winTop = scrollTop - viewH;
@@ -2049,6 +2071,7 @@ export class BlockView {
 
     // -- Scroll.
     if (move && Math.abs(scroller.scrollTop - scrollTop) > 0.5) scroller.scrollTop = scrollTop;
+    this.knownTop = scroller.scrollTop;
     this.prevLayout.clear();
     for (const seg of segs) this.prevLayout.set(seg.key, { top: seg.top, height: seg.height });
     this.updateBar();
