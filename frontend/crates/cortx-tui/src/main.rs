@@ -3137,6 +3137,7 @@ fn cmd_agents_show(storage: &Storage, id: &str, limit: usize, json: bool) -> any
                     cortx_core::agents::single_line(output, 90)
                 ),
                 AgentPart::Attachment { description } => format!("  attachment: {}", description),
+                AgentPart::Image { media_type, data } => format!("  image: {} ({} KB)", media_type, data.len() * 3 / 4 / 1024),
             };
             println!("{}", line);
         }
