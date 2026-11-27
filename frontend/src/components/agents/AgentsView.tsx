@@ -172,7 +172,7 @@ export function AgentsView({ projectId }: AgentsViewProps) {
             >
               <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', !collapsed && 'rotate-90')} />
               <span className={cn('truncate', !g.isProject && 'font-mono text-[11px]')}>{g.label}</span>
-              <span className="text-[11px] font-normal text-faint">{g.sessions.length}</span>
+              <span className="text-xs font-normal text-faint">{g.sessions.length}</span>
             </button>
             {!collapsed && <div className="flex flex-col">{g.sessions.map(row)}</div>}
           </section>
@@ -262,7 +262,7 @@ function SessionRow({ session, now, selected, onOpen, onRename, onPin, onHide, o
         <AgentStateDot state={session.state} size={7} />
         <span className="min-w-0 flex-1 truncate text-sm text-foreground">{session.title}</span>
         {session.annotations.pinned && <Pin className="size-3 shrink-0 text-faint" />}
-        <span className="shrink-0 text-[11px] tabular-nums text-faint group-hover/row:hidden">
+        <span className="shrink-0 text-xs tabular-nums text-faint group-hover/row:hidden">
           {formatRelativeTime(session.lastActivityAt, now)}
         </span>
       </button>

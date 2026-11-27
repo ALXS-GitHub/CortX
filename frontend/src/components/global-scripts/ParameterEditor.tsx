@@ -264,7 +264,7 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
                         <code className="truncate font-mono text-[11px] text-faint">{flagSummary}</code>
                       )}
                       {param.required && (
-                        <span className="shrink-0 text-[11px] font-medium text-destructive">required</span>
+                        <span className="shrink-0 text-xs font-medium text-destructive">required</span>
                       )}
                     </CollapsibleTrigger>
                     <Button
@@ -368,7 +368,7 @@ export function ParameterEditor({ script }: ParameterEditorProps) {
                             placeholder="1"
                             className={cn(fieldInput, 'font-mono')}
                           />
-                          <p className="text-[11px] text-faint">Number or + for variadic</p>
+                          <p className="text-xs text-faint">Number or + for variadic</p>
                         </div>
                         {/* Enum values */}
                         {param.paramType === 'enum' && (

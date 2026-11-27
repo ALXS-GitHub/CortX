@@ -51,7 +51,7 @@ export function OpenDevSessionButton({ project }: { project: Project }) {
             <SquareTerminal />
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate">{c.name}</span>
-              <span className="truncate text-[11px] text-faint">{describeLaunchConfig(c)}</span>
+              <span className="truncate text-xs text-faint">{describeLaunchConfig(c)}</span>
             </span>
           </DropdownMenuItem>
         ))}

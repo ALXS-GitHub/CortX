@@ -404,7 +404,7 @@ export function ColorField({
               setDraft('');
               onChange('');
             }}
-            className="text-left text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            className="text-left text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           >
             Use the theme's own colour
           </button>

@@ -37,6 +37,7 @@ import {
   ChevronDown,
   Pencil,
   Trash2,
+  SquareTerminal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
@@ -153,10 +154,17 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
       <div className="flex items-center gap-4 px-4 py-3">
         {/* Colour swatch + live state */}
         <div className="relative shrink-0">
+          {/* Tinted tile in the service's colour, like the app / tool / script tiles */}
           <span
-            className="block size-9 rounded-[var(--rad-sm)] shadow-soft"
-            style={{ backgroundColor: service.color || 'var(--text-faint)' }}
-          />
+            className="grid size-9 place-items-center rounded-sm"
+            style={{
+              color: service.color || 'var(--text-faint)',
+              backgroundColor: `color-mix(in srgb, ${service.color || 'var(--text-faint)'} 16%, transparent)`,
+            }}
+            aria-hidden
+          >
+            <SquareTerminal className="size-4" />
+          </span>
           <span className="absolute -bottom-1 -right-1 grid size-4 place-items-center rounded-full bg-card">
             <StatusDot status={status} size={9} />
           </span>
@@ -168,7 +176,7 @@ export function ServiceItem({ service, projectPath, onEdit, onDelete }: ServiceI
             <TruncatedText as="h3" className="font-display text-[15px] font-semibold tracking-tight">{service.name}</TruncatedText>
             <RunBadge status={status} activeMode={activeMode} activeArgPreset={activeArgPreset} />
             {ports.length > 0 && (
-              <span className="shrink-0 rounded-full bg-primary/12 px-2 font-mono text-[11px] leading-5 text-primary" title="Listening ports">
+              <span className="tag shrink-0 font-mono" title="Listening ports">
                 {ports.map((p) => `:${p}`).join(' ')}
               </span>
             )}

@@ -5,13 +5,14 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 /**
- * Halcyon pill. `secondary` is the neutral default for counts and metadata;
- * `default` is accent-tinted; use <Chip> (ui/Chip) for colour-coded labels.
+ * Small label (Zinc lays it out as a tag: radius-xs, tag height). `secondary`
+ * is the neutral default for counts and metadata; `default` is accent-tinted;
+ * use <Chip> (ui/Chip) for status pills and <TagBadge> for tags.
  */
 /* Private to this file: a component module that also exports something
    else stops fast-refreshing, and nothing outside ever used it. */
 const badgeVariants = cva(
-  "inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-none transition-colors [&>svg]:size-3! [&>svg]:pointer-events-none group/badge",
+  "inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium leading-none transition-colors [&>svg]:size-3! [&>svg]:pointer-events-none group/badge",
   {
     variants: {
       variant: {

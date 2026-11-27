@@ -21,7 +21,7 @@
  */
 import type { ITheme } from '@xterm/xterm';
 import type { AppSettings, TerminalConfig, TerminalTheme, TerminalThemeGradient, TerminalThemeSummary } from '@/types';
-import { accentForeground, bootstrapThemeStyle } from '@/lib/theme';
+import { accentForeground, setAppThemeSuspended } from '@/lib/theme';
 
 export const DEFAULT_THEME_DARK = 'dark-modern';
 export const DEFAULT_THEME_LIGHT = 'light-modern';
@@ -280,6 +280,20 @@ const CHROME_TOKENS = [
   '--glass-saturate',
   '--terminal-selection',
   '--terminal-cursor',
+  // Zinc's own names: the components read these directly.
+  '--bg',
+  '--surface',
+  '--surface-subtle',
+  '--surface-muted',
+  '--surface-sunken',
+  '--text',
+  '--text-muted',
+  '--border-control',
+  '--accent-hover',
+  '--accent-soft',
+  '--accent-text',
+  '--on-accent',
+  '--focus-ring',
 ] as const;
 
 /** User-level look of the window chrome (title bar + rail); see TerminalConfig. */
@@ -324,8 +338,24 @@ export function chromeTokens(theme: TerminalTheme, opacity = 100, look: ChromeLo
     '--secondary-foreground': fg,
     '--muted': mix(bg, fg, 0.08),
     '--muted-foreground': mix(fg, bg, 0.35),
-    '--accent': rgba(ac, dark ? 0.18 : 0.14),
+    // Zinc's `--accent` is the solid accent; the old tint is `--accent-soft`.
+    '--accent': ac,
+    '--accent-hover': mix(ac, dark ? '#ffffff' : '#000000', 0.12),
+    '--accent-soft': rgba(ac, dark ? 0.18 : 0.14),
+    '--accent-text': ac,
+    '--on-accent': accentForeground(ac),
+    '--focus-ring': ac,
     '--accent-foreground': fg,
+    // Zinc planes, lifted from the theme's own background like `--card`.
+    // `--bg` is see-through for the same reason as `--background`.
+    '--bg': 'transparent',
+    '--surface': card,
+    '--surface-subtle': mix(card, fg, 0.03),
+    '--surface-muted': mix(bg, fg, 0.08),
+    '--surface-sunken': bg,
+    '--text': fg,
+    '--text-muted': mix(fg, bg, 0.35),
+    '--border-control': rgba(fg, 0.32),
     '--border': rgba(fg, 0.12),
     '--border-strong': rgba(fg, 0.2),
     '--input': rgba(fg, 0.16),
@@ -373,10 +403,11 @@ export function applyWindowTheme(
     for (const token of CHROME_TOKENS) root.style.removeProperty(token);
     root.classList.remove(WINDOW_THEME_CLASS);
     if (opts.dark !== undefined) root.classList.toggle('dark', opts.dark);
-    // Put the user's accent / radius back (they were inline too).
-    bootstrapThemeStyle();
+    // Put the app's own colours back (the Zinc engine writes them inline too).
+    setAppThemeSuspended(false);
     return;
   }
+  setAppThemeSuspended(true);
   const tokens = chromeTokens(theme, opts.opacity, opts.look);
   for (const [name, value] of Object.entries(tokens)) root.style.setProperty(name, value);
   root.classList.add(WINDOW_THEME_CLASS);
@@ -402,16 +433,15 @@ export function applyWindowTheme(
 export type DockThemeMode = 'app' | 'canvas' | 'chrome';
 
 /**
- * `dockTheme` wins whenever it is set. A settings file written before the
- * enum landed has only the boolean, so `true` is read as `chrome` — the
- * whole dock, which is the coherent version of "on" — and anything else as
- * `app`. The value is still validated rather than trusted: `settings.json`
- * is a file on disk a user can edit.
+ * The dock's theme mode. The old `dockUsesTerminalTheme` boolean is migrated
+ * to `dockTheme` when the settings are read (Rust, `TerminalConfig`). The
+ * value is still validated rather than trusted: `settings.json` is a file on
+ * disk a user can edit.
  */
 export function dockThemeMode(terminal: TerminalConfig | null | undefined): DockThemeMode {
   const raw = terminal?.dockTheme;
   if (raw === 'app' || raw === 'canvas' || raw === 'chrome') return raw;
-  return terminal?.dockUsesTerminalTheme ? 'chrome' : 'app';
+  return 'app';
 }
 
 /**
@@ -440,6 +470,7 @@ export function dockChromeTokens(theme: TerminalTheme, look: ChromeLook = {}): R
   const tokens: Record<string, string> = {
     ...base,
     '--background': bg,
+    '--bg': bg,
     '--bg-terminal': bg,
     // No window alpha to fold in: the dock never lets the desktop through.
     '--bg-sidebar': rgba(card, chrome * 0.8),

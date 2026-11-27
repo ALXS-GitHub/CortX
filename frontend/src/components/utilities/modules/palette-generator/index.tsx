@@ -66,7 +66,7 @@ function Swatches({ colors, onCopy }: { colors: Rgb[]; onCopy: (value: string) =
           type="button"
           onClick={() => onCopy(formatHex(color))}
           title={`${formatHex(color)} — click to copy`}
-          className="h-24 flex-1 text-[10px] font-medium transition-transform hover:scale-y-105"
+          className="h-24 flex-1 text-[11px] font-medium transition-transform hover:scale-y-105"
           style={{ backgroundColor: formatRgb(color), color: formatRgb(readableTextOn(color)) }}
         >
           {formatHex(color)}

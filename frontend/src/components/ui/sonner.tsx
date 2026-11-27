@@ -41,7 +41,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       offset={{ top: "calc(var(--titlebar-h) + 12px)" }}
       toastOptions={{
         classNames: {
-          toast: "cn-toast glass-strong shadow-pop! font-sans! text-[13px]!",
+          toast: "cn-toast bg-popover shadow-pop! font-sans! text-[13px]!",
           description: "text-muted-foreground!",
         },
       }}

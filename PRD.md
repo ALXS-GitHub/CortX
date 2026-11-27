@@ -632,48 +632,44 @@ local-app-launcher/
 
 ### 7.1 Layout Structure
 
-Since the September 2026 redesign the GUI follows the **Halcyon** design system shared with Zorg
-(tinted canvas, frosted-glass panels, one accent colour, large radii, Outfit /
-Plus Jakarta Sans / JetBrains Mono). The design guide lives in
-`frontend/DESIGN.md`; the tokens in `frontend/src/index.css`.
+Since November 2026 the GUI is built on **Zinc**, the design system shared by
+the author's apps (sibling repository `ALXS-GitHub/Zinc`): Panneau style,
+Hanken Grotesk / JetBrains Mono, one accent colour, three planes (shell,
+panel, cards), no glass. The CortX guide lives in `frontend/DESIGN.md`; the
+tokens and components come from Zinc.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│ ⌘ CortX v0.14   [ Search projects, scripts, tools…  Ctrl K ]  ▾ ─ □ × │  glass title bar
-├──────────────────┬──────────────────────────────────────────────────┤
-│ CortX        [«] │  Projects · 22 projects              [+ Add project] │  glass screen header
-│ WORKSPACE        │  [search] [status ▾] [sort ▾] [★ Favorites] [▦ ≡ ☰] │  toolbar
-│  ▸ Projects      │  (utils)(web)(gaming)…                                │
-│    Scripts       ├──────────────────────────────────────────────────┤
-│    Agents  BETA  │                                                  │
-│ LIBRARY          │   cards / list / compact rows                    │  scrolls
-│    Tools         │                                                  │
-│    Apps          │                                                  │
-│    Shell Config  ├──────────────────────────────────────────────────┤
-│    Utilities     │ ›_ Terminal · 2 open · 1 running      + 👁 🗑 ■ ⊗ ▾ │  terminal dock
-│ ACTIVITY         │ [● api :3000] [○ web]                            │  (in-flow,
-│  ▾ Project A     │ > server listening on :3000                      │   resizable,
-│     ● api  ■     │                                                  │   collapsible)
-├──────────────────┤                                                  │
-│ ⚙ Settings    ☀ │                                                  │
-└──────────────────┴──────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ ■ CortX 0.17    ( Search projects, scripts, tools…   Ctrl K )  ▾ ─ □ × │  top bar (on the shell)
+│ ┌──────────────┐ ┌─────────────────────────────────────────────────┐ │
+│ │▣ Projects    │ │ Projects                         [+ Add project] │ │  page header
+│ │  Scripts     │ │ 29 projects                                      │ │
+│ │  Agents BETA │ │ [search] [status ▾] [sort ▾] [★ Favorites] [▦≡☰] │ │  toolbar
+│ │LIBRARY       │ ├─────────────────────────────────────────────────┤ │
+│ │  Tools       │ │  cards / list / compact rows                    │ │  scrolls
+│ │  Apps        │ │                                                 │ │
+│ │  Shell Config│ │                                                 │ │
+│ │  Utilities   │ ├─────────────────────────────────────────────────┤ │
+│ │RUNNING ● 2   │ │ ›_ Terminal · 2 open · 1 running          + ▾   │ │  terminal dock
+│ │ ▾ Project A  │ │ [● api :3000] [○ web]                           │ │  (in the panel,
+│ │    ● api  ■  │ │ > server listening on :3000                     │ │   resizable)
+│ │⚙ Settings ☀ «│ └─────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Sidebar** (glass, 252 px, resizable, collapses to an icon rail with
-  Ctrl+B): grouped navigation (Workspace: Projects, Scripts, Agents; Library:
-  Tools, Apps, Shell Config, Utilities), an **Activity** tree with the live
-  services / scripts per project (start / stop / close on hover), Settings and
-  the light/dark toggle in the footer.
-- **Screen header** (`layout/Screen`): every screen has the same sticky header
-  (back button, eyebrow, title + chips, subtitle, right-aligned actions) and an
-  optional toolbar row (search, filters, view switcher).
-- **Terminal dock**: lives under the current screen in the main column (no
-  longer overlays the sidebar), follows the light/dark mode.
-- **Appearance**: light / dark / system mode (app settings) + per-machine style
-  knobs (`frontend/src/lib/theme.ts`) — **skin** (Halcyon, or the previous
-  *Classic* near-native shadcn theme; each skin is one token file under
-  `frontend/src/styles/`), accent colour (both skins; the theme default is teal
-  for Halcyon, black / white for Classic), corner radius (Halcyon), font family.
+- **Top bar** (on the shell background): brand, the search pill that opens
+  the command palette, app menu, window buttons.
+- **Sidebar** (on the shell background, resizable, collapses to an icon rail
+  with Ctrl+B): Projects, Scripts, Agents; *Library*: Tools, Apps, Shell
+  Config, Utilities; *Running*: the live services / scripts per project
+  (start / stop / close on hover), only when something runs. Settings, the
+  light/dark toggle and the collapse toggle at the bottom.
+- **Panel**: one raised surface holding the current screen (`layout/Screen`:
+  page title and subtitle, actions, optional toolbar row) and the terminal
+  dock under it. The dock follows the light/dark mode.
+- **Appearance**: light / dark / system mode (app settings) plus the accent
+  (Zinc presets or any colour) and the neutral (pure, slate, warm, tinted),
+  per machine (`frontend/src/lib/theme.ts`).
 
 ### 7.2 Key Views (Current Implementation)
 
@@ -697,7 +693,7 @@ Plus Jakarta Sans / JetBrains Mono). The design guide lives in
 - Clickable URLs
 
 #### Settings View
-- Appearance: style (Halcyon / Classic), light/dark/system, accent, radius, font
+- Appearance: light/dark/system, accent, neutral (Zinc theme engine)
 - Terminal configuration (path, arguments, presets)
 
 ### 7.3 Component Library

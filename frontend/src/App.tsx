@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
-import { TitleBar } from '@/components/layout/TitleBar';
+import { AppTopBar } from '@/components/layout/AppTopBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { TerminalPanel } from '@/components/layout/TerminalPanel';
 import { UpdateChecker } from '@/components/UpdateChecker';
@@ -27,6 +27,7 @@ import { useAppStore } from '@/stores/appStore';
 import { bootstrapThemeStyle } from '@/lib/theme';
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import { onOpenCommandPalette } from '@/lib/tauri';
+import { SETTINGS_PAGE_KEY, storePage } from '@/components/settings/settingsNav';
 
 // Accent / radius / font are per-machine and applied before the first paint.
 bootstrapThemeStyle();
@@ -71,7 +72,11 @@ function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    listen('cortx-open-settings', () => useAppStore.getState().setCurrentView('settings')).then((u) => {
+    listen<{ section?: string } | null>('cortx-open-settings', (event) => {
+      // "Open in CortX" from the Terminal window lands on the Terminal pages.
+      if (event.payload?.section === 'terminal') storePage(SETTINGS_PAGE_KEY, 'terminal-shell');
+      useAppStore.getState().setCurrentView('settings');
+    }).then((u) => {
       if (cancelled) u();
       else unlisten = u;
     });
@@ -136,11 +141,14 @@ function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen flex-col overflow-hidden text-foreground">
-        <TitleBar onOpenPalette={() => setPaletteOpen(true)} />
+      {/* Zinc shell: the top bar and the navigation sit on the shell
+          background; the screen and the terminal dock live in one raised
+          panel, `shell-gap` away from the window edges. */}
+      <div className="flex h-screen flex-col overflow-hidden bg-bg text-foreground">
+        <AppTopBar onOpenPalette={() => setPaletteOpen(true)} />
         <div className="flex min-h-0 flex-1">
           <AppSidebar />
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="mb-1.5 mr-1.5 flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
             {/* Each screen owns its scrolling (see layout/Screen) */}
             <main className="min-h-0 flex-1 overflow-auto" key={currentView}>
               {renderView()}

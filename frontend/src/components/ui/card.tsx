@@ -3,8 +3,9 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 
 /**
- * Halcyon card: white/teal-navy surface, hairline border, soft shadow, 16px
- * radius. Add `interactive` for clickable cards (lift on hover).
+ * Card (Zinc): `surface-subtle` in the panel, hairline border, no shadow.
+ * Add `interactive` for clickable cards: a stronger border and the panel
+ * surface on hover, never a lift.
  */
 function Card({
   className,
@@ -17,8 +18,8 @@ function Card({
       data-slot="card"
       data-size={size}
       className={cn(
-        "group/card flex flex-col gap-5 overflow-hidden rounded-lg border border-[var(--card-border)] bg-card py-5 text-sm text-card-foreground shadow-soft data-[size=sm]:gap-4 data-[size=sm]:py-4",
-        interactive && "lift cursor-pointer hover:border-accent-border",
+        "group/card flex flex-col gap-5 overflow-hidden rounded-md border border-border bg-card py-5 text-sm text-card-foreground data-[size=sm]:gap-4 data-[size=sm]:py-4",
+        interactive && "lift cursor-pointer",
         className
       )}
       {...props}

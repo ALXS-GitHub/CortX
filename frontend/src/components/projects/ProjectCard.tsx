@@ -112,7 +112,7 @@ export function ProjectCard({ project, onEdit, onDelete, onToggleFavorite }: Pro
                 return (
                   <span
                     key={service.id}
-                    className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-background/60 px-2 text-[11px] font-medium text-muted-foreground"
+                    className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-background/60 px-2 text-xs font-medium text-muted-foreground"
                   >
                     <StatusDot status={status} size={7} />
                     {service.name}

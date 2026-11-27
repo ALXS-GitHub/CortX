@@ -269,7 +269,7 @@ export function ProjectForm({ open: isOpen, onOpenChange, project, onSubmit }: P
                   />
                 </div>
                 {showTagSuggestions && tagSuggestions.length > 0 && (
-                  <div className="glass-strong absolute top-full z-10 mt-1 max-h-32 w-full overflow-y-auto rounded-sm border border-border-strong p-1 shadow-pop">
+                  <div className="bg-popover absolute top-full z-10 mt-1 max-h-32 w-full overflow-y-auto rounded-sm border border-border-strong p-1 shadow-pop">
                     {tagSuggestions.map((def) => (
                       <button
                         key={def.name}

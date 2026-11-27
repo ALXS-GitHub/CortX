@@ -100,6 +100,23 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      # Zinc, the design system, is read from a sibling clone (../Zinc, see
+      # frontend/vite.config.ts). The repository is private: ZINC_TOKEN is a
+      # fine-grained token with read access to ALXS-GitHub/Zinc (contents).
+      - name: Check out Zinc (design system)
+        uses: actions/checkout@v4
+        with:
+          repository: ALXS-GitHub/Zinc
+          token: ${{ secrets.ZINC_TOKEN }}
+          path: .zinc
+
+      - name: Place Zinc next to the repository
+        working-directory: .
+        shell: bash
+        run: |
+          mv .zinc ../Zinc
+          cd ../Zinc && bun install --frozen-lockfile
+
       # Pinned, not `stable`: Rust 1.100 lays build scripts' output out as
       # build/<crate>/<hash>/out, and tauri-build 2.6 finds target/<profile>
       # three levels above OUT_DIR — it lands in build/ and tries to replace

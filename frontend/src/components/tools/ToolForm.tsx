@@ -363,7 +363,7 @@ export function ToolForm({ open, onOpenChange, tool, tools, tagDefinitions, stat
                       {showTagSuggestions && tagSuggestions.length > 0 && (
                         <div
                           ref={suggestionsRef}
-                          className="glass-strong absolute left-0 top-full z-50 mt-1.5 max-h-48 w-56 overflow-y-auto rounded-sm border border-border-strong p-1 shadow-pop"
+                          className="bg-popover absolute left-0 top-full z-50 mt-1.5 max-h-48 w-56 overflow-y-auto rounded-sm border border-border-strong p-1 shadow-pop"
                         >
                           {tagSuggestions.map((suggestion) => (
                             <button

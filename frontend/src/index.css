@@ -1,134 +1,52 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/outfit";
-@import "@fontsource-variable/plus-jakarta-sans";
-@import "@fontsource-variable/plus-jakarta-sans/wght-italic.css";
-@import "@fontsource-variable/jetbrains-mono";
-@import "@fontsource-variable/jetbrains-mono/wght-italic.css";
-@import "@fontsource-variable/inter";
-@import "@fontsource-variable/inter/wght-italic.css";
 
-/* Themes ("skins"). Each file defines the full token set for light + dark;
-   see styles/tokens.md. Halcyon is the default, Classic is selected with
-   data-skin="classic" on <html> (Settings → Appearance). */
-@import "./styles/theme-halcyon.css";
-@import "./styles/theme-classic.css";
+/* Zinc, the design system (sibling clone ../../Zinc, see vite.config.ts):
+   fonts, tokens, base, `zn-` components, then the layer that maps shadcn/ui
+   onto it. Colours are written at runtime by the Zinc engine (lib/theme.ts). */
+@import "../../../Zinc/src/styles/zinc.css";
+@import "../../../Zinc/src/tailwind/shadcn.css";
+/* Italic faces for the terminal (Zinc only ships the upright axes). */
+@import "@fontsource-variable/jetbrains-mono/wght-italic.css";
+
+/* CortX's profile: runtime status colours and the legacy token names the
+   terminal code still reads, all bridged onto Zinc. */
+@import "./styles/cortx-profile.css";
 
 /* Streamdown (markdown renderer used by the Agents transcript) ships Tailwind classes. */
 @source "../node_modules/streamdown/dist/*.js";
 
-@custom-variant dark (&:is(.dark *));
-
 :root {
   /* No faux bold. Faux italic stays allowed, for the fonts that have no
-     italic face (Outfit, a terminal font of the user's): with `none`, the
-     agent's *italics* came out upright (CORT-66). */
+     italic face (a terminal font of the user's): with `none`, the agent's
+     *italics* came out upright (CORT-66). */
   font-synthesis: style;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  /* Layout metrics shared between the shell pieces */
-  --titlebar-h: 2.25rem;
-  --scrollbar-thumb: color-mix(in srgb, var(--text-faint) 40%, transparent);
-  --scrollbar-thumb-hover: color-mix(in srgb, var(--text-faint) 65%, transparent);
 }
 
-/* ----- Font family (setting, resolved through data-font on <html>) ----- */
-:root[data-font="system"] {
-  --font-display: -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, "Segoe UI", Roboto,
-    "Helvetica Neue", sans-serif;
-  --font-sans: -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, "Segoe UI", Roboto,
-    "Helvetica Neue", sans-serif;
-}
-:root[data-font="mono"] {
-  --font-display: var(--font-mono-stack);
-  --font-sans: var(--font-mono-stack);
-}
-:root:not([data-font]),
-:root[data-font="halcyon"] {
-  --font-display: var(--font-display-stack);
-  --font-sans: var(--font-sans-stack);
-}
-
-/* Expose the tokens to Tailwind (bg-background, text-primary, rounded-lg,
-   shadow-soft, font-display, …). Only the mapping lives here: the values
-   come from the active theme file. */
+/* CortX-only utilities on top of the Zinc / shadcn mapping. */
 @theme inline {
-  --radius-xs: var(--rad-xs);
-  --radius-sm: var(--rad-sm);
-  --radius-md: var(--rad-md);
-  --radius-lg: var(--rad-lg);
-  --radius-xl: var(--rad-xl);
-  --radius-2xl: var(--rad-2xl);
-  --radius-3xl: calc(var(--rad-2xl) + 4px);
-  --radius-4xl: calc(var(--rad-2xl) + 8px);
-
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-info: var(--info);
-  --color-border: var(--border);
-  --color-border-strong: var(--border-strong);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
   --color-faint: var(--text-faint);
   --color-accent-border: var(--accent-border);
   --color-terminal: var(--bg-terminal);
-
   --color-st-open: var(--st-open);
   --color-st-progress: var(--st-progress);
   --color-st-blocked: var(--st-blocked);
   --color-st-done: var(--st-done);
   --color-st-agent: var(--st-agent);
-
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-
-  --font-sans: var(--font-sans);
-  --font-display: var(--font-display);
-  --font-mono: var(--font-mono-stack);
-
-  --shadow-soft: var(--elev-soft);
-  --shadow-pop: var(--elev-pop);
+  /* Zinc: cards carry no shadow; the panel and active items use shadow-sm. */
+  --shadow-soft: 0 0 #0000;
 }
 
 @layer base {
   * {
     border-color: var(--color-border);
-    outline-color: color-mix(in srgb, var(--ring) 50%, transparent);
   }
   html {
     height: 100%;
-    font-family: var(--font-sans);
     /* Custom window chrome (Tauri): rounded corners, no document scroll */
     border-radius: 8px;
     overflow: hidden;
@@ -138,34 +56,20 @@
     min-width: 320px;
     min-height: 100vh;
     overflow: hidden;
-    background-color: var(--color-background);
-    color: var(--color-foreground);
-    font-family: var(--font-sans);
-    font-size: var(--body-size);
     overscroll-behavior: none;
-    /* Canvas washes (Halcyon) / none (Classic) */
-    background-image: var(--canvas-wash);
-    background-attachment: fixed;
   }
   #root {
     min-height: 100vh;
     overflow: hidden;
   }
   ::selection {
-    background: color-mix(in srgb, var(--primary) 30%, transparent);
-  }
-  h1,
-  h2,
-  h3,
-  h4 {
-    font-family: var(--font-display);
-    letter-spacing: var(--display-tracking);
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
   }
   code,
   kbd,
   pre,
   samp {
-    font-family: var(--font-mono-stack);
+    font-family: var(--font-mono);
   }
 
   /* Discreet scrollbars */
@@ -206,15 +110,6 @@
 }
 
 @layer utilities {
-  .shadow-soft {
-    box-shadow: var(--elev-soft);
-  }
-  .shadow-pop {
-    box-shadow: var(--elev-pop);
-  }
-  .font-display {
-    font-family: var(--font-display);
-  }
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
@@ -222,36 +117,34 @@
     scrollbar-width: none;
   }
 
-  /* Frosted glass (sidebar, title bar, dialogs, popovers, toasts).
-     Opaque when the theme sets the blur to 0. */
+  /* Former frosted glass: Zinc has none. Kept as plain surfaces so the
+     terminal chrome that still names them reads correctly. */
   .glass {
     background: var(--bg-sidebar);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   }
   .glass-strong {
     background: var(--bg-glass);
-    -webkit-backdrop-filter: blur(var(--glass-strong-blur)) saturate(var(--glass-saturate));
-    backdrop-filter: blur(var(--glass-strong-blur)) saturate(var(--glass-saturate));
   }
-  /* Card that lifts on hover (clickable cards) */
+  /* Clickable card (Zinc): stronger border and the panel surface on hover,
+     never a lift. */
   .lift {
-    transition: transform 0.08s, box-shadow 0.14s, border-color 0.13s;
+    transition: background-color 0.12s, border-color 0.12s;
   }
   .lift:hover {
-    transform: translateY(var(--lift-y));
-    box-shadow: var(--elev-pop);
+    border-color: var(--border-strong);
+    background-color: var(--surface);
   }
   /* Section eyebrow (sidebar groups, settings sections) */
   .eyebrow {
-    font-size: var(--eyebrow-size);
-    font-weight: 600;
-    text-transform: var(--eyebrow-transform);
-    letter-spacing: var(--eyebrow-tracking);
+    font-size: var(--type-eyebrow-size);
+    line-height: var(--type-eyebrow-line);
+    font-weight: var(--type-eyebrow-weight);
+    letter-spacing: var(--type-eyebrow-tracking);
+    text-transform: uppercase;
     color: var(--text-faint);
   }
 
-  @keyframes halcyon-in {
+  @keyframes cortx-in {
     from {
       opacity: 0;
       transform: translateY(8px) scale(0.99);
@@ -261,7 +154,7 @@
       transform: translateY(0) scale(1);
     }
   }
-  @keyframes halcyon-fade {
+  @keyframes cortx-fade {
     from {
       opacity: 0;
     }
@@ -269,20 +162,20 @@
       opacity: 1;
     }
   }
-  @keyframes halcyon-pulse {
+  @keyframes cortx-pulse {
     0%,
     100% {
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc, var(--primary)) 55%, transparent);
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc, var(--accent)) 55%, transparent);
     }
     70% {
       box-shadow: 0 0 0 5px transparent;
     }
   }
   .animate-in-soft {
-    animation: halcyon-in 0.2s cubic-bezier(0.3, 0.8, 0.4, 1);
+    animation: cortx-in 0.2s cubic-bezier(0.3, 0.8, 0.4, 1);
   }
   .animate-fade-soft {
-    animation: halcyon-fade 0.15s ease-out;
+    animation: cortx-fade 0.15s ease-out;
   }
 }
 
@@ -290,32 +183,55 @@
    Shared components — chips, status dots, kbd. Driven by the tokens.
    ============================================================ */
 
-/* --- Chip (tag / status / label): pill tinted by its colour --- */
+/* --- Chip (tag / status / label): Zinc's status chip — a pill on the
+   surface, the colour carried by its dot, the word by its text. --- */
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 2px 9px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.5;
-  border-radius: var(--chip-radius);
+  gap: var(--space-1);
+  height: var(--chip-height);
+  padding: 0 var(--space-2);
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-label-weight);
+  line-height: 1;
+  border-radius: var(--radius-full);
   white-space: nowrap;
-  border: 1px solid color-mix(in srgb, var(--chip-color, var(--primary)) var(--chip-border-mix), var(--border));
-  background: color-mix(in srgb, var(--chip-color, var(--primary)) var(--chip-bg-mix), transparent);
-  color: color-mix(in srgb, var(--chip-color, var(--primary)) var(--chip-text-mix), var(--foreground));
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
 }
 .chip-neutral {
   --chip-color: var(--text-faint);
 }
 .chip-dot {
-  display: var(--chip-dot);
-  width: 7px;
-  height: 7px;
+  display: inline-block;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--chip-color, var(--primary));
+  background: var(--chip-color, var(--accent));
   flex: none;
 }
+/* --- Tag (classification): Zinc's tag — small corners, muted ground, no
+   border. A tag the user gave a colour keeps it as a dot. --- */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--tag-height);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-xs);
+  font-size: var(--type-caption-size);
+  line-height: 1;
+  white-space: nowrap;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+.tag .chip-dot {
+  width: 6px;
+  height: 6px;
+}
+
 .chip-x {
   display: inline-grid;
   place-items: center;
@@ -350,9 +266,9 @@
   background: conic-gradient(var(--sc) 0 50%, transparent 50% 100%);
 }
 .sdot.live {
-  background: var(--sc, var(--primary));
+  background: var(--sc, var(--accent));
   border-color: transparent;
-  animation: halcyon-pulse 1.8s ease-out infinite;
+  animation: cortx-pulse 1.8s ease-out infinite;
 }
 
 /* Agent dots (see components/terminal/agentColors.ts): a family of their own,
@@ -380,20 +296,20 @@
   .sdot.needs { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--sc) 35%, transparent); }
 }
 
-/* --- Keyboard hint --- */
+/* --- Keyboard hint (Zinc's kbd) --- */
 .kbd {
   display: inline-grid;
   place-items: center;
   min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  font-family: var(--font-mono-stack);
-  font-size: 10px;
-  line-height: 1;
-  color: var(--muted-foreground);
-  border-radius: 5px;
-  border: 1px solid var(--border-strong);
-  background: color-mix(in srgb, var(--text-faint) 12%, transparent);
+  padding: 1px var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--type-eyebrow-size);
+  line-height: var(--type-caption-line);
+  color: var(--text-muted);
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  white-space: nowrap;
 }
 
 /* ============================================================

@@ -36,7 +36,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useTerminalLayoutStore } from '@/stores/terminalLayoutStore';
 import type { LeafNode, TerminalTab } from '@/lib/terminalLayout';
 import { comboLabelFor } from '@/lib/keybindings';
-import { ACCENT_PRESETS } from '@/lib/theme';
+import { TAB_COLORS } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { FREE_WORKSPACE_ID } from '@/lib/terminalLayout';
 import {
@@ -81,7 +81,7 @@ export function ColorRow({ current, onPick }: { current: string | null; onPick: 
       >
         <X className="size-2.5" />
       </button>
-      {ACCENT_PRESETS.map((c) => (
+      {TAB_COLORS.map((c) => (
         <button
           key={c.value}
           type="button"

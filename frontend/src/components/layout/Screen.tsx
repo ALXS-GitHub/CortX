@@ -4,10 +4,13 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
 /**
- * Frame shared by every screen: a sticky glass header (optional back button,
- * title, subtitle, right-aligned actions) above the content. `fill` gives the
- * content the full height with no scroll of its own (utilities workbench),
- * otherwise the content scrolls and gets a comfortable padding.
+ * Frame shared by every screen, inside the shell's panel (Zinc page header):
+ * an optional back button and eyebrow, the page title in the display face
+ * with its subtitle under it, right-aligned actions, and an optional toolbar
+ * row (search, filters, view switcher). A hairline separates the header from
+ * the content, which scrolls on its own. `fill` gives the content the full
+ * height with no scroll or padding of its own (workbenches); `narrow` centres
+ * it at a reading width (settings, forms).
  */
 export function Screen({
   title,
@@ -39,38 +42,34 @@ export function Screen({
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="glass shrink-0 border-b border-border">
-        <div className="flex min-h-14 items-center gap-3 px-5">
+      <header className="shrink-0 border-b border-border">
+        <div className="flex items-center gap-3 px-6 pb-4 pt-5">
           {onBack && (
             <Button
               variant="ghost"
-              size="icon-sm"
+              size="icon"
               onClick={onBack}
               aria-label={backLabel}
               title={backLabel}
-              className="-ml-1.5 shrink-0"
+              className="-ml-2 shrink-0"
             >
-              <ArrowLeft className="size-4" />
+              <ArrowLeft />
             </Button>
           )}
-          <div className="flex min-w-0 flex-1 flex-col justify-center py-2.5">
+          <div className="flex min-w-0 flex-1 flex-col justify-center">
             {eyebrow && <span className="eyebrow mb-0.5">{eyebrow}</span>}
-            <div className="flex min-w-0 items-baseline gap-2.5">
-              <h1 className="truncate font-display text-[17px] font-semibold tracking-tight">{title}</h1>
-              {subtitle && (
-                <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:inline">{subtitle}</span>
-              )}
-            </div>
+            <h1 className="zn-page-title truncate">{title}</h1>
+            {subtitle && <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{subtitle}</p>}
           </div>
           {actions && <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}
         </div>
-        {toolbar && <div className="flex flex-wrap items-center gap-2 px-5 pb-3">{toolbar}</div>}
+        {toolbar && <div className="flex flex-wrap items-center gap-2 px-6 pb-3">{toolbar}</div>}
       </header>
       <div className={cn('min-h-0 flex-1', fill ? 'overflow-hidden' : 'overflow-y-auto')}>
         {fill ? (
           children
         ) : (
-          <div className={cn('animate-in-soft p-5 pb-8', narrow && 'mx-auto max-w-3xl', className)}>{children}</div>
+          <div className={cn('animate-in-soft px-6 pb-10 pt-5', narrow && 'mx-auto max-w-3xl', className)}>{children}</div>
         )}
       </div>
     </div>

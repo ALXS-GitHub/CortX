@@ -27,7 +27,17 @@
     // Path aliases
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      // Zinc from source (see vite.config.ts); its React imports resolve to
+      // this app's types, not to the copy in the Zinc clone.
+      "@zinc/ui": ["../../Zinc/src/index.ts"],
+      "@zinc/ui/theme": ["../../Zinc/src/theme/index.ts"],
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"],
+      "radix-ui": ["./node_modules/radix-ui"],
+      "lucide-react": ["./node_modules/lucide-react"]
     }
 
   },

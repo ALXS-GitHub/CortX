@@ -656,7 +656,7 @@
   cursor: pointer;
 }
 .cortx-block-menu-item:hover:not(:disabled) {
-  background: var(--accent);
+  background: var(--surface-muted);
   color: var(--accent-foreground, inherit);
 }
 .cortx-block-menu-item:disabled {

@@ -1,0 +1,82 @@
+/*
+ * CortX's profile on top of Zinc (../../Zinc, imported in index.css).
+ *
+ * Zinc owns the colours (theme engine, `lib/theme.ts`), the shapes, the type
+ * scale and the components. This file only adds what Zinc does not have:
+ *
+ * 1. Status colours of the runtime (services, scripts, agents) — named on
+ *    Zinc's state colours, plus the agent violet that must never read as a
+ *    service or a shell.
+ * 2. The legacy token names the terminal code still reads (`--bg-terminal`,
+ *    `--bg-input`, `--rad-*`, `--font-mono-stack`…), bridged onto Zinc so
+ *    that code needs no rewrite. New code reads the Zinc names directly.
+ *
+ * Never a hard-coded colour here except the agent hues: every other value is
+ * a Zinc token, so a new accent or neutral reaches every corner of the app.
+ */
+
+:root,
+[data-theme] {
+  /* ---- Runtime status (Tailwind: text-st-*, bg-st-*) ---- */
+  --st-open: var(--info);
+  --st-progress: var(--warning);
+  --st-blocked: var(--danger);
+  --st-done: var(--success);
+  --st-agent: #7c3aed;
+
+  /* ---- Bridge: legacy names → Zinc ---- */
+  --theme-primary: var(--accent);
+  --accent-border: color-mix(in srgb, var(--accent) 45%, transparent);
+  --bg-input: var(--surface);
+  --bg-glass: var(--surface);
+  --bg-sidebar: var(--bg);
+  --bg-terminal: var(--surface-sunken);
+  --terminal-fg: var(--text);
+  --card-border: var(--border);
+  --panel-border: var(--border);
+  --footer-bg: var(--surface-subtle);
+  --footer-border: var(--border);
+  --overlay-bg: color-mix(in srgb, #000 45%, transparent);
+  --overlay-blur: 0px;
+  --glass-blur: 0px;
+  --glass-strong-blur: 0px;
+  --glass-saturate: 100%;
+  --canvas-wash: none;
+  --shadow-color: 220 20% 10%;
+  --elev-soft: none;
+  --elev-pop: var(--shadow-pop);
+  --lift-y: 0px;
+  --dot-idle-fill: transparent;
+  --tab-active-bg: var(--surface);
+  --tab-active-fg: var(--text);
+  --tab-active-shadow: var(--shadow-sm);
+
+  /* Shapes: the terminal CSS speaks in the old 7-step scale. */
+  --radius: var(--radius-md);
+  --rad-xs: var(--radius-xs);
+  --rad-sm: var(--radius-sm);
+  --rad-md: var(--radius-md);
+  --rad-lg: var(--radius-md);
+  --rad-xl: var(--radius-lg);
+  --rad-2xl: var(--radius-lg);
+  --rad-menu: var(--radius-md);
+  --rad-nav: var(--radius-md);
+
+  /* Type */
+  --font-mono-stack: var(--font-mono);
+  --font-sans-stack: var(--font-sans);
+  --font-display-stack: var(--font-display);
+  --body-size: var(--type-body-size);
+
+  /* Window chrome */
+  --titlebar-h: 2.5rem;
+  --scrollbar-thumb: color-mix(in srgb, var(--text-faint) 40%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--text-faint) 65%, transparent);
+}
+
+:root.dark,
+[data-theme="dark"] {
+  --st-agent: #a78bfa;
+  --shadow-color: 220 40% 2%;
+  --overlay-bg: color-mix(in srgb, #000 60%, transparent);
+}

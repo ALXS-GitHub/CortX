@@ -95,7 +95,7 @@ function TabsContent({
 /** Small count next to a tab label. */
 function TabsCount({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <span className={cn("ml-0.5 rounded-full bg-[color-mix(in_srgb,var(--text-faint)_22%,transparent)] px-1.5 text-[10.5px] font-semibold tabular-nums leading-[16px] text-muted-foreground", className)}>
+    <span className={cn("ml-0.5 rounded-full bg-[color-mix(in_srgb,var(--text-faint)_22%,transparent)] px-1.5 text-xs font-semibold tabular-nums leading-[16px] text-muted-foreground", className)}>
       {children}
     </span>
   )

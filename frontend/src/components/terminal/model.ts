@@ -1,5 +1,5 @@
 import { useMemo, type CSSProperties } from 'react';
-import { ACCENT_PRESETS } from '@/lib/theme';
+import { TAB_COLORS } from '@/lib/theme';
 import { basename, formatDuration } from '@/lib/terminalNames';
 import {
   FREE_WORKSPACE_ID,
@@ -200,7 +200,7 @@ export function tabProject(tab: TerminalTab, projects: Project[]): Project | und
 export function projectColor(projectId: string): string {
   let h = 0;
   for (let i = 0; i < projectId.length; i++) h = (h * 31 + projectId.charCodeAt(i)) >>> 0;
-  return ACCENT_PRESETS[h % ACCENT_PRESETS.length].value;
+  return TAB_COLORS[h % TAB_COLORS.length].value;
 }
 
 // ---------------------------------------------------------------------------

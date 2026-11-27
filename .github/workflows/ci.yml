@@ -47,6 +47,23 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      # Zinc, the design system, is read from a sibling clone (../Zinc, see
+      # frontend/vite.config.ts). The repository is private: ZINC_TOKEN is a
+      # fine-grained token with read access to ALXS-GitHub/Zinc (contents).
+      - name: Check out Zinc (design system)
+        uses: actions/checkout@v4
+        with:
+          repository: ALXS-GitHub/Zinc
+          token: ${{ secrets.ZINC_TOKEN }}
+          path: .zinc
+
+      - name: Place Zinc next to the repository
+        working-directory: .
+        shell: bash
+        run: |
+          mv .zinc ../Zinc
+          cd ../Zinc && bun install --frozen-lockfile
+
       # `bun run test` is `node --test`, not `bun test`: the suites are .ts
       # files run through Node's own type stripping, which needs a Node new
       # enough to do it without a flag. The runner's default Node is not

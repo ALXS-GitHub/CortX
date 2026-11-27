@@ -207,7 +207,7 @@ export default function ColorConverterPanel({ ctx }: UtilityPanelProps) {
                         type="button"
                         onClick={() => ctx.copy(formatHex(shade))}
                         title={`${step} — ${formatHex(shade)}`}
-                        className="h-16 flex-1 text-[10px] font-medium"
+                        className="h-16 flex-1 text-[11px] font-medium"
                         style={{
                           backgroundColor: formatRgb(shade),
                           color: formatRgb(readableTextOn(shade)),

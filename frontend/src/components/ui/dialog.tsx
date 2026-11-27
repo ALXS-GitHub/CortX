@@ -37,7 +37,7 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-[var(--overlay-bg)] backdrop-blur-[var(--overlay-blur)] duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "fixed inset-0 isolate z-50 bg-[var(--overlay-bg)]-[var(--overlay-blur)] duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}
@@ -46,7 +46,8 @@ function DialogOverlay({
 }
 
 /**
- * Halcyon dialog: frosted-glass card, 22px radius, strong border, pop shadow.
+ * Dialog (Zinc): the panel surface, large corners, hairline border, pop
+ * shadow. Measurements are imposed by Zinc's shadcn layer.
  * The header / body / footer are laid out by DialogHeader, the children and
  * DialogFooter; the body scrolls when the content is taller than the viewport.
  */
@@ -64,7 +65,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "glass-strong fixed top-1/2 left-1/2 z-50 flex w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-5 overflow-hidden rounded-xl border border-[var(--panel-border)] p-6 text-sm text-popover-foreground shadow-pop outline-none duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 sm:max-w-md max-h-[calc(100vh-4rem)]",
+          "bg-popover fixed top-1/2 left-1/2 z-50 flex w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-5 overflow-hidden rounded-lg border border-border p-6 text-sm text-popover-foreground shadow-pop outline-none duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 sm:max-w-md max-h-[calc(100vh-4rem)]",
           className
         )}
         {...props}

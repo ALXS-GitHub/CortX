@@ -1,5 +1,4 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getVersion } from '@tauri-apps/api/app';
 import { ChevronDown, EyeOff, LogOut, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -13,29 +12,24 @@ import {
 import { quitApp } from '@/lib/tauri';
 import { useAppStore } from '@/stores/appStore';
 
-const appWindow = getCurrentWindow();
-
-// macOS draws its own traffic-light buttons (see `trafficLightPosition` in
-// tauri.conf.json); we hide our custom minimize/maximize/close there.
-const isMac = typeof navigator !== 'undefined'
-  && /mac/i.test(navigator.platform || (navigator as unknown as { userAgentData?: { platform?: string } }).userAgentData?.platform || '');
+import { appWindow, isMac } from './windowChrome';
 
 /* --- 10px glyphs, pixel-aligned, stroke = currentColor --- */
-function IconMinimize() {
+export function IconMinimize() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
       <path d="M1 5h8" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
     </svg>
   );
 }
-function IconMaximize() {
+export function IconMaximize() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
       <rect x="1" y="1" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1" />
     </svg>
   );
 }
-function IconRestore() {
+export function IconRestore() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
       <path
@@ -47,7 +41,7 @@ function IconRestore() {
     </svg>
   );
 }
-function IconClose() {
+export function IconClose() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
       <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
@@ -55,7 +49,7 @@ function IconClose() {
   );
 }
 
-function WinButton({
+export function WinButton({
   label,
   onClick,
   danger,

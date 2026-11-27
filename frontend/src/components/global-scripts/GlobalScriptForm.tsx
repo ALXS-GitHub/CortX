@@ -275,7 +275,7 @@ export function GlobalScriptForm({ open, onOpenChange, script, onSubmit }: Globa
                   />
                 </div>
                 {showTagSuggestions && tagSuggestions.length > 0 && (
-                  <div className="glass-strong absolute top-full z-10 mt-1 max-h-36 w-full overflow-y-auto rounded-lg border border-border-strong p-1.5 shadow-pop">
+                  <div className="bg-popover absolute top-full z-10 mt-1 max-h-36 w-full overflow-y-auto rounded-lg border border-border-strong p-1.5 shadow-pop">
                     {tagSuggestions.map((def) => (
                       <button
                         key={def.name}

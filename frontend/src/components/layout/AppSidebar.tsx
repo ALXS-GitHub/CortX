@@ -38,8 +38,8 @@ import {
   type TerminalTab,
 } from '@/lib/terminalLayout';
 import type { View } from '@/types';
+import { RAIL_WIDTH } from './AppTopBar';
 
-const RAIL_WIDTH = 56;
 
 interface NavItem {
   view: View;
@@ -102,10 +102,12 @@ function windowShares(tabs: TerminalTab[], terminalIds: string[]): WindowShare[]
 }
 
 /**
- * Left navigation (frosted glass). Two halves: the section nav on top and, when
- * something runs or has output, an "Activity" tree of the live services and
- * scripts (grouped by project) with start / stop / close actions on hover.
- * Collapses to an icon rail (Ctrl+B); the expanded width is drag-resizable.
+ * Left navigation (Zinc shell): posed on the shell background, no surface of
+ * its own. The section nav on top and, when something runs or has output, a
+ * "Running" tree of the live services and scripts (grouped by project) with
+ * start / stop / close actions on hover. Settings, the light/dark switch and
+ * the collapse toggle sit at the bottom. Collapses to an icon rail (Ctrl+B);
+ * the expanded width is drag-resizable.
  */
 export function AppSidebar() {
   const {
@@ -320,30 +322,17 @@ export function AppSidebar() {
   return (
     <aside
       className={cn(
-        'glass relative z-30 flex h-full shrink-0 flex-col border-r border-border',
+        'relative z-30 flex h-full shrink-0 flex-col',
         !resizing && 'transition-[width] duration-200 ease-out'
       )}
       style={{ width: collapsed ? RAIL_WIDTH : sidebarWidth }}
     >
-      {/* Header: collapse toggle only (the app name lives in the title bar) */}
-      <div className={cn('flex h-10 shrink-0 items-center', collapsed ? 'justify-center' : 'justify-end px-3')}>
-        {collapsed ? (
-          <RailButton label="Expand sidebar (Ctrl+B)" onClick={toggleSidebar} className="size-8">
-            <PanelLeftOpen className="size-4" />
-          </RailButton>
-        ) : (
-          <RailButton label="Collapse sidebar (Ctrl+B)" onClick={toggleSidebar} className="size-8">
-            <PanelLeftClose className="size-4" />
-          </RailButton>
-        )}
-      </div>
-
       {/* Navigation + activity */}
-      <nav className={cn('min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-1', collapsed ? 'px-2' : 'px-3')}>
-        {groups.map((g) => (
-          <div key={g.name} className="mb-3">
-            {!collapsed && <div className="eyebrow px-2 pb-1.5 pt-1">{g.name}</div>}
-            {collapsed && <div className="mx-auto mb-1.5 h-px w-6 bg-border first:hidden" />}
+      <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-2 pb-2 pt-1">
+        {groups.map((g, gi) => (
+          <div key={g.name} className="flex flex-col gap-0.5">
+            {!collapsed && gi > 0 && <div className="eyebrow px-2 pb-1 pt-4">{g.name}</div>}
+            {collapsed && gi > 0 && <div className="mx-auto my-2 h-px w-6 bg-border" />}
             {g.items.map((item) => {
               const Icon = item.icon;
               const active = item.matches.includes(currentView);
@@ -355,7 +344,7 @@ export function AppSidebar() {
                   label={item.label}
                   onClick={() => navigate(item.view)}
                 >
-                  <Icon className={cn('size-[18px] shrink-0', active ? 'text-primary' : 'text-faint')} />
+                  <Icon />
                   {!collapsed && (
                     <>
                       <span className="flex-1 truncate text-left">{item.label}</span>
@@ -369,8 +358,8 @@ export function AppSidebar() {
         ))}
 
         {hasActivity && collapsed && (
-          <div className="mb-3">
-            <div className="mx-auto mb-1.5 h-px w-6 bg-border" />
+          <div>
+            <div className="mx-auto my-2 h-px w-6 bg-border" />
             <NavButton
               active={terminalPanelOpen}
               collapsed
@@ -378,7 +367,7 @@ export function AppSidebar() {
               onClick={toggleTerminalPanel}
             >
               <span className="relative">
-                <Terminal className={cn('size-[18px]', terminalPanelOpen ? 'text-primary' : 'text-faint')} />
+                <Terminal />
                 {runningTotal > 0 && (
                   <StatusDot tone="running" size={7} className="absolute -right-1 -top-1" />
                 )}
@@ -388,13 +377,13 @@ export function AppSidebar() {
         )}
 
         {hasActivity && !collapsed && (
-          <div className="mb-3">
-            <div className="flex items-center gap-2 px-2 pb-1.5 pt-1">
-              <span className="eyebrow">Activity</span>
+          <div>
+            <div className="flex items-center gap-2 px-2 pb-1 pt-4">
+              <span className="eyebrow">Running</span>
               {runningTotal > 0 && (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-st-done/14 px-1.5 text-[10px] font-semibold leading-4 text-st-done">
+                <span className="inline-flex items-center gap-1.5 text-xs tabular-nums text-faint">
                   <StatusDot tone="running" size={6} />
-                  {runningTotal} running
+                  {runningTotal}
                 </span>
               )}
             </div>
@@ -510,8 +499,8 @@ export function AppSidebar() {
         )}
       </nav>
 
-      {/* Footer: settings + theme */}
-      <div className={cn('flex shrink-0 items-center gap-1 border-t border-border', collapsed ? 'flex-col px-2 py-2' : 'px-3 py-2')}>
+      {/* Footer: settings, light/dark, collapse */}
+      <div className={cn('flex shrink-0 gap-0.5 px-2 pb-3 pt-1', collapsed ? 'flex-col items-center' : 'items-center')}>
         <NavButton
           active={currentView === 'settings'}
           collapsed={collapsed}
@@ -519,11 +508,14 @@ export function AppSidebar() {
           onClick={() => navigate('settings')}
           className={collapsed ? undefined : 'flex-1'}
         >
-          <Settings className={cn('size-[18px] shrink-0', currentView === 'settings' ? 'text-primary' : 'text-faint')} />
+          <Settings />
           {!collapsed && <span className="flex-1 truncate text-left">Settings</span>}
         </NavButton>
-        <RailButton label={`${themeLabel} — click to change`} onClick={cycleTheme} className="size-8">
+        <RailButton label={`${themeLabel} — click to change`} onClick={cycleTheme}>
           <ThemeIcon className="size-4" />
+        </RailButton>
+        <RailButton label={collapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'} onClick={toggleSidebar}>
+          {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
         </RailButton>
       </div>
 
@@ -547,7 +539,7 @@ export function AppSidebar() {
           className="absolute inset-y-0 -right-1 z-40 w-2 cursor-ew-resize"
           onMouseDown={onResizeStart}
         >
-          <div className={cn('mx-auto h-full w-px transition-colors', resizing ? 'bg-primary' : 'bg-transparent hover:bg-accent-border')} />
+          <div className={cn('mx-auto h-full w-px transition-colors', resizing ? 'bg-primary' : 'bg-transparent hover:bg-border-strong')} />
         </div>
       )}
     </aside>
@@ -578,14 +570,7 @@ function NavButton({
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       aria-label={collapsed ? label : undefined}
-      className={cn(
-        'flex items-center rounded-[var(--rad-nav)] text-sm transition-colors',
-        collapsed ? 'mx-auto size-10 justify-center' : 'w-full gap-2.5 px-2.5 py-2',
-        active
-          ? 'bg-accent font-[550] text-foreground'
-          : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
-        className
-      )}
+      className={cn('zn-nav', collapsed ? 'mx-auto w-10 justify-center px-0' : 'w-full', className)}
     >
       {children}
     </button>
@@ -619,7 +604,7 @@ function RailButton({
           onClick={onClick}
           aria-label={label}
           className={cn(
-            'grid size-10 shrink-0 place-items-center rounded-[var(--rad-nav)] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+            'grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground',
             className
           )}
         >
@@ -655,11 +640,11 @@ function RowAction({
         onClick();
       }}
       className={cn(
-        'grid size-5 place-items-center rounded-[6px] text-muted-foreground transition-colors',
+        'grid size-5 place-items-center rounded-xs text-muted-foreground transition-colors',
         disabled && 'cursor-default opacity-40',
         !disabled && tone === 'start' && 'hover:bg-st-done/18 hover:text-st-done',
         !disabled && tone === 'stop' && 'hover:bg-destructive/15 hover:text-destructive',
-        !disabled && tone === 'close' && 'hover:bg-accent hover:text-foreground'
+        !disabled && tone === 'close' && 'hover:bg-surface-muted hover:text-foreground'
       )}
     >
       {children}
@@ -751,14 +736,14 @@ function ActivityGroupBlock({
         tabIndex={0}
         onClick={onOpen}
         onKeyDown={(e) => e.key === 'Enter' && onOpen()}
-        className="group/project flex w-full items-center gap-2 rounded-[var(--rad-nav)] px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-accent/60"
+        className="group/project flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] font-medium text-foreground transition-colors hover:bg-surface-subtle"
       >
         <Icon className="size-4 shrink-0 text-faint" />
         <span className="flex-1 truncate text-left">{name}</span>
         <span className="text-xs tabular-nums text-faint group-hover/project:hidden">{count}</span>
         <div className="hidden items-center gap-0.5 group-hover/project:flex">{actions}</div>
       </div>
-      <div className="ml-[15px] border-l border-border pl-2">{children}</div>
+      <div className="ml-4 border-l border-border pl-1.5">{children}</div>
     </div>
   );
 }
@@ -786,7 +771,7 @@ function ActivityRowItem({
       onClick={onOpen}
       onKeyDown={(e) => e.key === 'Enter' && onOpen()}
       title={row.hidden ? `${row.name} — hidden from the terminal panel` : row.name}
-      className="group/row flex w-full items-center gap-2 rounded-[var(--rad-xs)] py-1 pl-2 pr-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+      className="group/row flex h-7 w-full items-center gap-2 rounded-sm pl-2 pr-1.5 text-xs text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground"
     >
       <Icon className="size-3.5 shrink-0 text-faint" />
       <span className={cn('flex-1 truncate text-left', row.hidden && 'opacity-60')}>{row.name}</span>

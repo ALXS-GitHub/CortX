@@ -208,7 +208,7 @@ export function EnvFileCard({ envFile, projectId, services, exampleFile }: EnvFi
                     Manual
                   </Badge>
                 )}
-                <span className="shrink-0 text-[11px] text-faint">
+                <span className="shrink-0 text-xs text-faint">
                   {varCount} var{varCount !== 1 ? 's' : ''}
                 </span>
               </div>

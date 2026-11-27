@@ -180,7 +180,7 @@ Access settings from the sidebar to configure:
 - **Default terminal** - Choose between integrated or external terminal
 - **Integrated terminal shell** - Command line of the shell used by "new terminal" tabs (auto-detects PowerShell 7 / `$SHELL`)
 - **Shell integration & notifications** - Turn the OSC 7 / OSC 133 block of `cortx init` on or off, and choose whether long commands notify you and from how many seconds
-- **Appearance** - Light / dark / system mode, plus the style: *Halcyon* (the default look, shared with Zorg) or *Classic* (the previous neutral shadcn theme). Accent colour and font are adjustable in both styles; corner radius in Halcyon
+- **Appearance** - Light / dark / system mode, an accent colour (presets or any colour) and a neutral temperature, built by the Zinc design system
 
 ## Tech Stack
 
