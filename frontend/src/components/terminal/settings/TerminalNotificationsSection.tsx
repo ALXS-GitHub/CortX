@@ -1,21 +1,27 @@
 /**
- * Terminal notifications (DEV-13 #5). Store-backed: mounted both in the
- * Settings page and in the Terminal window's own panel.
+ * Notifications (DEV-13 #5, ticket #64): every notification in one place —
+ * finished commands, agents that need you or are done, how they are
+ * delivered, and the bell. Store-backed: mounted both in the Settings screen
+ * and in the Terminal window's own panel.
+ *
+ * The agent notifications used to live on the Agents card, with an "only out
+ * of sight" switch of their own beside the commands' one. Both fields are
+ * kept (an older file may set them apart), but they are one switch here.
  */
 import { useState } from 'react';
-import { Bell } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
 import { Segmented } from '@/components/ui/Segmented';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Code, Section } from '@/components/settings/SettingsPrimitives';
-import { NumberField, ResetCard, SettingField, SettingToggle } from './controls';
+import { Textarea } from '@/components/ui/textarea';
+import { Code, SectionNote } from '@/components/settings/SettingsPrimitives';
+import { cn } from '@/lib/utils';
+import { Group, NumberField, SelectField, SettingField, SwitchField } from './controls';
 import {
   DEFAULT_LONG_COMMAND_SECONDS,
   NOTIFY_STYLE_OPTIONS,
   NOTIFY_WHEN_OPTIONS,
+  TOAST_POSITION_OPTIONS,
   formatMutedCommands,
   parseMutedCommands,
+  resolveAgentNotifyPosition,
   resolveLongCommandSeconds,
   resolveMutedCommands,
   resolveNotifyOnlyWhenHidden,
@@ -24,17 +30,27 @@ import {
 } from './notificationPolicy';
 import { BELL_OPTIONS, resolveBellStyle } from './meta';
 import { useTerminalSettings } from './useTerminalSettings';
-import type { TerminalBellStyle, TerminalNotifyStyle, TerminalNotifyWhen } from '@/types';
+import type { TerminalBellStyle, TerminalNotifyStyle, TerminalNotifyWhen, ToastPosition } from '@/types';
 
 export function TerminalNotificationsSection() {
   const { terminal, patch } = useTerminalSettings();
+  const off = !terminal;
 
   const when = resolveNotifyWhen(terminal);
   const style = resolveNotifyStyle(terminal);
-  const onlyWhenHidden = resolveNotifyOnlyWhenHidden(terminal);
   const seconds = resolveLongCommandSeconds(terminal);
   const muted = resolveMutedCommands(terminal);
-  const disabled = !terminal || when === 'never';
+  const commandsOff = off || when === 'never';
+  const agentNeedsYou = terminal?.agentNotifyNeedsYou ?? true;
+  const agentDone = terminal?.agentNotifyDone ?? true;
+  const agentsOff = off || (!agentNeedsYou && !agentDone);
+  const nothing = commandsOff && agentsOff;
+
+  // One switch for two fields. They agree unless an older file set them
+  // apart; then the switch shows on only when both are, and says so.
+  const commandsHidden = resolveNotifyOnlyWhenHidden(terminal);
+  const agentsHidden = terminal?.agentNotifyOnlyWhenHidden ?? true;
+  const hiddenMixed = commandsHidden !== agentsHidden;
 
   // The muted list is a free-text field: while it has the focus it shows the
   // raw text, so a half-typed entry does not disappear from under you.
@@ -43,138 +59,210 @@ export function TerminalNotificationsSection() {
   const [mutedFocused, setMutedFocused] = useState(false);
 
   const bell = resolveBellStyle(terminal);
-  const whenHint = NOTIFY_WHEN_OPTIONS.find((o) => o.value === when)?.hint;
-  const styleHint = NOTIFY_STYLE_OPTIONS.find((o) => o.value === style)?.hint;
-  const bellHint = BELL_OPTIONS.find((o) => o.value === bell)?.hint;
+  const position = resolveAgentNotifyPosition(terminal);
 
   return (
-    <Section
-      title="Notifications"
-      icon={Bell}
-      action={<ResetCard card="notifications" title="Notifications" />}
-      description="Shell integration marks the end of every command — quitting Claude Code, leaving vim or interrupting a watcher all look the same from the outside. These rules decide which of them is worth interrupting you."
-    >
-      <SettingField k="notifyWhen" label="Notify me when" htmlFor="terminal-notify-when" hint={whenHint}>
-        <Select
+    <>
+      <Group group="notifications">
+        <SelectField<TerminalNotifyWhen>
+          k="notifyWhen"
+          id="terminal-notify-when"
+          label="Notify me when"
+          hint={NOTIFY_WHEN_OPTIONS.find((o) => o.value === when)?.hint}
           value={when}
-          onValueChange={(v: TerminalNotifyWhen) => patch({ notifyWhen: v, notifyOnLongCommand: v !== 'never' })}
-          disabled={!terminal}
+          options={NOTIFY_WHEN_OPTIONS}
+          onChange={(v) => patch({ notifyWhen: v })}
+          disabled={off}
+        />
+        {when === 'failed-or-long' && (
+          <NumberField
+            k="longCommandSeconds"
+            id="terminal-long-command-seconds"
+            label="“Long” starts at"
+            value={seconds}
+            min={1}
+            max={3600}
+            unit="s"
+            onCommit={(v) => patch({ longCommandSeconds: v ?? DEFAULT_LONG_COMMAND_SECONDS })}
+            disabled={commandsOff}
+            indent
+          />
+        )}
+        <SettingField
+          k="notifyMutedCommands"
+          label="Never notify for these commands"
+          htmlFor="terminal-notify-muted"
+          wide
+          disabled={commandsOff}
+          hint={
+            <>
+              One per line or separated by commas. A name matches the program (<Code>claude</Code> covers{' '}
+              <Code>claude --resume</Code>), a longer entry the start of the command line (<Code>npm run dev</Code>).
+              Agents, editors and remote shells belong here: their exit code only says you closed them.
+            </>
+          }
         >
-          <SelectTrigger id="terminal-notify-when" className="w-[300px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {NOTIFY_WHEN_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </SettingField>
+          <Textarea
+            id="terminal-notify-muted"
+            value={mutedFocused ? mutedText : storedMuted}
+            rows={3}
+            spellCheck={false}
+            onFocus={() => {
+              setMutedText(storedMuted);
+              setMutedFocused(true);
+            }}
+            onBlur={() => setMutedFocused(false)}
+            onChange={(e) => {
+              setMutedText(e.target.value);
+              patch({ notifyMutedCommands: parseMutedCommands(e.target.value) });
+            }}
+            placeholder="claude, codex, vim, ssh…"
+            disabled={commandsOff}
+          />
+        </SettingField>
+        <SectionNote>
+          CortX cannot tell that a program is waiting for a password: shell integration reports where commands start and
+          end, not what a running program asks for.
+        </SectionNote>
+      </Group>
 
-      <NumberField
-        k="longCommandSeconds"
-        id="terminal-long-command-seconds"
-        label={<span className="text-xs text-muted-foreground">“Long” starts at (seconds)</span>}
-        value={seconds}
-        min={1}
-        max={3600}
-        onCommit={(v) => patch({ longCommandSeconds: v ?? DEFAULT_LONG_COMMAND_SECONDS })}
-        disabled={disabled || when !== 'failed-or-long'}
-      />
+      <Group group="agentNotify">
+        <SwitchField
+          k="agentNotifyNeedsYou"
+          id="agent-notify-needs-you"
+          label="When an agent needs you"
+          hint="A question, a plan to approve, a permission prompt."
+          checked={agentNeedsYou}
+          onChange={(v) => patch({ agentNotifyNeedsYou: v })}
+          disabled={off}
+        />
+        <SwitchField
+          k="agentNotifyDone"
+          id="agent-notify-done"
+          label="When an agent is done"
+          hint="Its turn ended."
+          checked={agentDone}
+          onChange={(v) => patch({ agentNotifyDone: v })}
+          disabled={off}
+        />
+      </Group>
 
-      <SettingToggle
-        k="notifyOnlyWhenHidden"
-        id="terminal-notify-hidden-only"
-        label="Only for terminals out of sight"
-        hint="A command that ends in the pane you are watching stays silent. Turn this off to be told about every command, foreground included."
-      >
-        <Switch
+      <Group group="delivery">
+        <SettingField
+          k="notifyStyle"
+          label="Show it as"
+          hint={NOTIFY_STYLE_OPTIONS.find((o) => o.value === style)?.hint}
+          disabled={nothing}
+        >
+          <div className={cn(nothing && 'pointer-events-none opacity-50')}>
+            <Segmented<TerminalNotifyStyle>
+              value={style}
+              onChange={(v) => patch({ notifyStyle: v })}
+              options={NOTIFY_STYLE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              size="sm"
+            />
+          </div>
+        </SettingField>
+        <SwitchField
+          k={['notifyOnlyWhenHidden', 'agentNotifyOnlyWhenHidden']}
           id="terminal-notify-hidden-only"
-          checked={onlyWhenHidden}
-          onCheckedChange={(v) => patch({ notifyOnlyWhenHidden: v })}
-          disabled={disabled}
+          label="Only when out of sight"
+          hint={
+            hiddenMixed
+              ? `Currently on for ${commandsHidden ? 'commands' : 'agents'} only. Switching it sets both.`
+              : 'Nothing for the terminal or the agent you are looking at.'
+          }
+          checked={commandsHidden && agentsHidden}
+          onChange={(v) => patch({ notifyOnlyWhenHidden: v, agentNotifyOnlyWhenHidden: v })}
+          disabled={nothing}
         />
-      </SettingToggle>
+        <SettingField
+          k="agentNotifyPosition"
+          label="Agent toasts appear"
+          hint={`${TOAST_POSITION_OPTIONS.find((o) => o.value === position)?.label ?? ''} of the window. The other toasts stay bottom right.`}
+          disabled={agentsOff}
+        >
+          <ToastPositionPicker value={position} onChange={(v) => patch({ agentNotifyPosition: v })} disabled={agentsOff} />
+        </SettingField>
+      </Group>
 
-      <SettingField k="notifyStyle" label="Show it as" hint={styleHint}>
-        <div className={disabled ? 'pointer-events-none opacity-50' : undefined}>
-          <Segmented<TerminalNotifyStyle>
-            value={style}
-            onChange={(v) => patch({ notifyStyle: v })}
-            options={NOTIFY_STYLE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-            size="sm"
-          />
-        </div>
-      </SettingField>
+      <Group group="bell">
+        <SettingField
+          k="bell"
+          label="When a program rings the bell"
+          hint={
+            <>
+              {BELL_OPTIONS.find((o) => o.value === bell)?.hint} A <Code>BEL</Code> never becomes a toast, and one that
+              follows a command already being reported is dropped.
+            </>
+          }
+          disabled={off}
+        >
+          <div className={cn(off && 'pointer-events-none opacity-50')}>
+            <Segmented<TerminalBellStyle>
+              value={bell}
+              onChange={(v) => patch({ bell: v })}
+              options={BELL_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              size="sm"
+            />
+          </div>
+        </SettingField>
+      </Group>
+    </>
+  );
+}
 
-      <SettingField
-        k="notifyMutedCommands"
-        label="Never notify for these commands"
-        htmlFor="terminal-notify-muted"
-        hint={
-          <>
-            One per line or separated by commas. A name matches the program (<Code>claude</Code> covers{' '}
-            <Code>claude --resume</Code>), a longer entry matches the start of the command line (
-            <Code>npm run dev</Code>). Agents, editors and remote shells belong here: their exit code only says that you
-            closed them — under PowerShell a Ctrl+C even reads as <Code>exit 1</Code>.
-          </>
-        }
-      >
-        <Textarea
-          id="terminal-notify-muted"
-          value={mutedFocused ? mutedText : storedMuted}
-          rows={3}
-          spellCheck={false}
-          onFocus={() => {
-            setMutedText(storedMuted);
-            setMutedFocused(true);
-          }}
-          onBlur={() => setMutedFocused(false)}
-          onChange={(e) => {
-            setMutedText(e.target.value);
-            patch({ notifyMutedCommands: parseMutedCommands(e.target.value) });
-          }}
-          className="font-mono text-[12px]"
-          placeholder="claude, codex, vim, ssh…"
-          disabled={disabled}
-        />
-      </SettingField>
-      {/* The card's own "Reset the list" button is gone: the marker beside the
-          label now carries that gesture, and it is the same one every other
-          setting on the page offers (ticket #39). Typing the built-in list
-          back by hand still counts as untouched - see `notifyMutedCommands` in
-          `terminalDefaults.ts`. */}
-
-      <SettingField
-        k="bell"
-        label="When a program rings the bell"
-        hint={
-          <>
-            {bellHint} A <Code>BEL</Code> is a byte a program sends to ask for attention — the end of a long build, a
-            shell completion that found nothing. It is a different event from the rules above, which fire when a{' '}
-            <em>command</em> ends, so the two are kept on separate channels: the bell never becomes a toast or a desktop
-            notification, and a bell that arrives in the wake of a command already being reported is dropped, so one
-            event is never signalled twice.
-          </>
-        }
-      >
-        <div className={!terminal ? 'pointer-events-none opacity-50' : undefined}>
-          <Segmented<TerminalBellStyle>
-            value={bell}
-            onChange={(v) => patch({ bell: v })}
-            options={BELL_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-            size="sm"
-          />
-        </div>
-      </SettingField>
-
-      <p className="text-xs text-faint">
-        CortX cannot tell that a program is waiting for a password: shell integration reports command boundaries, not what
-        a running program does with its input. Reading the output for a prompt would fire on any text containing the
-        word, so it is deliberately not offered.
-      </p>
-    </Section>
+/**
+ * A miniature window with its six toast spots: the one you click is where the
+ * agent toasts appear. Tells at a glance what a list of six labels would not.
+ */
+function ToastPositionPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: ToastPosition;
+  onChange: (value: ToastPosition) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Where agent notifications appear"
+      className={cn(
+        'relative grid h-[72px] w-[120px] grid-cols-3 grid-rows-2 gap-1 rounded-sm border border-border-control bg-surface p-1.5 pt-3.5',
+        'before:absolute before:inset-x-0 before:top-0 before:h-2 before:rounded-t-sm before:border-b before:border-border before:bg-surface-muted',
+        disabled && 'pointer-events-none opacity-50'
+      )}
+    >
+      {TOAST_POSITION_OPTIONS.map((o) => {
+        const on = o.value === value;
+        const [row, col] = o.value.split('-') as ['top' | 'bottom', 'left' | 'center' | 'right'];
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            aria-label={o.label}
+            title={o.label}
+            disabled={disabled}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              'group flex rounded-xs transition-colors hover:bg-surface-muted',
+              row === 'top' ? 'items-start' : 'items-end',
+              col === 'left' ? 'justify-start' : col === 'center' ? 'justify-center' : 'justify-end'
+            )}
+          >
+            <span
+              className={cn(
+                'h-2 w-6 rounded-xs border transition-colors',
+                on ? 'border-primary bg-primary' : 'border-border-strong bg-surface-subtle group-hover:border-border-control'
+              )}
+            />
+          </button>
+        );
+      })}
+    </div>
   );
 }

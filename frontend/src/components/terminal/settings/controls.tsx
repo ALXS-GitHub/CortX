@@ -1,13 +1,9 @@
 /**
- * Small controls shared by the terminal settings sections. They write to the
- * store as soon as a value is valid, so the same card behaves identically in
- * the Settings page and in the Terminal window's panel.
- *
- * Ticket #39 added the other half: the **"changed" marker** and the gestures
- * that undo a change. A panel of seventy controls is unreadable when nothing
- * distinguishes the nine values you chose from the sixty serde chose for you,
- * and that - not the order of the cards - is what "I get lost in there" was
- * about. So:
+ * The terminal settings' controls: `SettingRow` (see
+ * `components/settings/SettingsPrimitives.tsx`) plus what ticket #39 added —
+ * the **"changed" marker** and the gestures that undo a change. They write to
+ * the store as soon as a value is valid, so a card behaves identically in the
+ * Settings screen and in the Terminal window's panel.
  *
  * - `SettingMark` - a dot beside the label of a setting that is away from its
  *   default. Never a colour on its own: it also carries the default in its
@@ -15,15 +11,16 @@
  * - `ResetSetting` - the per-setting gesture, right where the dot is. **No
  *   confirmation**: it changes one value, in front of you, and putting it back
  *   is the control you are already looking at.
- * - `ResetScope` - the per-group and per-card gesture, with the count of what
+ * - `ResetScope` - the per-group and per-page gesture, with the count of what
  *   is changed. This one *does* confirm, and the dialog **names every change**
- *   (`Padding 10 -> 8`), because twenty choices erased in one click with
- *   nothing on screen to say which is a trap. It then leaves an **Undo** in
- *   the toast - the dialog can be click-throughed, and the exact previous
- *   values are cheap to hold.
- * - `Group` - unchanged in look, plus that count and that gesture in its
- *   heading, so a group answers "is there anything of mine in here?" without
+ *   (`Padding 10 -> 8`), then leaves an **Undo** in the toast.
+ * - `Group` - one titled card of terminal settings (ticket #64: what used to
+ *   be a heading inside a big card), with that count and that gesture in its
+ *   heading, so a card answers "is there anything of mine in here?" without
  *   being read.
+ *
+ * A setting may also be several fields shown as one control (the command
+ * blocks select writes `blocks` and `blockLayout`): pass an array as `k`.
  *
  * All of it reads `terminalDefaults.ts`, which is where the defaults live and
  * where the comparison is unit-tested.
@@ -32,6 +29,8 @@ import { useState, type ReactNode } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -43,15 +42,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Field, ToggleField } from '@/components/settings/SettingsPrimitives';
+import { CONTROL_WIDTH, Section, SettingRow } from '@/components/settings/SettingsPrimitives';
 import { cn } from '@/lib/utils';
 import { useTerminalSettings } from './useTerminalSettings';
+import { TERMINAL_GROUPS } from './terminalPages';
 import {
   CARD_KEYS,
   GROUP_KEYS,
   TERMINAL_SETTINGS,
   formatSettingValue,
-  isSettingModified,
   modifiedSettings,
   resetPatch,
   restorePatch,
@@ -62,20 +61,28 @@ import {
   type TerminalSettingKey,
 } from './terminalDefaults';
 
+/** One setting, or the fields one control writes together. */
+export type SettingKeys = TerminalSettingKey | readonly TerminalSettingKey[];
+
+function asKeys(k: SettingKeys): readonly TerminalSettingKey[] {
+  return typeof k === 'string' ? [k] : k;
+}
+
 // ---------------------------------------------------------------------------
 // The marker
 // ---------------------------------------------------------------------------
 
 /** A dot beside the label of a setting that is not at its default. */
-export function SettingMark({ k }: { k: TerminalSettingKey }) {
+export function SettingMark({ k }: { k: SettingKeys }) {
   const { terminal } = useTerminalSettings();
-  if (!isSettingModified(terminal, k)) return null;
-  const fallback = formatSettingValue(settingDefault(k, terminal));
+  const changed = modifiedSettings(terminal, asKeys(k));
+  if (changed.length === 0) return null;
+  const fallback = changed.map((key) => formatSettingValue(settingDefault(key, terminal))).join(', ');
   return (
     <>
       <span
         aria-hidden
-        title={`Changed \u2014 the default is ${fallback}`}
+        title={`Changed — the default is ${fallback}`}
         className="inline-block size-1.5 shrink-0 rounded-full bg-primary"
       />
       <span className="sr-only">(changed from the default)</span>
@@ -84,7 +91,7 @@ export function SettingMark({ k }: { k: TerminalSettingKey }) {
 }
 
 /** Label text plus the marker, as one phrase for a `<Label>`. */
-export function MarkedLabel({ k, children }: { k: TerminalSettingKey; children: ReactNode }) {
+export function MarkedLabel({ k, children }: { k: SettingKeys; children: ReactNode }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       {children}
@@ -97,23 +104,23 @@ export function MarkedLabel({ k, children }: { k: TerminalSettingKey; children: 
  * Put one setting back, at once.
  *
  * Deliberately unconfirmed: this is one value, the control showing it is the
- * next thing along, and the change is visible the instant it lands. A
- * confirmation here would be noise on the gesture people will use most.
- * Nothing is rendered while the setting is at its default.
+ * next thing along, and the change is visible the instant it lands. Nothing is
+ * rendered while the setting is at its default.
  */
-export function ResetSetting({ k, className }: { k: TerminalSettingKey; className?: string }) {
+export function ResetSetting({ k, className }: { k: SettingKeys; className?: string }) {
   const { terminal, patch } = useTerminalSettings();
-  if (!isSettingModified(terminal, k)) return null;
-  const meta = TERMINAL_SETTINGS[k];
-  const fallback = formatSettingValue(settingDefault(k, terminal));
+  const keys = asKeys(k);
+  const changed = modifiedSettings(terminal, keys);
+  if (changed.length === 0) return null;
+  const fallback = changed.map((key) => formatSettingValue(settingDefault(key, terminal))).join(', ');
   return (
     <Button
       variant="ghost"
       size="icon-xs"
       className={cn('shrink-0 text-faint hover:text-foreground', className)}
       title={`Back to the default (${fallback})`}
-      aria-label={`Reset ${meta.label} to its default (${fallback})`}
-      onClick={() => patch(resetPatch(terminal, [k]))}
+      aria-label={`Reset ${TERMINAL_SETTINGS[keys[0]].label} to its default (${fallback})`}
+      onClick={() => patch(resetPatch(terminal, changed))}
     >
       <RotateCcw />
     </Button>
@@ -121,33 +128,17 @@ export function ResetSetting({ k, className }: { k: TerminalSettingKey; classNam
 }
 
 // ---------------------------------------------------------------------------
-// Putting a whole group - or a whole card - back
+// Putting a whole group - or a whole page - back
 // ---------------------------------------------------------------------------
 
 /**
  * The count of what is changed in a scope, and the gesture that undoes it.
  *
- * The count is the point of the whole ticket at the scale above one setting:
- * a heading that says "3 changed" is what lets a panel of seventy controls be
- * skimmed instead of read.
- *
  * **Reversibility.** This erases choices in bulk, so it asks first and the
- * question names every one of them, old value and new. That alone is not
- * enough - a dialog is a thing people click through - so the toast that
- * follows carries an exact undo, built from the values as they were a moment
- * before. Two safety nets rather than one, because the cost of the mistake
- * scales with the number of keys: twenty settings silently flattened is not
- * recoverable from memory.
+ * question names every one of them, old value and new. The toast that follows
+ * carries an exact undo, built from the values as they were a moment before.
  */
-function ResetScope({
-  keys,
-  title,
-  compact,
-}: {
-  keys: readonly TerminalSettingKey[];
-  title: string;
-  compact?: boolean;
-}) {
+function ResetScope({ keys, title }: { keys: readonly TerminalSettingKey[]; title: string }) {
   const { terminal, patch } = useTerminalSettings();
   const [open, setOpen] = useState(false);
   const changed = modifiedSettings(terminal, keys);
@@ -179,22 +170,22 @@ function ResetScope({
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reset {compact ? title.toLowerCase() : title}?</AlertDialogTitle>
+            <AlertDialogTitle>Reset {title}?</AlertDialogTitle>
             <AlertDialogDescription>
               {changed.length} setting{plural ? 's go' : ' goes'} back to the default. Nothing else in your settings is
               touched, and the toast that follows offers an undo.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <ul className="max-h-64 space-y-1 overflow-y-auto text-[13px]">
+          <ul className="max-h-64 space-y-1 overflow-y-auto text-sm">
             {changes.map((c) => (
               <li
                 key={c.key}
-                className="flex items-baseline justify-between gap-3 rounded-sm px-1 py-0.5 odd:bg-muted/40"
+                className="flex items-baseline justify-between gap-3 rounded-sm px-1 py-0.5 odd:bg-surface-muted"
               >
                 <span className="min-w-0 truncate">{c.label}</span>
                 <span className="shrink-0 font-mono text-[11px]">
                   <span className="text-muted-foreground line-through">{c.from}</span>
-                  <span className="text-faint"> {'\u2192'} </span>
+                  <span className="text-faint"> {'→'} </span>
                   <span className="text-foreground">{c.to}</span>
                 </span>
               </li>
@@ -210,105 +201,82 @@ function ResetScope({
   );
 }
 
-/** "3 changed" + reset, for a whole card. Goes in the card header's action slot. */
+/** "3 changed" + reset, for a whole page. Goes in the page heading. */
 export function ResetCard({ card, title }: { card: CardId; title: string }) {
   return <ResetScope keys={CARD_KEYS[card]} title={title} />;
 }
 
 /**
- * The same, scoped to one group, for a card that draws its own heading rather
- * than using `Group` - the shortcuts card, whose second half already has a
- * reset of its own for the keybindings.
+ * One titled card of terminal settings. The title and description come from
+ * `TERMINAL_GROUPS`, the same table the search reads, so a card is always
+ * found under the name it shows.
  */
-export function ResetGroup({ group, title }: { group: GroupId; title: string }) {
-  return <ResetScope keys={GROUP_KEYS[group]} title={title} />;
-}
-
-/**
- * A named group of settings inside one card.
- *
- * The integrated terminal card holds thirty-odd controls; without a heading
- * every couple of them the list reads as one undifferentiated stack and
- * nobody finds the block settings among the completion settings (ticket #26).
- * Purely a heading and its own vertical rhythm — no state, no collapsing.
- */
-export function Group({ title, group, children }: { title: string; group?: GroupId; children: ReactNode }) {
+export function Group({ group, action, children }: { group: GroupId; action?: ReactNode; children: ReactNode }) {
+  const meta = TERMINAL_GROUPS[group];
   return (
-    <section className="space-y-4 border-t border-border pt-5 first:border-t-0 first:pt-0">
-      <div className="flex min-h-6 items-center justify-between gap-3">
-        <h4 className="eyebrow">{title}</h4>
-        {group && <ResetScope keys={GROUP_KEYS[group]} title={title} compact />}
-      </div>
+    <Section
+      id={group}
+      title={meta.title}
+      description={meta.description}
+      action={
+        <>
+          {action}
+          <ResetScope keys={GROUP_KEYS[group]} title={meta.title} />
+        </>
+      }
+    >
       {children}
-    </section>
+    </Section>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Field wrappers that carry the marker
+// Rows that carry the marker
 // ---------------------------------------------------------------------------
 
-/**
- * `Field`, plus the marker on the label and the reset beside the control.
- *
- * The reset sits next to the control rather than inside the `<Label>` on
- * purpose: a `<button>` inside a label is interactive content the label would
- * also forward clicks through, and there is nowhere in a label to put it that
- * does not fight the text. Next to the control is where the eye already is,
- * and when the setting is at its default it renders nothing at all - so an
- * untouched panel looks exactly as it did before this ticket.
- */
-export function SettingField({
-  k,
-  label,
-  htmlFor,
-  hint,
-  className,
-  children,
-}: {
-  k: TerminalSettingKey;
+interface SettingRowProps {
+  k: SettingKeys;
   label: ReactNode;
   htmlFor?: string;
   hint?: ReactNode;
-  className?: string;
+  /** The control under the label, full width. */
+  wide?: boolean;
+  /** A sub-setting of the row above. */
+  indent?: boolean;
+  disabled?: boolean;
   children: ReactNode;
-}) {
+}
+
+/**
+ * `SettingRow`, plus the marker on the label and the reset beside the
+ * control. When the setting is at its default the reset renders nothing at
+ * all, so an untouched page looks exactly as it would without either.
+ */
+export function SettingField({ k, label, htmlFor, hint, wide, indent, disabled, children }: SettingRowProps) {
   return (
-    <Field label={<MarkedLabel k={k}>{label}</MarkedLabel>} htmlFor={htmlFor} hint={hint} className={className}>
-      <div className="flex items-start gap-2">
-        {children}
-        <ResetSetting k={k} />
-      </div>
-    </Field>
+    <SettingRow
+      label={<MarkedLabel k={k}>{label}</MarkedLabel>}
+      htmlFor={htmlFor}
+      hint={hint}
+      reset={<ResetSetting k={k} />}
+      wide={wide}
+      indent={indent}
+      disabled={disabled}
+    >
+      {children}
+    </SettingRow>
   );
 }
 
-/** `ToggleField`, plus the marker; the reset joins the switch on the right. */
-export function SettingToggle({
-  k,
-  id,
-  label,
-  hint,
-  children,
-}: {
-  k: TerminalSettingKey;
-  id?: string;
-  label: ReactNode;
-  hint?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <ToggleField id={id} label={<MarkedLabel k={k}>{label}</MarkedLabel>} hint={hint}>
-      <ResetSetting k={k} />
-      {children}
-    </ToggleField>
-  );
+/** The same row, for a switch (kept as its own name: it reads better at the call site). */
+export function SettingToggle(props: Omit<SettingRowProps, 'wide'>) {
+  return <SettingField {...props} />;
 }
 
 interface NumberFieldProps {
   id: string;
   /** Setting this field edits, for the "changed" marker and its reset. */
-  k?: TerminalSettingKey;
+  k: TerminalSettingKey;
   label: ReactNode;
   hint?: ReactNode;
   value: number | undefined;
@@ -316,7 +284,9 @@ interface NumberFieldProps {
   max: number;
   step?: number;
   disabled?: boolean;
-  className?: string;
+  indent?: boolean;
+  /** Unit after the box (`px`, `s`, `MB`). */
+  unit?: string;
   placeholder?: string;
   /** Empty input commits `undefined` instead of being rejected. */
   allowEmpty?: boolean;
@@ -338,7 +308,8 @@ export function NumberField({
   max,
   step,
   disabled,
-  className,
+  indent,
+  unit,
   placeholder,
   allowEmpty,
   onCommit,
@@ -365,34 +336,32 @@ export function NumberField({
   };
 
   return (
-    <Field label={k ? <MarkedLabel k={k}>{label}</MarkedLabel> : label} htmlFor={id} hint={hint}>
-      <div className="flex items-center gap-2">
-        <Input
-          id={id}
-          type="number"
-          min={min}
-          max={max}
-          step={step}
-          value={focused ? text : stored}
-          placeholder={placeholder}
-          disabled={disabled}
-          onFocus={() => {
-            setText(stored);
-            setFocused(true);
-          }}
-          onBlur={(e) => {
-            setFocused(false);
-            commit(e.target.value, true);
-          }}
-          onChange={(e) => {
-            setText(e.target.value);
-            commit(e.target.value, false);
-          }}
-          className={cn('w-28 font-mono text-[12px]', className)}
-        />
-        {k && <ResetSetting k={k} />}
-      </div>
-    </Field>
+    <SettingField k={k} label={label} htmlFor={id} hint={hint} indent={indent} disabled={disabled}>
+      <Input
+        id={id}
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={focused ? text : stored}
+        placeholder={placeholder}
+        disabled={disabled}
+        onFocus={() => {
+          setText(stored);
+          setFocused(true);
+        }}
+        onBlur={(e) => {
+          setFocused(false);
+          commit(e.target.value, true);
+        }}
+        onChange={(e) => {
+          setText(e.target.value);
+          commit(e.target.value, false);
+        }}
+        className="w-24 tabular-nums"
+      />
+      {unit && <span className="w-6 text-xs text-muted-foreground">{unit}</span>}
+    </SettingField>
   );
 }
 
@@ -406,50 +375,176 @@ export function TextField({
   onCommit,
   placeholder,
   disabled,
-  className,
+  wide,
   list,
   children,
 }: {
   id: string;
   /** Setting this field edits, for the "changed" marker and its reset. */
-  k?: TerminalSettingKey;
+  k: TerminalSettingKey;
   label: ReactNode;
   hint?: ReactNode;
   value: string;
   onCommit: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
-  className?: string;
+  /** Full width under the label (a command line, a font name). */
+  wide?: boolean;
   list?: string;
-  /** Extra nodes rendered after the input (a `<datalist>`, a swatch…). */
+  /** Extra nodes rendered after the input (a `<datalist>`, a warning…). */
   children?: ReactNode;
 }) {
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
 
   return (
-    <Field label={k ? <MarkedLabel k={k}>{label}</MarkedLabel> : label} htmlFor={id} hint={hint}>
-      <div className="flex items-center gap-2">
-        <Input
-          id={id}
-          value={focused ? text : value}
-          list={list}
-          placeholder={placeholder}
-          disabled={disabled}
-          onFocus={() => {
-            setText(value);
-            setFocused(true);
-          }}
-          onBlur={() => setFocused(false)}
-          onChange={(e) => {
-            setText(e.target.value);
-            onCommit(e.target.value);
-          }}
-          className={cn('min-w-0 flex-1 font-mono text-[12px]', className)}
-        />
-        {k && <ResetSetting k={k} />}
-      </div>
+    <SettingField k={k} label={label} htmlFor={id} hint={hint} wide={wide}>
+      <Input
+        id={id}
+        value={focused ? text : value}
+        list={list}
+        placeholder={placeholder}
+        disabled={disabled}
+        onFocus={() => {
+          setText(value);
+          setFocused(true);
+        }}
+        onBlur={() => setFocused(false)}
+        onChange={(e) => {
+          setText(e.target.value);
+          onCommit(e.target.value);
+        }}
+        className={wide ? 'w-full' : CONTROL_WIDTH}
+      />
       {children}
-    </Field>
+    </SettingField>
+  );
+}
+
+/** A range with its value in a number box beside it, for a look setting. */
+export function SliderField({
+  id,
+  k,
+  label,
+  hint,
+  value,
+  min,
+  max,
+  unit,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  k: TerminalSettingKey;
+  label: ReactNode;
+  hint?: ReactNode;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  disabled?: boolean;
+  onChange: (value: number) => void;
+}) {
+  const clamp = (n: number) => Math.min(max, Math.max(min, Math.round(n)));
+  return (
+    <SettingField k={k} label={label} htmlFor={id} hint={hint} disabled={disabled}>
+      <input
+        id={id}
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        className="h-1.5 w-28 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+      />
+      <Input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          if (Number.isFinite(n)) onChange(clamp(n));
+        }}
+        className="w-20 tabular-nums"
+        aria-label={typeof label === 'string' ? label : undefined}
+      />
+      <span className="w-6 text-xs text-muted-foreground">{unit}</span>
+    </SettingField>
+  );
+}
+
+/** A row with a switch: the most common setting there is. */
+export function SwitchField({
+  k,
+  id,
+  label,
+  hint,
+  checked,
+  onChange,
+  disabled,
+  indent,
+}: {
+  k: SettingKeys;
+  id: string;
+  label: ReactNode;
+  hint?: ReactNode;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  disabled?: boolean;
+  indent?: boolean;
+}) {
+  return (
+    <SettingField k={k} label={label} htmlFor={id} hint={hint} disabled={disabled} indent={indent}>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} disabled={disabled} />
+    </SettingField>
+  );
+}
+
+export interface ChoiceOption<T extends string> {
+  value: T;
+  label: ReactNode;
+}
+
+/** A row with a select, at the standard control width. */
+export function SelectField<T extends string>({
+  k,
+  id,
+  label,
+  hint,
+  value,
+  options,
+  onChange,
+  disabled,
+  indent,
+}: {
+  k: SettingKeys;
+  id: string;
+  label: ReactNode;
+  hint?: ReactNode;
+  value: T;
+  options: readonly ChoiceOption<T>[];
+  onChange: (value: T) => void;
+  disabled?: boolean;
+  indent?: boolean;
+}) {
+  return (
+    <SettingField k={k} label={label} htmlFor={id} hint={hint} disabled={disabled} indent={indent}>
+      <Select value={value} onValueChange={(v) => onChange(v as T)} disabled={disabled}>
+        <SelectTrigger id={id} className={CONTROL_WIDTH}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </SettingField>
   );
 }

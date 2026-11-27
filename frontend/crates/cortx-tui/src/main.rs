@@ -4318,8 +4318,7 @@ fn cmd_settings_get(storage: &Storage, json: bool) -> anyhow::Result<()> {
     println!("terminal.preset:       {:?}", settings.terminal.preset);
     println!("terminal.customPath:   {}", if settings.terminal.custom_path.is_empty() { "-" } else { &settings.terminal.custom_path });
     println!("appearance.theme:      {:?}", settings.appearance.theme);
-    println!("defaults.launchMethod: {:?}", settings.defaults.launch_method);
-    println!("toolboxBaseUrl:        {}", if settings.toolbox_base_url.is_empty() { "-" } else { &settings.toolbox_base_url });
+    println!("toolboxBaseUrl:        {}",if settings.toolbox_base_url.is_empty() { "-" } else { &settings.toolbox_base_url });
     println!("backupRepoPath:        {}", settings.backup_repo_path.as_deref().unwrap_or("-"));
     Ok(())
 }
@@ -4346,15 +4345,6 @@ fn cmd_settings_set(storage: &Storage, key: &str, value: &str) -> anyhow::Result
         }
         "backupRepoPath" | "backup_repo_path" => {
             settings.backup_repo_path = create_text(Some(value));
-        }
-        "defaults.launchMethod" | "defaults.launch_method" => {
-            let method = match value.to_lowercase().as_str() {
-                "clipboard" => cortx_core::models::LaunchMethod::Clipboard,
-                "external" => cortx_core::models::LaunchMethod::External,
-                "integrated" => cortx_core::models::LaunchMethod::Integrated,
-                _ => return Err(anyhow::anyhow!("Unknown launch method '{}'. Options: clipboard, external, integrated", value)),
-            };
-            settings.defaults.launch_method = method;
         }
         "appearance.theme" => {
             let theme = match value.to_lowercase().as_str() {

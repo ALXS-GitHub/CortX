@@ -356,7 +356,15 @@ impl Default for TerminalPreset {
     }
 }
 
+/// The terminal settings (`settings.terminal`).
+///
+/// `remote = "Self"` turns the derived (de)serializers into inherent
+/// functions, so the trait impls below can wrap them: deserializing runs
+/// [`TerminalConfig::migrate_legacy_fields`] right after the fields are read,
+/// wherever a settings file comes from (the app, the CLI, the MCP server, an
+/// import).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 #[serde(rename_all = "camelCase", default)]
 pub struct TerminalConfig {
     #[serde(deserialize_with = "lenient_enum")]
@@ -374,15 +382,17 @@ pub struct TerminalConfig {
     /// codes) when the shell runs inside a CortX terminal. Off = plain aliases.
     #[serde(default = "default_true")]
     pub shell_integration: bool,
-    /// Toast + OS notification when a command that ran at least
-    /// `long_command_seconds` finishes in a terminal you are not looking at.
-    #[serde(default = "default_true")]
-    pub notify_on_long_command: bool,
+    /// Legacy `notifyOnLongCommand`, superseded by `notify_when` (ticket #64).
+    /// Read from an older settings file only — `false` becomes
+    /// `notify_when: Never` in [`TerminalConfig::migrate_legacy_fields`] — and
+    /// never written back.
+    #[serde(default, rename = "notifyOnLongCommand", skip_serializing)]
+    legacy_notify_on_long_command: Option<bool>,
     #[serde(default = "default_long_command_seconds")]
     pub long_command_seconds: u32,
     /// Which finished commands are worth a notification (DEV-13 #5). None =
-    /// derived from `notify_on_long_command` for settings written before this
-    /// existed: `false` → `Never`, anything else → `Failed`.
+    /// `Failed`. A file written before this existed is migrated on load (see
+    /// [`TerminalConfig::migrate_legacy_fields`]).
     #[serde(default, deserialize_with = "lenient_opt_enum")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notify_when: Option<TerminalNotifyWhen>,
@@ -649,18 +659,17 @@ pub struct TerminalConfig {
     #[serde(default = "default_chrome_blur")]
     pub chrome_blur: u16,
     /// How much of the terminal theme the main window's dock takes (ticket
-    /// #38). `None` = fall back to [`TerminalConfig::dock_uses_terminal_theme`],
-    /// which is how a settings file written before this existed is read.
-    /// Only the frontend reads it (`lib/terminalTheme.rs` has no equivalent —
-    /// see `lib/terminalTheme.ts › dockThemeMode`).
+    /// #38). `None` = `App`. Only the frontend reads it (see
+    /// `lib/terminalTheme.ts › dockThemeMode`).
     #[serde(default, deserialize_with = "lenient_opt_enum")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dock_theme: Option<DockThemeMode>,
-    /// Superseded by [`TerminalConfig::dock_theme`]: `true` reads as
-    /// `Chrome`, `false` as `App`. Still written by the UI alongside the new
-    /// field so a downgrade keeps the dock looking the same.
-    #[serde(default)]
-    pub dock_uses_terminal_theme: bool,
+    /// Legacy `dockUsesTerminalTheme`, superseded by `dock_theme` (ticket
+    /// #64). Read from an older settings file only — `true` becomes
+    /// `dock_theme: Chrome` in [`TerminalConfig::migrate_legacy_fields`] — and
+    /// never written back.
+    #[serde(default, rename = "dockUsesTerminalTheme", skip_serializing)]
+    legacy_dock_uses_terminal_theme: Option<bool>,
     /// A mouse selection lands in the clipboard as soon as it ends (Warp /
     /// X11 style). While on, Ctrl+C keeps interrupting the running program
     /// instead of copying — the text is already copied.
@@ -1356,7 +1365,7 @@ impl Default for TerminalConfig {
             custom_args: Vec::new(),
             integrated_shell: None,
             shell_integration: true,
-            notify_on_long_command: true,
+            legacy_notify_on_long_command: None,
             long_command_seconds: default_long_command_seconds(),
             notify_when: None,
             notify_style: None,
@@ -1425,7 +1434,7 @@ impl Default for TerminalConfig {
             chrome_opacity: default_chrome_opacity(),
             chrome_blur: default_chrome_blur(),
             dock_theme: None,
-            dock_uses_terminal_theme: false,
+            legacy_dock_uses_terminal_theme: None,
             copy_on_select: true,
             shift_enter: ShiftEnterKey::default(),
             smooth_scroll_duration: default_smooth_scroll_duration(),
@@ -1463,6 +1472,41 @@ impl Default for TerminalConfig {
     }
 }
 
+impl TerminalConfig {
+    /// Fold the two legacy booleans into the settings that replaced them
+    /// (ticket #64), then forget them: they are never serialized, so the next
+    /// save drops them from the file.
+    ///
+    /// - `notifyOnLongCommand: false` with no `notifyWhen` → `Never`.
+    /// - `dockUsesTerminalTheme: true` with no `dockTheme` → `Chrome`.
+    ///
+    /// The newer field always wins when both are present.
+    fn migrate_legacy_fields(&mut self) {
+        if self.legacy_notify_on_long_command.take() == Some(false) && self.notify_when.is_none() {
+            self.notify_when = Some(TerminalNotifyWhen::Never);
+        }
+        if self.legacy_dock_uses_terminal_theme.take() == Some(true) && self.dock_theme.is_none() {
+            self.dock_theme = Some(DockThemeMode::Chrome);
+        }
+    }
+}
+
+impl Serialize for TerminalConfig {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // The inherent fn generated by `#[serde(remote = "Self")]`.
+        TerminalConfig::serialize(self, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TerminalConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // The inherent fn generated by `#[serde(remote = "Self")]`.
+        let mut config = TerminalConfig::deserialize(deserializer)?;
+        config.migrate_legacy_fields();
+        Ok(config)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppearanceConfig {
@@ -1487,36 +1531,17 @@ pub enum Theme {
     System,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DefaultsConfig {
-    #[serde(deserialize_with = "lenient_enum")]
-    pub launch_method: LaunchMethod,
-}
-
-impl Default for DefaultsConfig {
-    fn default() -> Self {
-        Self {
-            launch_method: LaunchMethod::Integrated,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum LaunchMethod {
-    Clipboard,
-    External,
-    #[default]
-    Integrated,
-}
-
+/// The app settings (`settings.json`).
+///
+/// No `deny_unknown_fields`: a key this build no longer knows is ignored. That
+/// is what lets a file written before ticket #64 removed `defaults`
+/// (`launchMethod`, never read by anything) and `scriptsConfig.autoScanOnStartup`
+/// still load; the next save drops them.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub terminal: TerminalConfig,
     pub appearance: AppearanceConfig,
-    pub defaults: DefaultsConfig,
     /// Global scripts configuration
     #[serde(default)]
     pub scripts_config: ScriptsConfig,
@@ -1929,8 +1954,6 @@ pub struct ScriptsConfig {
     pub scan_extensions: Vec<String>,
     #[serde(default = "default_ignored_patterns")]
     pub ignored_patterns: Vec<String>,
-    #[serde(default)]
-    pub auto_scan_on_startup: bool,
     #[serde(default = "default_command_templates")]
     pub command_templates: HashMap<String, String>,
 }
@@ -1999,7 +2022,6 @@ impl Default for ScriptsConfig {
             main_folder: None,
             scan_extensions: default_scan_extensions(),
             ignored_patterns: default_ignored_patterns(),
-            auto_scan_on_startup: false,
             command_templates: default_command_templates(),
         }
     }
@@ -2537,12 +2559,53 @@ mod tests {
             "appearance": { "theme": "midnight" },
             "defaults": { "launchMethod": "teleport" }
         }"#;
+        // `defaults` is a section ticket #64 removed: still in the JSON above,
+        // so this also proves an older file loads.
         let settings: AppSettings = serde_json::from_str(json).expect("unknown values must not fail the parse");
         assert_eq!(settings.terminal.preset, TerminalPreset::default());
         assert_eq!(settings.terminal.renderer, TerminalRenderer::default());
         assert_eq!(settings.terminal.cursor_style, CursorStyle::default());
         assert!(matches!(settings.appearance.theme, Theme::System));
-        assert!(matches!(settings.defaults.launch_method, LaunchMethod::Integrated));
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(!json.contains("launchMethod"), "{json}");
+    }
+
+    /// Ticket #64: `notifyOnLongCommand` and `dockUsesTerminalTheme` are gone,
+    /// and a file that still has them reads as it always did.
+    #[test]
+    fn the_legacy_terminal_booleans_are_migrated_on_load() {
+        let old: TerminalConfig =
+            serde_json::from_str(r#"{ "notifyOnLongCommand": false, "dockUsesTerminalTheme": true }"#).unwrap();
+        assert_eq!(old.notify_when, Some(TerminalNotifyWhen::Never));
+        assert_eq!(old.dock_theme, Some(DockThemeMode::Chrome));
+        let json = serde_json::to_string(&old).unwrap();
+        assert!(!json.contains("notifyOnLongCommand"), "{json}");
+        assert!(!json.contains("dockUsesTerminalTheme"), "{json}");
+        // And the migrated values survive the round trip.
+        let again: TerminalConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(again.notify_when, Some(TerminalNotifyWhen::Never));
+        assert_eq!(again.dock_theme, Some(DockThemeMode::Chrome));
+
+        // The default values of the booleans meant "nothing chosen".
+        let plain: TerminalConfig =
+            serde_json::from_str(r#"{ "notifyOnLongCommand": true, "dockUsesTerminalTheme": false }"#).unwrap();
+        assert_eq!(plain.notify_when, None);
+        assert_eq!(plain.dock_theme, None);
+
+        // The newer field wins when a file has both.
+        let both: TerminalConfig = serde_json::from_str(
+            r#"{ "notifyOnLongCommand": false, "notifyWhen": "all", "dockUsesTerminalTheme": true, "dockTheme": "canvas" }"#,
+        )
+        .unwrap();
+        assert_eq!(both.notify_when, Some(TerminalNotifyWhen::All));
+        assert_eq!(both.dock_theme, Some(DockThemeMode::Canvas));
+
+        // A settings file goes through the same path.
+        let settings: AppSettings = serde_json::from_str(
+            r#"{ "terminal": { "notifyOnLongCommand": false }, "appearance": { "theme": "dark" } }"#,
+        )
+        .unwrap();
+        assert_eq!(settings.terminal.notify_when, Some(TerminalNotifyWhen::Never));
     }
 
     /// Ticket #39 / #41. There is no snapshot of `TerminalConfig::default()`
@@ -2603,18 +2666,14 @@ mod tests {
         assert_eq!(TerminalConfig::default().preset, TerminalPreset::CortxTerminal);
     }
 
-    /// Ticket #38/#39: the dock's three modes. A settings file written before
-    /// the enum existed carries only the boolean, and the frontend reads
-    /// `true` as `chrome` (`lib/terminalTheme.ts › dockThemeMode`), so the
-    /// field must survive a round trip and stay absent when it was never set.
+    /// Ticket #38/#39: the dock's three modes, optional — absent when never
+    /// set. (The boolean that came before is migrated on load, see above.)
     #[test]
-    fn dock_theme_is_optional_and_falls_back_to_the_old_boolean() {
-        let legacy: TerminalConfig =
-            serde_json::from_str(r#"{ "dockUsesTerminalTheme": true }"#).unwrap();
-        assert_eq!(legacy.dock_theme, None);
-        assert!(legacy.dock_uses_terminal_theme);
+    fn dock_theme_is_optional() {
+        let unset: TerminalConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(unset.dock_theme, None);
         // Absent, not `null`: the frontend tells "never set" from "set to app".
-        let json = serde_json::to_string(&legacy).unwrap();
+        let json = serde_json::to_string(&unset).unwrap();
         assert!(!json.contains("dockTheme"), "{json}");
 
         let modern: TerminalConfig = serde_json::from_str(r#"{ "dockTheme": "canvas" }"#).unwrap();
@@ -2636,6 +2695,5 @@ mod tests {
         assert_eq!(settings.terminal.preset, TerminalPreset::Warp);
         assert_eq!(settings.terminal.renderer, TerminalRenderer::Webgl);
         assert!(matches!(settings.appearance.theme, Theme::Dark));
-        assert!(matches!(settings.defaults.launch_method, LaunchMethod::External));
     }
 }

@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Keyboard, MousePointerClick, RotateCcw, TriangleAlert } from 'lucide-react';
-import { toast } from 'sonner';
+/**
+ * Terminal › Shortcuts: the Terminal window's keyboard shortcuts (Warp-like
+ * defaults, grouped by category). Copy on select and Shift+Enter, which used
+ * to sit on a card of their own above this one, moved to Keyboard & mouse
+ * (ticket #64): they are about what keys do inside a terminal, not about the
+ * window's shortcuts.
+ */
+import { useEffect, useMemo, useState } from 'react';
+import { RotateCcw, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { DEFAULT_SHIFT_ENTER } from '@/lib/terminalKeys';
-import { useAppStore } from '@/stores/appStore';
-import type { ShiftEnterKey, TerminalConfig } from '@/types';
+import { Section, SectionSubheading } from '@/components/settings/SettingsPrimitives';
 import {
   IS_MAC,
   KEYBINDING_ACTIONS,
@@ -23,114 +23,13 @@ import {
   type KeybindingOverrides,
 } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
-import { MarkedLabel, ResetGroup, ResetSetting } from './controls';
-import type { TerminalSettingKey } from './terminalDefaults';
+import { TERMINAL_GROUPS } from './terminalPages';
 
 interface ShortcutsSectionProps {
   /** The user's overrides (`settings.terminal.keybindings`); undefined = all defaults. */
   value: KeybindingOverrides | undefined;
-  /** Reports the next overrides record; the page holds the state and saves it. */
+  /** Reports the next overrides record. */
   onChange: (next: KeybindingOverrides) => void;
-}
-
-/** One labelled row of the "Keys and selection" card. */
-function BehaviourRow({
-  k,
-  id,
-  label,
-  hint,
-  children,
-}: {
-  k: TerminalSettingKey;
-  id: string;
-  label: ReactNode;
-  hint?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0">
-        <Label htmlFor={id}>
-          <MarkedLabel k={k}>{label}</MarkedLabel>
-        </Label>
-        {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <ResetSetting k={k} />
-        {children}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Settings card for what the keys and the mouse do inside a terminal, as
- * opposed to the window shortcuts below it. These three are saved as soon as
- * they change (the Settings page's Save button only owns the fields it
- * renders itself).
- */
-function KeysAndSelectionCard() {
-  const settings = useAppStore((s) => s.settings);
-  const updateSettings = useAppStore((s) => s.updateSettings);
-  const terminal = settings?.terminal;
-
-  const patch = (next: Partial<TerminalConfig>) => {
-    if (!settings) return;
-    updateSettings({ ...settings, terminal: { ...settings.terminal, ...next } }).catch((err) =>
-      toast.error('Could not save the terminal settings', { description: String(err) })
-    );
-  };
-
-  const copyOnSelect = terminal?.copyOnSelect ?? true;
-  const shiftEnter = terminal?.shiftEnter ?? DEFAULT_SHIFT_ENTER;
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <MousePointerClick className="size-4 text-faint" />
-          Keys and selection
-        </CardTitle>
-        <CardDescription>How the keyboard and the mouse behave inside a terminal. Saved as soon as you change them.</CardDescription>
-        <CardAction>
-          <ResetGroup group="keys" title="Keys and selection" />
-        </CardAction>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <BehaviourRow
-          k="copyOnSelect"
-          id="terminal-copy-on-select"
-          label="Copy on select"
-          hint={
-            <>
-              Selecting with the mouse copies straight away, like Warp. Ctrl+C then keeps interrupting the running program instead of
-              copying — Ctrl+Shift+C copies whenever you need it.
-            </>
-          }
-        >
-          <Switch id="terminal-copy-on-select" checked={copyOnSelect} onCheckedChange={(v) => patch({ copyOnSelect: v })} disabled={!settings} />
-        </BehaviourRow>
-
-        <BehaviourRow
-          k="shiftEnter"
-          id="terminal-shift-enter"
-          label="Shift+Enter sends"
-          hint="A plain terminal sends the same key for Enter and Shift+Enter. ESC+Enter is what Claude Code's /terminal-setup binds, and what zsh and fish insert a new line for."
-        >
-          <Select value={shiftEnter} onValueChange={(v: ShiftEnterKey) => patch({ shiftEnter: v })} disabled={!settings}>
-            <SelectTrigger id="terminal-shift-enter" className="w-56">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="escape-enter">A new line (ESC + Enter)</SelectItem>
-              <SelectItem value="enter">The same thing as Enter</SelectItem>
-            </SelectContent>
-          </Select>
-        </BehaviourRow>
-
-      </CardContent>
-    </Card>
-  );
 }
 
 /**
@@ -158,53 +57,56 @@ function ShortcutRow({
   const combos = effectiveCombos(id, overrides);
   const overridden = isOverridden(id, overrides);
   return (
-    <div className={cn('group/row flex flex-col gap-1 rounded-sm px-2 py-1.5 transition-colors', recording ? 'bg-accent' : 'hover:bg-accent/50')}>
+    <div className={cn('flex flex-col gap-1 px-4 py-2', recording && 'bg-surface-muted')}>
       <div className="flex items-center gap-3">
-        <span className="min-w-0 flex-1 truncate text-[13px]">{action.label}</span>
+        <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm">
+          {action.label}
+          {overridden && (
+            <>
+              <span aria-hidden title="Changed from the default" className="inline-block size-1.5 shrink-0 rounded-full bg-primary" />
+              <span className="sr-only">(changed from the default)</span>
+            </>
+          )}
+        </span>
         <div className="flex min-w-0 shrink items-center gap-1">
           {recording ? (
-            <span className="animate-pulse text-xs text-primary">Press the new shortcut… (Esc cancels, Backspace clears)</span>
+            <span className="animate-pulse text-xs text-accent-text">Press the new shortcut… (Esc cancels, Backspace clears)</span>
           ) : combos.length === 0 ? (
-            <span className="text-xs text-faint">none</span>
+            <span className="text-xs text-faint">None</span>
           ) : (
             combos.map((c) => (
-              <kbd key={c} className={cn('kbd', overridden && 'border-accent-border text-foreground')}>
+              <kbd key={c} className="kbd">
                 {formatCombo(c)}
               </kbd>
             ))
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button variant="outline" size="xs" onClick={onRecord} disabled={recording} className="min-w-16">
-            {recording ? 'Listening' : 'Change'}
-          </Button>
           <Button
             variant="ghost"
             size="icon-xs"
             onClick={onReset}
-            title="Reset to default"
-            aria-label="Reset to default"
-            className={cn('transition-opacity', overridden ? 'opacity-100' : 'pointer-events-none opacity-0')}
+            title="Back to the default"
+            aria-label={`Reset ${action.label} to its default`}
+            className={cn('text-faint hover:text-foreground', !overridden && 'pointer-events-none invisible')}
           >
             <RotateCcw />
+          </Button>
+          <Button variant="outline" size="xs" onClick={onRecord} disabled={recording} className="min-w-16">
+            {recording ? 'Listening' : 'Change'}
           </Button>
         </div>
       </div>
       {conflictsWith.length > 0 && (
         <p className="flex items-center gap-1.5 text-xs text-st-progress">
           <TriangleAlert className="size-3.5 shrink-0" />
-          Also bound to {conflictsWith.join(', ')} — only the first one in this list runs.
+          Also bound to {conflictsWith.join(', ')}. Only the first one in this list runs.
         </p>
       )}
     </div>
   );
 }
 
-/**
- * Settings card for the Terminal window shortcuts (Warp-like defaults,
- * grouped by category). Standalone: the Settings page holds the overrides
- * record and saves it under `terminal.keybindings`.
- */
 export function ShortcutsSection({ value, onChange }: ShortcutsSectionProps) {
   const overrides = useMemo(() => value ?? {}, [value]);
   const [recording, setRecording] = useState<KeybindingActionId | null>(null);
@@ -266,46 +168,34 @@ export function ShortcutsSection({ value, onChange }: ShortcutsSectionProps) {
   };
 
   return (
-    <>
-    <KeysAndSelectionCard />
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Keyboard className="size-4 text-faint" />
-          Terminal shortcuts
-        </CardTitle>
-        <CardDescription>
-          Keyboard shortcuts of the Terminal window. Click Change, then press the keys you want
-          {IS_MAC ? ' (⌘ stands in for Ctrl)' : ''}. They apply the next time you press them.
-        </CardDescription>
-        <CardAction>
-          <Button variant="ghost" size="sm" onClick={() => onChange({})} disabled={overriddenCount === 0}>
-            <RotateCcw />
-            Reset all
-          </Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        {KEYBINDING_CATEGORIES.map((category) => (
-          <div key={category}>
-            <p className="eyebrow mb-1 px-2">{category}</p>
-            <div className="flex flex-col">
-              {KEYBINDING_ACTIONS.filter((a) => a.category === category).map((a) => (
-                <ShortcutRow
-                  key={a.id}
-                  id={a.id}
-                  overrides={overrides}
-                  recording={recording === a.id}
-                  conflictsWith={conflictLabels.get(a.id) ?? []}
-                  onRecord={() => setRecording(a.id)}
-                  onReset={() => reset(a.id)}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
-    </>
+    <Section
+      id="keybindings"
+      title={TERMINAL_GROUPS.keybindings.title}
+      description={`Click Change, then press the keys you want${IS_MAC ? ' (⌘ stands in for Ctrl)' : ''}. They apply the next time you press them.`}
+      action={
+        <Button variant="ghost" size="xs" onClick={() => onChange({})} disabled={overriddenCount === 0}>
+          <RotateCcw />
+          {overriddenCount > 0 ? `Reset all (${overriddenCount})` : 'Reset all'}
+        </Button>
+      }
+      className="divide-y-0"
+    >
+      {KEYBINDING_CATEGORIES.map((category) => (
+        <div key={category} className="border-t border-border pb-1 first:border-t-0">
+          <SectionSubheading>{category}</SectionSubheading>
+          {KEYBINDING_ACTIONS.filter((a) => a.category === category).map((a) => (
+            <ShortcutRow
+              key={a.id}
+              id={a.id}
+              overrides={overrides}
+              recording={recording === a.id}
+              conflictsWith={conflictLabels.get(a.id) ?? []}
+              onRecord={() => setRecording(a.id)}
+              onReset={() => reset(a.id)}
+            />
+          ))}
+        </div>
+      ))}
+    </Section>
   );
 }

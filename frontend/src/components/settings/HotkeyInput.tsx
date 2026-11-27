@@ -97,21 +97,21 @@ export function HotkeyInput({ value, onChange, defaultCombo }: HotkeyInputProps)
         onClick={() => setCapturing(true)}
         onBlur={() => setCapturing(false)}
         className={cn(
-          'flex min-h-9 flex-1 cursor-pointer items-center gap-1.5 rounded-sm border border-input bg-[var(--bg-input)] px-3 py-2 text-sm shadow-soft outline-none transition-[border-color,box-shadow]',
+          'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm border border-border-control bg-surface px-3 text-sm outline-none transition-colors',
           capturing
-            ? 'border-accent-border ring-2 ring-ring/40'
-            : 'hover:border-border-strong focus-visible:border-accent-border focus-visible:ring-2 focus-visible:ring-ring/40'
+            ? 'ring-2 ring-ring'
+            : 'focus-visible:ring-2 focus-visible:ring-ring'
         )}
       >
         {capturing ? (
-          <span className="text-xs italic text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             Press a key combo… (Esc to cancel, Backspace to clear)
           </span>
         ) : isEmpty ? (
-          <span className="text-xs italic text-faint">Disabled — click to set a shortcut</span>
+          <span className="text-xs text-faint">Disabled. Click to set a shortcut</span>
         ) : (
           tokens.map((t, i) => (
-            <kbd key={i} className="kbd h-6 min-w-6 px-2 text-[11px] text-foreground">
+            <kbd key={i} className="kbd">
               {t}
             </kbd>
           ))
@@ -132,8 +132,8 @@ export function HotkeyInput({ value, onChange, defaultCombo }: HotkeyInputProps)
         size="icon"
         type="button"
         onClick={() => onChange('')}
-        title="Clear / disable"
-        aria-label="Clear / disable"
+        title="Clear (disables the hotkey)"
+        aria-label="Clear the hotkey"
         disabled={isEmpty}
       >
         <X />

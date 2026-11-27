@@ -275,48 +275,103 @@ export const DEFAULT_SCROLLBACK_LINES = 25000;
 export const DEFAULT_INPUT_POSITION = 'bottom';
 
 // ---------------------------------------------------------------------------
-// The groups, in the order the cards draw them
+// The groups, and the settings page each one sits on
 // ---------------------------------------------------------------------------
 
-/** A settings card. The panel mounts them in this order. */
-export type CardId = 'integrated' | 'appearance' | 'notifications' | 'agents' | 'shortcuts' | 'external';
-
-/** A `Group` heading inside a card (or the card itself, when it has one group). */
-export type GroupId =
+/**
+ * A settings page holding terminal settings (ticket #64). The name is kept
+ * from the time each of these was one card: the page header carries the
+ * "N changed" count and reset a card header used to.
+ */
+export type CardId =
   | 'shell'
   | 'text'
+  | 'theme'
   | 'blocks'
-  | 'completion'
+  | 'input'
   | 'keyboard'
-  | 'scrolling'
-  | 'links'
   | 'tabs'
-  | 'sessions'
-  | 'accessibility'
-  | 'appearance'
+  | 'history'
+  | 'shortcuts'
+  | 'external'
   | 'notifications'
-  | 'agents'
-  | 'keys'
-  | 'keybindings'
-  | 'external';
+  | 'agents';
 
-const GROUP_CARD: Record<GroupId, CardId> = {
-  shell: 'integrated',
-  text: 'integrated',
-  blocks: 'integrated',
-  completion: 'integrated',
-  keyboard: 'integrated',
-  scrolling: 'integrated',
-  links: 'integrated',
-  tabs: 'integrated',
-  sessions: 'integrated',
-  accessibility: 'integrated',
-  appearance: 'appearance',
-  notifications: 'notifications',
-  agents: 'agents',
-  keys: 'shortcuts',
+/** A `Group`: one titled card on a page, with its own "N changed" reset. */
+export type GroupId =
+  // Terminal › Shell & sessions
+  | 'shell'
+  | 'sessions'
+  | 'targets'
+  // Terminal › Text
+  | 'text'
+  | 'accessibility'
+  // Terminal › Theme & window
+  | 'theme'
+  | 'cursor'
+  | 'window'
+  | 'wallpaper'
+  // Terminal › Blocks
+  | 'blocks'
+  // Terminal › Input & completion
+  | 'completion'
+  | 'inputLine'
+  // Terminal › Keyboard & mouse
+  | 'keys'
+  | 'mouse'
+  | 'programs'
+  // Terminal › Tabs
+  | 'tabs'
+  | 'tabContents'
+  // Terminal › History
+  | 'scrollback'
+  | 'history'
+  // Terminal › Shortcuts, External terminal
+  | 'keybindings'
+  | 'external'
+  // Notifications
+  | 'notifications'
+  | 'agentNotify'
+  | 'delivery'
+  | 'bell'
+  // Agents
+  | 'agentNew'
+  | 'agentView'
+  | 'agentPrompt'
+  | 'grid'
+  | 'agentColors';
+
+export const GROUP_CARD: Record<GroupId, CardId> = {
+  shell: 'shell',
+  sessions: 'shell',
+  targets: 'shell',
+  text: 'text',
+  accessibility: 'text',
+  theme: 'theme',
+  cursor: 'theme',
+  window: 'theme',
+  wallpaper: 'theme',
+  blocks: 'blocks',
+  completion: 'input',
+  inputLine: 'input',
+  keys: 'keyboard',
+  mouse: 'keyboard',
+  programs: 'keyboard',
+  tabs: 'tabs',
+  tabContents: 'tabs',
+  scrollback: 'history',
+  history: 'history',
   keybindings: 'shortcuts',
   external: 'external',
+  notifications: 'notifications',
+  agentNotify: 'notifications',
+  delivery: 'notifications',
+  bell: 'notifications',
+  agentNew: 'agents',
+  agentView: 'agents',
+  agentPrompt: 'agents',
+  grid: 'agents',
+  agentColors: 'agents',
 };
 
 // ---------------------------------------------------------------------------
@@ -349,7 +404,7 @@ interface SettingMeta {
 function tabDisplayMeta(sub: keyof TerminalTabDisplay, label: string): SettingMeta {
   return {
     label,
-    group: 'tabs',
+    group: 'tabContents',
     fallback: FROM_RUST,
     read: (cfg: TerminalConfigLike) => cfg?.tabDisplay?.[sub] as SettingValue,
     reset: (cfg: TerminalConfigLike, value: SettingValue) => ({ tabDisplay: { ...cfg?.tabDisplay, [sub]: value } }),
@@ -357,31 +412,31 @@ function tabDisplayMeta(sub: keyof TerminalTabDisplay, label: string): SettingMe
 }
 
 /**
- * Every setting the panel shows, with what it is worth untouched.
+ * Every setting the panel shows, with what it is worth untouched, in the
+ * order the settings pages draw them.
  *
- * Two fields of `TerminalConfig` are deliberately **not** here, and the
- * coverage test knows both by name:
- *
- * - `notifyOnLongCommand` — superseded by `notifyWhen`, kept only so a file
- *   written before `notifyWhen` existed still reads right. The UI writes it
- *   in mirror; marking it on its own would mark the same choice twice.
- * - `dockUsesTerminalTheme` — same story for `dockTheme`. Its value *is*
- *   read, but through `dockTheme`'s own fallback below.
+ * One field of `TerminalConfig` is deliberately **not** here, and the coverage
+ * test knows it by name: `windowZoom`, the Terminal window's Ctrl+wheel zoom.
+ * It is state the window keeps for itself, not a choice made in the settings
+ * (ticket #64 took its control off the panel), so it must not count as
+ * "changed" nor be put back by a group reset.
  */
 export const TERMINAL_SETTINGS = {
-  // --- External terminal ---------------------------------------------------
-  preset: { label: 'Terminal application', group: 'external', fallback: FROM_RUST },
-  customPath: { label: 'Custom terminal path', group: 'external', fallback: FROM_RUST },
-  customArgs: { label: 'Custom arguments', group: 'external', fallback: FROM_RUST },
-
-  // --- Shell ---------------------------------------------------------------
+  // === Terminal › Shell & sessions ========================================
   integratedShell: { label: 'Shell', group: 'shell', fallback: undefined },
   shellIntegration: { label: 'Shell integration', group: 'shell', fallback: FROM_RUST },
 
-  // --- Text ----------------------------------------------------------------
+  confirmCloseRunning: { label: 'Ask before closing a busy terminal', group: 'sessions', fallback: FROM_RUST },
+  restoreSessions: { label: 'Restore sessions on start', group: 'sessions', fallback: FROM_RUST },
+  restoreScrollback: { label: 'Restore scrollback', group: 'sessions', fallback: FROM_RUST },
+  restoreScrollbackLines: { label: 'Lines replayed on start', group: 'sessions', fallback: FROM_RUST },
+
+  openProcessesIn: { label: 'Services and scripts open in', group: 'targets', fallback: FROM_RUST },
+  openDevSessionsIn: { label: 'Dev sessions open in', group: 'targets', fallback: FROM_RUST },
+
+  // === Terminal › Text =====================================================
   fontFamily: { label: 'Font', group: 'text', fallback: undefined },
   fontSize: { label: 'Font size', group: 'text', fallback: DEFAULT_FONT_SIZE },
-  windowZoom: { label: 'Terminal window zoom', group: 'text', fallback: FROM_RUST },
   // The one default that is not a constant: the browser renderer needs a line
   // box of exactly 1 or powerline separators show a hairline between rows.
   // Mirrors `defaultLineHeight` in `lib/terminalSessions.ts`.
@@ -393,23 +448,47 @@ export const TERMINAL_SETTINGS = {
   fontWeight: { label: 'Text weight', group: 'text', fallback: 400 },
   fontWeightBold: { label: 'Bold weight', group: 'text', fallback: 700 },
   letterSpacing: { label: 'Letter spacing', group: 'text', fallback: undefined },
-  selectionColor: { label: 'Selection colour', group: 'text', fallback: undefined },
-  renderer: { label: 'Renderer', group: 'text', fallback: FROM_RUST },
   ligatures: { label: 'Font ligatures', group: 'text', fallback: FROM_RUST },
+  renderer: { label: 'Renderer', group: 'text', fallback: FROM_RUST },
 
-  // --- Command blocks ------------------------------------------------------
+  minimumContrastRatio: { label: 'Minimum text contrast', group: 'accessibility', fallback: FROM_RUST },
+  screenReaderMode: { label: 'Screen reader support', group: 'accessibility', fallback: FROM_RUST },
+
+  // === Terminal › Theme & window ===========================================
+  themeDark: { label: 'Theme for dark mode', group: 'theme', fallback: 'dark-modern' },
+  themeLight: { label: 'Theme for light mode', group: 'theme', fallback: 'light-modern' },
+  themeFollowsApp: { label: "Follow the app's light / dark mode", group: 'theme', fallback: FROM_RUST },
+  dockTheme: { label: 'Theme in the dock', group: 'theme', fallback: 'app' },
+
+  cursorStyle: { label: 'Cursor', group: 'cursor', fallback: FROM_RUST },
+  cursorBlink: { label: 'Cursor blink', group: 'cursor', fallback: FROM_RUST },
+  cursorInactiveStyle: { label: 'Cursor in an unfocused pane', group: 'cursor', fallback: FROM_RUST },
+  padding: { label: 'Padding', group: 'cursor', fallback: FROM_RUST },
+  selectionColor: { label: 'Selection colour', group: 'cursor', fallback: undefined },
+
+  windowOpacity: { label: 'Window opacity', group: 'window', fallback: FROM_RUST },
+  windowEffect: { label: 'Backdrop effect', group: 'window', fallback: FROM_RUST },
+  chromeOpacity: { label: 'Title bar and rail opacity', group: 'window', fallback: FROM_RUST },
+  chromeBlur: { label: 'Title bar and rail blur', group: 'window', fallback: FROM_RUST },
+
+  wallpaperOpacity: { label: 'Wallpaper opacity', group: 'wallpaper', fallback: undefined },
+  wallpaperBlur: { label: 'Wallpaper blur', group: 'wallpaper', fallback: undefined },
+  wallpaperDim: { label: 'Wallpaper dimming', group: 'wallpaper', fallback: FROM_RUST },
+  wallpaperFit: { label: 'Wallpaper fit', group: 'wallpaper', fallback: undefined },
+
+  // === Terminal › Blocks ===================================================
   blocks: { label: 'Command blocks', group: 'blocks', fallback: FROM_RUST },
-  blockSpacing: { label: 'Block spacing', group: 'blocks', fallback: FROM_RUST },
   blockLayout: { label: 'Block layout', group: 'blocks', fallback: FROM_RUST },
+  blockSpacing: { label: 'Block spacing', group: 'blocks', fallback: FROM_RUST },
   blockDividers: { label: 'Block dividers', group: 'blocks', fallback: FROM_RUST },
   blockActions: { label: 'Block actions on hover', group: 'blocks', fallback: FROM_RUST },
-  blockGutter: { label: 'Block gutter', group: 'blocks', fallback: FROM_RUST },
   blockFailedWash: { label: 'Tint failed blocks', group: 'blocks', fallback: FROM_RUST },
-  blockCards: { label: 'Block cards', group: 'blocks', fallback: FROM_RUST },
   blockStickyHeader: { label: 'Pin the command while scrolling', group: 'blocks', fallback: FROM_RUST },
+  blockGutter: { label: 'Block gutter', group: 'blocks', fallback: FROM_RUST },
+  blockCards: { label: 'Block cards', group: 'blocks', fallback: FROM_RUST },
   blockJumpToBottom: { label: 'Jump to the end of a block', group: 'blocks', fallback: FROM_RUST },
 
-  // --- Suggestions and completion -----------------------------------------
+  // === Terminal › Input & completion =======================================
   inlineSuggestions: { label: 'Inline suggestions', group: 'completion', fallback: FROM_RUST },
   suggestionsFromOutput: { label: 'Suggest from the last output', group: 'completion', fallback: FROM_RUST },
   suggestionConfidence: { label: 'Suggest only when sure', group: 'completion', fallback: FROM_RUST },
@@ -417,54 +496,26 @@ export const TERMINAL_SETTINGS = {
   completionSpecs: { label: "Learn a command's flags", group: 'completion', fallback: FROM_RUST },
   completionContext: { label: 'Complete from the directory', group: 'completion', fallback: FROM_RUST },
 
-  // --- Keyboard and input --------------------------------------------------
-  macOptionAsMeta: { label: 'Option as the Meta key', group: 'keyboard', fallback: FROM_RUST },
-  inputPosition: { label: 'Input line position', group: 'keyboard', fallback: FROM_RUST },
-  inputEditor: { label: 'Universal input editor', group: 'keyboard', fallback: FROM_RUST },
-  inputEditorHandoff: { label: 'Hand unknown keys back to the shell', group: 'keyboard', fallback: FROM_RUST },
+  inputPosition: { label: 'Input line position', group: 'inputLine', fallback: FROM_RUST },
+  inputEditor: { label: 'Universal input editor', group: 'inputLine', fallback: FROM_RUST },
+  inputEditorHandoff: { label: 'Hand unknown keys back to the shell', group: 'inputLine', fallback: FROM_RUST },
 
-  // --- Scrolling and scrollback -------------------------------------------
-  scrollbackLines: { label: 'Scrollback', group: 'scrolling', fallback: FROM_RUST },
-  historyMaxMb: { label: 'Command history size cap', group: 'scrolling', fallback: FROM_RUST },
-  redactSecrets: { label: 'Mask secrets in the command history', group: 'scrolling', fallback: FROM_RUST },
-  smoothScrollDuration: { label: 'Smooth scrolling', group: 'scrolling', fallback: FROM_RUST },
+  // === Terminal › Keyboard & mouse =========================================
+  shiftEnter: { label: 'Shift+Enter sends', group: 'keys', fallback: FROM_RUST },
+  macOptionAsMeta: { label: 'Option as the Meta key', group: 'keys', fallback: FROM_RUST },
+  ctrlTabBehavior: { label: 'Ctrl+Tab goes to', group: 'keys', fallback: FROM_RUST },
 
-  // --- Links, images and clipboard ----------------------------------------
-  filePathLinks: { label: 'Clickable file paths', group: 'links', fallback: FROM_RUST },
-  linkTooltip: { label: "Show a link's target on hover", group: 'links', fallback: FROM_RUST },
-  kittyGraphics: { label: 'Kitty graphics', group: 'links', fallback: FROM_RUST },
-  osc52: { label: 'Clipboard access from programs', group: 'links', fallback: FROM_RUST },
+  copyOnSelect: { label: 'Copy on select', group: 'mouse', fallback: FROM_RUST },
+  smoothScrollDuration: { label: 'Smooth scrolling', group: 'mouse', fallback: FROM_RUST },
+  filePathLinks: { label: 'Clickable file paths', group: 'mouse', fallback: FROM_RUST },
+  linkTooltip: { label: "Show a link's target on hover", group: 'mouse', fallback: FROM_RUST },
 
-  // --- Tabs and windows ----------------------------------------------------
+  osc52: { label: 'Clipboard access from programs', group: 'programs', fallback: FROM_RUST },
+  kittyGraphics: { label: 'Kitty graphics', group: 'programs', fallback: FROM_RUST },
+
+  // === Terminal › Tabs =====================================================
   tabsPlacement: { label: 'Terminal window tabs', group: 'tabs', fallback: FROM_RUST },
-  ctrlTabBehavior: { label: 'Ctrl+Tab goes to', group: 'tabs', fallback: FROM_RUST },
   followProjectOnCd: { label: 'Tabs follow the working directory', group: 'tabs', fallback: FROM_RUST },
-  gridTilesInteractive: { label: 'Type into grid tiles', group: 'agents', fallback: FROM_RUST },
-  gridTilesKeepSize: { label: 'Tiles keep the session size', group: 'agents', fallback: FROM_RUST },
-  agentModeHidesTabs: { label: 'Agent mode hides the rail', group: 'agents', fallback: FROM_RUST },
-  gridTileInfo: { label: 'Grid tiles show', group: 'agents', fallback: FROM_RUST },
-  gridTileTextScale: { label: 'Grid tile text size', group: 'agents', fallback: FROM_RUST },
-  agentColorWorking: { label: 'Agent working', group: 'agents', fallback: DEFAULT_AGENT_COLORS.working },
-  agentColorNeedsYou: { label: 'Agent needs you', group: 'agents', fallback: DEFAULT_AGENT_COLORS.needsYou },
-  agentColorDone: { label: 'Agent done, not seen', group: 'agents', fallback: DEFAULT_AGENT_COLORS.done },
-  agentColorIdle: { label: 'Agent idle', group: 'agents', fallback: DEFAULT_AGENT_COLORS.idle },
-  agentNotifyNeedsYou: { label: 'Notify when an agent needs you', group: 'agents', fallback: FROM_RUST },
-  agentNotifyDone: { label: 'Notify when an agent is done', group: 'agents', fallback: FROM_RUST },
-  agentNotifyOnlyWhenHidden: { label: 'Only for agents out of sight', group: 'agents', fallback: FROM_RUST },
-  agentNotifyPosition: { label: 'Agent notifications appear', group: 'agents', fallback: FROM_RUST },
-  agentLaunchCommand: { label: 'New agent runs', group: 'agents', fallback: FROM_RUST },
-  agentPromptBar: { label: 'Agent prompt (Ctrl+G)', group: 'agents', fallback: FROM_RUST },
-  agentStatusBar: { label: 'Agent status bar', group: 'agents', fallback: FROM_RUST },
-  agentPromptColor: { label: 'Agent prompt colour', group: 'agents', fallback: undefined },
-  agentPromptOpacity: { label: 'Agent prompt opacity', group: 'agents', fallback: FROM_RUST },
-  agentGuiCommand: { label: 'GUI mode runs', group: 'agents', fallback: 'claude' },
-  agentDefaultMode: { label: 'New agents open', group: 'agents', fallback: 'tui' },
-  agentViewBackground: { label: 'Agent view background', group: 'agents', fallback: 'terminal' },
-  agentViewFont: { label: 'Agent view font', group: 'agents', fallback: 'interface' },
-  agentViewTextSize: { label: 'Agent view text size', group: 'agents', fallback: 14 },
-  agentViewWidth: { label: 'Agent view width', group: 'agents', fallback: 'wide' },
-  agentViewLineHeight: { label: 'Agent view line spacing', group: 'agents', fallback: 'normal' },
-  agentGuiPermissionMode: { label: 'GUI agents start in', group: 'agents', fallback: undefined },
   'tabDisplay.cwd': tabDisplayMeta('cwd', 'Tab shows the directory'),
   'tabDisplay.command': tabDisplayMeta('command', 'Tab shows the running command'),
   'tabDisplay.status': tabDisplayMeta('status', 'Tab shows the status'),
@@ -472,58 +523,23 @@ export const TERMINAL_SETTINGS = {
   'tabDisplay.agentActivity': tabDisplayMeta('agentActivity', 'Tab shows what the agent is at'),
   'tabDisplay.colorBar': tabDisplayMeta('colorBar', 'Tab shows a colour bar'),
   'tabDisplay.index': tabDisplayMeta('index', 'Tab number'),
-  openProcessesIn: { label: 'Services and scripts open in', group: 'tabs', fallback: FROM_RUST },
-  openDevSessionsIn: { label: 'Dev sessions open in', group: 'tabs', fallback: FROM_RUST },
 
-  // --- Sessions ------------------------------------------------------------
-  confirmCloseRunning: { label: 'Ask before closing a busy terminal', group: 'sessions', fallback: FROM_RUST },
-  restoreSessions: { label: 'Restore sessions on start', group: 'sessions', fallback: FROM_RUST },
-  restoreScrollback: { label: 'Restore scrollback', group: 'sessions', fallback: FROM_RUST },
-  restoreScrollbackLines: { label: 'Lines replayed on start', group: 'sessions', fallback: FROM_RUST },
+  // === Terminal › History ==================================================
+  scrollbackLines: { label: 'Scrollback', group: 'scrollback', fallback: FROM_RUST },
+  historyMaxMb: { label: 'Command history size cap', group: 'history', fallback: FROM_RUST },
+  redactSecrets: { label: 'Mask secrets in the command history', group: 'history', fallback: FROM_RUST },
 
-  // --- Accessibility -------------------------------------------------------
-  minimumContrastRatio: { label: 'Minimum text contrast', group: 'accessibility', fallback: FROM_RUST },
-  screenReaderMode: { label: 'Screen reader support', group: 'accessibility', fallback: FROM_RUST },
+  // === Terminal › Shortcuts ================================================
+  keybindings: { label: 'Terminal shortcuts', group: 'keybindings', fallback: FROM_RUST },
 
-  // --- Terminal appearance -------------------------------------------------
-  themeDark: { label: 'Theme for dark mode', group: 'appearance', fallback: 'dark-modern' },
-  themeLight: { label: 'Theme for light mode', group: 'appearance', fallback: 'light-modern' },
-  themeFollowsApp: { label: "Follow the app's light / dark mode", group: 'appearance', fallback: FROM_RUST },
-  // `dockTheme` is an `Option` that supersedes a boolean, so its effective
-  // value has to walk the same fallback `lib/terminalTheme.ts › dockThemeMode`
-  // walks — otherwise a dock themed through the old boolean reads as untouched.
-  // Resetting writes both, exactly as the card does.
-  dockTheme: {
-    label: 'In the dock, the theme colours',
-    group: 'appearance',
-    fallback: 'app',
-    read: (cfg: TerminalConfigLike) => cfg?.dockTheme ?? (cfg?.dockUsesTerminalTheme ? 'chrome' : undefined),
-    reset: () => ({ dockTheme: undefined, dockUsesTerminalTheme: false }),
-  },
-  cursorStyle: { label: 'Cursor', group: 'appearance', fallback: FROM_RUST },
-  cursorBlink: { label: 'Cursor blink', group: 'appearance', fallback: FROM_RUST },
-  cursorInactiveStyle: { label: 'Cursor in an unfocused pane', group: 'appearance', fallback: FROM_RUST },
-  padding: { label: 'Padding', group: 'appearance', fallback: FROM_RUST },
-  wallpaperOpacity: { label: 'Wallpaper opacity', group: 'appearance', fallback: undefined },
-  wallpaperBlur: { label: 'Wallpaper blur', group: 'appearance', fallback: undefined },
-  wallpaperFit: { label: 'Wallpaper fit', group: 'appearance', fallback: undefined },
-  wallpaperDim: { label: 'Wallpaper dimming', group: 'appearance', fallback: FROM_RUST },
-  chromeOpacity: { label: 'Title bar & rail opacity', group: 'appearance', fallback: FROM_RUST },
-  chromeBlur: { label: 'Title bar & rail blur', group: 'appearance', fallback: FROM_RUST },
-  windowOpacity: { label: 'Window opacity', group: 'appearance', fallback: FROM_RUST },
-  windowEffect: { label: 'Backdrop effect', group: 'appearance', fallback: FROM_RUST },
+  // === Terminal › External terminal ========================================
+  preset: { label: 'Terminal application', group: 'external', fallback: FROM_RUST },
+  customPath: { label: 'Custom terminal path', group: 'external', fallback: FROM_RUST },
+  customArgs: { label: 'Custom arguments', group: 'external', fallback: FROM_RUST },
 
-  // --- Notifications -------------------------------------------------------
-  // `notifyWhen` writes `notifyOnLongCommand` in mirror, as the card does.
-  notifyWhen: {
-    label: 'Notify me when',
-    group: 'notifications',
-    fallback: 'failed',
-    reset: () => ({ notifyWhen: undefined, notifyOnLongCommand: true }),
-  },
+  // === Notifications =======================================================
+  notifyWhen: { label: 'Notify me when', group: 'notifications', fallback: 'failed' },
   longCommandSeconds: { label: '"Long" starts at', group: 'notifications', fallback: FROM_RUST },
-  notifyOnlyWhenHidden: { label: 'Only for terminals out of sight', group: 'notifications', fallback: FROM_RUST },
-  notifyStyle: { label: 'Show it as', group: 'notifications', fallback: 'both' },
   // The built-in list *is* the default, and the card lets it be edited back
   // to exactly that. Reading a verbatim copy as `undefined` keeps the marker
   // off a list that only looks changed.
@@ -536,18 +552,52 @@ export const TERMINAL_SETTINGS = {
         ? cfg.notifyMutedCommands
         : undefined,
   },
-  bell: { label: 'When a program rings the bell', group: 'notifications', fallback: FROM_RUST },
 
-  // --- Keys and selection / shortcuts -------------------------------------
-  copyOnSelect: { label: 'Copy on select', group: 'keys', fallback: FROM_RUST },
-  shiftEnter: { label: 'Shift+Enter sends', group: 'keys', fallback: FROM_RUST },
-  keybindings: { label: 'Terminal shortcuts', group: 'keybindings', fallback: FROM_RUST },
+  agentNotifyNeedsYou: { label: 'Notify when an agent needs you', group: 'agentNotify', fallback: FROM_RUST },
+  agentNotifyDone: { label: 'Notify when an agent is done', group: 'agentNotify', fallback: FROM_RUST },
+
+  notifyStyle: { label: 'Show it as', group: 'delivery', fallback: 'both' },
+  // One switch on screen, two fields in the file: commands and agents each
+  // keep their own, so an older file that set them apart still reads right.
+  notifyOnlyWhenHidden: { label: 'Only for terminals out of sight', group: 'delivery', fallback: FROM_RUST },
+  agentNotifyOnlyWhenHidden: { label: 'Only for agents out of sight', group: 'delivery', fallback: FROM_RUST },
+  agentNotifyPosition: { label: 'Agent notifications appear', group: 'delivery', fallback: FROM_RUST },
+
+  bell: { label: 'When a program rings the bell', group: 'bell', fallback: FROM_RUST },
+
+  // === Agents ==============================================================
+  agentDefaultMode: { label: 'New agents open', group: 'agentNew', fallback: 'tui' },
+  agentLaunchCommand: { label: 'TUI mode runs', group: 'agentNew', fallback: FROM_RUST },
+  agentGuiCommand: { label: 'GUI mode runs', group: 'agentNew', fallback: 'claude' },
+  agentGuiPermissionMode: { label: 'GUI agents start in', group: 'agentNew', fallback: undefined },
+
+  agentViewBackground: { label: 'Agent view background', group: 'agentView', fallback: 'terminal' },
+  agentViewFont: { label: 'Agent view font', group: 'agentView', fallback: 'interface' },
+  agentViewTextSize: { label: 'Agent view text size', group: 'agentView', fallback: 14 },
+  agentViewWidth: { label: 'Agent view width', group: 'agentView', fallback: 'wide' },
+  agentViewLineHeight: { label: 'Agent view line spacing', group: 'agentView', fallback: 'normal' },
+
+  agentPromptBar: { label: 'Agent prompt (Ctrl+G)', group: 'agentPrompt', fallback: FROM_RUST },
+  agentStatusBar: { label: 'Agent status bar', group: 'agentPrompt', fallback: FROM_RUST },
+  agentPromptColor: { label: 'Agent prompt colour', group: 'agentPrompt', fallback: undefined },
+  agentPromptOpacity: { label: 'Agent prompt opacity', group: 'agentPrompt', fallback: FROM_RUST },
+
+  agentModeHidesTabs: { label: 'Agent mode hides the rail', group: 'grid', fallback: FROM_RUST },
+  gridTilesInteractive: { label: 'Type into grid tiles', group: 'grid', fallback: FROM_RUST },
+  gridTilesKeepSize: { label: 'Tiles keep the session size', group: 'grid', fallback: FROM_RUST },
+  gridTileTextScale: { label: 'Grid tile text size', group: 'grid', fallback: FROM_RUST },
+  gridTileInfo: { label: 'Grid tiles show', group: 'grid', fallback: FROM_RUST },
+
+  agentColorWorking: { label: 'Agent working', group: 'agentColors', fallback: DEFAULT_AGENT_COLORS.working },
+  agentColorNeedsYou: { label: 'Agent needs you', group: 'agentColors', fallback: DEFAULT_AGENT_COLORS.needsYou },
+  agentColorDone: { label: 'Agent done, not seen', group: 'agentColors', fallback: DEFAULT_AGENT_COLORS.done },
+  agentColorIdle: { label: 'Agent idle', group: 'agentColors', fallback: DEFAULT_AGENT_COLORS.idle },
 } satisfies Record<string, SettingMeta>;
 
 export type TerminalSettingKey = keyof typeof TERMINAL_SETTINGS;
 
 /** Fields of `TerminalConfig` that are deliberately not marked. See above. */
-export const UNMARKED_TERMINAL_FIELDS = ['notifyOnLongCommand', 'dockUsesTerminalTheme'] as const;
+export const UNMARKED_TERMINAL_FIELDS = ['windowZoom'] as const;
 
 /**
  * Compile-time guard: **every** field of `TerminalConfig` is either marked or
@@ -576,13 +626,18 @@ export const GROUP_KEYS: Record<GroupId, TerminalSettingKey[]> = (() => {
   return out;
 })();
 
-/** Every setting on a card, in table order. */
+/** Every setting on a page, in table order. */
 export const CARD_KEYS: Record<CardId, TerminalSettingKey[]> = (() => {
-  const out = { integrated: [], appearance: [], notifications: [], agents: [], shortcuts: [], external: [] } as Record<
-    CardId,
-    TerminalSettingKey[]
-  >;
+  const out = {} as Record<CardId, TerminalSettingKey[]>;
+  for (const card of Object.values(GROUP_CARD)) out[card] = [];
   for (const key of ALL_KEYS) out[GROUP_CARD[TERMINAL_SETTINGS[key].group]].push(key);
+  return out;
+})();
+
+/** The groups on a page, in table order. */
+export const CARD_GROUPS: Record<CardId, GroupId[]> = (() => {
+  const out = {} as Record<CardId, GroupId[]>;
+  for (const [group, card] of Object.entries(GROUP_CARD) as [GroupId, CardId][]) (out[card] ??= []).push(group);
   return out;
 })();
 
@@ -662,8 +717,7 @@ export function modifiedCount(cfg: TerminalConfigLike, keys: readonly TerminalSe
  * A default of `undefined` is written as `undefined` rather than deleted:
  * `JSON.stringify` drops it on the way to `settings.json`, serde fills the
  * field back in on the way out, and every reader already falls back. The
- * nested and mirrored keys (`tabDisplay.*`, `dockTheme`, `notifyWhen`) carry
- * their own `reset` in the table.
+ * nested keys (`tabDisplay.*`) carry their own `reset` in the table.
  */
 export function resetPatch(cfg: TerminalConfigLike, keys: readonly TerminalSettingKey[]): Partial<TerminalConfig> {
   let patch: Partial<TerminalConfig> = {};
@@ -697,19 +751,11 @@ export function restorePatch(cfg: TerminalConfigLike, keys: readonly TerminalSet
 }
 
 /**
- * Undo for a key with a custom reset: replay the reset's own shape with the
- * current value instead of the default, so the mirrored field
- * (`dockUsesTerminalTheme`, `notifyOnLongCommand`) comes back too.
+ * Undo for a key with a custom reset (the `tabDisplay.*` sub-fields): replay
+ * the reset's own shape with the current value instead of the default.
  */
 function restoreStep(cfg: TerminalConfigLike, key: TerminalSettingKey, meta: SettingMeta): Partial<TerminalConfig> {
-  const current = settingValue(cfg, key);
-  if (key === 'dockTheme') {
-    return { dockTheme: current as TerminalConfig['dockTheme'], dockUsesTerminalTheme: cfg?.dockUsesTerminalTheme };
-  }
-  if (key === 'notifyWhen') {
-    return { notifyWhen: cfg?.notifyWhen, notifyOnLongCommand: cfg?.notifyOnLongCommand };
-  }
-  return meta.reset ? meta.reset(cfg, current) : {};
+  return meta.reset ? meta.reset(cfg, settingValue(cfg, key)) : {};
 }
 
 // ---------------------------------------------------------------------------

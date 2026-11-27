@@ -211,7 +211,6 @@ Same shape as tag. `create/update/delete` with `--color` and `--order`.
 Keys with friendly values:
 - `terminal.preset` — `windowsterminal`, `powershell`, `cmd`, `warp`, `macterminal`, `iterm2`, `custom`
 - `appearance.theme` — `light`, `dark`, `system`
-- `defaults.launchMethod` — `clipboard`, `external`, `integrated`
 - `toolboxBaseUrl` — URL prefix for `toolbox_url` fields (tools, apps, projects) starting with `/`
 - `backupRepoPath` — local path to a git repo for `cortx backup` (`""` clears)
 

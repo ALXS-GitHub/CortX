@@ -84,10 +84,13 @@ export const NOTIFY_STYLE_OPTIONS: { value: TerminalNotifyStyle; label: string; 
 // Resolving the settings
 // ---------------------------------------------------------------------------
 
-/** Effective mode, honouring an explicit `notifyOnLongCommand: false` opt-out. */
+/**
+ * Effective mode. The legacy `notifyOnLongCommand: false` opt-out is folded
+ * into `notifyWhen: never` by the backend when `settings.json` is read
+ * (ticket #64), so there is only one field left to look at.
+ */
 export function resolveNotifyWhen(cfg?: Partial<TerminalConfig> | null): TerminalNotifyWhen {
-  if (cfg?.notifyWhen) return cfg.notifyWhen;
-  return cfg?.notifyOnLongCommand === false ? 'never' : DEFAULT_NOTIFY_WHEN;
+  return cfg?.notifyWhen ?? DEFAULT_NOTIFY_WHEN;
 }
 
 export function resolveNotifyStyle(cfg?: Partial<TerminalConfig> | null): TerminalNotifyStyle {

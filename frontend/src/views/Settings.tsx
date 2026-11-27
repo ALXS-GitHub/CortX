@@ -1,22 +1,55 @@
-import { useState, useEffect, useRef, type CSSProperties } from 'react';
+/**
+ * The Settings screen (ticket #64): a list of pages on the left, the selected
+ * page on the right (`SettingsLayout`), and a search across every page.
+ *
+ * Two kinds of settings live here:
+ *
+ * - **App settings** (General, Appearance, Library, Shell & aliases, the
+ *   agent sources, Data) are held in local state below and written 400 ms
+ *   after the last edit, with no Save button.
+ * - **Terminal settings** (Terminal's pages, Notifications, the rest of
+ *   Agents) are owned by the cards in `components/terminal/settings/`, which
+ *   write `settings.terminal` themselves — the same cards run in the Terminal
+ *   window's own panel. This screen hands the terminal block back untouched.
+ */
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
+import {
+  Bell,
+  Bot,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Database,
+  Download,
+  FolderOpen,
+  Globe,
+  Library,
+  Loader2,
+  MonitorCog,
+  Moon,
+  Palette,
+  Plus,
+  RotateCcw,
+  Save,
+  SlidersHorizontal,
+  Sun,
+  Terminal,
+  Trash2,
+  Upload,
+} from 'lucide-react';
+import { toast } from 'sonner';
 import { useAppStore } from '@/stores/appStore';
 import { Screen } from '@/components/layout/Screen';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Chip } from '@/components/ui/Chip';
-import { Segmented, type SegOption } from '@/components/ui/Segmented';
-import { BetaBadge } from '@/components/ui/BetaBadge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
-import { open } from '@tauri-apps/plugin-dialog';
+import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Segmented } from '@/components/ui/Segmented';
+import { ColorField } from '@/components/ui/ColorField';
 import {
   Dialog,
   DialogContent,
@@ -25,60 +58,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Switch } from '@/components/ui/switch';
-import {
-  FolderOpen,
-  Save,
-  Search,
-  Loader2,
-  Info,
-  Download,
-  Upload,
-  Plus,
-  Trash2,
-  RotateCcw,
-  Tags,
-  Copy,
-  Check,
-  TerminalSquare,
-  ChevronDown,
-  ChevronUp,
-  CircleDot,
-  GitBranch,
-  Globe,
-  Bot,
-  Sun,
-  Moon,
-  MonitorCog,
-  Square,
-  Squircle,
-  Circle,
-  Palette,
-} from 'lucide-react';
-import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
 import { TagDefinitionManager } from '@/components/global-scripts/TagDefinitionManager';
 import { StatusDefinitionManager } from '@/components/settings/StatusDefinitionManager';
-import { generateShellInit, setGlobalHotkey as setGlobalHotkeyApi, getShimStatus, syncShims, installShimPath } from '@/lib/tauri';
 import { HotkeyInput } from '@/components/settings/HotkeyInput';
-import {
-  useThemeStore,
-  applyThemeMode,
-  accentForeground,
-  ACCENT_PRESETS,
-  RADIUS_PRESETS,
-  FONT_PRESETS,
-  SKIN_PRESETS,
-  type FontChoice,
-  type Skin,
-  type ThemeMode,
-} from '@/lib/theme';
-import { TERMINAL_SECTION_KEYWORDS } from '@/components/terminal/settings/meta';
-import { ColorField } from '@/components/ui/ColorField';
-import { TerminalSettingsSections } from '@/components/terminal/settings/TerminalSettingsPanel';
-import { Section, Field, Code } from '@/components/settings/SettingsPrimitives';
 import { UpdatesSection, UPDATES_SECTION_KEYWORDS } from '@/components/settings/UpdatesSection';
+import { SettingsLayout } from '@/components/settings/SettingsLayout';
+import {
+  Code,
+  Section,
+  SectionBody,
+  SettingRow,
+} from '@/components/settings/SettingsPrimitives';
+import { readStoredPage, resolvePage, storePage, type SettingsPageDef, SETTINGS_PAGE_KEY } from '@/components/settings/settingsNav';
+import { TerminalPageAction, TerminalSettingsPage } from '@/components/terminal/settings/TerminalSettingsPanel';
+import { agentTerminalSections, notificationsPage, terminalSubPages } from '@/components/terminal/settings/terminalPages';
+import { generateShellInit, setGlobalHotkey as setGlobalHotkeyApi, getShimStatus, syncShims, installShimPath } from '@/lib/tauri';
+import { useThemeStore, applyThemeMode, accentForeground, DEFAULT_COLORS, type ThemeMode } from '@/lib/theme';
+import { ACCENT_PRESETS as ZINC_ACCENTS, NEUTRALS as ZINC_NEUTRALS, type NeutralId } from '@zinc/ui/theme';
+import { cn } from '@/lib/utils';
 import type { AppSettings, AgentsSettings, ExportSummary, ImportOptions, ShimStatus } from '@/types';
 
 const DEFAULT_GLOBAL_HOTKEY = 'CmdOrCtrl+Shift+Space';
@@ -93,52 +90,101 @@ const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
   recentDays: 7,
 };
 
-// Terminal preset labels and descriptions
-type SettingsTab = 'general' | 'appearance' | 'terminal' | 'scripts' | 'agents';
+const DEFAULT_COMMAND_TEMPLATES: Record<string, string> = {
+  py: 'python {{SCRIPT_FILE}}',
+  ps1: 'powershell -ExecutionPolicy Bypass -File {{SCRIPT_FILE}}',
+  bat: '{{SCRIPT_FILE}}',
+  cmd: '{{SCRIPT_FILE}}',
+  sh: 'bash {{SCRIPT_FILE}}',
+  bash: 'bash {{SCRIPT_FILE}}',
+  js: 'node {{SCRIPT_FILE}}',
+  ts: 'npx tsx {{SCRIPT_FILE}}',
+  rb: 'ruby {{SCRIPT_FILE}}',
+  pl: 'perl {{SCRIPT_FILE}}',
+};
 
-const SETTINGS_TABS: SegOption<SettingsTab>[] = [
-  { value: 'general', label: 'General' },
-  { value: 'appearance', label: 'Appearance' },
-  { value: 'terminal', label: 'Terminal', badge: <BetaBadge /> },
-  { value: 'scripts', label: 'Scripts' },
-  { value: 'agents', label: 'Agents', badge: <BetaBadge /> },
-];
+const PAGE_KEY = SETTINGS_PAGE_KEY;
 
-const SETTINGS_TAB_KEY = 'cortx-settings-tab';
+// ============================================================================
+// The pages
+// ============================================================================
 
-const SECTION_KEYWORDS: [SettingsTab, string][] = [
-  ['appearance', 'appearance style halcyon classic theme light dark system accent colour color corners radius font'],
-  // The terminal cards carry their own keywords (they are shared with the
-  // Terminal window's settings panel), so the search banner reuses them.
-  ...Object.values(TERMINAL_SECTION_KEYWORDS).map((kw) => ['terminal', kw] as [SettingsTab, string]),
-  ['general', UPDATES_SECTION_KEYWORDS],
-  ['general', 'default behavior launch method integrated external clipboard services'],
-  ['general', 'command palette global hotkey shortcut'],
-  ['general', 'tags labels colours manage projects'],
-  ['general', 'statuses project status manage'],
-  ['general', 'shell aliases init profile cortx init shims path'],
-  ['general', 'toolbox documentation url'],
-  ['scripts', 'script command templates extensions interpreter run scripts'],
-  ['agents', 'agents claude code codex sessions directory recent days'],
-  ['general', 'data management export import backup git repository shims path'],
-];
+const GENERAL_PAGE: SettingsPageDef = {
+  id: 'general',
+  title: 'General',
+  description: 'The command palette hotkey, updates and the toolbox documentation.',
+  icon: SlidersHorizontal,
+  sections: [
+    { id: 'hotkey', title: 'Command palette', keywords: 'global hotkey shortcut palette' },
+    { id: 'updates', title: 'Updates', keywords: UPDATES_SECTION_KEYWORDS },
+    { id: 'toolbox', title: 'Toolbox documentation', keywords: 'toolbox documentation docs base url link' },
+  ],
+};
 
-function readSavedTab(): SettingsTab {
-  try {
-    const v = sessionStorage.getItem(SETTINGS_TAB_KEY);
-    return SETTINGS_TABS.some((t) => t.value === v) ? (v as SettingsTab) : 'general';
-  } catch {
-    return 'general';
-  }
+const APPEARANCE_PAGE: SettingsPageDef = {
+  id: 'appearance',
+  title: 'Appearance',
+  description: 'The colours of CortX, built from a mode, an accent and a neutral.',
+  icon: Palette,
+  sections: [{ id: 'appearance', title: 'Colours', keywords: 'theme mode light dark system accent colour color neutral grey' }],
+};
+
+const LIBRARY_PAGE: SettingsPageDef = {
+  id: 'library',
+  title: 'Library',
+  description: 'Tags and statuses shared by projects, scripts and tools, and how imported scripts run.',
+  icon: Library,
+  sections: [
+    { id: 'tags', title: 'Tags', keywords: 'tags labels colours manage' },
+    { id: 'statuses', title: 'Statuses', keywords: 'statuses status manage projects tools' },
+    { id: 'templates', title: 'Script command templates', keywords: 'script command templates extension interpreter run' },
+  ],
+};
+
+const SHELL_PAGE: SettingsPageDef = {
+  id: 'shell',
+  title: 'Shell & aliases',
+  description: 'Load your CortX aliases in a shell, or make them callable from anywhere.',
+  icon: Terminal,
+  sections: [
+    { id: 'shell-init', title: 'Shell profile', keywords: 'shell aliases init profile cortx init powershell bash zsh fish' },
+    { id: 'shims', title: 'Alias shims', keywords: 'shims path launcher callable anywhere agents' },
+  ],
+};
+
+const DATA_PAGE: SettingsPageDef = {
+  id: 'data',
+  title: 'Data',
+  description: 'Export, import or back up your whole CortX configuration.',
+  icon: Database,
+  sections: [
+    { id: 'export-import', title: 'Export and import', keywords: 'export import json file' },
+    { id: 'backup', title: 'Git backup', keywords: 'backup git repository commit' },
+  ],
+};
+
+function buildPages(): SettingsPageDef[] {
+  return [
+    GENERAL_PAGE,
+    APPEARANCE_PAGE,
+    LIBRARY_PAGE,
+    SHELL_PAGE,
+    {
+      id: 'agents',
+      title: 'Agents',
+      description: 'Where CortX reads Claude Code and Codex sessions from, and how agents show in the terminal.',
+      icon: Bot,
+      beta: true,
+      sections: [
+        { id: 'agent-sources', title: 'Sources', keywords: 'claude code codex sessions directory config home recent days running threshold' },
+        ...agentTerminalSections(),
+      ],
+    },
+    notificationsPage(Bell),
+    ...terminalSubPages(),
+    DATA_PAGE,
+  ];
 }
-
-const THEME_MODE_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
-  { value: 'light', label: 'Light', icon: Sun },
-  { value: 'dark', label: 'Dark', icon: Moon },
-  { value: 'system', label: 'System', icon: MonitorCog },
-];
-
-const RADIUS_ICONS = { Square, Soft: Squircle, Round: Circle } as const;
 
 /** Parse a numeric field, falling back to `fallback` and clamping to [min, max]. */
 const clampInt = (raw: string, fallback: number, min: number, max: number): number => {
@@ -147,8 +193,66 @@ const clampInt = (raw: string, fallback: number, min: number, max: number): numb
   return Math.min(Math.max(n, min), max);
 };
 
+async function pickFolder(title: string): Promise<string | null> {
+  try {
+    const selected = await open({ directory: true, multiple: false, title });
+    return selected && typeof selected === 'string' ? selected : null;
+  } catch (e) {
+    console.error('Failed to open folder picker:', e);
+    return null;
+  }
+}
+
+/** A path input with a browse button, full width. */
+function PathInput({
+  id,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+  pickerTitle,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  pickerTitle: string;
+}) {
+  return (
+    <div className="flex gap-2">
+      <Input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="flex-1"
+        disabled={disabled}
+      />
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label="Browse"
+        title="Browse"
+        disabled={disabled}
+        onClick={async () => {
+          const picked = await pickFolder(pickerTitle);
+          if (picked) onChange(picked);
+        }}
+      >
+        <FolderOpen />
+      </Button>
+    </div>
+  );
+}
+
+// ============================================================================
+// The screen
+// ============================================================================
+
 export function Settings() {
   const { settings, loadSettings, updateSettings, exportScriptsConfig, previewImport, importScriptsConfig, backupToGit } = useAppStore();
+  const pages = useMemo(buildPages, []);
 
   const [showTagManager, setShowTagManager] = useState(false);
   const [showStatusManager, setShowStatusManager] = useState(false);
@@ -165,8 +269,7 @@ export function Settings() {
     settings: true,
   });
   const [isImporting, setIsImporting] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [launchMethod, setLaunchMethod] = useState<'clipboard' | 'external' | 'integrated'>('integrated');
+  const [theme, setTheme] = useState<ThemeMode>('system');
   const [toolboxBaseUrl, setToolboxBaseUrl] = useState('');
   const [backupRepoPath, setBackupRepoPath] = useState('');
   const [globalHotkey, setGlobalHotkey] = useState<string>(DEFAULT_GLOBAL_HOTKEY);
@@ -191,12 +294,11 @@ export function Settings() {
     if (value) setEditVersion((n) => n + 1);
   };
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [activeTab, setActiveTab] = useState<SettingsTab>(readSavedTab);
+  const [selectedPage, setSelectedPage] = useState(() => resolvePage(pages, readStoredPage(PAGE_KEY))?.id ?? 'general');
   const [query, setQuery] = useState('');
   // Hydrate from the store only when its content actually changed (the
   // store object is replaced on every reload, our own saves included).
   const lastHydratedRef = useRef<string | null>(null);
-
 
   useEffect(() => {
     if (!settings) loadSettings();
@@ -208,7 +310,6 @@ export function Settings() {
       if (lastHydratedRef.current === json) return;
       lastHydratedRef.current = json;
       setTheme(settings.appearance.theme);
-      setLaunchMethod(settings.defaults.launchMethod);
       setToolboxBaseUrl(settings.toolboxBaseUrl ?? '');
       setBackupRepoPath(settings.backupRepoPath ?? '');
       setGlobalHotkey(settings.globalHotkey ?? DEFAULT_GLOBAL_HOTKEY);
@@ -243,9 +344,9 @@ export function Settings() {
     try {
       const outcome = await installShimPath();
       if (outcome.status === 'added') {
-        toast.success('Shim folder added to PATH. Restart your terminals/agents once to pick it up.');
+        toast.success('Shim folder added to PATH. Restart your terminals and agents once to pick it up.');
       } else if (outcome.status === 'alreadyPresent') {
-        toast.info('Shim folder is already on your PATH.');
+        toast.info('The shim folder is already on your PATH.');
       } else {
         toast.message('Add this line to your shell profile:', { description: outcome.instruction });
       }
@@ -267,7 +368,7 @@ export function Settings() {
       a.download = 'cortx-export.json';
       a.click();
       URL.revokeObjectURL(url);
-      toast.success('Scripts config exported');
+      toast.success('Configuration exported');
     } catch (error) {
       toast.error(`Failed to export: ${error}`);
     }
@@ -277,7 +378,7 @@ export function Settings() {
     try {
       const selected = await open({
         multiple: false,
-        title: 'Import CortX Config',
+        title: 'Import a CortX configuration',
         filters: [{ name: 'JSON', extensions: ['json'] }],
       });
       if (selected && typeof selected === 'string') {
@@ -341,39 +442,6 @@ export function Settings() {
     }
   };
 
-  const handleBrowseAgentsDir = async (target: 'claude' | 'codex') => {
-    try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: target === 'claude' ? 'Select the Claude Code config directory (~/.claude)' : 'Select the Codex home directory (~/.codex)',
-      });
-      if (selected && typeof selected === 'string') {
-        if (target === 'claude') setAgentsClaudeDir(selected);
-        else setAgentsCodexHome(selected);
-        setHasChanges(true);
-      }
-    } catch (e) {
-      console.error('Failed to open folder picker:', e);
-    }
-  };
-
-  const handleBrowseBackupRepo = async () => {
-    try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: 'Select Backup Git Repository',
-      });
-      if (selected && typeof selected === 'string') {
-        setBackupRepoPath(selected);
-        setHasChanges(true);
-      }
-    } catch (e) {
-      console.error('Failed to open folder picker:', e);
-    }
-  };
-
   const handleSave = async () => {
     if (!settings) return;
 
@@ -385,9 +453,6 @@ export function Settings() {
       terminal: { ...settings.terminal },
       appearance: {
         theme,
-      },
-      defaults: {
-        launchMethod,
       },
       scriptsConfig: {
         ...settings.scriptsConfig,
@@ -423,9 +488,6 @@ export function Settings() {
         toast.error(`Hotkey saved but registration failed: ${err}`);
       }
       setHasChanges(false);
-      toast.success('Settings saved');
-
-      // Apply theme
       applyThemeMode(theme);
     } catch (error) {
       toast.error(`Failed to save settings: ${error}`);
@@ -454,12 +516,11 @@ export function Settings() {
   // position and any half-typed field would be lost.
   if (!settings) {
     return (
-      <Screen title="Settings" subtitle="Configure your CortX preferences" narrow>
-        <p className="py-10 text-center text-sm text-muted-foreground">Loading settings...</p>
+      <Screen title="Settings" narrow>
+        <p className="py-10 text-center text-sm text-muted-foreground">Loading settings…</p>
       </Screen>
     );
   }
-
 
   const saveActions = (
     <span className="inline-flex h-8 items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
@@ -479,532 +540,338 @@ export function Settings() {
     </span>
   );
 
-  // Tabs, or every matching section when searching.
-  const q = query.trim().toLowerCase();
-  const visible = (tab: SettingsTab, keywords: string) =>
-    q ? keywords.toLowerCase().includes(q) || tab.includes(q) : activeTab === tab;
-  const selectTab = (tab: SettingsTab) => {
-    setActiveTab(tab);
-    try {
-      sessionStorage.setItem(SETTINGS_TAB_KEY, tab);
-    } catch {
-      // sessionStorage unavailable: the tab just isn't remembered
-    }
-  };
-  const toolbar = (
-    <div className="flex w-full flex-wrap items-center gap-3">
-      <Segmented<SettingsTab> value={activeTab} onChange={selectTab} options={SETTINGS_TABS} size="sm" />
-      <div className="relative ml-auto w-full sm:w-64">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search settings…"
-          className="pl-9"
-          aria-label="Search settings"
-        />
-      </div>
-    </div>
-  );
+  const edit =
+    <T,>(setter: (value: T) => void) =>
+    (value: T) => {
+      setter(value);
+      setHasChanges(true);
+    };
 
-  return (
-    <Screen title="Settings" subtitle="Configure your CortX preferences" narrow actions={saveActions} toolbar={toolbar}>
-      <div className="settings-sections space-y-5">
-        {q && !SECTION_KEYWORDS.some(([tab, kw]) => visible(tab, kw)) && (
-          <p className="py-10 text-center text-sm text-muted-foreground">No setting matches “{query}”.</p>
-        )}
-        {/* Appearance */}
-        {visible('appearance', 'appearance style halcyon classic theme light dark system accent colour color corners radius font') && (
+  const renderPage = (id: string) => {
+    switch (id) {
+      case 'general':
+        return (
           <>
-          <AppearanceSection
-            theme={theme}
-            onThemeChange={(value) => {
-              setTheme(value);
-              setHasChanges(true);
-            }}
-          />
-          </>
-        )}
-
-        {/* Terminal — every card lives in components/terminal/settings/ and is
-            bound straight to settings.terminal, so the Terminal window's own
-            panel (Ctrl+, there) shows the very same controls (DEV-13 #8). */}
-        {(q || activeTab === 'terminal') && <TerminalSettingsSections query={q} empty={null} />}
-
-        {/* Updates: check and install a new version on demand */}
-        {visible('general', UPDATES_SECTION_KEYWORDS) && <UpdatesSection />}
-
-        {/* Defaults */}
-        {visible('general', 'default behavior launch method integrated external clipboard services') && (
-          <>
-          <Section title="Default behavior" description="Set default behaviors for launching services.">
-            <Field label="Default launch method" htmlFor="launch-method" hint="The default method used when starting services">
-              <Select
-                value={launchMethod}
-                onValueChange={(value: 'clipboard' | 'external' | 'integrated') => {
-                  setLaunchMethod(value);
-                  setHasChanges(true);
-                }}
+            <Section id="hotkey" title="Command palette">
+              <SettingRow
+                label="Global hotkey"
+                hint={
+                  <>
+                    Opens the palette from anywhere. Inside the app, <kbd className="kbd">Ctrl+K</kbd> always works.
+                    Backspace while recording disables it; on macOS the system may ask for Accessibility access.
+                  </>
+                }
+                wide
               >
-                <SelectTrigger id="launch-method">
-                  <SelectValue placeholder="Select launch method" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="integrated">Integrated terminal</SelectItem>
-                  <SelectItem value="external">External terminal</SelectItem>
-                  <SelectItem value="clipboard">Copy to clipboard</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-          </Section>
-          </>
-        )}
-
-        {/* Command palette */}
-        {visible('general', 'command palette global hotkey shortcut') && (
-          <>
-          <Section
-            title="Command palette"
-            description={
-              <>
-                Open the command palette from anywhere using a system-wide hotkey. Inside the app,{' '}
-                <kbd className="kbd">Cmd/Ctrl+K</kbd> always works regardless of this setting.
-              </>
-            }
-          >
-            <Field
-              label="Global hotkey"
-              hint="Click the field, press your desired combo. Esc to cancel, Backspace to clear (disables). On macOS, the OS may prompt for Accessibility permission the first time."
-            >
-              <HotkeyInput
-                value={globalHotkey}
-                defaultCombo={DEFAULT_GLOBAL_HOTKEY}
-                onChange={(combo) => {
-                  setGlobalHotkey(combo);
-                  setHasChanges(true);
-                }}
-              />
-            </Field>
-          </Section>
-          </>
-        )}
-
-        {/* Tags */}
-        {visible('general', 'tags labels colours manage projects') && (
-          <>
-          <TagsSection onManage={() => setShowTagManager(true)} />
-          </>
-        )}
-
-        {/* Statuses */}
-        {visible('general', 'statuses project status manage') && (
-          <>
-          <StatusesSection onManage={() => setShowStatusManager(true)} />
-          </>
-        )}
-
-        {/* Shell aliases init */}
-        {visible('general', 'shell aliases init profile cortx init shims path') && (
-          <>
-          <ShellSetupCard />
-          </>
-        )}
-
-        {/* Toolbox base URL */}
-        {visible('general', 'toolbox documentation url') && (
-          <>
-          <Section
-            title="Toolbox documentation"
-            description='Set a base URL for your toolbox documentation site. When a tool&apos;s toolbox URL starts with "/", it will be appended to this base URL.'
-          >
-            <Field
-              label="Base URL"
-              htmlFor="toolbox-base-url"
-              hint='Tool URLs starting with "/" will be resolved relative to this base URL. Full URLs (https://...) are used as-is.'
-            >
-              <Input
-                id="toolbox-base-url"
-                value={toolboxBaseUrl}
-                onChange={(e) => {
-                  setToolboxBaseUrl(e.target.value);
-                  setHasChanges(true);
-                }}
-                placeholder="e.g., https://docs.example.com"
-                className="font-mono text-[12px]"
-              />
-            </Field>
-          </Section>
-          </>
-        )}
-
-        {/* Script command templates */}
-        {visible('scripts', 'script command templates extensions interpreter run scripts') && (
-          <>
-          <Section
-            title="Script command templates"
-            description={
-              <>
-                Configure the default command used when importing scripts by file extension. Use{' '}
-                <Code>{'{{SCRIPT_FILE}}'}</Code> as a placeholder for the script path.
-              </>
-            }
-            className="space-y-2"
-          >
-            {Object.entries(commandTemplates)
-              .sort(([a], [b]) => a.localeCompare(b))
-              .map(([ext, template]) => (
-                <div key={ext} className="grid grid-cols-[4rem_1fr_auto] items-center gap-2">
-                  <span className="truncate font-mono text-[12px] text-muted-foreground">.{ext}</span>
-                  <Input
-                    value={template}
-                    onChange={(e) => {
-                      setCommandTemplates((prev) => ({ ...prev, [ext]: e.target.value }));
-                      setHasChanges(true);
-                    }}
-                    className="h-8 font-mono text-[12px]"
-                    placeholder={`Command for .${ext} files`}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Remove .${ext} template`}
-                    className="text-faint hover:text-destructive"
-                    onClick={() => {
-                      setCommandTemplates((prev) => {
-                        const next = { ...prev };
-                        delete next[ext];
-                        return next;
-                      });
-                      setHasChanges(true);
-                    }}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </div>
-              ))}
-
-            <div className="flex items-center gap-2 pt-2">
-              <Input
-                value={newExtension}
-                onChange={(e) => setNewExtension(e.target.value.replace(/^\./, '').replace(/\s/g, ''))}
-                placeholder="ext"
-                className="h-8 w-16 font-mono text-[12px]"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!newExtension || newExtension in commandTemplates}
-                onClick={() => {
-                  if (newExtension && !(newExtension in commandTemplates)) {
-                    setCommandTemplates((prev) => ({ ...prev, [newExtension]: `{{SCRIPT_FILE}}` }));
-                    setNewExtension('');
-                    setHasChanges(true);
-                  }
-                }}
+                <HotkeyInput value={globalHotkey} defaultCombo={DEFAULT_GLOBAL_HOTKEY} onChange={edit(setGlobalHotkey)} />
+              </SettingRow>
+            </Section>
+            <UpdatesSection id="updates" />
+            <Section id="toolbox" title="Toolbox documentation">
+              <SettingRow
+                label="Base URL"
+                htmlFor="toolbox-base-url"
+                hint="A tool's toolbox URL starting with “/” is resolved against it. Full URLs (https://…) are used as they are."
+                wide
               >
-                <Plus />
-                Add extension
-              </Button>
-              <div className="flex-1" />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setCommandTemplates({
-                    py: 'python {{SCRIPT_FILE}}',
-                    ps1: 'powershell -ExecutionPolicy Bypass -File {{SCRIPT_FILE}}',
-                    bat: '{{SCRIPT_FILE}}',
-                    cmd: '{{SCRIPT_FILE}}',
-                    sh: 'bash {{SCRIPT_FILE}}',
-                    bash: 'bash {{SCRIPT_FILE}}',
-                    js: 'node {{SCRIPT_FILE}}',
-                    ts: 'npx tsx {{SCRIPT_FILE}}',
-                    rb: 'ruby {{SCRIPT_FILE}}',
-                    pl: 'perl {{SCRIPT_FILE}}',
-                  });
-                  setHasChanges(true);
-                }}
-              >
-                <RotateCcw />
-                Reset defaults
-              </Button>
-            </div>
-          </Section>
-          </>
-        )}
-
-        {/* Agents (beta) */}
-        {visible('agents', 'agents claude code codex sessions directory recent days') && (
-          <>
-          <Section
-            title={
-              <>
-                Agents <BetaBadge />
-              </>
-            }
-            icon={Bot}
-            description="Where CortX reads Claude Code and Codex sessions from. Nothing is written to these folders."
-          >
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label htmlFor="agents-claude-enabled">Claude Code</Label>
-                <p className="mt-1 text-xs text-muted-foreground">Transcripts and live sessions from the config directory</p>
-              </div>
-              <Switch
-                id="agents-claude-enabled"
-                checked={agentsClaudeEnabled}
-                onCheckedChange={(v) => { setAgentsClaudeEnabled(v); setHasChanges(true); }}
-              />
-            </div>
-            <Field label={<span className="text-xs text-muted-foreground">Claude config directory</span>} htmlFor="agents-claude-dir">
-              <div className="flex gap-2">
                 <Input
-                  id="agents-claude-dir"
-                  value={agentsClaudeDir}
-                  onChange={(e) => { setAgentsClaudeDir(e.target.value); setHasChanges(true); }}
-                  placeholder="~/.claude (default)"
-                  className="flex-1 font-mono text-[12px]"
-                  disabled={!agentsClaudeEnabled}
+                  id="toolbox-base-url"
+                  value={toolboxBaseUrl}
+                  onChange={(e) => edit(setToolboxBaseUrl)(e.target.value)}
+                  placeholder="https://docs.example.com"
                 />
-                <Button variant="outline" size="icon" onClick={() => handleBrowseAgentsDir('claude')} disabled={!agentsClaudeEnabled} aria-label="Browse">
-                  <FolderOpen />
+              </SettingRow>
+            </Section>
+          </>
+        );
+      case 'appearance':
+        return <AppearanceSection theme={theme} onThemeChange={edit(setTheme)} />;
+      case 'library':
+        return (
+          <>
+            <TagsSection onManage={() => setShowTagManager(true)} />
+            <StatusesSection onManage={() => setShowStatusManager(true)} />
+            <Section
+              id="templates"
+              title="Script command templates"
+              description={
+                <>
+                  The command used when a script is imported, by file extension. <Code>{'{{SCRIPT_FILE}}'}</Code> stands
+                  for the script path.
+                </>
+              }
+              action={
+                <Button variant="ghost" size="xs" onClick={() => edit(setCommandTemplates)({ ...DEFAULT_COMMAND_TEMPLATES })}>
+                  <RotateCcw />
+                  Reset defaults
                 </Button>
-              </div>
-            </Field>
-
-            <Separator />
-
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label htmlFor="agents-codex-enabled">Codex</Label>
-                <p className="mt-1 text-xs text-muted-foreground">Threads from the Codex home (state database and rollouts)</p>
-              </div>
-              <Switch
-                id="agents-codex-enabled"
-                checked={agentsCodexEnabled}
-                onCheckedChange={(v) => { setAgentsCodexEnabled(v); setHasChanges(true); }}
-              />
-            </div>
-            <Field label={<span className="text-xs text-muted-foreground">Codex home</span>} htmlFor="agents-codex-home">
-              <div className="flex gap-2">
-                <Input
-                  id="agents-codex-home"
-                  value={agentsCodexHome}
-                  onChange={(e) => { setAgentsCodexHome(e.target.value); setHasChanges(true); }}
-                  placeholder="~/.codex (default)"
-                  className="flex-1 font-mono text-[12px]"
-                  disabled={!agentsCodexEnabled}
-                />
-                <Button variant="outline" size="icon" onClick={() => handleBrowseAgentsDir('codex')} disabled={!agentsCodexEnabled} aria-label="Browse">
-                  <FolderOpen />
-                </Button>
-              </div>
-            </Field>
-            <Field
-              label={<span className="text-xs text-muted-foreground">Codex "running" threshold (minutes)</span>}
-              htmlFor="agents-codex-live"
-              hint={
-                <span className="inline-flex items-center gap-1">
-                  <Info className="size-3" />
-                  Codex has no live registry: a thread updated within this window is shown as running.
-                </span>
               }
             >
-              <Input
-                id="agents-codex-live"
-                type="number"
-                min={1}
-                max={1440}
-                value={agentsCodexLiveMinutes}
-                onChange={(e) => { setAgentsCodexLiveMinutes(e.target.value); setHasChanges(true); }}
-                className="w-32 font-mono text-[12px]"
-                disabled={!agentsCodexEnabled}
-              />
-            </Field>
-
-            <Separator />
-
-            <Field
-              label={<span className="text-xs text-muted-foreground">Show finished sessions from the last (days)</span>}
-              htmlFor="agents-recent-days"
-              hint='Running and waiting sessions are always listed. "Show all" in the Agents filters overrides this.'
-            >
-              <Input
-                id="agents-recent-days"
-                type="number"
-                min={1}
-                max={3650}
-                value={agentsRecentDays}
-                onChange={(e) => { setAgentsRecentDays(e.target.value); setHasChanges(true); }}
-                className="w-32 font-mono text-[12px]"
-              />
-            </Field>
-          </Section>
+              {Object.entries(commandTemplates)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([ext, template]) => (
+                  <div key={ext} className="flex items-center gap-3 px-4 py-2">
+                    <label htmlFor={`template-${ext}`} className="w-14 shrink-0 truncate font-mono text-xs text-muted-foreground">
+                      .{ext}
+                    </label>
+                    <Input
+                      id={`template-${ext}`}
+                      value={template}
+                      onChange={(e) => edit(setCommandTemplates)({ ...commandTemplates, [ext]: e.target.value })}
+                      placeholder={`Command for .${ext} files`}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Remove the .${ext} template`}
+                      title="Remove"
+                      className="text-faint hover:text-destructive"
+                      onClick={() => {
+                        const next = { ...commandTemplates };
+                        delete next[ext];
+                        edit(setCommandTemplates)(next);
+                      }}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
+                ))}
+              <div className="flex items-center gap-3 px-4 py-2">
+                <Input
+                  value={newExtension}
+                  onChange={(e) => setNewExtension(e.target.value.replace(/^\./, '').replace(/\s/g, ''))}
+                  placeholder="ext"
+                  aria-label="New extension"
+                  className="w-14 shrink-0 px-2"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!newExtension || newExtension in commandTemplates}
+                  onClick={() => {
+                    if (newExtension && !(newExtension in commandTemplates)) {
+                      edit(setCommandTemplates)({ ...commandTemplates, [newExtension]: '{{SCRIPT_FILE}}' });
+                      setNewExtension('');
+                    }
+                  }}
+                >
+                  <Plus />
+                  Add extension
+                </Button>
+              </div>
+            </Section>
           </>
-        )}
-
-        {/* Data management: import / export / git backup / shims */}
-        {visible('general', 'data management export import backup git repository shims path') && (
+        );
+      case 'shell':
+        return (
           <>
-          <Section title="Data management" description="Export, import, or back up your full CortX configuration." className="space-y-5">
-            {/* Import / export */}
-            <div className="space-y-2">
-              <span className="eyebrow">Import / export</span>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={handleExport}>
+            <ShellSetupSection />
+            <Section
+              id="shims"
+              title="Alias shims"
+              description="A shim is a real launcher file, so an alias works from any process (agents, scheduled tasks, non-interactive shells), not only from shells that load cortx init. Turn it on per alias with “Callable from anywhere”."
+            >
+              <SettingRow
+                label="Shim directory"
+                htmlFor="shim-dir"
+                hint="Empty = the platform default. Shims are re-synced when it changes."
+                wide
+              >
+                <PathInput
+                  id="shim-dir"
+                  value={shimDir}
+                  onChange={edit(setShimDir)}
+                  placeholder={shimStatus?.dir || 'Default: %LOCALAPPDATA%\\CortX\\bin'}
+                  pickerTitle="Select the shim directory"
+                />
+              </SettingRow>
+              <SettingRow
+                label={
+                  <span className="inline-flex items-center gap-2">
+                    On your PATH
+                    {shimStatus?.onPath ? (
+                      <Badge variant="success">
+                        <Check /> Yes
+                      </Badge>
+                    ) : (
+                      <Badge variant="warning">No</Badge>
+                    )}
+                  </span>
+                }
+                hint={
+                  shimStatus?.onPath
+                    ? `${shimStatus.count} shimmed alias${shimStatus.count === 1 ? '' : 'es'}. Turning a shim on or off is instant.`
+                    : 'Needed once. After adding it, restart your terminals and agents; turning a shim on or off is then instant.'
+                }
+              >
+                <Button variant="outline" size="sm" onClick={handleInstallShimPath} disabled={isInstallingPath || !!shimStatus?.onPath}>
+                  <Globe />
+                  {isInstallingPath ? 'Adding…' : 'Add to PATH'}
+                </Button>
+              </SettingRow>
+            </Section>
+          </>
+        );
+      case 'agents':
+        return (
+          <>
+            <Section
+              id="agent-sources"
+              title="Sources"
+              description="Where CortX reads Claude Code and Codex sessions from. Nothing is written to these folders."
+            >
+              <SettingRow
+                label="Claude Code"
+                htmlFor="agents-claude-enabled"
+                hint="Transcripts and live sessions from its config directory."
+              >
+                <Switch id="agents-claude-enabled" checked={agentsClaudeEnabled} onCheckedChange={edit(setAgentsClaudeEnabled)} />
+              </SettingRow>
+              <SettingRow label="Config directory" htmlFor="agents-claude-dir" wide indent disabled={!agentsClaudeEnabled}>
+                <PathInput
+                  id="agents-claude-dir"
+                  value={agentsClaudeDir}
+                  onChange={edit(setAgentsClaudeDir)}
+                  placeholder="~/.claude (default)"
+                  disabled={!agentsClaudeEnabled}
+                  pickerTitle="Select the Claude Code config directory (~/.claude)"
+                />
+              </SettingRow>
+              <SettingRow label="Codex" htmlFor="agents-codex-enabled" hint="Threads from the Codex home (state database and rollouts).">
+                <Switch id="agents-codex-enabled" checked={agentsCodexEnabled} onCheckedChange={edit(setAgentsCodexEnabled)} />
+              </SettingRow>
+              <SettingRow label="Codex home" htmlFor="agents-codex-home" wide indent disabled={!agentsCodexEnabled}>
+                <PathInput
+                  id="agents-codex-home"
+                  value={agentsCodexHome}
+                  onChange={edit(setAgentsCodexHome)}
+                  placeholder="~/.codex (default)"
+                  disabled={!agentsCodexEnabled}
+                  pickerTitle="Select the Codex home directory (~/.codex)"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Running threshold"
+                htmlFor="agents-codex-live"
+                hint="Codex has no live registry: a thread updated within this window shows as running."
+                indent
+                disabled={!agentsCodexEnabled}
+              >
+                <Input
+                  id="agents-codex-live"
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={agentsCodexLiveMinutes}
+                  onChange={(e) => edit(setAgentsCodexLiveMinutes)(e.target.value)}
+                  className="w-24 tabular-nums"
+                  disabled={!agentsCodexEnabled}
+                />
+                <span className="w-6 text-xs text-muted-foreground">min</span>
+              </SettingRow>
+              <SettingRow
+                label="Finished sessions shown"
+                htmlFor="agents-recent-days"
+                hint="From the last days. Running and waiting sessions are always listed; “Show all” in the Agents filters overrides it."
+              >
+                <Input
+                  id="agents-recent-days"
+                  type="number"
+                  min={1}
+                  max={3650}
+                  value={agentsRecentDays}
+                  onChange={(e) => edit(setAgentsRecentDays)(e.target.value)}
+                  className="w-24 tabular-nums"
+                />
+                <span className="w-6 text-xs text-muted-foreground">days</span>
+              </SettingRow>
+            </Section>
+            <TerminalSettingsPage page="agents" />
+          </>
+        );
+      case 'data':
+        return (
+          <>
+            <Section id="export-import" title="Export and import">
+              <SettingRow
+                label="Export"
+                hint="Projects, scripts, tools, apps, shell config, tags, statuses and settings, in one JSON file."
+              >
+                <Button variant="outline" size="sm" onClick={handleExport}>
                   <Download />
                   Export
                 </Button>
-                <Button variant="outline" onClick={handleImport}>
+              </SettingRow>
+              <SettingRow label="Import" hint="Pick what to bring in from an export file. Items that already exist are kept.">
+                <Button variant="outline" size="sm" onClick={handleImport}>
                   <Upload />
-                  Import
+                  Import…
                 </Button>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Git backup */}
-            <div className="space-y-3">
-              <span className="eyebrow inline-flex items-center gap-1.5">
-                <GitBranch className="size-3.5" />
-                Git backup
-              </span>
-              <Field
-                label={<span className="text-xs text-muted-foreground">Repository path</span>}
+              </SettingRow>
+            </Section>
+            <Section id="backup" title="Git backup">
+              <SettingRow
+                label="Repository"
                 htmlFor="backup-repo-path"
-                hint="Must be an existing git repo with a remote configured. Save settings before backing up."
+                hint="An existing git repository with a remote configured."
+                wide
               >
-                <div className="flex gap-2">
-                  <Input
-                    id="backup-repo-path"
-                    value={backupRepoPath}
-                    onChange={(e) => {
-                      setBackupRepoPath(e.target.value);
-                      setHasChanges(true);
-                    }}
-                    placeholder="Path to a local git repo"
-                    className="flex-1 font-mono text-[12px]"
-                  />
-                  <Button variant="outline" size="icon" onClick={handleBrowseBackupRepo} aria-label="Browse">
-                    <FolderOpen />
-                  </Button>
-                </div>
-              </Field>
-              <Button
-                variant="outline"
-                onClick={handleBackup}
-                disabled={isBackingUp || !settings?.backupRepoPath}
-              >
-                <Upload />
-                {isBackingUp ? 'Backing up...' : 'Backup now'}
-              </Button>
-            </div>
-
-            <Separator />
-
-            {/* Alias shims */}
-            <div className="space-y-3">
-              <span className="eyebrow inline-flex items-center gap-1.5">
-                <Globe className="size-3.5" />
-                Alias shims
-              </span>
-              <p className="text-xs text-muted-foreground">
-                A shim is a real launcher file so an alias becomes callable from <strong>any</strong> process
-                — AI agents, scheduled tasks, non-interactive shells — not just terminals that load{' '}
-                <Code>cortx init</Code>. Enable per alias via the
-                “Callable from anywhere” switch. The shim folder must be on your PATH (one-time).
-              </p>
-
-              <Field
-                label={<span className="text-xs text-muted-foreground">Shim directory</span>}
-                htmlFor="shim-dir"
-                hint="Leave empty to use the platform default. Save settings to apply (shims are re-synced automatically)."
-              >
-                <div className="flex gap-2">
-                  <Input
-                    id="shim-dir"
-                    value={shimDir}
-                    onChange={(e) => {
-                      setShimDir(e.target.value);
-                      setHasChanges(true);
-                    }}
-                    placeholder={shimStatus?.dir || 'Default: %LOCALAPPDATA%\\CortX\\bin'}
-                    className="flex-1 font-mono text-[12px]"
-                  />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    aria-label="Browse"
-                    onClick={async () => {
-                      try {
-                        const selected = await open({ directory: true, multiple: false, title: 'Select Shim Directory' });
-                        if (selected && typeof selected === 'string') {
-                          setShimDir(selected);
-                          setHasChanges(true);
-                        }
-                      } catch (e) {
-                        console.error('Failed to open folder picker:', e);
-                      }
-                    }}
-                  >
-                    <FolderOpen />
-                  </Button>
-                </div>
-              </Field>
-
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-muted-foreground">Status</span>
-                {shimStatus?.onPath ? (
-                  <Badge variant="success">
-                    <Check /> On PATH
-                  </Badge>
-                ) : (
-                  <Badge variant="warning">Not on PATH</Badge>
-                )}
-                <span className="text-faint">·</span>
-                <span className="text-muted-foreground">{shimStatus?.count ?? 0} shimmed alias{(shimStatus?.count ?? 0) === 1 ? '' : 'es'}</span>
-              </div>
-
-              <Button
-                variant="outline"
-                onClick={handleInstallShimPath}
-                disabled={isInstallingPath || !!shimStatus?.onPath}
-              >
-                <Globe />
-                {isInstallingPath ? 'Adding…' : shimStatus?.onPath ? 'Already on PATH' : 'Add to PATH'}
-              </Button>
-              {!shimStatus?.onPath && (
-                <p className="text-xs text-muted-foreground">
-                  After adding, restart your terminals/agents once. Then enabling or disabling a shim is instant — no restart needed.
-                </p>
-              )}
-            </div>
-          </Section>
+                <PathInput
+                  id="backup-repo-path"
+                  value={backupRepoPath}
+                  onChange={edit(setBackupRepoPath)}
+                  placeholder="Path to a local git repository"
+                  pickerTitle="Select the backup git repository"
+                />
+              </SettingRow>
+              <SettingRow label="Back up now" hint="Copies your CortX data files into the repository and commits them.">
+                <Button variant="outline" size="sm" onClick={handleBackup} disabled={isBackingUp || !settings.backupRepoPath}>
+                  <Upload />
+                  {isBackingUp ? 'Backing up…' : 'Back up now'}
+                </Button>
+              </SettingRow>
+            </Section>
           </>
-        )}
+        );
+      default:
+        return <TerminalSettingsPage page={id} />;
+    }
+  };
 
-      </div>
+  const titleOf = (id: string) => pages.find((p) => p.id === id)?.title ?? '';
 
-      {/* Tag definition manager dialog */}
-      <TagDefinitionManager
-        open={showTagManager}
-        onOpenChange={setShowTagManager}
+  return (
+    <Screen title="Settings" actions={saveActions} fill>
+      <SettingsLayout
+        pages={pages}
+        selected={selectedPage}
+        onSelect={(id) => {
+          setSelectedPage(id);
+          storePage(PAGE_KEY, id);
+        }}
+        query={query}
+        onQueryChange={setQuery}
+        renderPage={renderPage}
+        renderPageAction={(id) => <TerminalPageAction page={id} title={titleOf(id)} />}
       />
 
-      {/* Status definition manager dialog */}
-      <StatusDefinitionManager
-        open={showStatusManager}
-        onOpenChange={setShowStatusManager}
-      />
+      <TagDefinitionManager open={showTagManager} onOpenChange={setShowTagManager} />
+      <StatusDefinitionManager open={showStatusManager} onOpenChange={setShowStatusManager} />
 
       {/* Import preview dialog */}
-      <Dialog open={importDialogOpen} onOpenChange={(open) => {
-        if (!isImporting) {
-          setImportDialogOpen(open);
-          if (!open) { setImportJson(null); setImportSummary(null); }
-        }
-      }}>
+      <Dialog
+        open={importDialogOpen}
+        onOpenChange={(open) => {
+          if (!isImporting) {
+            setImportDialogOpen(open);
+            if (!open) {
+              setImportJson(null);
+              setImportSummary(null);
+            }
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Import CortX config</DialogTitle>
@@ -1076,11 +943,19 @@ export function Settings() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="ghost" onClick={() => { setImportDialogOpen(false); setImportJson(null); setImportSummary(null); }} disabled={isImporting}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setImportDialogOpen(false);
+                setImportJson(null);
+                setImportSummary(null);
+              }}
+              disabled={isImporting}
+            >
               Cancel
             </Button>
             <Button onClick={handleConfirmImport} disabled={isImporting || !Object.values(importOptions).some(Boolean)}>
-              {isImporting ? 'Importing...' : 'Import'}
+              {isImporting ? 'Importing…' : 'Import'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1090,160 +965,121 @@ export function Settings() {
 }
 
 // ============================================================================
-// Appearance (mode is saved in the app settings; accent / radius / font are
-// per-machine and applied instantly through the theme store)
+// Appearance — the three Zinc seeds. The mode is saved in the app settings
+// (the CLI reads it, and it can follow the OS); accent and neutral are
+// per-machine and apply instantly through the theme store.
 // ============================================================================
 
-function AppearanceSection({
-  theme,
-  onThemeChange,
-}: {
-  theme: 'light' | 'dark' | 'system';
-  onThemeChange: (value: 'light' | 'dark' | 'system') => void;
-}) {
-  const { skin, accent, radius, font, setStyle, reset } = useThemeStore();
-  const isPreset = !!accent && ACCENT_PRESETS.some((p) => p.value.toLowerCase() === accent.toLowerCase());
-  const isCustom = !!accent && !isPreset;
-  const radiusName = RADIUS_PRESETS.find((r) => r.value === radius)?.name ?? 'Soft';
-  const isDefaultStyle = !accent && radius === 1 && font === 'halcyon';
-  const isClassic = skin === 'classic';
-  const skinPreset = SKIN_PRESETS.find((p) => p.value === skin) ?? SKIN_PRESETS[0];
+const THEME_MODE_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'dark', label: 'Dark', icon: Moon },
+  { value: 'system', label: 'System', icon: MonitorCog },
+];
+
+const ACCENT_NAMES: Record<string, string> = {
+  jaune: 'Yellow',
+  teal: 'Teal',
+  bleu: 'Blue',
+  violet: 'Violet',
+  vert: 'Green',
+  rose: 'Pink',
+  graphite: 'Graphite',
+};
+
+const NEUTRAL_NAMES: Record<string, string> = {
+  pur: 'Pure',
+  ardoise: 'Slate',
+  chaud: 'Warm',
+  teinte: 'Tinted',
+};
+
+function AppearanceSection({ theme, onThemeChange }: { theme: ThemeMode; onThemeChange: (value: ThemeMode) => void }) {
+  const { accent, neutral, setColors, reset } = useThemeStore();
+  const dark = document.documentElement.classList.contains('dark');
+  const presetId = 'preset' in accent ? accent.preset : null;
+  const customHex = 'color' in accent ? accent.color : null;
+  const isDefault =
+    neutral === DEFAULT_COLORS.neutral && presetId !== null && 'preset' in DEFAULT_COLORS.accent && presetId === DEFAULT_COLORS.accent.preset;
 
   return (
     <Section
-      title="Appearance"
-      icon={Palette}
-      description="Customize the look and feel of the application."
-      className="space-y-5"
+      id="appearance"
+      title="Colours"
+      action={
+        <Button variant="ghost" size="xs" onClick={reset} disabled={isDefault}>
+          <RotateCcw />
+          Reset
+        </Button>
+      }
     >
-      <Field label="Style" hint={skinPreset.description}>
-        <Segmented<Skin>
-          value={skin}
-          onChange={(value) => setStyle({ skin: value })}
-          options={SKIN_PRESETS.map((p) => ({ value: p.value, label: p.name, title: p.description }))}
-        />
-      </Field>
+      <SettingRow label="Mode" hint="“System” follows the OS.">
+        <Segmented size="sm" value={theme} onChange={onThemeChange} options={THEME_MODE_OPTIONS} />
+      </SettingRow>
 
-      <Field label="Theme" hint="Saved with the settings. “System” follows the OS.">
-        <Segmented
-          value={theme}
-          onChange={onThemeChange}
-          options={THEME_MODE_OPTIONS}
-        />
-      </Field>
-
-      <Separator />
-
-      <div className="space-y-5">
-        <Field label="Accent colour" hint={isClassic ? 'Theme default is black in light mode and white in dark mode.' : undefined}>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              title="Theme default"
-              aria-label="Theme default"
-              aria-pressed={!accent}
-              onClick={() => setStyle({ accent: undefined })}
-              className={cn(
-                'grid size-7 place-items-center rounded-full border border-border-strong text-background transition-[transform,box-shadow] hover:scale-110',
-                !accent && 'ring-2 ring-ring ring-offset-2 ring-offset-card'
-              )}
-              style={{ backgroundColor: 'var(--theme-primary)' }}
-            >
-              {!accent && <Check className="size-3.5" />}
-            </button>
-            <span className="mx-1 h-5 w-px bg-border" />
-            {ACCENT_PRESETS.map((preset) => {
-              const active = !!accent && preset.value.toLowerCase() === accent.toLowerCase();
-              return (
-                <button
-                  key={preset.value}
-                  type="button"
-                  title={preset.name}
-                  aria-label={preset.name}
-                  aria-pressed={active}
-                  onClick={() => setStyle({ accent: preset.value })}
-                  className={cn(
-                    'grid size-7 place-items-center rounded-full transition-[transform,box-shadow] hover:scale-110',
-                    active && 'ring-2 ring-offset-2 ring-offset-card'
-                  )}
-                  style={{ backgroundColor: preset.value, '--tw-ring-color': preset.value } as CSSProperties}
-                >
-                  {active && <Check className="size-3.5" style={{ color: accentForeground(preset.value) }} />}
-                </button>
-              );
-            })}
-            <span className="mx-1 h-5 w-px bg-border" />
-            {/* CortX's own picker, not `<input type="color">`: that one opens
-                Windows' colour dialog, which knows nothing of the app's theme
-                and drops the user out of the window to pick a colour for it.
-                The trigger keeps the round pip of the presets beside it. */}
-            <ColorField
-              value={accent ?? ''}
-              onChange={(hex) => setStyle({ accent: hex || undefined })}
-              swatches={ACCENT_PRESETS.map((p) => p.value)}
-              aria-label="Custom accent colour"
-              trigger={
-                <button
-                  type="button"
-                  title="Custom colour"
-                  aria-label="Custom accent colour"
-                  className={cn(
-                    'relative grid size-7 cursor-pointer place-items-center rounded-full border border-dashed border-border-strong',
-                    isCustom && 'border-solid ring-2 ring-offset-2 ring-offset-card'
-                  )}
-                  style={
-                    isCustom && accent
-                      ? ({ backgroundColor: accent, '--tw-ring-color': accent } as CSSProperties)
-                      : undefined
-                  }
-                >
-                  {isCustom && accent ? (
-                    <Check className="size-3.5" style={{ color: accentForeground(accent) }} />
-                  ) : (
-                    <Palette className="size-3.5 text-faint" />
-                  )}
-                </button>
-              }
-            />
-            <span className="font-mono text-[11px] text-faint">{accent ? accent.toLowerCase() : 'theme default'}</span>
-            <Button variant="ghost" size="sm" onClick={reset} disabled={isDefaultStyle} className="ml-auto">
-              <RotateCcw />
-              Reset
-            </Button>
-          </div>
-        </Field>
-
-        <div className={cn('grid gap-5 sm:grid-cols-2', isClassic && 'pointer-events-none opacity-50')} aria-disabled={isClassic}>
-          <Field label="Corners">
-            <Segmented
-              value={radiusName}
-              onChange={(name) => {
-                const preset = RADIUS_PRESETS.find((r) => r.name === name);
-                if (preset) setStyle({ radius: preset.value });
-              }}
-              options={RADIUS_PRESETS.map((r) => ({ value: r.name, label: r.name, icon: RADIUS_ICONS[r.name] }))}
-            />
-          </Field>
-      </div>
-
-      </div>
-
-      <div className="grid gap-5 sm:grid-cols-2">
-        <Field label="Font">
-          <Segmented<FontChoice>
-            value={font}
-            onChange={(value) => setStyle({ font: value })}
-            options={FONT_PRESETS.map((f) => ({ value: f.value, label: f.name }))}
+      <SettingRow label="Accent" hint="The colour of the main actions and of what is active. Any colour works." wide>
+        <div className="flex flex-wrap items-center gap-2">
+          {ZINC_ACCENTS.map((p) => {
+            const active = presetId === p.id;
+            const color = dark ? p.dark : p.light;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                title={ACCENT_NAMES[p.id] ?? p.name}
+                aria-label={ACCENT_NAMES[p.id] ?? p.name}
+                aria-pressed={active}
+                onClick={() => setColors({ accent: { preset: p.id } })}
+                className={cn(
+                  'grid size-7 place-items-center rounded-full border border-border transition-shadow',
+                  active && 'ring-2 ring-ring ring-offset-2 ring-offset-background'
+                )}
+                style={{ backgroundColor: color }}
+              >
+                {active && <Check className="size-3.5" style={{ color: accentForeground(color) }} />}
+              </button>
+            );
+          })}
+          <span className="mx-1 h-5 w-px bg-border" />
+          {/* CortX's own picker, not `<input type="color">`: that one opens
+              Windows' colour dialog, which knows nothing of the app's theme. */}
+          <ColorField
+            value={customHex ?? ''}
+            onChange={(hex) => {
+              if (/^#[0-9a-fA-F]{6}$/.test(hex)) setColors({ accent: { color: hex.toLowerCase() } });
+            }}
+            swatches={ZINC_ACCENTS.map((p) => (dark ? p.dark : p.light))}
+            aria-label="Custom accent colour"
+            trigger={
+              <button
+                type="button"
+                title="Custom colour"
+                aria-label="Custom accent colour"
+                className={cn(
+                  'grid size-7 cursor-pointer place-items-center rounded-full border border-dashed border-border-strong',
+                  customHex && 'border-solid ring-2 ring-ring ring-offset-2 ring-offset-background'
+                )}
+                style={customHex ? { backgroundColor: customHex } : undefined}
+              >
+                {customHex ? (
+                  <Check className="size-3.5" style={{ color: accentForeground(customHex) }} />
+                ) : (
+                  <Palette className="size-3.5 text-faint" />
+                )}
+              </button>
+            }
           />
-        </Field>
-      </div>
+          {customHex && <span className="font-mono text-xs text-faint">{customHex}</span>}
+        </div>
+      </SettingRow>
 
-      <p className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Info className="size-3" />
-        {isClassic
-          ? 'Corners are fixed in the Classic style. Accent and font apply instantly on this machine — no need to save.'
-          : 'Accent, corners and font apply instantly on this machine — no need to save.'}
-      </p>
+      <SettingRow label="Neutral" hint="The temperature of the greys: backgrounds, borders and text.">
+        <Segmented<NeutralId>
+          size="sm"
+          value={neutral}
+          onChange={(value) => setColors({ neutral: value })}
+          options={ZINC_NEUTRALS.map((n) => ({ value: n.id, label: NEUTRAL_NAMES[n.id] ?? n.name }))}
+        />
+      </SettingRow>
     </Section>
   );
 }
@@ -1257,27 +1093,28 @@ function TagsSection({ onManage }: { onManage: () => void }) {
   const sorted = [...tagDefinitions].sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
   return (
     <Section
+      id="tags"
       title="Tags"
-      icon={Tags}
-      description="Tag definitions shared across scripts, tools, and projects. Tags can have custom colors and display order."
+      description="Shared by scripts, tools and projects, each with its colour and place in the order."
       action={
         <Button variant="outline" size="sm" onClick={onManage}>
-          <Tags />
           Manage tags
         </Button>
       }
     >
-      {sorted.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {sorted.map((def) => (
-            <Chip key={def.name} color={def.color} neutral={!def.color} dot={false}>
-              {def.name}
-            </Chip>
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">No tags defined yet.</p>
-      )}
+      <SectionBody>
+        {sorted.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {sorted.map((def) => (
+              <Chip key={def.name} color={def.color} neutral={!def.color} dot={false}>
+                {def.name}
+              </Chip>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No tags defined yet.</p>
+        )}
+      </SectionBody>
     </Section>
   );
 }
@@ -1287,33 +1124,34 @@ function StatusesSection({ onManage }: { onManage: () => void }) {
   const sorted = [...statusDefinitions].sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
   return (
     <Section
+      id="statuses"
       title="Statuses"
-      icon={CircleDot}
-      description="Status definitions shared across tools, scripts, projects, apps, and aliases. Statuses can have custom colors and display order."
+      description="Shared by tools, scripts, projects, apps and aliases, each with its colour and place in the order."
       action={
         <Button variant="outline" size="sm" onClick={onManage}>
-          <CircleDot />
           Manage statuses
         </Button>
       }
     >
-      {sorted.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {sorted.map((def) => (
-            <Chip key={def.name} color={def.color} neutral={!def.color}>
-              {def.name}
-            </Chip>
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">No statuses defined yet.</p>
-      )}
+      <SectionBody>
+        {sorted.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {sorted.map((def) => (
+              <Chip key={def.name} color={def.color} neutral={!def.color}>
+                {def.name}
+              </Chip>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No statuses defined yet.</p>
+        )}
+      </SectionBody>
     </Section>
   );
 }
 
 // ============================================================================
-// Shell Setup Card (cortx init)
+// Shell profile (cortx init)
 // ============================================================================
 
 const SHELL_INIT_LINES: { shell: string; label: string; profileLine: string; profileFile: string }[] = [
@@ -1323,27 +1161,12 @@ const SHELL_INIT_LINES: { shell: string; label: string; profileLine: string; pro
     profileLine: 'cortx init powershell | Out-String | Invoke-Expression',
     profileFile: '$PROFILE',
   },
-  {
-    shell: 'bash',
-    label: 'Bash',
-    profileLine: 'eval "$(cortx init bash)"',
-    profileFile: '~/.bashrc',
-  },
-  {
-    shell: 'zsh',
-    label: 'Zsh',
-    profileLine: 'eval "$(cortx init zsh)"',
-    profileFile: '~/.zshrc',
-  },
-  {
-    shell: 'fish',
-    label: 'Fish',
-    profileLine: 'cortx init fish | source',
-    profileFile: '~/.config/fish/config.fish',
-  },
+  { shell: 'bash', label: 'Bash', profileLine: 'eval "$(cortx init bash)"', profileFile: '~/.bashrc' },
+  { shell: 'zsh', label: 'Zsh', profileLine: 'eval "$(cortx init zsh)"', profileFile: '~/.zshrc' },
+  { shell: 'fish', label: 'Fish', profileLine: 'cortx init fish | source', profileFile: '~/.config/fish/config.fish' },
 ];
 
-function ShellSetupCard() {
+function ShellSetupSection() {
   const { aliases } = useAppStore();
   const [selectedShell, setSelectedShell] = useState('powershell');
   const [copiedLine, setCopiedLine] = useState(false);
@@ -1383,57 +1206,43 @@ function ShellSetupCard() {
 
   return (
     <Section
-      title="Shell aliases setup"
-      icon={TerminalSquare}
-      description={
-        <>
-          Add this line to your shell profile to enable all CortX aliases{' '}
-          <Badge variant="secondary">
-            {aliases.length} alias{aliases.length !== 1 ? 'es' : ''}
-          </Badge>
-        </>
-      }
+      id="shell-init"
+      title="Shell profile"
+      description={`One line in your shell profile loads every CortX alias (${aliases.length} alias${aliases.length === 1 ? '' : 'es'} today).`}
     >
-      {/* Shell selector */}
-      <Segmented
-        size="sm"
-        value={selectedShell}
-        onChange={(shell) => {
-          setSelectedShell(shell);
-          setShowPreview(false);
-          setPreviewOutput(null);
-        }}
-        options={SHELL_INIT_LINES.map((s) => ({ value: s.shell, label: s.label }))}
-      />
-
-      {/* Profile line to copy */}
-      <Field label={<span className="text-xs text-muted-foreground">Add to <Code>{selected.profileFile}</Code></span>}>
+      <SettingRow label="Shell">
+        <Segmented
+          size="sm"
+          value={selectedShell}
+          onChange={(shell) => {
+            setSelectedShell(shell);
+            setShowPreview(false);
+            setPreviewOutput(null);
+          }}
+          options={SHELL_INIT_LINES.map((s) => ({ value: s.shell, label: s.label }))}
+        />
+      </SettingRow>
+      <SettingRow label={<>Add to {selected.profileFile}</>} wide>
         <div className="flex items-center gap-2">
-          <code className="flex-1 select-all overflow-x-auto whitespace-nowrap rounded-sm border border-border bg-muted/50 px-3 py-2 font-mono text-[12px]">
+          <code className="flex-1 select-all overflow-x-auto whitespace-nowrap rounded-sm border border-border bg-surface-sunken px-3 py-1.5 font-mono text-xs">
             {selected.profileLine}
           </code>
-          <Button variant="outline" size="icon" className="shrink-0" onClick={handleCopyLine} aria-label="Copy line">
+          <Button variant="outline" size="icon" className="shrink-0" onClick={handleCopyLine} aria-label="Copy the line" title="Copy">
             {copiedLine ? <Check className="text-st-done" /> : <Copy />}
           </Button>
         </div>
-      </Field>
-
-      {/* Preview toggle */}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={handleTogglePreview}
-        disabled={isGenerating}
-      >
-        {showPreview ? <ChevronUp /> : <ChevronDown />}
-        {isGenerating ? 'Generating...' : showPreview ? 'Hide generated script' : 'Preview generated script'}
-      </Button>
-
-      {showPreview && previewOutput && (
-        <pre className="max-h-48 overflow-x-auto overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/50 p-4 font-mono text-[11px] text-muted-foreground">
-          {previewOutput}
-        </pre>
-      )}
+      </SettingRow>
+      <SettingRow label="Generated script" hint="What that line runs, for the shell above." wide={showPreview && !!previewOutput}>
+        <Button variant="ghost" size="sm" onClick={handleTogglePreview} disabled={isGenerating}>
+          {showPreview ? <ChevronUp /> : <ChevronDown />}
+          {isGenerating ? 'Generating…' : showPreview ? 'Hide' : 'Show'}
+        </Button>
+        {showPreview && previewOutput && (
+          <pre className="mt-2.5 max-h-48 overflow-auto whitespace-pre-wrap rounded-sm border border-border bg-surface-sunken p-3 font-mono text-[11px] text-muted-foreground">
+            {previewOutput}
+          </pre>
+        )}
+      </SettingRow>
     </Section>
   );
 }
@@ -1461,18 +1270,11 @@ function ImportCheckboxRow({
   disabled: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
-  const countLabel = count !== undefined
-    ? extra ? `${count} ${label.toLowerCase()}, ${extra}` : `${count}`
-    : undefined;
+  const countLabel = count !== undefined ? (extra ? `${count} ${label.toLowerCase()}, ${extra}` : `${count}`) : undefined;
 
   return (
-    <div className={cn('flex items-center gap-3', disabled && 'opacity-40')}>
-      <Checkbox
-        id={`import-${id}`}
-        checked={checked && !disabled}
-        disabled={disabled}
-        onCheckedChange={onCheckedChange}
-      />
+    <div className={cn('flex items-center gap-3', disabled && 'opacity-50')}>
+      <Checkbox id={`import-${id}`} checked={checked && !disabled} disabled={disabled} onCheckedChange={onCheckedChange} />
       <label htmlFor={`import-${id}`} className="flex-1 cursor-pointer select-none text-sm">
         {label}
         {countLabel && <span className="ml-1 text-muted-foreground">({countLabel})</span>}
@@ -1481,3 +1283,4 @@ function ImportCheckboxRow({
     </div>
   );
 }
+

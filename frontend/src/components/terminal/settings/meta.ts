@@ -144,22 +144,6 @@ export function resolveBellStyle(cfg?: Partial<TerminalConfig> | null): Terminal
   return cfg?.bell ?? DEFAULT_BELL;
 }
 
-/** Search keywords of each terminal settings card, shared by both surfaces. */
-export const TERMINAL_SECTION_KEYWORDS = {
-  external:
-    'terminal application external windows terminal powershell cmd warp custom path arguments cortx terminal preset',
-  integrated:
-    'integrated terminal shell integration inline suggestions ghost font size line height weight letter spacing selection renderer tabs placement rail restore sessions scrollback command history size cap megabytes searchable past compaction mask secrets redact token password api key block cards plate sticky header pinned command jump to end of block close busy open in dock window processes dev sessions file path links clickable paths kitty graphics images tab display number cwd agent completion menu flags subcommands git branches npm scripts input line position bottom pinned universal input editor blocks dividers gutter fold prompt navigation suggestions from output confidence ghost text smooth scrolling block spacing comfortable failed tint wash link tooltip hover target option meta alt key macos word keys dead keys azerty swiss font family missing not installed nerd font mono osc52 osc 52 clipboard access escape sequence tmux neovim yank write only read write deny security ssh scrollback lines kept buffer memory history block navigation trim markers ligatures font ligature calt fira code cascadia jetbrains arrow glyph ctrl tab behavior next tab recently used mru most recently used alt+tab alt tab switch tabs order stack hold ctrl cycle tabs previous tab accessibility screen reader voiceover nvda narrator minimum contrast ratio wcag aa aaa readable text legibility font installed all users library fonts font book',
-  notifications:
-    'terminal notifications notify toast system desktop long command failed exit code muted commands claude codex vim ssh hidden background password prompt bell BEL 0x07 visual flash audible beep sound ring attention',
-  appearance:
-    'terminal appearance theme picker wallpaper opacity blur dim cursor padding window opacity effect acrylic mica vibrancy chrome dock theme dock colours dock skin panes only whole dock inactive cursor unfocused pane split focus which pane',
-  agents:
-    'agents agent mode claude code codex grid tiles colours colors dot working needs you question permission done not seen idle notify notification new agent launch command cc alias tile header project branch model last prompt reply',
-  shortcuts: 'terminal shortcuts keybindings keyboard combo copy on select shift enter smooth scroll keys selection',
-  launch: 'terminal launch configurations dev session yaml tabs layout',
-} as const;
-
 /** DOM event the Terminal window listens to in order to show its settings panel. */
 export const OPEN_TERMINAL_SETTINGS_EVENT = 'cortx:open-terminal-settings';
 

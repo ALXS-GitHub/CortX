@@ -1,18 +1,21 @@
 /**
- * Agents (agent mode): the dot colours, the agent notifications, what "New
- * agent" runs and how the grid tiles behave. Store-backed like the other
- * cards — mounted in the Settings page and in the Terminal window's panel.
+ * Agents (agent mode): what "New agent" runs, the GUI agent view, the agent
+ * prompt, the grid and the dot colours. Store-backed like the other terminal
+ * pages — mounted in the Settings screen (under the agent sources) and in the
+ * Terminal window's panel. The agent *notifications* moved to the
+ * Notifications page (ticket #64), so every notification lives in one place.
  *
  * Everything here is observation and presentation: CortX reads what the
  * agents write on their own (their live registry, their transcripts, the
  * terminal's output) and never sends them anything — except, for "New agent",
  * the command you chose, typed as you would type it.
  */
-import { Bot } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
+import type { ReactNode } from 'react';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ColorField } from '@/components/ui/ColorField';
-import { Code, Section } from '@/components/settings/SettingsPrimitives';
+import { Segmented } from '@/components/ui/Segmented';
+import { CONTROL_WIDTH, Code, SectionNote } from '@/components/settings/SettingsPrimitives';
 import { cn } from '@/lib/utils';
 import type {
   AgentPermissionMode,
@@ -22,9 +25,7 @@ import type {
   AgentViewWidth,
   GridTileInfo,
   TerminalConfig,
-  ToastPosition,
 } from '@/types';
-import { resolveAgentNotifyPosition, TOAST_POSITION_OPTIONS } from './notificationPolicy';
 import { AgentPhaseDot } from '../TerminalStatusGlyph';
 import { DEFAULT_AGENT_COLORS, type AgentColorKey } from '../agentColors';
 import {
@@ -33,9 +34,8 @@ import {
   resolveGridTileInfo,
   resolveGridTileTextScale,
 } from '../gridTileInfo';
-import { Segmented } from '@/components/ui/Segmented';
 import type { AgentPhase } from '../agentPhase';
-import { Group, ResetCard, SettingField, SettingToggle } from './controls';
+import { Group, SelectField, SettingField, SliderField, SwitchField } from './controls';
 import { useTerminalSettings } from './useTerminalSettings';
 
 type ColorSetting = 'agentColorWorking' | 'agentColorNeedsYou' | 'agentColorDone' | 'agentColorIdle';
@@ -49,235 +49,64 @@ const COLORS: Array<{ key: AgentColorKey; field: ColorSetting; phase: AgentPhase
     label: 'Needs you',
     hint: 'A calling ring when it is stopped on you: a question, a plan to approve, a permission prompt.',
   },
-  { key: 'done', field: 'agentColorDone', phase: 'done', label: 'Done, not seen', hint: 'Solid once its turn ended and until you look at it.' },
+  { key: 'done', field: 'agentColorDone', phase: 'done', label: 'Done, not seen', hint: 'Solid once its turn ended, until you look at it.' },
   { key: 'idle', field: 'agentColorIdle', phase: 'idle', label: 'Idle', hint: 'A ring: finished, seen, waiting for your next prompt.' },
 ];
 
+/** Disables a `Segmented`, which has no `disabled` of its own. */
+function Dimmed({ off, children }: { off: boolean; children: ReactNode }) {
+  return (
+    <div className={cn(off && 'pointer-events-none opacity-50')} aria-disabled={off || undefined}>
+      {children}
+    </div>
+  );
+}
+
 export function AgentSettingsSection() {
   const { terminal, patch } = useTerminalSettings();
-  const disabled = !terminal;
-  const promptOpacity = terminal?.agentPromptOpacity ?? 95;
+  const off = !terminal;
   const tileInfo = resolveGridTileInfo(terminal);
-  const position = resolveAgentNotifyPosition(terminal);
-  const toggleInfo = (value: GridTileInfo) => {
-    const next = tileInfo.includes(value) ? tileInfo.filter((v) => v !== value) : [...tileInfo, value];
+  const keepSize = terminal?.gridTilesKeepSize ?? true;
+  const promptBar = terminal?.agentPromptBar ?? true;
+  const toggleInfo = (value: GridTileInfo, on: boolean) => {
+    const next = on ? [...tileInfo, value] : tileInfo.filter((v) => v !== value);
     patch({ gridTileInfo: GRID_TILE_INFO_OPTIONS.map((o) => o.value).filter((v) => next.includes(v)) });
   };
 
   return (
-    <Section
-      title="Agents"
-      icon={Bot}
-      action={<ResetCard card="agents" title="Agents" />}
-      description="How CortX shows the agents (Claude Code, Codex) running in its terminals. It watches what they write on their own — their session files and their output — and only sends them what you write in the agent prompt."
-    >
-      <Group title="Dot colours" group="agents">
-        <p className="text-xs text-faint">
-          A family of their own: no shell, service or script dot ever uses them. Empty = CortX&rsquo;s colour.
-        </p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {COLORS.map((c) => {
-            const value = terminal?.[c.field] ?? '';
-            return (
-              <SettingField key={c.key} k={c.field} label={c.label} hint={c.hint}>
-                <div className="flex items-center gap-2">
-                  <AgentPhaseDot phase={c.phase} size={9} />
-                  <ColorField
-                    value={value}
-                    onChange={(hex) => patch({ [c.field]: hex || undefined } as Partial<TerminalConfig>)}
-                    clearable
-                    placeholder={DEFAULT_AGENT_COLORS[c.key]}
-                    swatches={Object.values(DEFAULT_AGENT_COLORS)}
-                    disabled={disabled}
-                    aria-label={`${c.label} colour`}
-                    className="w-40"
-                  />
-                </div>
-              </SettingField>
-            );
-          })}
-        </div>
-      </Group>
-
-      <Group title="Notifications">
-        <SettingToggle
-          k="agentNotifyNeedsYou"
-          id="agent-notify-needs-you"
-          label="When an agent needs you"
-          hint="A question, a plan to approve, a permission prompt."
-        >
-          <Switch
-            id="agent-notify-needs-you"
-            checked={terminal?.agentNotifyNeedsYou ?? true}
-            onCheckedChange={(v) => patch({ agentNotifyNeedsYou: v })}
-            disabled={disabled}
-          />
-        </SettingToggle>
-        <SettingToggle k="agentNotifyDone" id="agent-notify-done" label="When an agent is done" hint="Its turn ended.">
-          <Switch
-            id="agent-notify-done"
-            checked={terminal?.agentNotifyDone ?? true}
-            onCheckedChange={(v) => patch({ agentNotifyDone: v })}
-            disabled={disabled}
-          />
-        </SettingToggle>
-        <SettingToggle
-          k="agentNotifyOnlyWhenHidden"
-          id="agent-notify-hidden"
-          label="Only for agents out of sight"
-          hint="Not for the one you are looking at. How a notification shows (a toast, the desktop, both) follows the Notifications card."
-        >
-          <Switch
-            id="agent-notify-hidden"
-            checked={terminal?.agentNotifyOnlyWhenHidden ?? true}
-            onCheckedChange={(v) => patch({ agentNotifyOnlyWhenHidden: v })}
-            disabled={disabled}
-          />
-        </SettingToggle>
-        <SettingField
-          k="agentNotifyPosition"
-          label="Appear"
-          hint={`${TOAST_POSITION_OPTIONS.find((o) => o.value === position)?.label ?? ''} of the window. Only the agent toasts move; the others stay bottom right.`}
-        >
-          <ToastPositionPicker value={position} onChange={(v) => patch({ agentNotifyPosition: v })} disabled={disabled} />
-        </SettingField>
-      </Group>
-
-      <Group title="Agent prompt">
-        <SettingToggle
-          k="agentPromptBar"
-          id="agent-prompt-bar"
-          label="Agent prompt (Ctrl+G)"
-          hint="While an agent runs in a terminal, Ctrl+G opens an editor over its last rows: write your prompt there, paste or drop images and files, and it goes to the agent as if typed in its own input."
-        >
-          <Switch
-            id="agent-prompt-bar"
-            checked={terminal?.agentPromptBar ?? true}
-            onCheckedChange={(v) => patch({ agentPromptBar: v })}
-            disabled={disabled}
-          />
-        </SettingToggle>
-        <SettingToggle
-          k="agentStatusBar"
-          id="agent-status-bar"
-          label="Status bar under the terminal"
-          hint="A thin bar under a terminal running an agent: which agent, what it is doing, a draft waiting to be sent. Click it to open the agent prompt — the same as Ctrl+G. Off, nothing takes room under the terminal and Ctrl+G is the only way in."
-        >
-          <Switch
-            id="agent-status-bar"
-            checked={terminal?.agentStatusBar ?? true}
-            onCheckedChange={(v) => patch({ agentStatusBar: v })}
-            disabled={disabled || terminal?.agentPromptBar === false}
-          />
-        </SettingToggle>
-        <SettingField k="agentPromptColor" label="Bubble colour" hint="Background of the prompt bubble. Empty = the theme's.">
-          <ColorField
-            value={terminal?.agentPromptColor ?? ''}
-            onChange={(hex) => patch({ agentPromptColor: hex || undefined })}
-            clearable
-            placeholder="theme"
-            disabled={disabled}
-            aria-label="Agent prompt bubble colour"
-            className="w-40"
-          />
-        </SettingField>
-        <SettingField
-          k="agentPromptOpacity"
-          label={`Bubble opacity · ${promptOpacity}%`}
-          hint="How much of the terminal shows through the bubble."
-        >
-          <div className="flex w-56 items-center gap-3">
-            <input
-              type="range"
-              min={20}
-              max={100}
-              step={1}
-              value={promptOpacity}
-              onChange={(e) => patch({ agentPromptOpacity: Number(e.target.value) })}
-              disabled={disabled}
-              aria-label="Agent prompt bubble opacity"
-              className="h-1.5 flex-1 cursor-pointer accent-primary"
+    <>
+      <Group group="agentNew">
+        <SettingField k="agentDefaultMode" label="Opens in" hint="The mode of a pane opened by New agent.">
+          <Dimmed off={off}>
+            <Segmented<'tui' | 'gui'>
+              size="sm"
+              value={terminal?.agentDefaultMode ?? 'tui'}
+              onChange={(v) => patch({ agentDefaultMode: v })}
+              options={[
+                { value: 'tui', label: 'Terminal (TUI)' },
+                { value: 'gui', label: 'GUI' },
+              ]}
             />
-          </div>
+          </Dimmed>
         </SettingField>
-      </Group>
-
-      <Group title="Agent view">
-        <p className="px-1 pb-1 text-xs text-muted-foreground">
-          An agent pane runs either Claude Code&rsquo;s own interface in the terminal (TUI), or the GUI mode: a
-          conversation view, with Claude Code driven by CortX the way the Claude desktop app drives it (stream-json).
-          Switch a pane with its button or Ctrl+Shift+M: the session is closed in one mode and resumed in the other.
-        </p>
-        <SettingField k="agentViewBackground" label="Background" hint="The terminal's: its theme colour, wallpaper and opacity, as in the terminal. The app's: the plain app background.">
-          <Segmented<AgentViewBackground>
-            size="sm"
-            value={terminal?.agentViewBackground ?? 'terminal'}
-            onChange={(v) => patch({ agentViewBackground: v })}
-            options={[
-              { value: 'terminal', label: 'Terminal' },
-              { value: 'app', label: 'App' },
-            ]}
-          />
-        </SettingField>
-        <SettingField k="agentViewFont" label="Font" hint="The interface font, or the terminal's font (Appearance).">
-          <Segmented<AgentViewFont>
-            size="sm"
-            value={terminal?.agentViewFont ?? 'interface'}
-            onChange={(v) => patch({ agentViewFont: v })}
-            options={[
-              { value: 'interface', label: 'Interface' },
-              { value: 'terminal', label: 'Terminal' },
-            ]}
-          />
-        </SettingField>
-        <SettingField k="agentViewTextSize" label="Text size" hint="Size of the messages, in pixels.">
-          <Segmented<string>
-            size="sm"
-            value={String(terminal?.agentViewTextSize ?? 14)}
-            onChange={(v) => patch({ agentViewTextSize: Number(v) })}
-            options={[12, 13, 14, 15, 16, 18].map((n) => ({ value: String(n), label: String(n) }))}
-          />
-        </SettingField>
-        <SettingField k="agentViewWidth" label="Width" hint="How wide the conversation runs in the pane.">
-          <Segmented<AgentViewWidth>
-            size="sm"
-            value={terminal?.agentViewWidth ?? 'wide'}
-            onChange={(v) => patch({ agentViewWidth: v })}
-            options={[
-              { value: 'narrow', label: 'Narrow' },
-              { value: 'wide', label: 'Wide' },
-              { value: 'full', label: 'Full' },
-            ]}
-          />
-        </SettingField>
-        <SettingField k="agentViewLineHeight" label="Line spacing" hint="Room between the lines of the messages.">
-          <Segmented<AgentViewLineHeight>
-            size="sm"
-            value={terminal?.agentViewLineHeight ?? 'normal'}
-            onChange={(v) => patch({ agentViewLineHeight: v })}
-            options={[
-              { value: 'compact', label: 'Compact' },
-              { value: 'normal', label: 'Normal' },
-              { value: 'relaxed', label: 'Relaxed' },
-            ]}
-          />
-        </SettingField>
-        <p className="px-1 text-xs text-faint">
-          Zoom one pane&rsquo;s conversation with Ctrl + = / − / 0 or Ctrl + wheel over it; the view&rsquo;s options
-          button (top right of the pane) has the width, the spacing and the session&rsquo;s permissions too.
-        </p>
-      </Group>
-
-      <Group title="New agent">
-        <SettingField k="agentDefaultMode" label="Opens in" hint="The mode of a pane opened by New agent (Ctrl+Shift+A by default) and the palette.">
-          <Segmented<'tui' | 'gui'>
-            size="sm"
-            value={terminal?.agentDefaultMode ?? 'tui'}
-            onChange={(v) => patch({ agentDefaultMode: v })}
-            options={[
-              { value: 'tui', label: 'Terminal (TUI)' },
-              { value: 'gui', label: 'GUI' },
-            ]}
+        <SettingField
+          k="agentLaunchCommand"
+          label="TUI mode runs"
+          htmlFor="agent-launch-command"
+          hint={
+            <>
+              Typed in a new terminal, then Enter. Any command or alias: <Code>claude</Code>, <Code>cc</Code>,{' '}
+              <Code>codex</Code>…
+            </>
+          }
+        >
+          <Input
+            id="agent-launch-command"
+            className={CONTROL_WIDTH}
+            value={terminal?.agentLaunchCommand ?? 'claude'}
+            onChange={(e) => patch({ agentLaunchCommand: e.target.value })}
+            placeholder="claude"
+            disabled={off}
           />
         </SettingField>
         <SettingField
@@ -286,200 +115,227 @@ export function AgentSettingsSection() {
           htmlFor="agent-gui-command"
           hint={
             <>
-              The command CortX starts Claude Code with in GUI mode; it adds the stream-json flags (and{' '}
-              <Code>--resume</Code>). <Code>claude</Code>, or an alias shim such as <Code>cc</Code> (Settings &gt; Alias
-              Shims), since it is not run by your shell.
+              CortX adds the stream-json flags (and <Code>--resume</Code>). Not run by your shell: use{' '}
+              <Code>claude</Code>, or an alias shim such as <Code>cc</Code> (Shell &amp; aliases).
             </>
           }
         >
           <Input
             id="agent-gui-command"
-            className="w-56 font-mono"
+            className={CONTROL_WIDTH}
             value={terminal?.agentGuiCommand ?? 'claude'}
             onChange={(e) => patch({ agentGuiCommand: e.target.value })}
             placeholder="claude"
-            disabled={disabled}
+            disabled={off}
           />
         </SettingField>
-        <SettingField
+        <SelectField<AgentPermissionMode | 'command'>
           k="agentGuiPermissionMode"
+          id="agent-gui-permission-mode"
           label="GUI agents start in"
-          hint="The permission mode of an agent started in GUI mode. “As the command says” passes nothing: an alias shim that carries --dangerously-skip-permissions keeps it. Change it for one session from the view's options."
-        >
-          <Segmented<AgentPermissionMode | 'command'>
-            size="sm"
-            value={terminal?.agentGuiPermissionMode ?? 'command'}
-            onChange={(v) => patch({ agentGuiPermissionMode: v === 'command' ? undefined : v })}
-            options={[
-              { value: 'command', label: 'As the command says' },
-              { value: 'default', label: 'Ask' },
-              { value: 'acceptEdits', label: 'Accept edits' },
-              { value: 'plan', label: 'Plan' },
-              { value: 'bypassPermissions', label: 'Bypass' },
-            ]}
-          />
-        </SettingField>
-        <SettingField
-          k="agentLaunchCommand"
-          label="TUI mode runs"
-          htmlFor="agent-launch-command"
-          hint={
-            <>
-              Typed in a new terminal, then Enter — by the <em>New agent</em> shortcut (Ctrl+Shift+A by default) and the
-              palette. Any command or alias: <Code>claude</Code>, <Code>cc</Code>, <Code>codex</Code>…
-            </>
-          }
-        >
-          <Input
-            id="agent-launch-command"
-            className="w-56 font-mono"
-            value={terminal?.agentLaunchCommand ?? 'claude'}
-            onChange={(e) => patch({ agentLaunchCommand: e.target.value })}
-            placeholder="claude"
-            disabled={disabled}
-          />
-        </SettingField>
+          hint="“As the command says” passes nothing, so a shim carrying --dangerously-skip-permissions keeps it. One session can change it from the view's options."
+          value={terminal?.agentGuiPermissionMode ?? 'command'}
+          options={[
+            { value: 'command', label: 'As the command says' },
+            { value: 'default', label: 'Ask' },
+            { value: 'acceptEdits', label: 'Accept edits' },
+            { value: 'plan', label: 'Plan' },
+            { value: 'bypassPermissions', label: 'Bypass permissions' },
+          ]}
+          onChange={(v) => patch({ agentGuiPermissionMode: v === 'command' ? undefined : v })}
+          disabled={off}
+        />
       </Group>
 
-      <Group title="Grid">
-        <SettingToggle
+      <Group group="agentView">
+        <SettingField k="agentViewBackground" label="Background" hint="The terminal's (theme colour, wallpaper, opacity) or the app's.">
+          <Dimmed off={off}>
+            <Segmented<AgentViewBackground>
+              size="sm"
+              value={terminal?.agentViewBackground ?? 'terminal'}
+              onChange={(v) => patch({ agentViewBackground: v })}
+              options={[
+                { value: 'terminal', label: 'Terminal' },
+                { value: 'app', label: 'App' },
+              ]}
+            />
+          </Dimmed>
+        </SettingField>
+        <SettingField k="agentViewFont" label="Font" hint="The interface font, or the terminal's.">
+          <Dimmed off={off}>
+            <Segmented<AgentViewFont>
+              size="sm"
+              value={terminal?.agentViewFont ?? 'interface'}
+              onChange={(v) => patch({ agentViewFont: v })}
+              options={[
+                { value: 'interface', label: 'Interface' },
+                { value: 'terminal', label: 'Terminal' },
+              ]}
+            />
+          </Dimmed>
+        </SettingField>
+        <SelectField<string>
+          k="agentViewTextSize"
+          id="agent-view-text-size"
+          label="Text size"
+          hint="Size of the messages."
+          value={String(terminal?.agentViewTextSize ?? 14)}
+          options={[12, 13, 14, 15, 16, 18].map((n) => ({ value: String(n), label: `${n} px${n === 14 ? ' (default)' : ''}` }))}
+          onChange={(v) => patch({ agentViewTextSize: Number(v) })}
+          disabled={off}
+        />
+        <SettingField k="agentViewWidth" label="Width" hint="How wide the conversation runs in the pane.">
+          <Dimmed off={off}>
+            <Segmented<AgentViewWidth>
+              size="sm"
+              value={terminal?.agentViewWidth ?? 'wide'}
+              onChange={(v) => patch({ agentViewWidth: v })}
+              options={[
+                { value: 'narrow', label: 'Narrow' },
+                { value: 'wide', label: 'Wide' },
+                { value: 'full', label: 'Full' },
+              ]}
+            />
+          </Dimmed>
+        </SettingField>
+        <SettingField k="agentViewLineHeight" label="Line spacing">
+          <Dimmed off={off}>
+            <Segmented<AgentViewLineHeight>
+              size="sm"
+              value={terminal?.agentViewLineHeight ?? 'normal'}
+              onChange={(v) => patch({ agentViewLineHeight: v })}
+              options={[
+                { value: 'compact', label: 'Compact' },
+                { value: 'normal', label: 'Normal' },
+                { value: 'relaxed', label: 'Relaxed' },
+              ]}
+            />
+          </Dimmed>
+        </SettingField>
+        <SectionNote>
+          Switch a pane between the TUI and the GUI with its button or Ctrl+Shift+M. Zoom one conversation with Ctrl + =
+          / − / 0 or Ctrl + wheel.
+        </SectionNote>
+      </Group>
+
+      <Group group="agentPrompt">
+        <SwitchField
+          k="agentPromptBar"
+          id="agent-prompt-bar"
+          label="Agent prompt (Ctrl+G)"
+          hint="An editor over the agent's last rows: write your prompt there, paste or drop images and files, and it goes to the agent as if typed."
+          checked={promptBar}
+          onChange={(v) => patch({ agentPromptBar: v })}
+          disabled={off}
+        />
+        <SwitchField
+          k="agentStatusBar"
+          id="agent-status-bar"
+          label="Status bar under the terminal"
+          hint="Which agent, what it is doing, a draft waiting to be sent. Click it to open the agent prompt."
+          checked={terminal?.agentStatusBar ?? true}
+          onChange={(v) => patch({ agentStatusBar: v })}
+          disabled={off || !promptBar}
+          indent
+        />
+        <SettingField k="agentPromptColor" label="Bubble colour" hint="Empty = the theme's." indent disabled={!promptBar}>
+          <ColorField
+            value={terminal?.agentPromptColor ?? ''}
+            onChange={(hex) => patch({ agentPromptColor: hex || undefined })}
+            clearable
+            placeholder="Theme"
+            disabled={off || !promptBar}
+            aria-label="Agent prompt bubble colour"
+            className={CONTROL_WIDTH}
+          />
+        </SettingField>
+        <SliderField
+          k="agentPromptOpacity"
+          id="agent-prompt-opacity"
+          label="Bubble opacity"
+          hint="How much of the terminal shows through."
+          value={terminal?.agentPromptOpacity ?? 95}
+          min={20}
+          max={100}
+          unit="%"
+          onChange={(v) => patch({ agentPromptOpacity: v })}
+          disabled={off || !promptBar}
+        />
+      </Group>
+
+      <Group group="grid">
+        <SwitchField
           k="agentModeHidesTabs"
           id="agent-mode-hides-tabs"
           label="Hide the rail in agent mode"
-          hint="In agent mode, the sessions rail (or the tab strip) disappears entirely — not even its collapsed icon strip — and the grid takes the whole window. Off, it stays as it is (Ctrl+B still collapses it)."
-        >
-          <Switch
-            id="agent-mode-hides-tabs"
-            checked={terminal?.agentModeHidesTabs ?? false}
-            onCheckedChange={(v) => patch({ agentModeHidesTabs: v })}
-            disabled={disabled}
-          />
-        </SettingToggle>
-        <SettingToggle
+          hint="The sessions rail (or the tab strip) disappears entirely and the grid takes the whole window."
+          checked={terminal?.agentModeHidesTabs ?? false}
+          onChange={(v) => patch({ agentModeHidesTabs: v })}
+          disabled={off}
+        />
+        <SwitchField
           k="gridTilesInteractive"
           id="grid-tiles-interactive"
           label="Type into grid tiles"
-          hint="Each tile is a working terminal: click into it to type, select or scroll, and click its header to open it full size. Off, the tiles are only watched: a click anywhere opens it, and nothing you do in the grid reaches the program inside."
-        >
-          <Switch
-            id="grid-tiles-interactive"
-            checked={terminal?.gridTilesInteractive ?? true}
-            onCheckedChange={(v) => patch({ gridTilesInteractive: v })}
-            disabled={disabled}
-          />
-        </SettingToggle>
-        <SettingToggle
+          hint="Each tile is a working terminal; click its header to open it full size. Off, the tiles are only watched and a click opens one."
+          checked={terminal?.gridTilesInteractive ?? true}
+          onChange={(v) => patch({ gridTilesInteractive: v })}
+          disabled={off}
+        />
+        <SwitchField
           k="gridTilesKeepSize"
           id="grid-tiles-keep-size"
           label="Tiles keep the session's size"
-          hint="A tile shows its session at the size it has full page, scaled down, so entering or leaving the grid never resizes it. Off, each session is resized to its tile — readable, but a program that lays its text out for the width it is given (Claude Code) keeps what it drew narrow once you open it again."
-        >
-          <Switch
-            id="grid-tiles-keep-size"
-            checked={terminal?.gridTilesKeepSize ?? true}
-            onCheckedChange={(v) => patch({ gridTilesKeepSize: v })}
-            disabled={disabled}
-          />
-        </SettingToggle>
-        <SettingField
+          hint="A tile shows its session at full size, scaled down, so the grid never resizes it. Off, each session is resized to its tile, and Claude Code keeps what it drew narrow."
+          checked={keepSize}
+          onChange={(v) => patch({ gridTilesKeepSize: v })}
+          disabled={off}
+        />
+        <SelectField<string>
           k="gridTileTextScale"
+          id="grid-tile-text-scale"
           label="Tile text size"
-          hint="With the session's size kept, the whole page shrunk into a tile is too small to read. At a readable size the tile shows the part of the page around the cursor — the prompt, or the agent's input box and its latest messages — cut at the right. Whole page = everything, however small."
-        >
-          <div
-            className={cn('w-fit', (disabled || !(terminal?.gridTilesKeepSize ?? true)) && 'pointer-events-none opacity-50')}
-            aria-disabled={disabled || !(terminal?.gridTilesKeepSize ?? true)}
-          >
-            <Segmented<string>
-              size="sm"
-              value={String(resolveGridTileTextScale(terminal))}
-              onChange={(v) => patch({ gridTileTextScale: Number(v) })}
-              options={GRID_TILE_TEXT_SCALE_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
-            />
-          </div>
-        </SettingField>
-        <SettingField
-          k="gridTileInfo"
-          label="A tile's header shows"
-          hint="Besides its name and its dot. Also in the grid's View menu."
-        >
-          <div className="flex flex-wrap gap-1.5">
-            {GRID_TILE_INFO_OPTIONS.map((o) => {
-              const on = tileInfo.includes(o.value);
-              return (
-                <button
-                  key={o.value}
-                  type="button"
-                  aria-pressed={on}
-                  disabled={disabled}
-                  onClick={() => toggleInfo(o.value)}
-                  className={cn(
-                    'h-6 rounded-full border px-2.5 text-[11px] transition-colors',
-                    on ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {o.label}
-                </button>
-              );
-            })}
+          hint="At a readable size a tile shows the part of the page around the cursor. Whole page = everything, however small."
+          value={String(resolveGridTileTextScale(terminal))}
+          options={GRID_TILE_TEXT_SCALE_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
+          onChange={(v) => patch({ gridTileTextScale: Number(v) })}
+          disabled={off || !keepSize}
+          indent
+        />
+        <SettingField k="gridTileInfo" label="A tile's header shows" hint="Besides its name and its dot. Also in the grid's View menu." wide>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            {GRID_TILE_INFO_OPTIONS.map((o) => (
+              <label key={o.value} className="flex items-center gap-2 text-sm" htmlFor={`grid-tile-info-${o.value}`}>
+                <Checkbox
+                  id={`grid-tile-info-${o.value}`}
+                  checked={tileInfo.includes(o.value)}
+                  onCheckedChange={(v) => toggleInfo(o.value, v === true)}
+                  disabled={off}
+                />
+                {o.label}
+              </label>
+            ))}
           </div>
         </SettingField>
       </Group>
-    </Section>
-  );
-}
 
-/**
- * A miniature window with its six toast spots: the one you click is where the
- * agent toasts appear. Tells at a glance what a list of six labels would not.
- */
-function ToastPositionPicker({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: ToastPosition;
-  onChange: (value: ToastPosition) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div
-      role="radiogroup"
-      aria-label="Where agent notifications appear"
-      className={cn(
-        'grid h-[72px] w-[120px] grid-cols-3 grid-rows-2 gap-1 rounded-md border border-border-strong bg-muted/40 p-1.5 pt-3.5',
-        'relative before:absolute before:inset-x-0 before:top-0 before:h-2 before:rounded-t-md before:border-b before:border-border before:bg-muted',
-        disabled && 'pointer-events-none opacity-50'
-      )}
-    >
-      {TOAST_POSITION_OPTIONS.map((o) => {
-        const on = o.value === value;
-        const [row, col] = o.value.split('-') as ['top' | 'bottom', 'left' | 'center' | 'right'];
-        return (
-          <button
-            key={o.value}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            aria-label={o.label}
-            title={o.label}
-            disabled={disabled}
-            onClick={() => onChange(o.value)}
-            className={cn(
-              'group flex rounded-sm transition-colors hover:bg-primary/10',
-              row === 'top' ? 'items-start' : 'items-end',
-              col === 'left' ? 'justify-start' : col === 'center' ? 'justify-center' : 'justify-end'
-            )}
-          >
-            <span
-              className={cn(
-                'h-2 w-6 rounded-[2px] border transition-colors',
-                on ? 'border-primary bg-primary' : 'border-border-strong bg-card group-hover:border-primary/60'
-              )}
+      <Group group="agentColors">
+        {COLORS.map((c) => (
+          <SettingField key={c.key} k={c.field} label={c.label} hint={c.hint}>
+            <AgentPhaseDot phase={c.phase} size={9} />
+            <ColorField
+              value={terminal?.[c.field] ?? ''}
+              onChange={(hex) => patch({ [c.field]: hex || undefined } as Partial<TerminalConfig>)}
+              clearable
+              placeholder={DEFAULT_AGENT_COLORS[c.key]}
+              swatches={Object.values(DEFAULT_AGENT_COLORS)}
+              disabled={off}
+              aria-label={`${c.label} colour`}
+              className={CONTROL_WIDTH}
             />
-          </button>
-        );
-      })}
-    </div>
+          </SettingField>
+        ))}
+      </Group>
+    </>
   );
 }

@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Chip } from '@/components/ui/Chip';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Code, Section } from '@/components/settings/SettingsPrimitives';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -77,29 +77,27 @@ export function LaunchConfigsSection() {
   const sorted = sortLaunchConfigs(configs);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Rocket className="size-4 text-faint" />
-          Launch configurations
-        </CardTitle>
-        <CardDescription>
-          Presets that open a set of terminals — tabs and splits — in a project, optionally typing a command in each. Stored as
-          YAML under <code className="rounded-xs bg-muted px-1 py-px font-mono text-[11px] text-foreground">data/terminal/launch</code>,
-          synced by the git backup.
-        </CardDescription>
-        {sorted.length > 0 && (
-          <CardAction>
+    <>
+      <Section
+        id="launch"
+        title="Launch configurations"
+        description={
+          <>
+            Tabs and splits in a project, optionally typing a command in each. Stored as YAML under{' '}
+            <Code>data/terminal/launch</Code>, synced by the git backup.
+          </>
+        }
+        action={
+          sorted.length > 0 && (
             <Button variant="outline" size="sm" onClick={openNew}>
               <Plus />
               New configuration
             </Button>
-          </CardAction>
-        )}
-      </CardHeader>
-      <CardContent>
+          )
+        }
+      >
         {sorted.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border-strong">
+          <div>
             <EmptyState
               compact
               icon={Rocket}
@@ -120,60 +118,55 @@ export function LaunchConfigsSection() {
             />
           </div>
         ) : (
-          <div className="flex flex-col gap-1.5">
-            {sorted.map((config) => (
-              <div
-                key={config.id}
-                className="group flex h-11 items-center gap-3 rounded-sm border border-border px-3 transition-colors hover:border-border-strong hover:bg-accent/40"
-              >
-                <Rocket className="size-4 shrink-0 text-faint" />
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <span className="truncate text-[13px] font-medium">{config.name}</span>
-                  {config.projectId ? (
-                    <Chip color={projectColor(config.projectId)} className="shrink-0">
-                      {launchProjectName(config, projects)}
-                    </Chip>
-                  ) : (
-                    <Chip neutral dot={false} className="shrink-0">
-                      Global
-                    </Chip>
-                  )}
-                  <span className="shrink-0 text-xs text-faint">
-                    {describeLaunchConfig(config)}
-                    {config.window === 'dock' && ' · dock'}
-                  </span>
-                </div>
-                <Button variant="outline" size="xs" onClick={() => void runLaunchConfigWithToast(config)}>
-                  <Play />
-                  Run
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon-xs" aria-label={`Actions for ${config.name}`}>
-                      <MoreVertical />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => openEdit(config)}>
-                      <Pencil />
-                      Edit
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => void handleDuplicate(config)}>
-                      <Copy />
-                      Duplicate
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" onClick={() => setDeleting(config)}>
-                      <Trash2 />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+          sorted.map((config) => (
+            <div key={config.id} className="flex items-center gap-3 px-4 py-2.5">
+              <Rocket className="size-4 shrink-0 text-faint" />
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="truncate text-sm font-medium">{config.name}</span>
+                {config.projectId ? (
+                  <Chip color={projectColor(config.projectId)} className="shrink-0">
+                    {launchProjectName(config, projects)}
+                  </Chip>
+                ) : (
+                  <Chip neutral dot={false} className="shrink-0">
+                    Global
+                  </Chip>
+                )}
+                <span className="shrink-0 text-xs text-faint">
+                  {describeLaunchConfig(config)}
+                  {config.window === 'dock' && ' · dock'}
+                </span>
               </div>
-            ))}
-          </div>
+              <Button variant="outline" size="xs" onClick={() => void runLaunchConfigWithToast(config)}>
+                <Play />
+                Run
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-xs" aria-label={`Actions for ${config.name}`}>
+                    <MoreVertical />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => openEdit(config)}>
+                    <Pencil />
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void handleDuplicate(config)}>
+                    <Copy />
+                    Duplicate
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => setDeleting(config)}>
+                    <Trash2 />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ))
         )}
-      </CardContent>
+      </Section>
 
       <LaunchConfigDialog open={dialogOpen} onOpenChange={setDialogOpen} config={editing} onSaved={() => void reload()} />
 
@@ -193,6 +186,6 @@ export function LaunchConfigsSection() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </>
   );
 }

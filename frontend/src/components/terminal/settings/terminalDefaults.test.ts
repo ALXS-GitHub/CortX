@@ -25,13 +25,14 @@
  *     covers, and a reader fallback that has stopped agreeing with Rust;
  *  2. the contract with the notification policy, the other module that still
  *     owns defaults of its own;
- *  3. the awkward comparisons: a renderer-dependent default, a deprecated
- *     boolean standing in for an enum, six sub-fields of one object, a list
- *     that equals the built-in list, blank versus absent;
+ *  3. the awkward comparisons: a renderer-dependent default, six sub-fields
+ *     of one object, a list that equals the built-in list, blank versus
+ *     absent, a runtime field the panel must leave alone (`windowZoom`);
  *  4. that a reset patch contains exactly the changes and nothing else, and
  *     that the undo handed to the toast puts every one of them back.
  */
 import {
+  CARD_GROUPS,
   CARD_KEYS,
   DEFAULT_FONT_SIZE,
   DEFAULT_INPUT_POSITION,
@@ -152,7 +153,6 @@ const BACKEND_DEFAULTS = {
   cursorStyle: 'bar',
   customArgs: [],
   customPath: '',
-  dockUsesTerminalTheme: false,
   filePathLinks: true,
   historyMaxMb: 10,
   inlineSuggestions: true,
@@ -166,7 +166,6 @@ const BACKEND_DEFAULTS = {
   longCommandSeconds: 10,
   macOptionAsMeta: 'wordKeys',
   minimumContrastRatio: 1,
-  notifyOnLongCommand: true,
   notifyOnlyWhenHidden: true,
   openDevSessionsIn: 'window',
   openProcessesIn: 'dock',
@@ -218,7 +217,7 @@ const LIVED_IN = {
   blockGutter: false,
   blocks: true,
   blockDividers: true,
-  dockUsesTerminalTheme: true,
+  dockTheme: 'chrome',
   chromeOpacity: 71,
   chromeBlur: 0,
   wallpaperDim: 14,
@@ -370,25 +369,27 @@ test("the line-height default follows the renderer, as the terminal does", () =>
   assert.equal(isSettingModified({ renderer: 'canvas', lineHeight: 1 }, 'lineHeight'), true);
 });
 
-test('a dock themed through the deprecated boolean is marked', () => {
-  // `dockUsesTerminalTheme: true` with no `dockTheme` is what an older
-  // settings file holds, and the dock really is themed. Reading only
-  // `dockTheme` would call it untouched.
-  assert.equal(isSettingModified({ dockUsesTerminalTheme: true }, 'dockTheme'), true);
-  assert.equal(settingValue({ dockUsesTerminalTheme: true }, 'dockTheme'), 'chrome');
-  assert.equal(isSettingModified({ dockUsesTerminalTheme: false }, 'dockTheme'), false);
+test('the dock theme is one field, its default the app skin', () => {
+  // Ticket #64: the legacy `dockUsesTerminalTheme` boolean is migrated to
+  // `dockTheme: chrome` by the backend when the file is read, so `dockTheme`
+  // is all there is to compare.
   assert.equal(isSettingModified({ dockTheme: 'app' }, 'dockTheme'), false);
   assert.equal(isSettingModified({ dockTheme: 'canvas' }, 'dockTheme'), true);
+  assert.deepEqual(resetPatch({ dockTheme: 'canvas' }, ['dockTheme']), { dockTheme: 'app' });
 });
 
-test('resetting the dock theme clears the mirror as well', () => {
-  const patch = resetPatch({ dockTheme: 'canvas', dockUsesTerminalTheme: true }, ['dockTheme']);
-  assert.deepEqual(patch, { dockTheme: undefined, dockUsesTerminalTheme: false });
+test('"notify me when" is one field too, and resets to "failed"', () => {
+  // Same for `notifyOnLongCommand: false`, migrated to `notifyWhen: never`.
+  assert.equal(isSettingModified({ notifyWhen: 'never' }, 'notifyWhen'), true);
+  assert.equal(isSettingModified({ notifyWhen: 'failed' }, 'notifyWhen'), false);
+  assert.deepEqual(resetPatch({ notifyWhen: 'never' }, ['notifyWhen']), { notifyWhen: 'failed' });
 });
 
-test('resetting "notify me when" keeps its legacy mirror in step', () => {
-  const patch = resetPatch({ notifyWhen: 'never', notifyOnLongCommand: false }, ['notifyWhen']);
-  assert.deepEqual(patch, { notifyWhen: undefined, notifyOnLongCommand: true });
+test('the Terminal window zoom is not a setting the panel marks', () => {
+  // Ctrl+wheel state the window keeps for itself: a group reset must never
+  // put it back, and it must not light up a "changed" dot.
+  assert.equal('windowZoom' in TERMINAL_SETTINGS, false);
+  assert.deepEqual(checkTerminalDefaults({ ...BACKEND_DEFAULTS, windowZoom: 0 }), []);
 });
 
 test('the muted list is only marked when it is really not the built-in one', () => {
@@ -475,23 +476,28 @@ test('every setting belongs to exactly one group and one card', () => {
   assert.deepEqual([...carded].sort(), [...all].sort());
 });
 
-test('a card counts every group under it', () => {
-  // The count in a card header must be the sum of its groups', or the two
+test('a page counts every group on it', () => {
+  // The count in a page header must be the sum of its groups', or the two
   // numbers on screen disagree.
-  const integratedGroups: (keyof typeof GROUP_KEYS)[] = [
-    'shell',
-    'text',
-    'blocks',
-    'completion',
-    'keyboard',
-    'scrolling',
-    'links',
-    'tabs',
-    'sessions',
-    'accessibility',
-  ];
-  const fromGroups = integratedGroups.flatMap((g) => GROUP_KEYS[g]);
-  assert.deepEqual([...CARD_KEYS.integrated].sort(), [...fromGroups].sort());
+  for (const [card, groups] of Object.entries(CARD_GROUPS) as [keyof typeof CARD_GROUPS, (keyof typeof GROUP_KEYS)[]][]) {
+    const fromGroups = groups.flatMap((g) => GROUP_KEYS[g]);
+    assert.deepEqual([...CARD_KEYS[card]].sort(), [...fromGroups].sort(), card);
+  }
+  const textGroups: (keyof typeof GROUP_KEYS)[] = ['text', 'accessibility'];
+  assert.deepEqual(CARD_GROUPS.text, textGroups);
+});
+
+test('no group is empty', () => {
+  // A `Group` with no setting would draw a card whose reset can never count
+  // anything — the sign that a setting was moved and its group forgotten.
+  for (const [group, keys] of Object.entries(GROUP_KEYS)) assert.ok(keys.length > 0, group);
+});
+
+test('the merged notification switch covers both of its fields', () => {
+  // One switch, "only when out of sight", writes the command and the agent
+  // field together; both must be counted by the same group reset.
+  assert.ok(GROUP_KEYS.delivery.includes('notifyOnlyWhenHidden'));
+  assert.ok(GROUP_KEYS.delivery.includes('agentNotifyOnlyWhenHidden'));
 });
 
 report();

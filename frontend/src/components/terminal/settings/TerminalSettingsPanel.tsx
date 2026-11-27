@@ -1,77 +1,75 @@
 /**
- * Every terminal settings card, in one column (DEV-13 #8).
+ * The terminal settings pages (DEV-13 #8, ticket #64), by page id.
  *
- * The Settings page of the main window and the Terminal window's own dialog
- * both render this list, and every card inside reads and writes
+ * The Settings screen of the main window and the Terminal window's panel
+ * both render these, and every card inside reads and writes
  * `settings.terminal` through the app store — which persists `settings.json`.
  * A change made in one window reaches the other through the existing
  * `data-changed` file-watcher event, which reloads the settings there. There
  * is no second copy of the data anywhere.
+ *
+ * The page list itself (titles, cards, search words) is `terminalPages.ts`.
  */
-import type { ReactNode } from 'react';
 import { LaunchConfigsSection } from '@/components/terminal/launch/LaunchConfigsSection';
-import { TERMINAL_SECTION_KEYWORDS } from './meta';
-import { ExternalTerminalSection } from './ExternalTerminalSection';
-import { IntegratedTerminalSection } from './IntegratedTerminalSection';
-import { ShortcutsSection } from './ShortcutsSection';
-import { TerminalAppearanceSection } from './TerminalAppearanceSection';
-import { TerminalNotificationsSection } from './TerminalNotificationsSection';
 import { AgentSettingsSection } from './AgentSettingsSection';
+import { ExternalTerminalSection } from './ExternalTerminalSection';
+import { ShortcutsSection } from './ShortcutsSection';
+import { TerminalThemePage } from './TerminalAppearanceSection';
+import { TerminalNotificationsSection } from './TerminalNotificationsSection';
+import {
+  TerminalBlocksPage,
+  TerminalHistoryPage,
+  TerminalInputPage,
+  TerminalKeyboardPage,
+  TerminalShellPage,
+  TerminalTabsPage,
+  TerminalTextPage,
+} from './TerminalBehaviourPages';
+import { ResetCard } from './controls';
+import { TERMINAL_PAGE_CARD } from './terminalPages';
 import { useTerminalSettings } from './useTerminalSettings';
 
-function matches(keywords: string, query: string): boolean {
-  return !query || keywords.includes(query);
-}
-
-export interface TerminalSettingsSectionsProps {
-  /** Lower-cased search text; empty shows everything. */
-  query?: string;
-  /** Show the "launch configurations" card. */
-  launchConfigs?: boolean;
-  /** Show the external-terminal card (which program a service opens in). */
-  externalTerminal?: boolean;
-  /** Rendered when the query matches nothing. */
-  empty?: ReactNode;
-}
-
-/**
- * The cards themselves, without any page chrome, so a host can lay them out
- * (the settings page adds its own spacing and tab filtering).
- */
-export function TerminalSettingsSections({
-  query = '',
-  launchConfigs = true,
-  externalTerminal = true,
-  empty,
-}: TerminalSettingsSectionsProps) {
+function KeybindingsPage() {
   const { terminal, patch } = useTerminalSettings();
-  const q = query.trim().toLowerCase();
-  const k = TERMINAL_SECTION_KEYWORDS;
+  return <ShortcutsSection value={terminal?.keybindings} onChange={(next) => patch({ keybindings: next })} />;
+}
 
-  // Most often touched first (ticket #39). The external-terminal card used to
-  // open the list, and it is the rarest setting of the lot — which program a
-  // service opens in when it is *not* run inside CortX, a choice made once and
-  // never again. What the user came for is the terminal CortX runs itself.
-  const shown = [
-    matches(k.integrated, q),
-    matches(k.appearance, q),
-    matches(k.notifications, q),
-    matches(k.shortcuts, q),
-    matches(k.agents, q),
-    externalTerminal && matches(k.external, q),
-    launchConfigs && matches(k.launch, q),
-  ];
-  if (!shown.some(Boolean)) return <>{empty}</>;
+/** The cards of one terminal page (`terminalPages.ts` ids). Nothing for an unknown id. */
+export function TerminalSettingsPage({ page }: { page: string }) {
+  switch (page) {
+    case 'terminal-shell':
+      return <TerminalShellPage />;
+    case 'terminal-text':
+      return <TerminalTextPage />;
+    case 'terminal-theme':
+      return <TerminalThemePage />;
+    case 'terminal-blocks':
+      return <TerminalBlocksPage />;
+    case 'terminal-input':
+      return <TerminalInputPage />;
+    case 'terminal-keyboard':
+      return <TerminalKeyboardPage />;
+    case 'terminal-tabs':
+      return <TerminalTabsPage />;
+    case 'terminal-history':
+      return <TerminalHistoryPage />;
+    case 'terminal-shortcuts':
+      return <KeybindingsPage />;
+    case 'terminal-external':
+      return <ExternalTerminalSection />;
+    case 'terminal-launch':
+      return <LaunchConfigsSection />;
+    case 'notifications':
+      return <TerminalNotificationsSection />;
+    case 'agents':
+      return <AgentSettingsSection />;
+    default:
+      return null;
+  }
+}
 
-  return (
-    <>
-      {shown[0] && <IntegratedTerminalSection />}
-      {shown[1] && terminal && <TerminalAppearanceSection value={terminal} onChange={patch} />}
-      {shown[2] && <TerminalNotificationsSection />}
-      {shown[4] && <AgentSettingsSection />}
-      {shown[3] && <ShortcutsSection value={terminal?.keybindings} onChange={(next) => patch({ keybindings: next })} />}
-      {shown[5] && <ExternalTerminalSection />}
-      {shown[6] && <LaunchConfigsSection />}
-    </>
-  );
+/** "N changed" and its reset, for the heading of a terminal page. */
+export function TerminalPageAction({ page, title }: { page: string; title: string }) {
+  const card = TERMINAL_PAGE_CARD[page];
+  return card ? <ResetCard card={card} title={title} /> : null;
 }

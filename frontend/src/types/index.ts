@@ -106,13 +106,11 @@ export interface TerminalConfig {
   /** `cortx init` emits OSC 7 / OSC 133 (cwd, command boundaries, exit codes)
    *  inside CortX terminals. Default true. */
   shellIntegration?: boolean;
-  /** Toast + OS notification when a long command finishes in a terminal you
-   *  are not looking at. Default true. */
-  notifyOnLongCommand?: boolean;
   /** Threshold for "long", in seconds. Default 10. */
   longCommandSeconds?: number;
-  /** Which finished commands are worth a notification. Undefined = derived from
-   *  `notifyOnLongCommand` (false → `never`, otherwise `failed`). */
+  /** Which finished commands are worth a notification. Undefined = `failed`.
+   *  (The legacy `notifyOnLongCommand: false` is migrated to `never` by the
+   *  backend when the file is read.) */
   notifyWhen?: TerminalNotifyWhen;
   /** How a notification is delivered. Undefined = `both`. */
   notifyStyle?: TerminalNotifyStyle;
@@ -270,13 +268,9 @@ export interface TerminalConfig {
   /** Title bar + rail backdrop blur in px. Default 20. */
   chromeBlur?: number;
   /** How much of the terminal theme the main window's dock takes (ticket #38).
-   *  Default `app`. Supersedes `dockUsesTerminalTheme`, which is kept only so
-   *  an older settings file (and an older build) still reads right — see
-   *  `lib/terminalTheme.ts › dockThemeMode`. */
+   *  Default `app`. (The legacy `dockUsesTerminalTheme: true` is migrated to
+   *  `chrome` by the backend when the file is read.) */
   dockTheme?: TerminalDockTheme;
-  /** @deprecated Use `dockTheme`. `true` is read as `chrome`, `false` as `app`.
-   *  Still written alongside `dockTheme` so downgrading keeps the dock right. */
-  dockUsesTerminalTheme?: boolean;
   /** A mouse selection is copied to the clipboard as soon as it ends (Warp / X11 style).
    *  While on, Ctrl+C keeps interrupting the program instead of copying. Default true. */
   copyOnSelect?: boolean;
@@ -678,14 +672,9 @@ export interface AppearanceConfig {
   theme: 'light' | 'dark' | 'system';
 }
 
-export interface DefaultsConfig {
-  launchMethod: 'clipboard' | 'external' | 'integrated';
-}
-
 export interface AppSettings {
   terminal: TerminalConfig;
   appearance: AppearanceConfig;
-  defaults: DefaultsConfig;
   scriptsConfig: ScriptsConfig;
   toolboxBaseUrl: string;
   backupRepoPath?: string;
@@ -939,7 +928,6 @@ export interface ScriptsConfig {
   mainFolder?: string;
   scanExtensions: string[];
   ignoredPatterns: string[];
-  autoScanOnStartup: boolean;
   commandTemplates: Record<string, string>;
 }
 
