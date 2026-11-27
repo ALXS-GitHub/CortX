@@ -101,13 +101,11 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       # Zinc, the design system, is read from a sibling clone (../Zinc, see
-      # frontend/vite.config.ts). The repository is private: ZINC_TOKEN is a
-      # fine-grained token with read access to ALXS-GitHub/Zinc (contents).
+      # frontend/vite.config.ts). The repository is public: no token needed.
       - name: Check out Zinc (design system)
         uses: actions/checkout@v4
         with:
           repository: ALXS-GitHub/Zinc
-          token: ${{ secrets.ZINC_TOKEN }}
           path: .zinc
 
       - name: Place Zinc next to the repository

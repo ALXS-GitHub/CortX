@@ -16,7 +16,7 @@ and pushed there, never patched locally.
   `@zinc/ui/theme` are aliases (`vite.config.ts`, `tsconfig.app.json`), and
   `src/index.css` imports `../../../Zinc/src/styles/zinc.css` and
   `../../../Zinc/src/tailwind/shadcn.css`. CI checks the clone out next to the
-  repository (`ZINC_TOKEN` secret, see `.github/workflows/`).
+  repository (public, no token; see `.github/workflows/`).
 - **shadcn/ui stays.** The components in `components/ui/*` carry `data-slot`
   attributes; Zinc's shadcn layer imposes its heights, corners, borders, focus
   and typography on them, whatever their Tailwind classes. A `h-10` or
